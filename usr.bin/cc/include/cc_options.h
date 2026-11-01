@@ -94,6 +94,16 @@ typedef struct {
     int unsigned_char;       /**< -funsigned-char: plain char is unsigned, as Linux builds (it is signed on x86) */
     int short_wchar;         /**< -fshort-wchar: wchar_t is unsigned short, an L"" literal's elements 2 bytes
                                   (Linux's EFI code's UTF-16) */
+    int stack_protector;     /**< -fstack-protector*: 0 none, 1 (the functions with a char array of 8 bytes or
+                                  more, or alloca), 2 -strong (with any array, or a local whose address is taken),
+                                  3 -all, 4 -explicit (only those declared stack_protect) */
+    int ssp_guard_global;    /**< -mstack-protector-guard=global: the canary is __stack_chk_guard, not the
+                                  thread's (tls, the default) */
+    int ssp_guard_seg;       /**< -mstack-protector-guard-reg=fs|gs: CC_SSA_SEG_FS or CC_SSA_SEG_GS; 0 for the
+                                  target's (%fs on x86-64, %gs on i386) */
+    long ssp_guard_offset;   /**< -mstack-protector-guard-offset=N; -1 for the target's (40, 20) */
+    const char *ssp_guard_symbol; /**< -mstack-protector-guard-symbol=S: the canary at S in the segment (Linux's
+                                       __ref_stack_chk_guard); NULL for the offset alone */
 } cc_options_t;
 
 /**

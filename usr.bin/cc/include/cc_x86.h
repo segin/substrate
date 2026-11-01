@@ -146,6 +146,16 @@ void x86_emit_profile_call(FILE *fp, const cc_ssa_function_t *f, int after_frame
  * patchable_function_entry attribute, if it has one, says how many.
  */
 void x86_emit_patchable_entry(FILE *fp, const cc_ssa_function_t *f, int after_entry);
+/** Whether -fstack-protector guards function @p f (gcc's rules for the level asked for, and its attributes). */
+int x86_stack_protected(const cc_ssa_function_t *f);
+/** A legacy prologue's copy of the -fstack-protector guard to the canary at @p off(%rbp); -1 if it cannot be. */
+int x86_emit_ssp_store_at(FILE *fp, int off);
+/** A legacy return's check of the canary at @p off(%rbp), jumping to .L<fn>_ssp_fail when it has changed. */
+void x86_emit_ssp_check_at(FILE *fp, int off, const char *fn_name);
+/** Where the -fstack-protector canary is, as a memory operand's text in @p buf; NULL when it does not fit. */
+const char *x86_ssp_guard(char *buf, size_t cap);
+/** The function a -fstack-protector check calls when the canary has changed: __stack_chk_fail's form here. */
+const char *x86_ssp_fail(void);
 /** The alignment function @p f starts on: its `aligned`, raised to -fmin-function-alignment's; 1 or less for none. */
 long x86_function_alignment(const cc_ssa_function_t *f);
 /** Register a constructor or destructor in .init_array or .fini_array. */

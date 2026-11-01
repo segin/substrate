@@ -7,6 +7,7 @@
 #include "cc_lang.h"
 #include "cc_options.h"
 #include "cc_pipeline.h"
+#include "cc_ssa.h"
 #include "cc_util.h"
 
 #include <errno.h>
@@ -116,6 +117,11 @@ typedef struct {
   int min_function_alignment; /* -fmin-function-alignment=N (opt_min_function_alignment()) */
   int unsigned_char;  /* -funsigned-char, -fno-signed-char; the last of them and -fsigned-char, -fno-unsigned-char */
   int short_wchar;    /* -fshort-wchar, the last of it and -fno-short-wchar */
+  int stack_protector; /* -fstack-protector*: 1, 2 -strong, 3 -all, 4 -explicit; 0, -fno-stack-protector */
+  int ssp_guard_global; /* -mstack-protector-guard=global (opt_ssp_guard()) */
+  int ssp_guard_seg;  /* -mstack-protector-guard-reg=fs|gs: CC_SSA_SEG_*; 0 the target's */
+  long ssp_guard_offset; /* -mstack-protector-guard-offset=N; -1 the target's */
+  const char *ssp_guard_symbol; /* -mstack-protector-guard-symbol=S */
 
   const char *std;
   const char *opt_level;
@@ -240,6 +246,11 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->min_function_alignment = o->min_function_alignment;
   out->unsigned_char = o->unsigned_char;
   out->short_wchar = o->short_wchar;
+  out->stack_protector = o->stack_protector;
+  out->ssp_guard_global = o->ssp_guard_global;
+  out->ssp_guard_seg = o->ssp_guard_seg;
+  out->ssp_guard_offset = o->ssp_guard_offset;
+  out->ssp_guard_symbol = o->ssp_guard_symbol;
 }
 
 
@@ -1510,6 +1521,46 @@ static int opt_patchable_function_entry(cc_opts_t *o, const driver_opt_t *d, con
 }
 
 /**
+ * -mstack-protector-guard=tls|global, -mstack-protector-guard-reg=fs|gs,
+ * -mstack-protector-guard-offset=N and -mstack-protector-guard-symbol=S: where the canary -fstack-protector
+ * compares is, as gcc has them -- by default the thread's, %fs:40 on x86-64 and %gs:20 on i386; Linux's
+ * %gs:__ref_stack_chk_guard; with global, __stack_chk_guard.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_ssp_guard(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  char *end = NULL;
+
+  if (val == NULL || val[0] == '\0') {
+    fprintf(stderr, "cc: error: missing argument to '%s'\n", as);
+    return -1;
+  }
+  if (strcmp(d->names, "-mstack-protector-guard=") == 0) {
+    if (strcmp(val, "tls") == 0 || strcmp(val, "global") == 0) {
+      o->ssp_guard_global = strcmp(val, "global") == 0;
+      return 0;
+    }
+  } else if (strcmp(d->names, "-mstack-protector-guard-reg=") == 0) {
+    if (strcmp(val, "fs") == 0 || strcmp(val, "gs") == 0) {
+      o->ssp_guard_seg = strcmp(val, "fs") == 0 ? CC_SSA_SEG_FS : CC_SSA_SEG_GS;
+      return 0;
+    }
+  } else if (strcmp(d->names, "-mstack-protector-guard-offset=") == 0) {
+    long n = strtol(val, &end, 0);
+
+    if (end != val && *end == '\0' && n >= 0) {
+      o->ssp_guard_offset = n;
+      return 0;
+    }
+  } else {
+    o->ssp_guard_symbol = val;
+    return 0;
+  }
+  fprintf(stderr, "cc: error: bad value '%s' for '%s'\n", val, as);
+  return -1;
+}
+
+/**
  * -fmin-function-alignment=N: each function starts on N bytes, at least -- its patchable nops before it do,
  * so that with Linux's 16,16 padding the function itself is on 16 too.  N is a power of 2: an alignment of
  * another the assembler refuses.
@@ -1670,6 +1721,15 @@ static const driver_opt_t options[] = {
     {"-mno-nop-mcount", OPT_FLAG, 0, opt_int, F(nop_mcount), 0},
     {"-fpatchable-function-entry=", OPT_PREFIX, 0, opt_patchable_function_entry, 0, 0},
     {"-fmin-function-alignment=", OPT_PREFIX, 0, opt_min_function_alignment, 0, 0},
+    {"-fstack-protector", OPT_FLAG, 0, opt_int, F(stack_protector), 1},
+    {"-fstack-protector-strong", OPT_FLAG, 0, opt_int, F(stack_protector), 2},
+    {"-fstack-protector-all", OPT_FLAG, 0, opt_int, F(stack_protector), 3},
+    {"-fstack-protector-explicit", OPT_FLAG, 0, opt_int, F(stack_protector), 4},
+    {"-fno-stack-protector", OPT_FLAG, 0, opt_int, F(stack_protector), 0},
+    {"-mstack-protector-guard=", OPT_PREFIX, 0, opt_ssp_guard, 0, 0},
+    {"-mstack-protector-guard-reg=", OPT_PREFIX, 0, opt_ssp_guard, 0, 0},
+    {"-mstack-protector-guard-offset=", OPT_PREFIX, 0, opt_ssp_guard, 0, 0},
+    {"-mstack-protector-guard-symbol=", OPT_PREFIX, 0, opt_ssp_guard, 0, 0},
     /* (to the preprocessor too, for __CHAR_UNSIGNED__) */
     {"-funsigned-char -fno-signed-char", OPT_FLAG, FWD_CPP, opt_int, F(unsigned_char), 1},
     {"-fsigned-char -fno-unsigned-char", OPT_FLAG, FWD_CPP, opt_int, F(unsigned_char), 0},
@@ -1893,6 +1953,12 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     fprintf(stderr, "cc: -E, -S, and -c are mutually exclusive\n");
     return -1;
   }
+  if (o->stack_protector != 0 && o->ssp_guard_global && (o->pic || o->fpie)) {
+    /* (its canary would be reached through the GOT, which the canary's copy and check do not do) */
+    o->parse_bad_arg = "-mstack-protector-guard=global";
+    fprintf(stderr, "cc: error: -mstack-protector-guard=global with -fpic or -fpie is not supported\n");
+    return -1;
+  }
   if (o->pg && o->omit_frame_pointer) {
     /* (gcc refuses them together, -mfentry or not) */
     o->parse_bad_arg = "-pg";
@@ -1927,18 +1993,23 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
  * and lib/string_helpers.c, which names its enum, did not build.
  *
  * And __CET__, the -fcf-protection asked for: 1 branches, 2 returns, 3
- * both.
+ * both; and gcc's macro of the -fstack-protector asked for.
  *
  * @param o     the parsed command line
- * @param defs  receives the -D options, at most 3
+ * @param defs  receives the -D options, at most 4
  * @return      how many
  */
-static size_t optimize_predefines(const cc_opts_t *o, const char *defs[3]) {
+static size_t optimize_predefines(const cc_opts_t *o, const char *defs[4]) {
   static const char *const cet[] = {NULL, "-D__CET__=1", "-D__CET__=2", "-D__CET__=3"};
+  static const char *const ssp[] = {NULL, "-D__SSP__=1", "-D__SSP_STRONG__=3", "-D__SSP_ALL__=2",
+                                    "-D__SSP_EXPLICIT__=4"};
   size_t n = 0;
 
   if (o->cf_protection > 0 && o->cf_protection <= 3) {
     defs[n++] = cet[o->cf_protection];
+  }
+  if (o->stack_protector > 0 && o->stack_protector <= 4) {
+    defs[n++] = ssp[o->stack_protector];
   }
   if (opt_level_num(o) == 0) {
     defs[n++] = "-D__NO_INLINE__=1";
@@ -2010,7 +2081,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     size_t j;
     size_t extra = (target_flag != NULL && target_flag[0] != '\0') ? 1 : 0;
     size_t first = 0;
-    const char *opt_defs[3];
+    const char *opt_defs[4];
     size_t opt_def_count = optimize_predefines(o, opt_defs);
 
     extra += opt_def_count;
@@ -2627,6 +2698,7 @@ int cc_main(int argc, char **argv) {
   o.i386_fp_math_mode = CC_FPMATH_AUTO;
   o.implicit_funcdecl_override = -1;
   o.fentry = -1;
+  o.ssp_guard_offset = -1;
 #ifdef CC_SUBSTRATE_BUILD
   o.target = CC_DEFAULT_TARGET;
 #else

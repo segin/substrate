@@ -322,6 +322,8 @@ const char *xcc_name(xcc_t cc);
  * offsets from the frame pointer (@p fp_name).  XI_RET and XI_LABEL are the caller's.
  */
 void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const char *fn_name);
+/** Print operand @p o as xi_print() prints an instruction's, for a target of @p word bytes. */
+void xop_print(FILE *fp, const xfunc_t *xf, const xop_t *o, int word);
 /** The name of physical register @p r accessed as @p size bytes. */
 const char *xr_name(int r, int size);
 
@@ -433,6 +435,8 @@ struct xsel {
     int nasm_slot;
     int has_goto;             /**< the function has an asm goto */
     int has_dynalloc;         /**< it moves the stack pointer itself (alloca, a variable-length array) */
+    int ssp_obj;              /**< -fstack-protector: the frame object of the canary, the frame's first, which the
+                                   prologue sets and each return checks (x86_stack_protected()); -1 for none */
     int fpo;                  /**< -fomit-frame-pointer taken: no frame pointer, %ebp (%rbp) allocated (fpo_ok()) */
     long flag_br;             /**< the IR branch that reads an asm's flag output from the flags themselves, or -1 */
     size_t skip_to;           /**< IR instructions before this one are selected already (a switch's chain of cases) */

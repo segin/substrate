@@ -5166,6 +5166,8 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_no_instrument;
     int is_nocf_check;
     int is_patchable;
+    int is_no_stack_protector;
+    int is_stack_protect;
     int has_num = 0;
     int has_num2 = 0;
     long num = 0;
@@ -5222,6 +5224,8 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_no_instrument = tok_is_gnu_attr_name(p, "no_instrument_function");
     is_nocf_check = tok_is_gnu_attr_name(p, "nocf_check");
     is_patchable = tok_is_gnu_attr_name(p, "patchable_function_entry");
+    is_no_stack_protector = tok_is_gnu_attr_name(p, "no_stack_protector");
+    is_stack_protect = tok_is_gnu_attr_name(p, "stack_protect");
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
                 is_always_inline || is_gnu_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
@@ -5229,7 +5233,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
                 is_constructor ||
                 is_destructor || is_transparent_union ||
                 is_vector_size || is_ext_vector_type || is_may_alias || is_mode || is_regparm || is_no_instrument ||
-                is_nocf_check || is_patchable;
+                is_nocf_check || is_patchable || is_no_stack_protector || is_stack_protect;
 
     if (next_tok(p) != 0) {
         return -1;
@@ -5362,6 +5366,12 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         }
         if (is_nocf_check) {
             out_attrs->flags |= CC_ATTR_NOCF_CHECK;
+        }
+        if (is_no_stack_protector) {
+            out_attrs->flags |= CC_ATTR_NO_STACK_PROTECTOR;
+        }
+        if (is_stack_protect) {
+            out_attrs->flags |= CC_ATTR_STACK_PROTECT;
         }
         if (is_patchable) {
             /* its function's own -fpatchable-function-entry=n,m; (0, 0) none (Linux's notrace on some machines) */

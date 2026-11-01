@@ -674,6 +674,58 @@ and
 .Dv __SIZEOF_WCHAR_T__
 are
 .Xr gcc 1 Ns 's .
+.It Fl fstack-protector , Fl fstack-protector-strong , Fl fstack-protector-all , Fl fstack-protector-explicit , Fl fno-stack-protector
+Put a canary between a function's locals and its return address, copied
+from the guard at entry and checked before each return; a changed one
+calls
+.Fn __stack_chk_fail .
+Which functions, as with
+.Xr gcc 1 :
+.Fl fstack-protector
+those with a
+.Ic char
+array of 8 bytes or more, or one in an aggregate, and those calling
+.Fn alloca
+or with a variable-length array;
+.Fl fstack-protector-strong
+those too with any array or aggregate, or a local whose address is
+taken;
+.Fl fstack-protector-all
+every function;
+.Fl fstack-protector-explicit
+only those declared
+.Ic __attribute__((stack_protect)) ,
+which any of the others guards too.
+A function declared
+.Ic __attribute__((no_stack_protector))
+has none.
+The guarded locals lie right under the canary.
+.Dv __SSP__ ,
+.Dv __SSP_STRONG__ ,
+.Dv __SSP_ALL__
+or
+.Dv __SSP_EXPLICIT__
+is defined as with
+.Xr gcc 1 .
+.It Fl mstack-protector-guard Ns = Ns Cm tls Ns | Ns Cm global , Fl mstack-protector-guard-reg Ns = Ns Cm fs Ns | Ns Cm gs , Fl mstack-protector-guard-offset Ns = Ns Ar n , Fl mstack-protector-guard-symbol Ns = Ns Ar sym
+Where the guard is: by default the thread's,
+.Li %fs:40
+on x86-64 and
+.Li %gs:20
+on i386; at offset
+.Ar n
+or symbol
+.Ar sym
+in segment
+.Cm fs
+or
+.Cm gs
+\(em Linux's is
+.Li %gs:__ref_stack_chk_guard
+\(em or with
+.Cm global ,
+.Va __stack_chk_guard ,
+which position-independent code cannot have here.
 .It Fl fsyntax-only
 Check each C input \(em its syntax and what it means \(em and write
 nothing: no assembly or object is made and nothing is linked.

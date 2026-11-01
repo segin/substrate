@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 static cc_options_t g_current = {
-    {"gnu17", 2017, 1}, CC_TARGET_X86_64, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 6, 1, 1, 1, CC_FPMATH_AUTO, 0, 0, NULL, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    {"gnu17", 2017, 1}, CC_TARGET_X86_64, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 6, 1, 1, 1, CC_FPMATH_AUTO, 0, 0, NULL, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, NULL,
 };
 
 /**
@@ -61,6 +61,11 @@ void cc_options_init(cc_options_t *o) {
     o->min_function_alignment = 0;
     o->unsigned_char = 0;
     o->short_wchar = 0;
+    o->stack_protector = 0;
+    o->ssp_guard_global = 0;
+    o->ssp_guard_seg = 0;
+    o->ssp_guard_offset = -1;
+    o->ssp_guard_symbol = NULL;
 }
 
 /**

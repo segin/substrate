@@ -165,6 +165,11 @@ typedef struct {
     long long imm;
     int stack_align;   /**< STACKALLOC: the alignment its declaration requires, 16 or more, or 0 for none -- the
                             frame may put a large one on 16 bytes by choice, which a smaller stack boundary drops */
+    unsigned char ssp; /**< STACKALLOC: what -fstack-protector makes of a declared local (gcc's classes): 0 none (a
+                            compiler's temporary), 1 a canary under -strong (an array, an aggregate), 2 under plain
+                            -fstack-protector too (a char array of 8 bytes or more, or an aggregate with one), 3 a
+                            scalar, a canary under -strong if its address is taken (used as more than a load's
+                            or a store's address) */
     unsigned char seg; /**< LOAD, STORE: CC_SSA_SEG_FS or CC_SSA_SEG_GS for an access in that named address space
                             (gcc's __seg_fs, __seg_gs), the address the offset in the segment; else 0.  ASM: the
                             address space of the memory operands asm_seg_in and asm_seg_out mark */

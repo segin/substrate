@@ -3265,6 +3265,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         unsigned home_used = 0;
         int dst_in_home = 0;               /* the instruction made its result in the result's home */
         int stack_shift = 0;               /* how far the stack objects moved down for the registers pushed */
+        int ssp;                           /* -fstack-protector guards it: its canary right under them */
         int pushed = 0;                    /* the bytes of those registers */
         int slot_lo;                       /* the %ebp offsets of the value slots: [slot_lo, slot_hi) */
         int slot_hi;
@@ -3349,10 +3350,12 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
             return -1;
         }
         stack_shift = 0;
-        if (home_used != 0) {
+        ssp = x86_stack_protected(f);
+        if (home_used != 0 || ssp) {
             /*
-             * the caller's %ebx, %esi, %edi pushed right below %ebp: the slots start under them, and the stack
-             * objects 16 bytes further on at least, where they keep the alignment the layout gave them
+             * the caller's %ebx, %esi, %edi pushed right below %ebp, and under them the -fstack-protector
+             * canary: the slots start under those, and the stack objects 16 bytes further on at least, where
+             * they keep the alignment the layout gave them
              */
             int r;
             int v;
@@ -3360,7 +3363,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
             for (r = 0; r < I386_HOME_REGS; ++r) {
                 pushed += (home_used & (1u << r)) != 0 ? 4 : 0;
             }
-            stack_shift = (pushed + 15) & ~15;
+            stack_shift = (pushed + (ssp ? 4 : 0) + 15) & ~15;
             lay.bias += stack_shift;
             for (v = 0; v < f->value_count; ++v) {
                 if (lay.stackalloc_off[v] != 0) {
@@ -3451,6 +3454,11 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         emit_i386_home_saves(fp, home_used, emit_debug, 0);
         if (frame - pushed > 0) {
             fprintf(fp, "\tsubl $%d, %%esp\n", frame - pushed);
+        }
+        if (ssp && x86_emit_ssp_store_at(fp, -(pushed + 4)) != 0) {
+            slot_layout_free(&lay);
+            set_diag(diag, "-mstack-protector-guard-symbol: the name is too long");
+            return -1;
         }
         i386_regparm_bound(f, rp_bound);
         if (regparm_home != 0) {
@@ -4155,6 +4163,9 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                         emit_i386_call_memcpy(fp, (long)in->imm);
                     }
                     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", hidden);
+                    if (ssp) {
+                        x86_emit_ssp_check_at(fp, -(pushed + 4), f->name);
+                    }
                     if (i386_pic()) {
                         fprintf(fp, "\tmovl %d(%%ebp), %%ebx\n", scratch_off + 16);
                     }
@@ -4203,6 +4214,9 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 } else {
                     i386_drop_cache(&ist);
                 }
+                if (ssp) {
+                    x86_emit_ssp_check_at(fp, -(pushed + 4), f->name);
+                }
                 if (i386_pic()) {
                     fprintf(fp, "\tmovl %d(%%ebp), %%ebx\n", scratch_off + 16);
                 }
@@ -4227,6 +4241,9 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
             }
         }
 
+        if (ssp) {
+            fprintf(fp, ".L%s_ssp_fail:\n\tcall %s\n", f->name, x86_ssp_fail());
+        }
         if (emit_debug) {
             fprintf(fp, "\t.cfi_endproc\n");
         }

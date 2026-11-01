@@ -1155,6 +1155,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         int has_sret;
         int sret_ptr_off = 0;
         int param_gpr_bias;
+        int ssp; /* -fstack-protector guards it: its canary at -8(%rbp) */
 
         if (inferred_sret_size > sret_mem_size) {
             sret_mem_size = inferred_sret_size;
@@ -1186,6 +1187,19 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             return -1;
         }
         raw_frame = lay.frame_bytes;
+        ssp = x86_stack_protected(f);
+        if (ssp) {
+            /* -fstack-protector: the canary at -8(%rbp), above every slot and object, which move 16 down */
+            int v;
+
+            lay.bias += 16;
+            for (v = 0; v < f->value_count; ++v) {
+                if (lay.stackalloc_off[v] != 0) {
+                    lay.stackalloc_off[v] -= 16;
+                }
+            }
+            raw_frame += 16;
+        }
         if (has_sret) {
             sret_ptr_off = -(raw_frame + 8);
             raw_frame += 8;
@@ -1258,6 +1272,11 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         }
         if (frame > 0) {
             fprintf(fp, "\tsubq $%d, %%rsp\n", frame);
+        }
+        if (ssp && x86_emit_ssp_store_at(fp, -8) != 0) {
+            slot_layout_free(&lay);
+            set_diag(diag, "-mstack-protector-guard-symbol: the name is too long");
+            return -1;
         }
         if (has_sret) {
             fprintf(fp, "\tmovq %%rdi, %d(%%rbp)\n", sret_ptr_off);
@@ -2056,6 +2075,9 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                 } else {
                     int_regs_flush(fp, f, &lay, &ist);
                 }
+                if (ssp) {
+                    x86_emit_ssp_check_at(fp, -8, f->name);
+                }
                 fprintf(fp, "\tleave\n");
                 if (emit_debug) {
                     fprintf(fp, "\t.cfi_def_cfa %%rsp, 8\n");
@@ -2065,6 +2087,9 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             }
         }
 
+        if (ssp) {
+            fprintf(fp, ".L%s_ssp_fail:\n\tcall %s\n", f->name, x86_ssp_fail());
+        }
         if (emit_debug) {
             fprintf(fp, "\t.cfi_endproc\n");
         }

@@ -3986,6 +3986,68 @@ static int needs_realign(const xfunc_t *xf) {
  * Lay out the frame: below the saved registers (@p saved bytes), each object not at a fixed place, the busiest
  * first; a 16-byte one on a 16-byte boundary.  The bytes the prologue allocates go to *@p frame.
  */
+/**
+ * The canary's frame object as a memory operand.
+ *
+ * @param s  the selector, its canary made (ssp_obj)
+ * @return   the operand
+ */
+static xop_t ssp_canary(const xsel_t *s) {
+    xop_t o;
+
+    memset(&o, 0, sizeof(o));
+    o.kind = XO_MEM;
+    o.size = (unsigned char)s->word;
+    o.scale = 1;
+    o.base = XR_FRAME;
+    o.index = XR_NONE;
+    o.obj = s->ssp_obj;
+    return o;
+}
+
+/**
+ * Print the prologue's copy of the -fstack-protector guard into the canary, the frame's first object: a push
+ * of the guard and a pop into it, which takes no register -- the arguments are in theirs -- and addresses the
+ * canary off the stack pointer as it was, a pop's address being made after it moves.
+ *
+ * @param fp  the assembly output
+ * @param s   the selector, its frame laid out
+ * @return    0, or -1 when the guard's operand cannot be written
+ */
+static int print_ssp_store(FILE *fp, const xsel_t *s) {
+    char guard[256];
+    xop_t canary = ssp_canary(s);
+    char sfx = s->word == 8 ? 'q' : 'l';
+
+    if (x86_ssp_guard(guard, sizeof(guard)) == NULL) {
+        return -1;
+    }
+    fprintf(fp, "\tpush%c %s\n\tpop%c ", sfx, guard, sfx);
+    xop_print(fp, &s->xf, &canary, s->word);
+    fputc('\n', fp);
+    return 0;
+}
+
+/**
+ * Print a return's -fstack-protector check, before the epilogue gives the frame back: the canary less the
+ * guard, in a register no result is in (%r11, %ecx), and a jump to the function's call of __stack_chk_fail
+ * when that is not 0.  (An i386 function guarded makes no tail call, whose arguments %ecx may hold.)
+ *
+ * @param fp  the assembly output
+ * @param s   the selector
+ */
+static void print_ssp_check(FILE *fp, const xsel_t *s) {
+    char guard[256];
+    xop_t canary = ssp_canary(s);
+    const char *r = s->word == 8 ? "%r11" : "%ecx";
+    char sfx = s->word == 8 ? 'q' : 'l';
+
+    (void)x86_ssp_guard(guard, sizeof(guard)); /* (print_ssp_store() has made sure it fits) */
+    fprintf(fp, "\tmov%c ", sfx);
+    xop_print(fp, &s->xf, &canary, s->word);
+    fprintf(fp, ", %s\n\tsub%c %s, %s\n\tjne .L%s_ssp_fail\n", r, sfx, guard, r, s->f->name);
+}
+
 static int layout_frame(const xsel_t *s, xfunc_t *xf, int saved, int *frame) {
     int *order = (int *)malloc((size_t)(xf->nobj > 0 ? xf->nobj : 1) * sizeof(int));
     int residue = s->t->fp_residue;
@@ -3999,9 +4061,14 @@ static int layout_frame(const xsel_t *s, xfunc_t *xf, int saved, int *frame) {
     }
     for (i = 0; i < xf->nobj; ++i) {
         if (xf->obj[i].kind != XF_FIXED && (xf->obj[i].uses > 0 || xf->obj[i].kind == XF_LOCAL) &&
-            !(s->t->stack_boundary < 16 && xf->obj[i].align >= 16)) {
+            !(s->t->stack_boundary < 16 && xf->obj[i].align >= 16) && i != s->ssp_obj) {
             order[n++] = i; /* (16-byte ones under a smaller boundary placed apart, below) */
         }
+    }
+    if (s->ssp_obj >= 0) {
+        /* the -fstack-protector canary first, under the saved registers: between them and every other object */
+        cur -= xf->obj[s->ssp_obj].size;
+        xf->obj[s->ssp_obj].off = cur;
     }
     /* busiest first, the big (16-byte aligned) ones last; insertion sort, the order otherwise kept */
     for (i = 1; i < n; ++i) {
@@ -4085,6 +4152,9 @@ static void print_epilogue(FILE *fp, const xsel_t *s, unsigned saved, int frame,
 
     for (r = 0; r < nsv; ++r) {
         nsaved += (saved & XR_BIT(sv[r])) != 0;
+    }
+    if (s->ssp_obj >= 0) {
+        print_ssp_check(fp, s);
     }
     if (emit_debug) {
         fputs("\t.cfi_remember_state\n", fp);
@@ -4332,6 +4402,10 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     s->xf.fp_omit = s->fpo;
     s->xf.fp_bias = s->fpo ? (long)(nsaved - 1) * w + frame : 0;
     s->xf.sp_depth = 0;
+    if (s->ssp_obj >= 0 && print_ssp_store(fp, s) != 0) {
+        set_diag(diag, "-mstack-protector-guard-symbol: the name is too long");
+        return -1;
+    }
     /*
      * one epilogue, at the last return, the others jumping to it, as gcc keeps it -- when it is more than the
      * two bytes of `leave; ret` a jump takes as well
@@ -4352,7 +4426,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         }
     }
     /* tail calls, where nothing the callee may reach is in this frame (no frame object's address made) */
-    tail_ok = !emit_debug && !s->has_goto && !s->has_dynalloc && s->nbind == 0;
+    tail_ok = !emit_debug && !s->has_goto && !s->has_dynalloc && s->nbind == 0 && !(s->ssp_obj >= 0 && w == 4);
     for (i = 0; tail_ok && i < s->xf.nins; ++i) {
         const xinst_t *in = &s->xf.ins[i];
 
@@ -4410,6 +4484,10 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         } else if (in->op == XI_CALL) {
             s->xf.sp_depth -= in->aux;
         }
+    }
+    if (s->ssp_obj >= 0) {
+        /* where each return's -fstack-protector check goes when the canary has changed: it does not return */
+        fprintf(fp, ".L%s_ssp_fail:\n\tcall %s\n", f->name, x86_ssp_fail());
     }
     if (emit_debug) {
         fputs("\t.cfi_endproc\n", fp);
@@ -4640,6 +4718,7 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
     s.m = m;
     s.f = f;
     s.fn_index = fn_index;
+    s.ssp_obj = -1;
     why = function_ok(&s);
     if (why != NULL) {
         /* CC_MIR_STATS=1: each function this path takes, and why it does not take the others */
@@ -4663,6 +4742,10 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
         if (s.xf.ins[j].op == XI_JMPT) {
             s.xf.ins[j].targets = s.jt + s.xf.ins[j].aux;
         }
+    }
+    if (rc == 0 && !s.unsupported && !s.xf.oom && x86_stack_protected(f)) {
+        /* the -fstack-protector canary: a word, laid out first (layout_frame()) */
+        s.ssp_obj = xf_new_obj(&s.xf, XF_LOCAL, s.word, s.word, 0);
     }
     if (rc == 0 && (s.unsupported || s.xf.oom)) {
         rc = s.xf.oom ? -1 : 1;

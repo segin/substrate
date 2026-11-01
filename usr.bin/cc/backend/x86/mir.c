@@ -501,6 +501,19 @@ static void print_op(FILE *fp, const xfunc_t *xf, const xop_t *o, int word) {
     }
 }
 
+/**
+ * Print operand @p o, as an instruction's are printed: for the code a function's prologue and epilogue make
+ * around its instructions (the -fstack-protector canary's frame object).
+ *
+ * @param fp    the assembly output
+ * @param xf    the function, laid out
+ * @param o     the operand
+ * @param word  the target's word size
+ */
+void xop_print(FILE *fp, const xfunc_t *xf, const xop_t *o, int word) {
+    print_op(fp, xf, o, word);
+}
+
 /** The extension mnemonic of XI_MOVZX or XI_MOVSX from @p from bytes to @p to. */
 static const char *ext_mnemonic(int sign, int from, int to) {
     if (sign) {

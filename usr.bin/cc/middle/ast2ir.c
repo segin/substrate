@@ -1954,6 +1954,66 @@ static int expr_is_certainly_nonconstant(const cc_expr_t *e) {
     return 0;
 }
 
+/**
+ * What -fstack-protector makes of a local array or aggregate of type @p t, in gcc's classes
+ * (cc_ssa_instr_t.ssp): 2 for a char array of 8 bytes or more (gcc's ssp-buffer-size), or an aggregate or
+ * array with one in it, which plain -fstack-protector guards; else 1, which -strong guards.
+ *
+ * @param tu     the translation unit
+ * @param t      the local's type
+ * @param depth  how deep in the type this is, to stop at
+ * @return       2 or 1
+ */
+static unsigned char stack_protect_class(const cc_translation_unit_t *tu, const cc_ctype_t *t, int depth) {
+    const cc_ctype_t *base = t;
+    int sid;
+    size_t i;
+
+    while (base != NULL && base->unqual != NULL && base->unqual->kind == CC_CT_ARRAY) {
+        base = base->unqual->of;
+    }
+    if (base == NULL || depth > 8) {
+        return 1;
+    }
+    base = base->unqual != NULL ? base->unqual : base;
+    if (base != t && (base->kind == CC_CT_CHAR || base->kind == CC_CT_SCHAR || base->kind == CC_CT_UCHAR)) {
+        long size = cc_ct_size(t, tu);
+
+        return size < 0 || size >= 8 ? 2 : 1;
+    }
+    sid = ct_record_id(base);
+    if (sid >= 0 && (size_t)sid < tu->struct_count) {
+        for (i = 0; i < tu->structs[sid].member_count; ++i) {
+            const cc_ctype_t *mt = member_decl_ctype(&tu->structs[sid].members[i]);
+
+            if (mt != NULL && ((mt->unqual != NULL ? mt->unqual : mt)->kind == CC_CT_ARRAY || ct_record_id(mt) >= 0) &&
+                stack_protect_class(tu, mt, depth + 1) == 2) {
+                return 2;
+            }
+        }
+    }
+    return 1;
+}
+
+/**
+ * Mark the stack allocation just made in @p sf, the storage of a declared local, as of class @p ssp for
+ * -fstack-protector (cc_ssa_instr_t.ssp): the last STACKALLOC, which an aligned one's adjustment follows.
+ *
+ * @param sf   the function
+ * @param ssp  the class
+ */
+static void mark_stack_protect(cc_ssa_function_t *sf, unsigned char ssp) {
+    size_t i = sf->instr_count;
+
+    while (i > 0) {
+        --i;
+        if (sf->instrs[i].op == CC_SSA_STACKALLOC) {
+            sf->instrs[i].ssp = ssp;
+            return;
+        }
+    }
+}
+
 static int ensure_local_var_addressable(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t *v, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     int rhs;
@@ -1980,6 +2040,7 @@ static int ensure_local_var_addressable(const cc_translation_unit_t *tu, cc_ssa_
     if (v->addr_value < 0) {
         return -1;
     }
+    mark_stack_protect(sf, 3); /* (a scalar: -fstack-protector-strong's if its address is taken) */
 
     rhs = v->value;
     rhs = normalize_float_ct(sf, rhs, lower_var_ctype(v), diag);
@@ -2355,6 +2416,7 @@ static int lower_collect_hoisted_allocs(const cc_translation_unit_t *tu, cc_ssa_
         if (value < 0) {
             return -1;
         }
+        mark_stack_protect(sf, stack_protect_class(tu, stmt_decl_ctype(s), 0));
         if (append_hoisted_alloc(ctx, s, value, diag) != 0) {
             return -1;
         }

@@ -1585,6 +1585,171 @@ void x86_emit_return(FILE *fp, int pop) {
 }
 
 /**
+ * Where the -fstack-protector canary is, as an instruction's memory operand, as gcc has it: the thread's,
+ * %fs:40 on x86-64 and %gs:20 on i386 by default, or the segment, offset and symbol
+ * -mstack-protector-guard-reg, -offset and -symbol name -- Linux's %gs:__ref_stack_chk_guard(%rip) -- or with
+ * -mstack-protector-guard=global, __stack_chk_guard.
+ *
+ * @param buf  receives the operand's text
+ * @param cap  the size of @p buf
+ * @return     @p buf, or NULL when the text does not fit
+ */
+const char *x86_ssp_guard(char *buf, size_t cap) {
+    const cc_options_t *o = cc_options_current();
+    int is_64bit = o->target == CC_TARGET_X86_64;
+    int seg = o->ssp_guard_seg != 0 ? o->ssp_guard_seg : is_64bit ? CC_SSA_SEG_FS : CC_SSA_SEG_GS;
+    const char *sname = seg == CC_SSA_SEG_FS ? "%fs" : "%gs";
+    int n;
+
+    if (o->ssp_guard_global) {
+        n = snprintf(buf, cap, "__stack_chk_guard%s", is_64bit ? "(%rip)" : "");
+    } else if (o->ssp_guard_symbol != NULL && o->ssp_guard_offset > 0) {
+        n = snprintf(buf, cap, "%s:%s+%ld%s", sname, o->ssp_guard_symbol, o->ssp_guard_offset,
+                     is_64bit ? "(%rip)" : "");
+    } else if (o->ssp_guard_symbol != NULL) {
+        n = snprintf(buf, cap, "%s:%s%s", sname, o->ssp_guard_symbol, is_64bit ? "(%rip)" : "");
+    } else {
+        n = snprintf(buf, cap, "%s:%ld", sname, o->ssp_guard_offset >= 0 ? o->ssp_guard_offset : is_64bit ? 40 : 20);
+    }
+    return n >= 0 && (size_t)n < cap ? buf : NULL;
+}
+
+/** x86_for_each_use()'s counter of the uses of one value (stack_object_escapes()). */
+typedef struct {
+    int v;
+    int n;
+} use_count_t;
+
+static void count_use(int v, void *ctx) {
+    use_count_t *c = (use_count_t *)ctx;
+
+    c->n += v == c->v;
+}
+
+/**
+ * Whether the address of stack object @p v (a STACKALLOC's value) is used as anything but the address a load
+ * reads or a store writes: passed on, stored, computed with -- so that its object's address is taken, which a
+ * scalar local's is not when only its own loads and stores reach it (every one is stack-allocated before
+ * mem2reg, and at -O0 stays so).
+ *
+ * @param f  the function
+ * @param v  the value
+ * @return   1 if it is, else 0
+ */
+static int stack_object_escapes(const cc_ssa_function_t *f, int v) {
+    size_t j;
+
+    for (j = 0; j < f->instr_count; ++j) {
+        const cc_ssa_instr_t *in = &f->instrs[j];
+        use_count_t c;
+
+        c.v = v;
+        c.n = 0;
+        x86_for_each_use(f, in, count_use, &c);
+        if ((in->op == CC_SSA_LOAD || in->op == CC_SSA_STORE) && in->lhs == v) {
+            c.n--; /* (its address, which it reads or writes) */
+        }
+        if (c.n > 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Whether -fstack-protector guards function @p f, by gcc's rules: -all every function, -strong one with an
+ * array, an aggregate or a local whose address is taken, plain one with a char array of 8 bytes or more --
+ * each by its declared locals' class (cc_ssa_instr_t.ssp) -- and either one calling alloca or with a
+ * variable-length array; -explicit, and any of them, one declared stack_protect.  Never one declared
+ * no_stack_protector.
+ *
+ * @param f  the function
+ * @return   1 if it does, else 0
+ */
+int x86_stack_protected(const cc_ssa_function_t *f) {
+    const cc_options_t *o = cc_options_current();
+    int strong = 0;
+    size_t j;
+
+    if (o->stack_protector == 0 || (f->attr_flags & CC_ATTR_NO_STACK_PROTECTOR) != 0) {
+        return 0;
+    }
+    if (o->stack_protector == 3 || (f->attr_flags & CC_ATTR_STACK_PROTECT) != 0) {
+        return 1;
+    }
+    if (o->stack_protector == 4) {
+        return 0;
+    }
+    for (j = 0; j < f->instr_count; ++j) {
+        const cc_ssa_instr_t *in = &f->instrs[j];
+
+        if (in->op == CC_SSA_DYNALLOC || (in->op == CC_SSA_STACKALLOC && in->ssp == 2)) {
+            return 1;
+        }
+        if (in->op == CC_SSA_STACKALLOC && (in->ssp == 1 || (in->ssp == 3 && stack_object_escapes(f, in->dst)))) {
+            strong = 1;
+        }
+    }
+    return o->stack_protector == 2 && strong;
+}
+
+/**
+ * Print a legacy prologue's copy of the -fstack-protector guard into the canary @p off bytes from the frame
+ * pointer, as the MIR path's: a push of the guard and a pop into it, taking no register.
+ *
+ * @param fp   the assembly output
+ * @param off  the canary's offset from %rbp (%ebp)
+ * @return     0, or -1 when the guard's operand cannot be written
+ */
+int x86_emit_ssp_store_at(FILE *fp, int off) {
+    char guard[256];
+    int is_64bit = cc_options_current()->target == CC_TARGET_X86_64;
+
+    if (x86_ssp_guard(guard, sizeof(guard)) == NULL) {
+        return -1;
+    }
+    fprintf(fp, "\tpush%c %s\n\tpop%c %d(%s)\n", is_64bit ? 'q' : 'l', guard, is_64bit ? 'q' : 'l', off,
+            is_64bit ? "%rbp" : "%ebp");
+    return 0;
+}
+
+/**
+ * Print a legacy return's -fstack-protector check of the canary @p off bytes from the frame pointer, as the MIR
+ * path's: the canary less the guard in %r11 (%ecx), no result's register, and a jump to the call of
+ * __stack_chk_fail, .L<fn>_ssp_fail, when that is not 0.
+ *
+ * @param fp       the assembly output
+ * @param off      the canary's offset from %rbp (%ebp)
+ * @param fn_name  the function's name, of its label
+ */
+void x86_emit_ssp_check_at(FILE *fp, int off, const char *fn_name) {
+    char guard[256];
+    int is_64bit = cc_options_current()->target == CC_TARGET_X86_64;
+    const char *r = is_64bit ? "%r11" : "%ecx";
+    char sfx = is_64bit ? 'q' : 'l';
+
+    (void)x86_ssp_guard(guard, sizeof(guard)); /* (x86_emit_ssp_store_at() has made sure it fits) */
+    fprintf(fp, "\tmov%c %d(%s), %s\n\tsub%c %s, %s\n\tjne .L%s_ssp_fail\n", sfx, off, is_64bit ? "%rbp" : "%ebp",
+            r, sfx, guard, r, fn_name);
+}
+
+/**
+ * The function a -fstack-protector check calls when the canary has changed, as gcc's calls it:
+ * __stack_chk_fail, through the PLT in x86-64 position-independent code; in i386's,
+ * __stack_chk_fail_local, which needs no %ebx.
+ *
+ * @return  the call's operand
+ */
+const char *x86_ssp_fail(void) {
+    const cc_options_t *o = cc_options_current();
+
+    if (!(o->pic || o->pie)) {
+        return "__stack_chk_fail";
+    }
+    return o->target == CC_TARGET_X86_64 ? "__stack_chk_fail@PLT" : "__stack_chk_fail_local";
+}
+
+/**
  * The alignment function @p f's code starts on: its `aligned` attribute's, raised to
  * -fmin-function-alignment's, as gcc has it -- before -fpatchable-function-entry's nops ahead of its label,
  * which x86_emit_patchable_entry() prints after it.
@@ -4505,6 +4670,27 @@ void int_regs_store_remat_uses(FILE *fp, const cc_ssa_function_t *f, const slot_
 /** The largest stack object an i386 frame places above its slots, near %ebp (build_slot_layout()). */
 #define SMALL_STACK_OBJECT 64
 
+/**
+ * Whether stack object @p in goes above the slots, near the frame pointer, and how near: in a function
+ * -fstack-protector guards (@p protect) an array or aggregate of a class it guards, right under the canary --
+ * one with a char array nearest, as gcc puts them -- and on i386 (@p reuse_always) one of SMALL_STACK_OBJECT
+ * bytes or fewer below those.
+ *
+ * @param in             a STACKALLOC
+ * @param reuse_always   the frame is i386's
+ * @param protect        -fstack-protector guards the function
+ * @return               2 nearest, 1, 0 last; -1 for one that goes below the slots
+ */
+static int stack_object_top_rank(const cc_ssa_instr_t *in, int reuse_always, int protect) {
+    if (protect && in->ssp == 2) {
+        return 2;
+    }
+    if (protect && in->ssp == 1) {
+        return 1;
+    }
+    return reuse_always && (in->imm > 0 ? in->imm : 1) <= SMALL_STACK_OBJECT ? 0 : -1;
+}
+
 typedef struct {
     long weight;
     int slot;
@@ -4591,6 +4777,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     int i;
     int nvals;
     int raw_frame;
+    int protect; /* -fstack-protector guards it: its guarded locals go under the canary, on top */
     int *def_at = NULL;
     int *first_use = NULL;
     int *last_use = NULL;
@@ -4982,26 +5169,35 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     out->word_count = next_word;
     raw_frame = out->slot_count * slot_size + 4 * next_word;
 build_stackalloc_offsets:
-    if (reuse_always) {
+    protect = x86_stack_protected(f);
+    if (reuse_always || protect) {
         /*
          * i386: the stack objects of SMALL_STACK_OBJECT bytes or fewer -- a local whose address is taken, a
          * small structure, read and written often -- first, right under %ebp at a short displacement; the
-         * slots start below them (bias).  One of 16 bytes or more on a 16-byte boundary, as below.
+         * slots start below them (bias).  One of 16 bytes or more on a 16-byte boundary, as below.  And
+         * under -fstack-protector the arrays and aggregates it guards first, as gcc puts them -- those with a
+         * char array nearest -- right under the canary, which the emitter puts above them all, so that running
+         * past one reaches the canary before any slot.
          */
         int small = 0;
+        int residue = cc_target_pointer_size() == 4 ? 8 : 0;
+        int rank;
 
-        for (j = 0; j < f->instr_count; ++j) {
-            const cc_ssa_instr_t *in = &f->instrs[j];
-            int bytes = in->imm > 0 ? (int)in->imm : 1;
+        for (rank = 2; rank >= 0; --rank) {
+            for (j = 0; j < f->instr_count; ++j) {
+                const cc_ssa_instr_t *in = &f->instrs[j];
+                int bytes = in->imm > 0 ? (int)in->imm : 1;
 
-            if (in->op != CC_SSA_STACKALLOC || in->dst < 0 || in->dst >= nvals || bytes > SMALL_STACK_OBJECT) {
-                continue;
+                if (in->op != CC_SSA_STACKALLOC || in->dst < 0 || in->dst >= nvals ||
+                    stack_object_top_rank(in, reuse_always, protect) != rank) {
+                    continue;
+                }
+                small += (bytes + 3) & ~3;
+                while (bytes >= 16 && small % 16 != residue) {
+                    small += 4;
+                }
+                out->stackalloc_off[in->dst] = -small;
             }
-            small += (bytes + 3) & ~3;
-            while (bytes >= 16 && small % 16 != 8) {
-                small += 4;
-            }
-            out->stackalloc_off[in->dst] = -small;
         }
         out->bias = small;
         if (cc_backend_checked_frame_add(&raw_frame, small, diag, "stack allocation layout") != 0) {
@@ -5016,7 +5212,7 @@ build_stackalloc_offsets:
         if (in->op != CC_SSA_STACKALLOC || in->dst < 0 || in->dst >= nvals) {
             continue;
         }
-        if (reuse_always && (in->imm > 0 ? in->imm : 1) <= SMALL_STACK_OBJECT) {
+        if (stack_object_top_rank(in, reuse_always, protect) >= 0) {
             /* placed above */
             continue;
         }
