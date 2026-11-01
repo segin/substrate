@@ -1480,6 +1480,74 @@ static void emit_data_section(FILE *fp, const char *section_name) {
     }
 }
 
+/**
+ * The addresses the data of global @p g holds, which the loader of position-independent code relocates:
+ * a symbol's, or a string literal's that a pointer in it points to (an array of char holds a string's
+ * bytes, not its address).
+ *
+ * @param m  the module
+ * @param g  the global
+ * @return   0 for none, 1 when each is of a symbol that binds within the module, 2 when one may not
+ */
+static int global_init_relocations(const cc_ssa_module_t *m, const cc_ssa_global_t *g) {
+    int char_array = g->is_array && g->elem_size == 1 && g->data_kind == CC_SSA_DATA_CHAR;
+    int r = 0;
+    size_t j;
+
+    if (g->init_item_count > 0) {
+        int stream = g->init_items[0].init_size > 0 || g->init_items[0].init_is_zero_fill;
+
+        for (j = 0; j < g->init_item_count; ++j) {
+            const cc_ssa_global_init_item_t *it = &g->init_items[j];
+
+            if (it->init_is_symbol && it->init_sym != NULL && !module_symbol_binds_locally(m, it->init_sym)) {
+                return 2;
+            }
+            if (it->init_is_symbol || (it->init_is_string && (stream || !char_array))) {
+                r = 1;
+            }
+        }
+        return r;
+    }
+    if (g->init_is_symbol && g->init_sym != NULL) {
+        return module_symbol_binds_locally(m, g->init_sym) ? 1 : 2;
+    }
+    return g->init_is_string && !g->is_array ? 1 : 0;
+}
+
+/**
+ * The section a read-only global @p g goes in when no attribute names one, as gcc chooses it: .rodata,
+ * or, when position-independent code has the loader relocate its data (written once, then made
+ * read-only), .data.rel.ro -- .data.rel.ro.local when each address is of the module's own.
+ *
+ * @param m  the module
+ * @param g  the global, const
+ * @return   the section's name
+ */
+static const char *readonly_data_section(const cc_ssa_module_t *m, const cc_ssa_global_t *g) {
+    int r = cc_options_current()->pic && g->has_init ? global_init_relocations(m, g) : 0;
+
+    return r == 0 ? ".rodata" : r == 1 ? ".data.rel.ro.local" : ".data.rel.ro";
+}
+
+/**
+ * Switch to the section initialized global data goes in: @p section_name, .data for NULL.  A read-only
+ * object's own (@p readonly; .rodata and those -fdata-sections makes of it) is not writable; .data.rel.ro
+ * is, until the loader has relocated it.
+ *
+ * @param fp            the assembly output
+ * @param section_name  the section, or NULL
+ * @param readonly      whether the object went in its section for being const
+ */
+static void emit_object_section(FILE *fp, const char *section_name, int readonly) {
+    if (!readonly || section_name == NULL) {
+        emit_data_section(fp, section_name);
+        return;
+    }
+    fprintf(fp, "\t.section %s,\"%s\",@progbits\n", section_name,
+            strncmp(section_name, ".rodata", 7) == 0 ? "a" : "aw");
+}
+
 static void emit_bss_section(FILE *fp, const char *section_name) {
     int is_nobits = 1;
     if (section_name != NULL && section_name[0] != '\0') {
@@ -2250,6 +2318,45 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
     return rc;
 }
 
+/**
+ * Write, in .rodata, the string literals whose addresses the data of global @p g holds, each at the label
+ * its data names it by.  They come before the object's own label: a const object is in .rodata too, and
+ * a string written after its label was the object (`const char *const p = "x"` pointed at itself).
+ *
+ * @param fp            the assembly output
+ * @param g             the global, initialized
+ * @param i             its index in the module
+ * @param pointer_size  4 or 8
+ */
+static void emit_global_strings(FILE *fp, const cc_ssa_global_t *g, size_t i, int pointer_size) {
+    size_t j;
+
+    if (g->init_item_count > 0) {
+        int stream = g->init_items[0].init_size > 0 || g->init_items[0].init_is_zero_fill;
+
+        if (!stream && (!g->is_array || g->data_kind != CC_SSA_DATA_POINTER)) {
+            return; /* an array of char holds its strings' bytes; anything else with one is refused */
+        }
+        for (j = 0; j < g->init_item_count; ++j) {
+            const cc_ssa_global_init_item_t *it = &g->init_items[j];
+
+            if (it->init_is_string) {
+                fprintf(fp, "\t.section .rodata\n");
+                fprintf(fp, stream ? ".L__cc_gstream_%zu_%zu:\n" : ".L__cc_garr_%zu_%zu:\n", i, j);
+                emit_asciz_literal(fp, it->init_str);
+            }
+        }
+        return;
+    }
+    if (g->init_is_string && !g->is_array &&
+        (g->data_kind == CC_SSA_DATA_POINTER ||
+         (g->data_kind == CC_SSA_DATA_INT && global_object_size_bytes(g, pointer_size) == (long)pointer_size))) {
+        fprintf(fp, "\t.section .rodata\n");
+        fprintf(fp, ".L__cc_gstr_%zu:\n", i);
+        emit_asciz_literal(fp, g->init_str);
+    }
+}
+
 static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_size, const size_t *choices,
                                cc_diag_t *diag) {
     size_t i;
@@ -2263,9 +2370,12 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
         int has_sec = g->attr_section != NULL && g->attr_section[0] != '\0';
         char data_buf[1024];
         char bss_buf[1024];
-        /* (its section attribute's, -fdata-sections' own, or none: .data and .bss) */
+        /* a const one is read-only, its data too when it has none: it was in .data, outside Linux's STRICT_KERNEL_RWX */
+        int ro = g->is_readonly && !has_sec;
+        /* (its section attribute's, -fdata-sections' own, or none: .data and .bss, or .rodata) */
         const char *data_sec =
-            has_sec ? g->attr_section : x86_data_section(".data", g->name, data_buf, sizeof(data_buf));
+            has_sec ? g->attr_section
+                    : x86_data_section(ro ? readonly_data_section(m, g) : ".data", g->name, data_buf, sizeof(data_buf));
         const char *bss_sec = has_sec ? g->attr_section : x86_data_section(".bss", g->name, bss_buf, sizeof(bss_buf));
         const char *data_arg = strcmp(data_sec, ".data") != 0 ? data_sec : NULL;
         const char *bss_arg = strcmp(bss_sec, ".bss") != 0 ? bss_sec : NULL;
@@ -2313,7 +2423,11 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
             continue;
         }
         if (!g->has_init) {
-            emit_bss_section(fp, bss_arg);
+            if (ro) {
+                emit_object_section(fp, data_arg, 1);
+            } else {
+                emit_bss_section(fp, bss_arg);
+            }
             if (!is_static) {
                 if ((g->attr_flags & CC_ATTR_WEAK) != 0) {
                     fprintf(fp, ".weak %s\n", g->name);
@@ -2330,7 +2444,8 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
             fprintf(fp, "\t.zero %ld\n", sz);
             continue;
         }
-        emit_data_section(fp, data_arg);
+        emit_global_strings(fp, g, i, pointer_size);
+        emit_object_section(fp, data_arg, ro);
         if (!is_static) {
             if ((g->attr_flags & CC_ATTR_WEAK) != 0) {
                 fprintf(fp, ".weak %s\n", g->name);
@@ -2348,16 +2463,6 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
             if (g->init_items[0].init_size > 0 || g->init_items[0].init_is_zero_fill) {
                 size_t j;
                 long emitted = 0;
-
-                for (j = 0; j < g->init_item_count; ++j) {
-                    const cc_ssa_global_init_item_t *it = &g->init_items[j];
-                    if (it->init_is_string) {
-                        fprintf(fp, "\t.section .rodata\n");
-                        fprintf(fp, ".L__cc_gstream_%zu_%zu:\n", i, j);
-                        emit_asciz_literal(fp, it->init_str);
-                        emit_data_section(fp, data_arg);
-                    }
-                }
 
                 for (j = 0; j < g->init_item_count; ++j) {
                     const cc_ssa_global_init_item_t *it = &g->init_items[j];
@@ -2464,10 +2569,6 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
                     }
                     return -1;
                 }
-                fprintf(fp, "\t.section .rodata\n");
-                fprintf(fp, ".L__cc_garr_%zu_%zu:\n", i, j);
-                emit_asciz_literal(fp, it->init_str);
-                emit_data_section(fp, data_arg);
             }
             for (j = 0; j < g->init_item_count; ++j) {
                 const cc_ssa_global_init_item_t *it = &g->init_items[j];
@@ -2515,11 +2616,7 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
                 }
             } else if (g->data_kind == CC_SSA_DATA_POINTER ||
                        (g->data_kind == CC_SSA_DATA_INT && sz == (long)pointer_size)) {
-                /* a pointer, or an integer holding the literal's address: `(unsigned long)"s"` */
-                fprintf(fp, "\t.section .rodata\n");
-                fprintf(fp, ".L__cc_gstr_%zu:\n", i);
-                emit_asciz_literal(fp, g->init_str);
-                emit_data_section(fp, data_arg);
+                /* a pointer, or an integer holding the literal's address: `(unsigned long)"s"` (its string is out) */
                 if (pointer_size == 4) {
                     fprintf(fp, "\t.long .L__cc_gstr_%zu\n", i);
                 } else {

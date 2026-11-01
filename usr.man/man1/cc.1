@@ -793,7 +793,19 @@ or
 for a hot or cold one
 .Pc ,
 .Li .data. Ns Ar name ,
-.Li .bss. Ns Ar name ;
+.Li .bss. Ns Ar name ,
+and for a const one
+.Li .rodata. Ns Ar name
+.Po
+.Li .data.rel.ro. Ns Ar name
+or
+.Li .data.rel.ro.local. Ns Ar name
+when position-independent code has the loader relocate an address in it,
+as without the option it is in
+.Li .rodata
+or
+.Li .data.rel.ro
+.Pc ;
 one with a section attribute stays in that section.
 A link with
 .Fl Wl,--gc-sections

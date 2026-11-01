@@ -1004,7 +1004,8 @@ static cc_ssa_data_kind_t ssa_data_kind(const cc_ctype_t *t) {
 
 /**
  * Lay out an SSA global as an object of type @p t: an array's elements,
- * or a single object, as aligned as the type needs.
+ * or a single object, as aligned as the type needs.  A const object, or
+ * an array of const elements, is read-only, as gcc has it.
  *
  * @param g   the global
  * @param t   its type
@@ -1012,8 +1013,16 @@ static cc_ssa_data_kind_t ssa_data_kind(const cc_ctype_t *t) {
  */
 static void ssa_global_set_layout(cc_ssa_global_t *g, const cc_ctype_t *t, const cc_translation_unit_t *tu) {
     long a = cc_ct_align(t, tu);
+    const cc_ctype_t *e;
 
     g->type_align = a > 0 ? a : 0;
+    g->is_readonly = 0;
+    for (e = t; e != NULL; e = ct_has_kind(e, CC_CT_ARRAY) ? e->of : NULL) {
+        if ((e->quals & CC_CQ_CONST) != 0) {
+            g->is_readonly = 1;
+            break;
+        }
+    }
     if (ct_has_kind(t, CC_CT_ARRAY)) {
         g->is_array = 1;
         g->data_kind = ssa_data_kind(t->of);
@@ -9790,6 +9799,10 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                 return -1;
             }
             needs_runtime_init = rc == 0;
+        }
+        if (needs_runtime_init) {
+            /* the code stores its value the first time through: writable, const or not */
+            g.is_readonly = 0;
         }
         if (append_synth_global(ctx->mod, &g) != 0) {
             free(g.name);
