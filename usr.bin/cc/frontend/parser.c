@@ -148,7 +148,9 @@ typedef struct {
     long vector_bytes; /**< `vector_size(n)`: the vector's size in bytes; 0 for none */
     long vector_elems; /**< `ext_vector_type(n)`: its element count; 0 for none */
     int regparm;       /**< `regparm(n)` (i386): n + 1; 0 for none */
-    char *asm_label;   /**< the string of a declarator's `asm("...")`, whole (owned); NULL for none */
+    int patchable;     /**< `patchable_function_entry(n, m)`: n + 1; 0 for none */
+    int patchable_before; /**< its m */
+    char *asm_label;  /**< the string of a declarator's `asm("...")`, whole (owned); NULL for none */
     char *cleanup_fn;  /**< `cleanup(fn)`: the function called with the variable's address as it goes out of
                             scope (owned); NULL for none */
     char *counted_by;  /**< `counted_by(m)`: the member holding a flexible array's or a pointer's element count
@@ -3930,6 +3932,8 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     a->vector_bytes = 0;
     a->vector_elems = 0;
     a->regparm = 0;
+    a->patchable = 0;
+    a->patchable_before = 0;
 }
 
 static void decl_attrs_clear(decl_attrs_t *a) {
@@ -3953,6 +3957,8 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     a->vector_bytes = 0;
     a->vector_elems = 0;
     a->regparm = 0;
+    a->patchable = 0;
+    a->patchable_before = 0;
 }
 
 static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
@@ -3992,6 +3998,10 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
     }
     if (src->regparm > 0) {
         dst->regparm = src->regparm;
+    }
+    if (src->patchable > 0) {
+        dst->patchable = src->patchable;
+        dst->patchable_before = src->patchable_before;
     }
     if (sec_dup != NULL) {
         free(dst->section);
@@ -5149,6 +5159,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_regparm;
     int is_no_instrument;
     int is_nocf_check;
+    int is_patchable;
     int has_num = 0;
     int has_num2 = 0;
     long num = 0;
@@ -5204,6 +5215,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_regparm = tok_is_gnu_attr_name(p, "regparm");
     is_no_instrument = tok_is_gnu_attr_name(p, "no_instrument_function");
     is_nocf_check = tok_is_gnu_attr_name(p, "nocf_check");
+    is_patchable = tok_is_gnu_attr_name(p, "patchable_function_entry");
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
                 is_always_inline || is_gnu_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
@@ -5211,7 +5223,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
                 is_constructor ||
                 is_destructor || is_transparent_union ||
                 is_vector_size || is_ext_vector_type || is_may_alias || is_mode || is_regparm || is_no_instrument ||
-                is_nocf_check;
+                is_nocf_check || is_patchable;
 
     if (next_tok(p) != 0) {
         return -1;
@@ -5344,6 +5356,17 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         }
         if (is_nocf_check) {
             out_attrs->flags |= CC_ATTR_NOCF_CHECK;
+        }
+        if (is_patchable) {
+            /* its function's own -fpatchable-function-entry=n,m; (0, 0) none (Linux's notrace on some machines) */
+            if (!has_num || num < 0 || num > 65535 || (has_num2 && (num2 < 0 || num2 > num))) {
+                set_diag(p->diag, attr_line, attr_col,
+                         "patchable_function_entry attribute takes a count and a count before the entry no greater");
+                free(sec);
+                return -1;
+            }
+            out_attrs->patchable = (int)num + 1;
+            out_attrs->patchable_before = has_num2 ? (int)num2 : 0;
         }
         if (is_target) {
             out_attrs->flags |= CC_ATTR_TARGET;
@@ -9650,12 +9673,16 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         long merged_format_index = 0;
         long merged_format_first_to_check = 0;
         int merged_regparm = 0;
+        int merged_patchable = 0;
+        int merged_patchable_before = 0;
 
         if (decl_attrs_merge(&merged_attrs, &base_attrs) != 0 || decl_attrs_merge(&merged_attrs, &suffix_attrs) != 0) {
             free_stmt(&s);
             return -1;
         }
         merged_regparm = merged_attrs.regparm;
+        merged_patchable = merged_attrs.patchable;
+        merged_patchable_before = merged_attrs.patchable_before;
         merged_format_index = merged_attrs.format_index;
         merged_format_first_to_check = merged_attrs.format_first_to_check;
         s.attr_flags = with_pragma_visibility(merged_attrs.flags, start_vis);
@@ -9711,6 +9738,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             fn_decl.attr_format_index = merged_format_index;
             fn_decl.attr_format_first_to_check = merged_format_first_to_check;
             fn_decl.attr_regparm = merged_regparm;
+            fn_decl.attr_patchable = merged_patchable;
+            fn_decl.attr_patchable_before = merged_patchable_before;
             fn_decl.has_body = 0;
             if (next_tok(p) != 0) {
                 free_stmt(&s);
@@ -9766,6 +9795,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             fn_decl.attr_format_index = merged_format_index;
             fn_decl.attr_format_first_to_check = merged_format_first_to_check;
             fn_decl.attr_regparm = merged_regparm;
+            fn_decl.attr_patchable = merged_patchable;
+            fn_decl.attr_patchable_before = merged_patchable_before;
             fn_decl.has_body = 0;
             fn_decl.is_variadic = s.ctype->variadic;
             fn_decl.has_prototype = s.ctype->prototyped;
@@ -11043,6 +11074,8 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     f->attr_format_index = merged_attrs.format_index;
     f->attr_format_first_to_check = merged_attrs.format_first_to_check;
     f->attr_regparm = merged_attrs.regparm;
+    f->attr_patchable = merged_attrs.patchable;
+    f->attr_patchable_before = merged_attrs.patchable_before;
     if (merged_attrs.section != NULL) {
         f->attr_section = cc_strndup(merged_attrs.section, strlen(merged_attrs.section));
         if (f->attr_section == NULL) {

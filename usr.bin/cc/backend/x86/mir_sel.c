@@ -4281,7 +4281,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     if (x86_function_alignment(f) > 1) {
         fprintf(fp, ".align %ld\n", x86_function_alignment(f));
     }
-    x86_emit_patchable_entry(fp, 0);
+    x86_emit_patchable_entry(fp, f, 0);
     fprintf(fp, ".type %s, @function\n", f->name);
     fprintf(fp, "%s:\n", f->name);
     if (emit_debug) {
@@ -4295,7 +4295,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
          */
         fputs(w == 8 ? "\tendbr64\n" : "\tendbr32\n", fp);
     }
-    x86_emit_patchable_entry(fp, 1);
+    x86_emit_patchable_entry(fp, f, 1);
     x86_emit_profile_call(fp, f, 0);
     if (!s->fpo) {
         fprintf(fp, "\tpush%c %s\n\tmov%c %s, %s\n", sfx, xr_name(XR_BP, w), sfx, xr_name(XR_SP, w),

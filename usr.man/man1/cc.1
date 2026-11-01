@@ -623,6 +623,15 @@ The section is
 for an assembler without
 .Dv SHF_LINK_ORDER ,
 one for the whole object.
+A function declared
+.Ic __attribute__((patchable_function_entry( Ns Ar n , Ar m Ns ))) ,
+on its definition or a declaration before it, has
+.Ar n
+and
+.Ar m
+of its own instead;
+.Pq 0 , 0
+gives it none.
 .It Fl fmin-function-alignment Ns = Ns Ar N
 Start each function on a multiple of
 .Ar N

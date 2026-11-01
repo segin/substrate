@@ -1619,20 +1619,24 @@ long x86_function_alignment(const cc_ssa_function_t *f) {
  * __patchable_function_entries.  That is gcc's section without the "o" flag, the one it writes for an
  * assembler without SHF_LINK_ORDER: Substrate's as keeps one section of a name, and the flag's form is one
  * per function.  (Linux's x86 discards the section; what it patches is the 16 bytes before each function.)
+ * A function declared patchable_function_entry(n, m) has its own n and m; (0, 0), none.
  *
  * @param fp           the assembly output
+ * @param f            the function
  * @param after_entry  0 before the function's label, 1 after it and its endbr
  */
-void x86_emit_patchable_entry(FILE *fp, int after_entry) {
+void x86_emit_patchable_entry(FILE *fp, const cc_ssa_function_t *f, int after_entry) {
     static unsigned long label_number;
     const cc_options_t *o = cc_options_current();
-    int n = after_entry ? o->patchable_count - o->patchable_before : o->patchable_before;
+    int count = f->attr_patchable > 0 ? f->attr_patchable - 1 : o->patchable_count;
+    int before = f->attr_patchable > 0 ? f->attr_patchable_before : o->patchable_before;
+    int n = after_entry ? count - before : before;
     int i;
 
-    if (o->patchable_count == 0) {
+    if (count == 0) {
         return;
     }
-    if (after_entry == (o->patchable_before == 0)) {
+    if (after_entry == (before == 0)) {
         ++label_number;
         fprintf(fp, "\t.section __patchable_function_entries,\"aw\",@progbits\n\t.align %d\n\t%s .LPFE%lu\n\t.previous\n",
                 o->target == CC_TARGET_X86_64 ? 8 : 4, o->target == CC_TARGET_X86_64 ? ".quad" : ".long",

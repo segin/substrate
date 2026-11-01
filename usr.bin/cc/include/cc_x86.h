@@ -142,9 +142,10 @@ void x86_emit_return(FILE *fp, int pop);
 void x86_emit_profile_call(FILE *fp, const cc_ssa_function_t *f, int after_frame);
 /**
  * Print -fpatchable-function-entry's nops before a function's label (@p after_entry 0) or after it and its
- * endbr (1), with the address of the first recorded in __patchable_function_entries.
+ * endbr (1), with the address of the first recorded in __patchable_function_entries; function @p f's
+ * patchable_function_entry attribute, if it has one, says how many.
  */
-void x86_emit_patchable_entry(FILE *fp, int after_entry);
+void x86_emit_patchable_entry(FILE *fp, const cc_ssa_function_t *f, int after_entry);
 /** The alignment function @p f starts on: its `aligned`, raised to -fmin-function-alignment's; 1 or less for none. */
 long x86_function_alignment(const cc_ssa_function_t *f);
 /** Register a constructor or destructor in .init_array or .fini_array. */

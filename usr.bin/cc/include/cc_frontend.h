@@ -397,6 +397,8 @@ typedef struct {
     long attr_format_index;
     long attr_format_first_to_check;
     int attr_regparm; /**< `regparm(n)` (i386): n + 1; 0 when this declaration does not say */
+    int attr_patchable; /**< `patchable_function_entry(n, m)`: n + 1; 0 when this declaration does not say */
+    int attr_patchable_before; /**< its m */
     char *attr_section;
     char *attr_alias;
     int has_body;

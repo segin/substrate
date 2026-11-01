@@ -15895,10 +15895,17 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         eff_attr_align = af->attr_align;
         eff_attr_section = af->attr_section;
         eff_attr_alias = af->attr_alias;
+        sf->attr_patchable = af->attr_patchable;
+        sf->attr_patchable_before = af->attr_patchable_before;
         for (k = cc_tu_function_first(tu, af->name); k >= 0; k = cc_tu_function_next(tu, k)) {
             const cc_function_t *cand = &tu->funcs[k];
 
             eff_attr_flags |= cand->attr_flags;
+            if (sf->attr_patchable == 0 && cand->attr_patchable > 0) {
+                /* (the definition's, else a declaration's) */
+                sf->attr_patchable = cand->attr_patchable;
+                sf->attr_patchable_before = cand->attr_patchable_before;
+            }
             if (cand->attr_align > eff_attr_align) {
                 eff_attr_align = cand->attr_align;
             }

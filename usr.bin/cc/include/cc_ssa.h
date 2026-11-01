@@ -269,6 +269,9 @@ typedef struct cc_ssa_function {
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;
+    int attr_patchable;        /**< `patchable_function_entry(n, m)` on one of its declarations: n + 1; 0 for none,
+                                    -fpatchable-function-entry's then */
+    int attr_patchable_before; /**< its m */
     char *attr_section;
     char *attr_alias;
     int is_variadic;
