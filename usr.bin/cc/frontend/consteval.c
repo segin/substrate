@@ -491,6 +491,110 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
  * @param out  receives the value
  * @return     0, or -1 if the value does not fit the type
  */
+/**
+ * The address of a member of an object a constant points to:
+ * `&((T *)K)->m`, members of members included, is K and the members'
+ * offsets -- an address constant, as gcc has it.  Linux's
+ * sound/synth/emux has `((long)(&((type)NULL)->tag) - (long)(NULL))`,
+ * offsetof the old way, in a static table.
+ *
+ * @param env  the context
+ * @param e    the CC_EXPR_ADDR
+ * @param out  receives the address
+ * @return     0, or -1 if it is no such address
+ */
+static int const_lvalue_address(const cc_const_env_t *env, const cc_expr_t *m, uint64_t *addr);
+
+/**
+ * The address of element @p k of the array lvalue @p arr, a member of
+ * an object a constant points to: `&((T *)K)->a[k]` is `*(a + k)`, the
+ * element's size from its type (no structure's, which only the
+ * translation unit knows).  Linux's neighbour.c has
+ * `&((struct neigh_parms *) 0)->data[index]` in a sysctl table.
+ *
+ * @return 0, or -1 if it is no such address
+ */
+static int const_element_address(const cc_const_env_t *env, const cc_expr_t *sum, uint64_t *addr) {
+    const cc_expr_t *arr = sum->lhs;
+    const cc_expr_t *idx = sum->rhs;
+    cc_const_t k;
+    long size;
+
+    if (arr == NULL || idx == NULL) {
+        return -1;
+    }
+    if (arr->ctype == NULL || arr->ctype->unqual->kind != CC_CT_ARRAY) {
+        const cc_expr_t *t = arr;
+
+        if (sum->op != CC_BIN_ADD) {
+            return -1;
+        }
+        arr = idx;
+        idx = t;
+    }
+    if (arr->ctype == NULL || arr->ctype->unqual->kind != CC_CT_ARRAY ||
+        (size = cc_ct_size(arr->ctype->unqual->of, NULL)) <= 0 || cc_const_eval(env, idx, &k) != 0 ||
+        const_lvalue_address(env, arr, addr) != 0) {
+        return -1;
+    }
+    *addr += sum->op == CC_BIN_SUB ? (uint64_t)-((int64_t)k.bits * size) : (uint64_t)((int64_t)k.bits * size);
+    return 0;
+}
+
+/**
+ * The address of lvalue @p m: members of members, by `.`, of an object
+ * a constant points to, by `->` or `*`; or an element of an array member
+ * of one (const_element_address()).
+ *
+ * @return 0, or -1 if it is no such lvalue
+ */
+static int const_lvalue_address(const cc_const_env_t *env, const cc_expr_t *m, uint64_t *addr) {
+    uint64_t off = 0;
+    cc_const_t base;
+
+    while (m != NULL && m->kind == CC_EXPR_MEMBER && m->lhs != NULL && !m->member_is_bitfield && !m->member_is_part) {
+        off += (uint64_t)m->member_offset;
+        if (m->member_is_arrow) {
+            if (cc_const_eval(env, m->lhs, &base) != 0) {
+                return -1;
+            }
+            *addr = base.bits + off;
+            return 0;
+        }
+        m = m->lhs;
+    }
+    if (m == NULL || m->kind != CC_EXPR_DEREF || m->lhs == NULL) {
+        return -1;
+    }
+    if (m->lhs->kind == CC_EXPR_BIN) {
+        /* an element of an array member, or no address this knows (no pointer arithmetic is scaled here) */
+        if ((m->lhs->op != CC_BIN_ADD && m->lhs->op != CC_BIN_SUB) || const_element_address(env, m->lhs, addr) != 0) {
+            return -1;
+        }
+        *addr += off;
+        return 0;
+    }
+    if (off == 0) {
+        /* `&*K` alone, no member: left to what reads it as it was */
+        return -1;
+    }
+    if (cc_const_eval(env, m->lhs, &base) != 0) {
+        return -1;
+    }
+    *addr = base.bits + off;
+    return 0;
+}
+
+static int const_eval_member_address(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out) {
+    uint64_t addr;
+
+    if (e->lhs == NULL || (e->lhs->kind != CC_EXPR_MEMBER && e->lhs->kind != CC_EXPR_DEREF) ||
+        const_lvalue_address(env, e->lhs, &addr) != 0) {
+        return -1;
+    }
+    return const_make(addr, const_uintptr(), out);
+}
+
 static int const_eval_float_cast(const cc_expr_t *e, cc_const_t *out) {
     long double d = e->lhs->float_val_ld != 0.0L ? e->lhs->float_val_ld : (long double)e->lhs->float_val;
     const cc_ctype_t *t = const_cast_type(e);
@@ -632,6 +736,8 @@ int cc_const_eval(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out
             return -1;
         }
         return const_convert(&a, const_cast_type(e), out);
+    case CC_EXPR_ADDR:
+        return const_eval_member_address(env, e, out);
     case CC_EXPR_SIZEOF: {
         long n = env != NULL && env->sizeof_bytes != NULL ? env->sizeof_bytes(env->ctx, e) : -1;
         if (n < 0) {
