@@ -477,7 +477,9 @@ each function begins with
 .Li endbr64
 .Pq Li endbr32 with Fl m32 ,
 as does each label whose address is taken, where an indirect branch may
-land.
+land; a function declared
+.Ic __attribute__((nocf_check))
+has none.
 .Dv __CET__
 is defined as with
 .Xr gcc 1 :

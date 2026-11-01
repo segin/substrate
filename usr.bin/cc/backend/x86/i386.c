@@ -3425,7 +3425,8 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
 
-        if (cc_options_current() != NULL && cc_options_current()->cf_branch) {
+        if (cc_options_current() != NULL && cc_options_current()->cf_branch &&
+            (f->attr_flags & CC_ATTR_NOCF_CHECK) == 0) {
             /* -fcf-protection=branch: where an indirect call may land (CET IBT), as the MIR emitter has it */
             fputs("\tendbr32\n", fp);
         }

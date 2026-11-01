@@ -4288,8 +4288,11 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         fprintf(fp, "\t.cfi_startproc\n\t.cfi_def_cfa_offset %d\n\t.cfi_offset %s, -%d\n", 2 * w,
                 xr_name(XR_BP, w), 2 * w);
     }
-    if (cc_options_current() != NULL && cc_options_current()->cf_branch) {
-        /* where an indirect call may land, under -fcf-protection=branch (CET IBT): Linux's kernel faults else */
+    if (cc_options_current() != NULL && cc_options_current()->cf_branch && (f->attr_flags & CC_ATTR_NOCF_CHECK) == 0) {
+        /*
+         * where an indirect call may land, under -fcf-protection=branch (CET IBT): Linux's kernel faults else;
+         * none in a nocf_check function (Linux's __noendbr), which no indirect call is to reach
+         */
         fputs(w == 8 ? "\tendbr64\n" : "\tendbr32\n", fp);
     }
     x86_emit_patchable_entry(fp, 1);
