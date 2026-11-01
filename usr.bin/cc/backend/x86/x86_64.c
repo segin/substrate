@@ -1230,6 +1230,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         if (f->attr_align > 1) {
             fprintf(fp, ".align %ld\n", f->attr_align);
         }
+        x86_emit_patchable_entry(fp, 0);
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
 
@@ -1242,6 +1243,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             /* -fcf-protection=branch: where an indirect call may land (CET IBT), as the MIR emitter has it */
             fputs("\tendbr64\n", fp);
         }
+        x86_emit_patchable_entry(fp, 1);
         x86_emit_profile_call(fp, f, 0);
 
         fprintf(fp, "\tpushq %%rbp\n");

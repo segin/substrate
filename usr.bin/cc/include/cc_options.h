@@ -86,6 +86,9 @@ typedef struct {
                                   ftrace patches the latter */
     int record_mcount;       /**< -mrecord-mcount: each such call's address in section __mcount_loc */
     int nop_mcount;          /**< -mnop-mcount: the call a 5-byte nop, for the program to make one later */
+    int patchable_count;     /**< -fpatchable-function-entry=N,M: N nops at each function's entry, for the
+                                  program to patch -- Linux's call padding */
+    int patchable_before;    /**< M of them before the entry */
 } cc_options_t;
 
 /**

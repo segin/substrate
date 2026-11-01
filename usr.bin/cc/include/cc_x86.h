@@ -140,6 +140,11 @@ void x86_emit_return(FILE *fp, int pop);
  * whichever the call's kind has: __fentry__ the one, mcount the other.
  */
 void x86_emit_profile_call(FILE *fp, const cc_ssa_function_t *f, int after_frame);
+/**
+ * Print -fpatchable-function-entry's nops before a function's label (@p after_entry 0) or after it and its
+ * endbr (1), with the address of the first recorded in __patchable_function_entries.
+ */
+void x86_emit_patchable_entry(FILE *fp, int after_entry);
 /** Register a constructor or destructor in .init_array or .fini_array. */
 void emit_lifecycle_attr(FILE *fp, const char *section, const char *section_type, const char *name, int is_64bit);
 /** Write string literal @p literal of instruction @p instr_index, then return to section @p restore_sec. */

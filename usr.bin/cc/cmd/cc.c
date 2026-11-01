@@ -111,6 +111,8 @@ typedef struct {
   int fentry;         /* -mfentry 1, -mno-fentry 0, neither -1 (x86-64's default, i386's not) */
   int record_mcount;  /* -mrecord-mcount, the last of it and -mno-record-mcount */
   int nop_mcount;     /* -mnop-mcount, the last of it and -mno-nop-mcount */
+  int patchable_count;  /* -fpatchable-function-entry=N[,M]: N (opt_patchable_function_entry()) */
+  int patchable_before; /* M */
 
   const char *std;
   const char *opt_level;
@@ -230,6 +232,8 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->profile = !o->pg ? 0 : profile_fentry(o) ? 2 : 1;
   out->record_mcount = o->record_mcount;
   out->nop_mcount = o->nop_mcount;
+  out->patchable_count = o->patchable_count;
+  out->patchable_before = o->patchable_before;
 }
 
 
@@ -1469,6 +1473,37 @@ static int opt_harden_sls(cc_opts_t *o, const driver_opt_t *d, const char *as, c
 }
 
 /**
+ * -fpatchable-function-entry=N[,M]: N nops at each function's entry, M of them before it, for the program
+ * to patch -- Linux's call padding, 16 before each function -- each recorded in
+ * __patchable_function_entries, as gcc does.
+ *
+ * @return 0, or -1 when N or M is not a number or M is more than N
+ */
+static int opt_patchable_function_entry(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  char *end = NULL;
+  long n;
+  long m = 0;
+
+  (void)d;
+  n = val != NULL ? strtol(val, &end, 10) : -1;
+  if (end != NULL && end != val && *end == ',') {
+    const char *p = end + 1;
+
+    m = strtol(p, &end, 10);
+    if (end == p) {
+      end = NULL;
+    }
+  }
+  if (end == NULL || end == val || *end != '\0' || n < 0 || m < 0 || m > n || n > 65535) {
+    fprintf(stderr, "cc: error: invalid arguments for '%s%s'\n", as, val != NULL ? val : "");
+    return -1;
+  }
+  o->patchable_count = (int)n;
+  o->patchable_before = (int)m;
+  return 0;
+}
+
+/**
  * -ftrivial-auto-var-init=zero|pattern|uninitialized: whether an automatic
  * variable with no initializer starts as zero, as Linux builds with, as
  * gcc's pattern (every byte 0xfe), or as whatever the stack held.
@@ -1606,6 +1641,7 @@ static const driver_opt_t options[] = {
     {"-mno-record-mcount", OPT_FLAG, 0, opt_int, F(record_mcount), 0},
     {"-mnop-mcount", OPT_FLAG, 0, opt_int, F(nop_mcount), 1},
     {"-mno-nop-mcount", OPT_FLAG, 0, opt_int, F(nop_mcount), 0},
+    {"-fpatchable-function-entry=", OPT_PREFIX, 0, opt_patchable_function_entry, 0, 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},

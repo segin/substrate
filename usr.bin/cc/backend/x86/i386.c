@@ -3421,6 +3421,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         if (f->attr_align > 1) {
             fprintf(fp, ".align %ld\n", f->attr_align);
         }
+        x86_emit_patchable_entry(fp, 0);
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
 
@@ -3428,6 +3429,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
             /* -fcf-protection=branch: where an indirect call may land (CET IBT), as the MIR emitter has it */
             fputs("\tendbr32\n", fp);
         }
+        x86_emit_patchable_entry(fp, 1);
         if (emit_debug) {
             fprintf(fp, "\t.cfi_startproc\n");
             fprintf(fp, "\t.cfi_def_cfa_offset 8\n");

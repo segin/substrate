@@ -1596,6 +1596,37 @@ void x86_emit_return(FILE *fp, int pop) {
  * @param after_frame  0 at the entry, 1 once the frame pointer is set up: the call is printed at the one
  *                     its kind has
  */
+/**
+ * Print -fpatchable-function-entry=N,M's nops at a function's entry: M before its label, the rest after it
+ * (after an endbr, before -pg's call), as gcc puts them, and the address of the first in section
+ * __patchable_function_entries.  That is gcc's section without the "o" flag, the one it writes for an
+ * assembler without SHF_LINK_ORDER: Substrate's as keeps one section of a name, and the flag's form is one
+ * per function.  (Linux's x86 discards the section; what it patches is the 16 bytes before each function.)
+ *
+ * @param fp           the assembly output
+ * @param after_entry  0 before the function's label, 1 after it and its endbr
+ */
+void x86_emit_patchable_entry(FILE *fp, int after_entry) {
+    static unsigned long label_number;
+    const cc_options_t *o = cc_options_current();
+    int n = after_entry ? o->patchable_count - o->patchable_before : o->patchable_before;
+    int i;
+
+    if (o->patchable_count == 0) {
+        return;
+    }
+    if (after_entry == (o->patchable_before == 0)) {
+        ++label_number;
+        fprintf(fp, "\t.section __patchable_function_entries,\"aw\",@progbits\n\t.align %d\n\t%s .LPFE%lu\n\t.previous\n",
+                o->target == CC_TARGET_X86_64 ? 8 : 4, o->target == CC_TARGET_X86_64 ? ".quad" : ".long",
+                label_number);
+        fprintf(fp, ".LPFE%lu:\n", label_number);
+    }
+    for (i = 0; i < n; ++i) {
+        fputs("\tnop\n", fp);
+    }
+}
+
 void x86_emit_profile_call(FILE *fp, const cc_ssa_function_t *f, int after_frame) {
     const cc_options_t *o = cc_options_current();
     int is_64bit = o->target == CC_TARGET_X86_64;
