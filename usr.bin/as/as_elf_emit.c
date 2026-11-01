@@ -2176,6 +2176,20 @@ static int data_eval(data_eval_t *ev, const as_expr_t *e, data_value_t *out) {
             if (find_label_virtual_location(ev->ctx, ev->st, NULL, 0, 0, e->symbol, &section, &off) == 0) {
                 return data_eval_place(ev, section, (long long)off, e->symbol, out);
             }
+            /*
+             * a name no label has, of a section: the section's start, as gas has it -- Linux's vDSO
+             * extable is `.long (from) - __ex_table` in __ex_table
+             */
+            {
+                /* (only a name the source left local and undefined, which is what such a name is: see
+                 * as_symtab_build(); an extern's name needs no walk of the sections) */
+                const as_symbol_t *said = find_as_symbol_const(ev->ctx, ev->ctx->symtab, e->symbol);
+
+                if (said != NULL && said->bind == AS_SYM_BIND_LOCAL && !said->defined && ev->ctx->obj != NULL &&
+                    elf_find_section(ev->ctx->obj, e->symbol) != NULL) {
+                    return data_eval_place(ev, e->symbol, 0, NULL, out);
+                }
+            }
         }
         memset(&term, 0, sizeof(term));
         term.base = e->symbol;

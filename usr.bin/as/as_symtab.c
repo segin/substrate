@@ -1,5 +1,6 @@
 #include "as_symtab.h"
 #include "as_reloc_op.h"
+#include "as_strmap.h"
 #include "as_util.h"
 
 #include <ctype.h>
@@ -805,9 +806,101 @@ static int is_numeric_local_label_name(const char *name) {
     return 1;
 }
 
+/** The names of the sections a source makes, by name (section_names_collect()). */
+typedef struct {
+    as_strmap_t map;
+    char **names; /* the keys, owned */
+    size_t count;
+} section_names_t;
+
+/** Free @p s. */
+static void section_names_free(section_names_t *s) {
+    size_t i;
+
+    for (i = 0; i < s->count; ++i) {
+        free(s->names[i]);
+    }
+    free(s->names);
+    as_strmap_free(&s->map);
+}
+
+/**
+ * Collect the names of the sections the source makes: those `.section`
+ * and `.pushsection` name, and .text, .data and .bss.  Such a name, where
+ * no label has it and the source does not make it global, is the
+ * section's start, as gas has it: Linux's vDSO extable is
+ * `.long (from) - __ex_table` in __ex_table.  Once, in a map: a walk of
+ * the source for each symbol made assembly quadratic.
+ *
+ * @param parsed  the source
+ * @param out     receives the names
+ * @return        0, or -1 when out of memory
+ */
+static int section_names_collect(const as_parse_result_t *parsed, section_names_t *out) {
+    static const char *const fixed[] = {".text", ".data", ".bss"};
+    size_t i;
+
+    memset(out, 0, sizeof(*out));
+    for (i = 0; i < parsed->count + 3; ++i) {
+        const char *a;
+        size_t n;
+        char *name;
+        char **grown;
+        size_t at;
+
+        if (i < 3) {
+            a = fixed[i];
+        } else {
+            const as_stmt_t *st = &parsed->items[i - 3];
+
+            if (st->kind != AS_STMT_DIRECTIVE || st->u.directive.name == NULL || st->u.directive.arg_count == 0 ||
+                st->u.directive.args[0] == NULL ||
+                (strcmp(st->u.directive.name, ".section") != 0 &&
+                 strcmp(st->u.directive.name, ".pushsection") != 0)) {
+                continue;
+            }
+            a = st->u.directive.args[0];
+        }
+        while (*a == ' ' || *a == '\t') {
+            a++;
+        }
+        if (*a == '"') {
+            a++;
+            n = strcspn(a, "\"");
+        } else {
+            n = strcspn(a, " \t,");
+        }
+        if (n == 0) {
+            continue;
+        }
+        name = (char *)malloc(n + 1);
+        if (name == NULL) {
+            return -1;
+        }
+        memcpy(name, a, n);
+        name[n] = '\0';
+        if (as_strmap_get(&out->map, name, &at)) {
+            free(name);
+            continue;
+        }
+        grown = (char **)realloc(out->names, (out->count + 1) * sizeof(*grown));
+        if (grown == NULL) {
+            free(name);
+            return -1;
+        }
+        out->names = grown;
+        out->names[out->count++] = name;
+        if (as_strmap_put(&out->map, name, 0) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
                     char *errbuf, size_t errbuf_sz) {
     sym_ctx_t ctx;
+    section_names_t sections;
     size_t i;
 
     if (parsed == NULL || tab == NULL) {
@@ -913,8 +1006,22 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
         }
     }
 
+    if (section_names_collect(parsed, &sections) != 0) {
+        section_names_free(&sections);
+        set_err(&ctx, "out of memory");
+        return -1;
+    }
     for (i = 0; i < tab->count; ++i) {
         as_symbol_t *sym = &tab->items[i];
+        size_t at;
+        int a_section = !sym->defined && !sym->is_common && sym->alias_target == NULL &&
+                        sym->bind == AS_SYM_BIND_LOCAL && sym->name != NULL &&
+                        as_strmap_get(&sections.map, sym->name, &at);
+
+        if (a_section) {
+            /* the name of a section, which no file need define: the section (see symbol_is_not_emitted()) */
+            continue;
+        }
         sym->unresolved = (!sym->defined && !sym->is_common && sym->reference_count > 0) ? 1 : 0;
         /*
          * What this source does not define is another file's, and is
@@ -928,6 +1035,7 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
             sym->bind = AS_SYM_BIND_GLOBAL;
         }
     }
+    section_names_free(&sections);
 
     return 0;
 }

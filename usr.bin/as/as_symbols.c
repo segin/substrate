@@ -227,6 +227,11 @@ static int symbol_is_not_emitted(emit_ctx_t *ctx, const as_symtab_t *symtab, con
         s->reference_count == 0) {
         return 1;
     }
+    /* A name no file need define, of a section: the section, as gas has it (Linux's vDSO `.long __ex_table`) */
+    if (s->bind == AS_SYM_BIND_LOCAL && !s->defined && !s->is_common && s->alias_target == NULL && s->name != NULL &&
+        ctx->obj != NULL && elf_find_section(ctx->obj, s->name) != NULL) {
+        return 1;
+    }
     if (s->alias_target == NULL || s->name == NULL) {
         return 0;
     }
