@@ -8749,6 +8749,10 @@ static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu
     return 0;
 }
 
+static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                          var_entry_t *vars, size_t var_count, int depth, const cc_ctype_t *arr,
+                                          const cc_expr_t *list, size_t *cursor, int base_ptr, cc_diag_t *diag);
+
 static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf,
                                                  const lower_ctx_t *ctx, var_entry_t *vars, size_t var_count,
                                                  int depth, int field_ptr, const cc_struct_member_t *m,
@@ -8775,6 +8779,20 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
     if (elem_size <= 0 || m->size <= 0) {
         set_diag(diag, "unsupported array-like struct member size in initializer lowering");
         return -1;
+    }
+    if (elem != NULL && elem->kind == CC_CT_ARRAY && member_elem_record_id(m) < 0) {
+        /* more dimensions, of scalars: a row at a time, a string filling a row of characters */
+        size_t cur = 0;
+
+        if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, member_decl_ctype(m), item, &cur,
+                                           field_ptr, diag) != 0) {
+            return -1;
+        }
+        if (cur < item->arg_count) {
+            set_diag(diag, "too many initializers for fixed-size struct member array");
+            return -1;
+        }
+        return 0;
     }
     max_items = member_flat_count(tu, m) > 0 ? member_flat_count(tu, m) : (m->size / elem_size);
     if (max_items <= 0) {
