@@ -121,6 +121,7 @@ typedef struct {
     int target_supports_avx2;
     int unsigned_char; /**< -funsigned-char: __CHAR_UNSIGNED__ */
     int short_wchar;   /**< -fshort-wchar: wchar_t's macros those of unsigned short */
+    int freestanding;  /**< -ffreestanding: __STDC_HOSTED__ 0 */
     int enable_trigraphs;
     int std_version;
     int std_is_c11;
@@ -1528,6 +1529,10 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__STDC__", 0, 0, NULL, 0, "1") != 0) {
         return -1;
     }
+    /* a hosted implementation, as C99 has every one say; -ffreestanding's is not */
+    if (macro_set(&st->macros, "__STDC_HOSTED__", 0, 0, NULL, 0, st->freestanding ? "0" : "1") != 0) {
+        return -1;
+    }
     if (!st->std_is_gnu) {
         if (macro_set(&st->macros, "__STRICT_ANSI__", 0, 0, NULL, 0, "1") != 0) {
             return -1;
@@ -2401,6 +2406,10 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             st->short_wchar = 1;
         } else if (strcmp(f, "-fno-short-wchar") == 0) {
             st->short_wchar = 0;
+        } else if (strcmp(f, "-ffreestanding") == 0) {
+            st->freestanding = 1;
+        } else if (strcmp(f, "-fhosted") == 0) {
+            st->freestanding = 0;
         }
     }
     /* AVX2 implies AVX, as in gcc: -mavx2 -mno-avx2 leaves neither, but an

@@ -1736,6 +1736,11 @@ static const driver_opt_t options[] = {
     /* (to the preprocessor too, for wchar_t's macros) */
     {"-fshort-wchar", OPT_FLAG, FWD_CPP, opt_int, F(short_wchar), 1},
     {"-fno-short-wchar", OPT_FLAG, FWD_CPP, opt_int, F(short_wchar), 0},
+    /*
+     * the preprocessor's: __STDC_HOSTED__ 0 or 1.  (gcc's -ffreestanding implies -fno-builtin, which cc
+     * keeps in meaning: a call it expands -- memcpy, memset -- does what the function does)
+     */
+    {"-ffreestanding -fhosted", OPT_FLAG, FWD_CPP, NULL, 0, 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
