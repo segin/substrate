@@ -1293,6 +1293,33 @@ static int opt_arch(cc_opts_t *o, const driver_opt_t *d, const char *as, const c
  *
  * @return 0, or -1 for a feature the architecture lacks
  */
+/**
+ * -mgeneral-regs-only: no register but the general ones -- no SSE, MMX or x87 -- as gcc has it, so
+ * -mno-sse -mno-sse2 -mno-mmx -mno-80387, the preprocessor told too (no __SSE__, __SSE2__, __MMX__).
+ * Floating point is then refused, as gcc refuses it.  Substrate's x86-64 kernel builds with it.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int opt_general_regs_only(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  static const char *const off[] = {"-mno-sse", "-mno-sse2", "-mno-mmx"};
+  size_t k;
+
+  (void)d;
+  (void)as;
+  (void)val;
+  o->i386_has_sse = 0;
+  o->i386_has_sse2 = 0;
+  o->i386_has_mmx = 0;
+  o->no_sse = 1;
+  o->no_80387 = 1;
+  for (k = 0; k < sizeof(off) / sizeof(off[0]); ++k) {
+    if (cc_strvec_push(&o->cpp_flags, off[k]) != 0) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
 static int opt_isa_feature(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
   int on = strncmp(as, "-mno-", 5) != 0;
   int supported = *(int *)((char *)o + d->n);
@@ -1720,6 +1747,7 @@ static const driver_opt_t options[] = {
     {"-msse -mno-sse", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_sse), (int)F(i386_supports_sse)},
     {"-msse2 -mno-sse2", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_sse2), (int)F(i386_supports_sse2)},
     {"-mmmx -mno-mmx", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_mmx), (int)F(i386_supports_mmx)},
+    {"-mgeneral-regs-only", OPT_FLAG, 0, opt_general_regs_only, 0, 0},
     {"-mavx -mno-avx -mavx2 -mno-avx2", OPT_FLAG, FWD_C | FWD_CPP, NULL, 0, 0},
     {"-mfpmath", OPT_VALUE, FWD_C, opt_fpmath, 0, 0},
     {"-mregparm", OPT_VALUE, FWD_C, opt_regparm, 0, 0},
@@ -1776,8 +1804,9 @@ static const driver_opt_t options[] = {
     {"-ffreestanding -fhosted", OPT_FLAG, FWD_CPP, NULL, 0, 0},
     {"-fvisibility=", OPT_PREFIX, 0, opt_visibility, 0, 0},
     /* no x87 code, nor results in %st0: what would need them refused, as gcc refuses it (Linux's x86-64) */
-    {"-mno-80387", OPT_FLAG, 0, opt_int, F(no_80387), 1},
-    {"-m80387", OPT_FLAG, 0, opt_int, F(no_80387), 0},
+    /* (gcc's -msoft-float and -mhard-float are the same two: Linux's amdgpu display code -mhard-float -msse) */
+    {"-mno-80387 -msoft-float", OPT_FLAG, 0, opt_int, F(no_80387), 1},
+    {"-m80387 -mhard-float", OPT_FLAG, 0, opt_int, F(no_80387), 0},
     {"-mno-fp-ret-in-387", OPT_FLAG, 0, opt_int, F(no_fp_ret_in_387), 1},
     {"-mfp-ret-in-387", OPT_FLAG, 0, opt_int, F(no_fp_ret_in_387), 0},
     {"-ffunction-sections", OPT_FLAG, 0, opt_int, F(function_sections), 1},

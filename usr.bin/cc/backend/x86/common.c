@@ -1698,6 +1698,12 @@ int x86_check_x87_options(const cc_ssa_function_t *f, int legacy, cc_diag_t *dia
             why = "has floating point, which cc computes on the x87 here";
         }
     }
+    for (v = 0; why == NULL && o->no_80387 && is_64bit && o->no_sse && v < f->value_count; ++v) {
+        /* (-mgeneral-regs-only, or -mno-sse -mno-80387: neither SSE nor the x87 to compute it, as gcc refuses) */
+        if (cc_ssa_value_class(f, v) == CC_VAL_F64) {
+            why = "has floating point, with neither SSE nor the x87";
+        }
+    }
     if (why == NULL) {
         return 0;
     }
