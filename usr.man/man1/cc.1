@@ -256,6 +256,23 @@ and
 .Fl Ofast
 is
 .Fl O3 .
+The level defines
+.Xr gcc 1 Ns 's
+macros:
+.Dv __OPTIMIZE__
+above 0,
+.Dv __OPTIMIZE_SIZE__
+too at
+.Fl Os
+and
+.Fl Oz ,
+and
+.Dv __NO_INLINE__
+at 0;
+.Fl U
+and
+.Fl D
+override them.
 Every level above 0 currently runs the same passes.
 From
 .Fl O1

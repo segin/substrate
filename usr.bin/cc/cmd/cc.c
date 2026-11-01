@@ -1688,6 +1688,32 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
   return 0;
 }
 
+/**
+ * The macros gcc predefines for the optimization the command line asks
+ * for: __OPTIMIZE__ at -O1 and above, __OPTIMIZE_SIZE__ too at -Os and
+ * -Oz, __NO_INLINE__ at -O0.  cc defined none, and Linux's
+ * fortify-string.h, included only `#if defined(__OPTIMIZE__)`, was not:
+ * a kernel with CONFIG_FORTIFY_SOURCE had no fortified string functions,
+ * and lib/string_helpers.c, which names its enum, did not build.
+ *
+ * @param o     the parsed command line
+ * @param defs  receives the -D options, at most 2
+ * @return      how many
+ */
+static size_t optimize_predefines(const cc_opts_t *o, const char *defs[2]) {
+  size_t n = 0;
+
+  if (opt_level_num(o) == 0) {
+    defs[n++] = "-D__NO_INLINE__=1";
+    return n;
+  }
+  defs[n++] = "-D__OPTIMIZE__=1";
+  if (o->opt_level != NULL && (strcmp(o->opt_level, "s") == 0 || strcmp(o->opt_level, "z") == 0)) {
+    defs[n++] = "-D__OPTIMIZE_SIZE__=1";
+  }
+  return n;
+}
+
 static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
                           int as_cpp_mode) {
   cc_diag_t diag;
@@ -1743,10 +1769,14 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     use_stdin_tmp = 1;
   }
 
-  if ((target_flag != NULL && target_flag[0] != '\0') || use_stdin_tmp ||
-      (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0)) {
+  {
     size_t j;
     size_t extra = (target_flag != NULL && target_flag[0] != '\0') ? 1 : 0;
+    size_t first = 0;
+    const char *opt_defs[2];
+    size_t opt_def_count = optimize_predefines(o, opt_defs);
+
+    extra += opt_def_count;
     if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
       extra += 2;
     }
@@ -1762,9 +1792,14 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
       fprintf(stderr, "cpp: error: failed to allocate preprocess flags\n");
       return -1;
     }
-    for (j = 0; j < pp_count; ++j) {
-      pp_flags_aug[j] = pp_flags_base[j];
+    /* the predefined macros first, so a -U or -D on the command line overrides them, as gcc's */
+    for (j = 0; j < opt_def_count; ++j) {
+      pp_flags_aug[first++] = opt_defs[j];
     }
+    for (j = 0; j < pp_count; ++j) {
+      pp_flags_aug[first + j] = pp_flags_base[j];
+    }
+    pp_count += first;
     if (target_flag != NULL && target_flag[0] != '\0') {
       pp_flags_aug[pp_count++] = target_flag;
     }
