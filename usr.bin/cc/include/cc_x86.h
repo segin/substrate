@@ -130,6 +130,11 @@ void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags
  * instruction, or under -mindirect-branch=thunk-extern one to __x86_indirect_thunk_<reg>.
  */
 void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg);
+/**
+ * Print a function's return, popping @p pop bytes of arguments after the return address: `ret`, or under
+ * -mfunction-return=thunk-extern a jump to __x86_return_thunk.
+ */
+void x86_emit_return(FILE *fp, int pop);
 /** Register a constructor or destructor in .init_array or .fini_array. */
 void emit_lifecycle_attr(FILE *fp, const char *section, const char *section_type, const char *name, int is_64bit);
 /** Write string literal @p literal of instruction @p instr_index, then return to section @p restore_sec. */

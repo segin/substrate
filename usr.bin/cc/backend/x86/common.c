@@ -1550,6 +1550,32 @@ void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg) {
     fprintf(fp, "\t%s __x86_indirect_thunk_%s\n", op, reg + 1);
 }
 
+/**
+ * Print a function's return, as -mfunction-return has it: `ret` (`ret $4`, an i386 function popping a
+ * structure result's hidden pointer), or under thunk-extern `jmp __x86_return_thunk`, the program's (Linux's,
+ * which objtool finds every return of a CONFIG_MITIGATION_RETHUNK kernel going through).  One popping its
+ * arguments takes the return address into %ecx, which no result is in, pops them, and jumps to
+ * __x86_return_thunk_ecx, as gcc does.
+ *
+ * @param fp   the assembly output
+ * @param pop  the bytes of arguments the return pops; 0 for none
+ */
+void x86_emit_return(FILE *fp, int pop) {
+    if (!cc_options_current()->return_thunk) {
+        if (pop > 0) {
+            fprintf(fp, "\tret $%d\n", pop);
+        } else {
+            fputs("\tret\n", fp);
+        }
+        return;
+    }
+    if (pop > 0) {
+        fprintf(fp, "\tpopl %%ecx\n\tleal %d(%%esp), %%esp\n\tjmp __x86_return_thunk_ecx\n", pop);
+        return;
+    }
+    fputs("\tjmp __x86_return_thunk\n", fp);
+}
+
 void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags) {
     if (name == NULL || name[0] == '\0') {
         return;

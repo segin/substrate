@@ -4159,7 +4159,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                         fprintf(fp, "\t.cfi_def_cfa %%esp, 4\n");
                     }
                     /* popping the pointer only if it was on the stack */
-                    fprintf(fp, f->sret_reg ? "\tret\n" : "\tret $4\n");
+                    x86_emit_return(fp, f->sret_reg ? 0 : 4);
                     break;
                 }
                 if (in->lhs >= 0 && (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0) {
@@ -4206,7 +4206,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 if (emit_debug) {
                     fprintf(fp, "\t.cfi_def_cfa %%esp, 4\n");
                 }
-                fprintf(fp, "\tret\n");
+                x86_emit_return(fp, 0);
                 break;
             }
             if (in->dst >= 0 && in->dst < f->value_count && home[in->dst] >= 0 && !dst_in_home) {

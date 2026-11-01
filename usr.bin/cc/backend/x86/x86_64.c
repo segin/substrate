@@ -2055,7 +2055,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                 if (emit_debug) {
                     fprintf(fp, "\t.cfi_def_cfa %%rsp, 8\n");
                 }
-                fprintf(fp, "\tret\n");
+                x86_emit_return(fp, 0);
                 break;
             }
         }

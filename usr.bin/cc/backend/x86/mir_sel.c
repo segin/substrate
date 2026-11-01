@@ -4121,10 +4121,8 @@ static void print_epilogue(FILE *fp, const xsel_t *s, unsigned saved, int frame,
     }
     if (tail != NULL) {
         fprintf(fp, "\tjmp %s\n", tail); /* (a tail call: the callee returns for it) */
-    } else if (pop > 0) {
-        fprintf(fp, "\tret $%d\n", pop);
     } else {
-        fputs("\tret\n", fp);
+        x86_emit_return(fp, pop);
     }
     if (emit_debug) {
         fputs("\t.cfi_restore_state\n", fp);

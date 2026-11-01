@@ -105,6 +105,7 @@ typedef struct {
   int cf_protection;  /* -fcf-protection[=]: 1 branches, 2 returns, 3 both (opt_cf_protection()) */
   int indirect_thunk; /* -mindirect-branch=thunk-extern (opt_indirect_branch()) */
   int indirect_cs_prefix; /* -mindirect-branch-cs-prefix */
+  int return_thunk;   /* -mfunction-return=thunk-extern (opt_function_return()) */
 
   const char *std;
   const char *opt_level;
@@ -207,6 +208,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->cf_branch = (o->cf_protection & 1) != 0;
   out->indirect_thunk = o->indirect_thunk;
   out->indirect_cs_prefix = o->indirect_cs_prefix;
+  out->return_thunk = o->return_thunk;
 }
 
 
@@ -1396,6 +1398,31 @@ static int opt_indirect_branch(cc_opts_t *o, const driver_opt_t *d, const char *
 }
 
 /**
+ * -mfunction-return=keep|thunk-extern: whether a function returns by `ret` (keep), or by a jump to
+ * __x86_return_thunk, the program's -- Linux's, with CONFIG_MITIGATION_RETHUNK.  gcc's thunk and
+ * thunk-inline, which emit the thunk themselves, cc has not.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_function_return(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  if (val != NULL && strcmp(val, "keep") == 0) {
+    o->return_thunk = 0;
+  } else if (val != NULL && strcmp(val, "thunk-extern") == 0) {
+    o->return_thunk = 1;
+  } else if (val != NULL && (strcmp(val, "thunk") == 0 || strcmp(val, "thunk-inline") == 0)) {
+    fprintf(stderr, "cc: error: %s%s is not supported: cc jumps to an external thunk only (thunk-extern)\n", as,
+            val);
+    return -1;
+  } else {
+    fprintf(stderr, "cc: error: %s%s: the argument must be keep, thunk, thunk-inline or thunk-extern\n", as,
+            val != NULL ? val : "");
+    return -1;
+  }
+  return 0;
+}
+
+/**
  * -ftrivial-auto-var-init=zero|pattern|uninitialized: whether an automatic
  * variable with no initializer starts as zero, as Linux builds with, as
  * gcc's pattern (every byte 0xfe), or as whatever the stack held.
@@ -1523,6 +1550,7 @@ static const driver_opt_t options[] = {
     /* (a thunk's target is always in a register: there is no memory form of the call) */
     {"-mindirect-branch-register", OPT_FLAG, 0, NULL, 0, 0},
     {"-mindirect-branch-cs-prefix", OPT_FLAG, 0, opt_int, F(indirect_cs_prefix), 1},
+    {"-mfunction-return=", OPT_PREFIX, 0, opt_function_return, 0, 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
