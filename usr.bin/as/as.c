@@ -2831,6 +2831,21 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
                 rp++;
             }
             rname[rn] = '\0';
+            /*
+             * another label after this one: this one, and the rest as a statement of its own, so a macro after
+             * labels is expanded however many they are -- Linux's ALTERNATIVE_2 puts `740: 740: \oldinstr`, and
+             * retpoline.S's oldinstr is the macro RETPOLINE
+             */
+            if (rn > 0 && *rp == ':' && rp[1] != ':' && find_gas_macro(macros, rname) == NULL) {
+                for (; label_start < q; ++label_start) {
+                    text_putc((unsigned char)*label_start, out);
+                }
+                text_puts(":\n", out);
+                if (out->failed) {
+                    return -1;
+                }
+                return expand_gas_macro_statement(out, macros, rest, depth);
+            }
             if (rn > 0 && find_gas_macro(macros, rname) != NULL) {
                 for (; label_start < q; ++label_start) {
                     text_putc((unsigned char)*label_start, out);
