@@ -3,6 +3,7 @@
  */
 
 #include "cc_ctype.h"
+#include "cc_options.h"
 #include "cc_target.h"
 #include "cc_types.h"
 
@@ -459,6 +460,9 @@ int cc_ct_is_unsigned(const cc_ctype_t *t) {
     case CC_CT_ULLONG:
     case CC_CT_UBITINT:
         return 1;
+    case CC_CT_CHAR:
+        /* plain char: signed on x86, unsigned under -funsigned-char (Linux's) */
+        return cc_options_current()->unsigned_char;
     default:
         return 0;
     }

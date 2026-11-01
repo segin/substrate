@@ -1,5 +1,6 @@
 #include "cc_ctype.h"
 #include "cc_lexer.h"
+#include "cc_options.h"
 #include "cc_target.h"
 #include "cc_util.h"
 
@@ -797,7 +798,8 @@ static int lex_char_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, size_t
     if (lx_peek(lx) == '\'') {
         lx_adv(lx);
     }
-    if (is_plain && (unsigned long long)v <= 0xffULL) {
+    /* a plain constant is an int of a char's value: '\xff' is -1, or 255 under -funsigned-char, as gcc's */
+    if (is_plain && (unsigned long long)v <= 0xffULL && !cc_options_current()->unsigned_char) {
         signed char sc = (signed char)(unsigned char)v;
         v = (long long)sc;
     }

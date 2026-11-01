@@ -837,7 +837,8 @@ static cc_ctype_kind_t packed_enum_kind_from_range(long min_v, long max_v) {
         return CC_CT_ULLONG;
     }
     if (min_v >= SCHAR_MIN && max_v <= SCHAR_MAX) {
-        return CC_CT_CHAR;
+        /* (a signed one: plain char is not, under -funsigned-char) */
+        return cc_options_current()->unsigned_char ? CC_CT_SCHAR : CC_CT_CHAR;
     }
     if (min_v >= SHRT_MIN && max_v <= SHRT_MAX) {
         return CC_CT_SHORT;
@@ -879,6 +880,7 @@ static int parser_is_bitfield_base_type(const cc_ctype_t *t) {
 static int parser_bitfield_is_signed(const cc_ctype_t *t) {
     switch (t->unqual->kind) {
     case CC_CT_CHAR:
+        return !cc_options_current()->unsigned_char;
     case CC_CT_SCHAR:
     case CC_CT_SHORT:
     case CC_CT_INT:

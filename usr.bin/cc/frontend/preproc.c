@@ -119,6 +119,7 @@ typedef struct {
     int target_supports_mmx;
     int target_supports_avx;
     int target_supports_avx2;
+    int unsigned_char; /**< -funsigned-char: __CHAR_UNSIGNED__ */
     int enable_trigraphs;
     int std_version;
     int std_is_c11;
@@ -1551,6 +1552,9 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__GNUC_STDC_INLINE__", 0, 0, NULL, 0, "1") != 0) {
         return -1;
     }
+    if (st->unsigned_char && macro_set(&st->macros, "__CHAR_UNSIGNED__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
     if (macro_set(&st->macros, "__SIZE_TYPE__", 0, 0, NULL, 0, size_type) != 0) {
         return -1;
     }
@@ -2381,6 +2385,10 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             }
         } else if (strcmp(f, "-mno-avx2") == 0) {
             st->target_has_avx2 = 0;
+        } else if (strcmp(f, "-funsigned-char") == 0 || strcmp(f, "-fno-signed-char") == 0) {
+            st->unsigned_char = 1;
+        } else if (strcmp(f, "-fsigned-char") == 0 || strcmp(f, "-fno-unsigned-char") == 0) {
+            st->unsigned_char = 0;
         }
     }
     /* AVX2 implies AVX, as in gcc: -mavx2 -mno-avx2 leaves neither, but an

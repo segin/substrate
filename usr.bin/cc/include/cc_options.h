@@ -91,6 +91,7 @@ typedef struct {
     int patchable_before;    /**< M of them before the entry */
     int min_function_alignment; /**< -fmin-function-alignment=N: each function's code starts on N bytes (with
                                      -fpatchable-function-entry, its nops before it do); 0 for none */
+    int unsigned_char;       /**< -funsigned-char: plain char is unsigned, as Linux builds (it is signed on x86) */
 } cc_options_t;
 
 /**

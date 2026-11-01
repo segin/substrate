@@ -644,6 +644,18 @@ the
 .Li nop Ns s
 before the function's label are what start there, as with
 .Xr gcc 1 .
+.It Fl funsigned-char , Fl fno-signed-char , Fl fsigned-char , Fl fno-unsigned-char
+Whether plain
+.Ic char
+is unsigned, under the first two, or signed, as it is on x86 by default;
+the last given decides.
+It is still a type of its own, apart from
+.Ic signed char
+and
+.Ic unsigned char .
+.Dv __CHAR_UNSIGNED__
+is defined when it is unsigned, as with
+.Xr gcc 1 .
 .It Fl fsyntax-only
 Check each C input \(em its syntax and what it means \(em and write
 nothing: no assembly or object is made and nothing is linked.
