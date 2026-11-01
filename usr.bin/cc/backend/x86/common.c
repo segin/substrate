@@ -837,6 +837,7 @@ const char *ssa_op_name(cc_ssa_opcode_t op) {
 }
 
 static int find_store_instr_index_for_ptr_before(const cc_ssa_function_t *f, int ptr_value, size_t max_instr_index);
+static int store_is_sole(const cc_ssa_function_t *f, int ptr_value, int store_idx);
 
 static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_index, int value, unsigned char *visiting,
                                     long *out_imm) {
@@ -880,7 +881,7 @@ static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_i
     case CC_SSA_LOAD:
         if (in->lhs >= 0) {
             int store_idx = find_store_instr_index_for_ptr_before(f, in->lhs, (size_t)def_index[value]);
-            if (store_idx >= 0) {
+            if (store_idx >= 0 && store_is_sole(f, in->lhs, store_idx)) {
                 const cc_ssa_instr_t *st = &f->instrs[store_idx];
                 if (st->rhs >= 0 && eval_const_i64_for_value(f, def_index, st->rhs, visiting, out_imm) == 0) {
                     visiting[value] = 0;
@@ -1095,6 +1096,38 @@ static int pointer_addr_key_before(const cc_ssa_function_t *f, int value, size_t
     return 0;
 }
 
+/**
+ * Whether the store at @p store_idx is the only one to what @p ptr_value
+ * points at in all of @p f.  A load reads the store before it only so: a
+ * loop's variable stored before the loop and again at its end has two,
+ * and the one before it in the code is not the one each trip reads -- at
+ * -O0, an inlined test_bit()'s "Ir"(i & 7) was the `$0` of `i = 0`.
+ *
+ * @return 1 or 0
+ */
+static int store_is_sole(const cc_ssa_function_t *f, int ptr_value, int store_idx) {
+    int idx;
+    size_t max;
+
+    if (f->instr_count == 0) {
+        return 0;
+    }
+    max = f->instr_count - 1;
+    for (;;) {
+        idx = find_store_instr_index_for_ptr_before(f, ptr_value, max);
+        if (idx < 0) {
+            return 1;
+        }
+        if (idx != store_idx) {
+            return 0;
+        }
+        if (idx == 0) {
+            return 1;
+        }
+        max = (size_t)idx - 1;
+    }
+}
+
 static int find_store_instr_index_for_ptr_before(const cc_ssa_function_t *f, int ptr_value, size_t max_instr_index) {
     size_t i;
     int ptr_root;
@@ -1183,7 +1216,7 @@ static int resolve_asm_immediate_symbol(const cc_ssa_function_t *f, int value, s
     }
     if (def->op == CC_SSA_LOAD && def->lhs >= 0) {
         store_idx = find_store_instr_index_for_ptr_before(f, def->lhs, (size_t)def_idx);
-        if (store_idx >= 0) {
+        if (store_idx >= 0 && store_is_sole(f, def->lhs, store_idx)) {
             const cc_ssa_instr_t *st = &f->instrs[store_idx];
             if (find_const_i64_for_value(f, st->rhs, (size_t)store_idx, &imm) == 0) {
                 snprintf(out, outsz, "$%ld", imm);
@@ -1193,28 +1226,11 @@ static int resolve_asm_immediate_symbol(const cc_ssa_function_t *f, int value, s
                 return 0;
             }
         }
-        for (store_idx = def_idx - 1; store_idx >= 0; --store_idx) {
-            const cc_ssa_instr_t *st = &f->instrs[store_idx];
-            if (st->op != CC_SSA_STORE || st->rhs < 0) {
-                continue;
-            }
-            if (find_const_i64_for_value(f, st->rhs, (size_t)store_idx, &imm) == 0) {
-                snprintf(out, outsz, "$%ld", imm);
-                return 0;
-            }
-            if (resolve_asm_immediate_symbol(f, st->rhs, (size_t)store_idx, fn_index, depth + 1, out, outsz) == 0) {
-                return 0;
-            }
-        }
-        for (store_idx = def_idx - 1; store_idx >= 0; --store_idx) {
-            const cc_ssa_instr_t *prev = &f->instrs[store_idx];
-            if (prev->op == CC_SSA_CONST) {
-                snprintf(out, outsz, "$%lld", prev->imm);
-                return 0;
-            }
-        }
-        snprintf(out, outsz, "$0");
-        return 0;
+        /*
+         * nothing stored there that is known: no constant.  (Any store before it, any constant before it, and
+         * at last 0 were taken for its value, and the asm got another's constant or none, silently.)
+         */
+        return -1;
     }
     if (def->op == CC_SSA_CONST) {
         snprintf(out, outsz, "$%lld", def->imm);
@@ -3988,20 +4004,14 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 continue;
             }
             if (!cc_asm_constraint_allows_gpr(c) && !cc_asm_constraint_allows_memory(c)) {
-                /* Can't resolve to a constant. cc has no inliner, so a
-                 * `static __always_inline` helper that takes its `i`-
-                 * constrained input from a parameter (Linux's
-                 * rip_rel_ptr is the canonical case) is unresolvable
-                 * here. Emit a placeholder; the function body is
-                 * either dead code (32-bit vDSO never calls
-                 * rip_rel_ptr, which is 64-bit specific) or the link
-                 * will fail in a more obvious way later. Beats
-                 * blocking the entire compilation. */
-                op_text[slot] = dup_cstr("$0");
-                if (op_text[slot] == NULL) {
-                    goto oom;
-                }
-                continue;
+                /*
+                 * No constant, and the constraint leaves no other place: an error, as gcc's.  It was written
+                 * as 0, and an asm whose text took it -- Linux's `.quad %c0` of a static key -- assembled to a
+                 * table entry at address 0.  (An always_inline helper's parameter is the caller's constant,
+                 * inlined at -O0 too.)
+                 */
+                set_diag(diag, "impossible constraint in 'asm'");
+                goto fail;
             }
             if (cc_asm_constraint_allows_memory(c) && !cc_asm_constraint_allows_gpr(c)) {
                 long off = slot_off(lay, v);
