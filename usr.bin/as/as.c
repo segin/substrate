@@ -2092,7 +2092,18 @@ static int gas_macro_vec_push(gas_macro_vec_t *v, gas_macro_t *m) {
     return 0;
 }
 
-static int split_macro_list(const char *s, strvec_t *out, int split_ws) {
+/**
+ * Split a macro's parameter list or an invocation's arguments at their
+ * commas (and, for @p split_ws, their whitespace), each piece trimmed.
+ *
+ * @param s           the list
+ * @param out         receives the pieces
+ * @param split_ws    whitespace separates too
+ * @param keep_empty  an empty piece is kept, as "": an invocation's `1, , 3`
+ *                    has three arguments, the second omitted
+ * @return            0, or -1 when out of memory
+ */
+static int split_macro_list(const char *s, strvec_t *out, int split_ws, int keep_empty) {
     const char *start;
     size_t i;
     as_scan_t scan;
@@ -2130,7 +2141,7 @@ static int split_macro_list(const char *s, strvec_t *out, int split_ws) {
             memcpy(tmp, start, n);
             tmp[n] = '\0';
             trimmed = trim_in_place(tmp);
-            if (trimmed != NULL && *trimmed != '\0' && strvec_push(out, trimmed) != 0) {
+            if (trimmed != NULL && (*trimmed != '\0' || keep_empty) && strvec_push(out, trimmed) != 0) {
                 free(tmp);
                 return -1;
             }
@@ -2246,11 +2257,18 @@ static int split_macro_arglist(const char *s, strvec_t *out) {
     size_t i;
     int rc = -1;
 
-    if (split_macro_list(s, &comma_args, 0) != 0) {
+    if (split_macro_list(s, &comma_args, 0, 1) != 0) {
         return -1;
     }
+    /* no arguments at all is none, not one omitted */
+    if (comma_args.count == 1 && comma_args.items[0][0] == '\0') {
+        rc = 0;
+        goto out;
+    }
     for (i = 0; i < comma_args.count; ++i) {
-        if (split_named_macro_arg_piece(comma_args.items[i], out) != 0) {
+        /* an omitted argument, `1, , 3`: its parameter keeps its default (gas) */
+        if (comma_args.items[i][0] == '\0' ? strvec_push(out, "") != 0
+                                            : split_named_macro_arg_piece(comma_args.items[i], out) != 0) {
             goto out;
         }
     }
@@ -2262,7 +2280,7 @@ out:
 }
 
 static int split_macro_param_specs(const char *s, strvec_t *out) {
-    return split_macro_list(s, out, 1);
+    return split_macro_list(s, out, 1, 0);
 }
 
 static int parse_gas_macro_header(const char *header, gas_macro_t *m) {
@@ -2862,6 +2880,11 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
         size_t pos = 0;
         for (i = 0; i < args.count; ++i) {
             char *eq = macro_named_arg_eq(args.items[i]);
+            if (args.items[i][0] == '\0') {
+                /* omitted: the parameter keeps its default (Linux's aes-xts `_vaes_1x \enc, 1, , \data, tmp=`) */
+                pos++;
+                continue;
+            }
             if (eq != NULL) {
                 size_t k;
                 *eq = '\0';
