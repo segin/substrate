@@ -4,9 +4,10 @@
 # before -pg's call), and records the first's address in
 # __patchable_function_entries, as gcc does; Linux's call padding is 16
 # before each function.  cc took the option and ignored it.  Each
-# function of the object has its nops where gcc puts them, the section
-# has an entry at each function's first nop, and the program runs as
-# gcc's; a bad N,M is refused.
+# function of the object has its nops where gcc puts them; there is a
+# section of each function, as gcc's, flagged "o" and ordered by the
+# function's section, its entry the function's first nop; and the
+# program runs as gcc's.  A bad N,M is refused.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -98,27 +99,24 @@ for m in 64 32; do
 						if [ "$before" -gt 0 ]; then first=$((at - before)); else first=$((at + skip)); fi
 						entries="$entries $first"
 					done
-					# the section's entries: each function's first nop, by .text + its offset
-					got=""
-					for a in $(readelf -rW "$CC_TMP/b.o" | awk '
-						/^Relocation section/ { on = $3 ~ /__patchable_function_entries/; next }
-						on && $5 == ".text" { print $7 }'); do
-						got="$got $((0x$a))"
-					done
-					got=$(echo "$got" | tr ' ' '\n' | grep . | sort -n | tr '\n' ' ')
-					if [ $m = 32 ]; then
-						# (REL: the addend is the word in the section)
-						objcopy -O binary -j __patchable_function_entries "$CC_TMP/b.o" "$CC_TMP/pfe.bin"
-						got=$(od -An -tu4 -v "$CC_TMP/pfe.bin" | tr -s ' \n' '\n\n' | grep . | sort -n | tr '\n' ' ')
+					# one section of each function, as gcc's: flagged "o" (L) and ordered by .text, a word long
+					readelf -SW "$CC_TMP/b.o" | sed -n 's/^ *\[ *\([0-9]*\)\] /\1 /p' >"$CC_TMP/secs"
+					links=$(awk 'NR == FNR { name[$1] = $2; next }
+						$2 == "__patchable_function_entries" { print $6, $8, name[$9] }' "$CC_TMP/secs" "$CC_TMP/secs" |
+						sort | uniq -c | tr -s ' \n' '  ')
+					hexptr=$(printf '%06x' $ptr)
+					if [ "$links" != " 3 $hexptr WAL .text " ]; then
+						echo "run_patchable_function_entry: $what: sections [$links], not 3 of [$hexptr WAL .text]"
+						exit 1
 					fi
+					# their entries, each function's first nop: linked at 0, where .text's offsets are addresses
+					if [ $m = 64 ]; then emu=elf_x86_64; od_t=u8; else emu=elf_i386; od_t=u4; fi
+					ld -m $emu -Ttext=0 -e 0 --unresolved-symbols=ignore-all -o "$CC_TMP/x" "$CC_TMP/b.o"
+					objcopy -O binary -j __patchable_function_entries "$CC_TMP/x" "$CC_TMP/pfe.bin"
+					got=$(od -An -t$od_t -v "$CC_TMP/pfe.bin" | tr -s ' \n' '\n\n' | grep . | sort -n | tr '\n' ' ')
 					exp=$(echo "$entries" | tr ' ' '\n' | grep . | sort -n | tr '\n' ' ')
 					if [ "$got" != "$exp" ]; then
 						echo "run_patchable_function_entry: $what: entries [$got], not [$exp]"
-						exit 1
-					fi
-					size=$((0x$(readelf -SW "$CC_TMP/b.o" | awk '{ for (i = 1; i < NF; ++i) if ($i == "__patchable_function_entries") print $(i + 4) }')))
-					if [ "$size" != $((3 * ptr)) ]; then
-						echo "run_patchable_function_entry: $what: the section is $size bytes, not $((3 * ptr))"
 						exit 1
 					fi
 					if [ -z "$extra" ]; then

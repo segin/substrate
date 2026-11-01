@@ -618,11 +618,11 @@ call \(em as
 .Xr gcc 1
 does, and record the address of the first in section
 .Li __patchable_function_entries .
-The section is
-.Xr gcc 1 Ns 's
-for an assembler without
-.Dv SHF_LINK_ORDER ,
-one for the whole object.
+Each function's entry is in a section of its own, ordered by the
+function's section
+.Pq Dv SHF_LINK_ORDER ,
+as with
+.Xr gcc 1 .
 A function declared
 .Ic __attribute__((patchable_function_entry( Ns Ar n , Ar m Ns ))) ,
 on its definition or a declaration before it, has

@@ -1585,18 +1585,6 @@ void x86_emit_return(FILE *fp, int pop) {
 }
 
 /**
- * Print -pg's call at function @p f's entry, where gcc puts it: to __fentry__ first thing (after an endbr),
- * under -mfentry and x86-64's default, or to mcount once the frame pointer is set up -- Linux's ftrace patches
- * the former.  None in a function declared no_instrument_function (Linux's notrace, which its `inline`
- * carries).  Under -mrecord-mcount the call's address goes in section __mcount_loc, where Linux finds the
- * calls to patch; under -mnop-mcount it is a 5-byte nop, gcc's, for the program to make a call later.
- *
- * @param fp           the assembly output
- * @param f            the function
- * @param after_frame  0 at the entry, 1 once the frame pointer is set up: the call is printed at the one
- *                     its kind has
- */
-/**
  * The alignment function @p f's code starts on: its `aligned` attribute's, raised to
  * -fmin-function-alignment's, as gcc has it -- before -fpatchable-function-entry's nops ahead of its label,
  * which x86_emit_patchable_entry() prints after it.
@@ -1616,9 +1604,9 @@ long x86_function_alignment(const cc_ssa_function_t *f) {
 /**
  * Print -fpatchable-function-entry=N,M's nops at a function's entry: M before its label, the rest after it
  * (after an endbr, before -pg's call), as gcc puts them, and the address of the first in section
- * __patchable_function_entries.  That is gcc's section without the "o" flag, the one it writes for an
- * assembler without SHF_LINK_ORDER: Substrate's as keeps one section of a name, and the flag's form is one
- * per function.  (Linux's x86 discards the section; what it patches is the 16 bytes before each function.)
+ * __patchable_function_entries -- one of each function, flagged "o" (SHF_LINK_ORDER) and ordered by the
+ * address's label, so by the function's section: gcc's, with which a linker drops a function's entry with
+ * the function.  (Linux's x86 discards the section; what it patches is the 16 bytes before each function.)
  * A function declared patchable_function_entry(n, m) has its own n and m; (0, 0), none.
  *
  * @param fp           the assembly output
@@ -1638,8 +1626,10 @@ void x86_emit_patchable_entry(FILE *fp, const cc_ssa_function_t *f, int after_en
     }
     if (after_entry == (before == 0)) {
         ++label_number;
-        fprintf(fp, "\t.section __patchable_function_entries,\"aw\",@progbits\n\t.align %d\n\t%s .LPFE%lu\n\t.previous\n",
-                o->target == CC_TARGET_X86_64 ? 8 : 4, o->target == CC_TARGET_X86_64 ? ".quad" : ".long",
+        fprintf(fp,
+                "\t.section __patchable_function_entries,\"awo\",@progbits,.LPFE%lu\n\t.align %d\n\t%s .LPFE%lu\n"
+                "\t.previous\n",
+                label_number, o->target == CC_TARGET_X86_64 ? 8 : 4, o->target == CC_TARGET_X86_64 ? ".quad" : ".long",
                 label_number);
         fprintf(fp, ".LPFE%lu:\n", label_number);
     }
@@ -1648,6 +1638,18 @@ void x86_emit_patchable_entry(FILE *fp, const cc_ssa_function_t *f, int after_en
     }
 }
 
+/**
+ * Print -pg's call at function @p f's entry, where gcc puts it: to __fentry__ first thing (after an endbr),
+ * under -mfentry and x86-64's default, or to mcount once the frame pointer is set up -- Linux's ftrace patches
+ * the former.  None in a function declared no_instrument_function (Linux's notrace, which its `inline`
+ * carries).  Under -mrecord-mcount the call's address goes in section __mcount_loc, where Linux finds the
+ * calls to patch; under -mnop-mcount it is a 5-byte nop, gcc's, for the program to make a call later.
+ *
+ * @param fp           the assembly output
+ * @param f            the function
+ * @param after_frame  0 at the entry, 1 once the frame pointer is set up: the call is printed at the one
+ *                     its kind has
+ */
 void x86_emit_profile_call(FILE *fp, const cc_ssa_function_t *f, int after_frame) {
     const cc_options_t *o = cc_options_current();
     int is_64bit = o->target == CC_TARGET_X86_64;
