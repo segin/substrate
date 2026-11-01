@@ -6506,6 +6506,76 @@ static int pp_emit_keeping_lines(pp_state_t *st, FILE *out, const char *expanded
     return 0;
 }
 
+static int pp_emit_line_marker(pp_state_t *st, FILE *out, int line_no, const char *file_path);
+
+/** How many newlines @p s holds. */
+static long pp_count_newlines(const char *s) {
+    long n = 0;
+
+    for (; s != NULL && *s != '\0'; ++s) {
+        n += *s == '\n';
+    }
+    return n;
+}
+
+/**
+ * Bring the output to source line @p line of @p path before code from it
+ * is written: the lines a directive or a skipped group took, which write
+ * nothing, as blank lines (up to 8) or a line marker, as gcc does.  The
+ * compiler numbers its diagnostics by them, and an error after a
+ * #define or an #if group was reported that many lines early.
+ *
+ * @param st        the preprocessor state
+ * @param out       the output
+ * @param out_next  the source line the next output line is of; updated, -1
+ *                  where it is not known
+ * @param line      the line the code starts at
+ * @param path      the file
+ * @return          0, or -1 on an output error
+ */
+static int pp_sync_line(pp_state_t *st, FILE *out, int *out_next, int line, const char *path) {
+    if (st->suppress_output || !st->emit_line_markers || line <= 0 || line == *out_next) {
+        return 0;
+    }
+    if (*out_next > 0 && line > *out_next && line - *out_next <= 8) {
+        for (; *out_next < line; ++*out_next) {
+            if (pp_emit_text(st, out, "\n") != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+    *out_next = line;
+    return pp_emit_line_marker(st, out, line, path);
+}
+
+/**
+ * Emit code expanded from source lines starting at @p line of @p path,
+ * the output first brought to that line (pp_sync_line()).
+ *
+ * @param st        the preprocessor state
+ * @param out       the output
+ * @param out_next  the source line the next output line is of; updated
+ * @param line      the code's first line
+ * @param path      the file
+ * @param expanded  the expansion
+ * @param src       the source lines it came from
+ * @return          0, or -1 on an output error
+ */
+static int pp_emit_code(pp_state_t *st, FILE *out, int *out_next, int line, const char *path, const char *expanded,
+                        const char *src) {
+    long a = pp_count_newlines(expanded);
+    long b = pp_count_newlines(src);
+
+    if (pp_sync_line(st, out, out_next, line, path) != 0 || pp_emit_keeping_lines(st, out, expanded, src) != 0) {
+        return -1;
+    }
+    if (*out_next > 0) {
+        *out_next += (int)(a > b ? a : b);
+    }
+    return 0;
+}
+
 static int pp_emit_line_marker(pp_state_t *st, FILE *out, int line_no, const char *file_path) {
     char buf[PATH_MAX + 64];
     if (st->suppress_output || !st->emit_line_markers) {
@@ -6565,6 +6635,8 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     sb_t comment_tail = {0};
     int line_no = 1;
     int cur_line = 1;
+    int out_next = 1;          /* the source line the next output line is of (pp_sync_line()) */
+    char mark_file[PATH_MAX];  /* the file name line markers give: the file's, or a #line's */
     int had_line = 0;
     int in_block_comment = 0;
     int code_paren_depth = 0;
@@ -6580,6 +6652,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     if (depth == 0 && st->main_is_stdin) {
         path = PP_STDIN_NAME;
     }
+    snprintf(mark_file, sizeof(mark_file), "%s", path);
     g_pp_diag_file = path;
 
     if (depth > (int)st->max_include_depth) {
@@ -6633,7 +6706,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 if (expanded == NULL) {
                     goto fail;
                 }
-                if (pp_emit_keeping_lines(st, out, expanded, code_accum.buf) != 0) {
+                if (pp_emit_code(st, out, &out_next, code_start_line, mark_file, expanded, code_accum.buf) != 0) {
                     free(expanded);
                     goto fail;
                 }
@@ -6703,10 +6776,11 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                             free(inc_expanded);
                             goto fail;
                         }
-                        if (pp_emit_line_marker(st, out, line_no, path) != 0) {
+                        if (pp_emit_line_marker(st, out, line_no, mark_file) != 0) {
                             free(inc_expanded);
                             goto fail;
                         }
+                        out_next = line_no;
                     } else {
                         free(inc_expanded);
                         set_diag(diag, (size_t)cur_line, 1, "malformed #include");
@@ -6756,6 +6830,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         set_diag(diag, (size_t)cur_line, 1, "failed to emit #embed data");
                         goto fail;
                     }
+                    out_next = -1; /* (the data's lines are its own) */
                 }
                 continue;
             }
@@ -6994,7 +7069,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     char *end = NULL;
                     char *line_expanded = NULL;
                     char line_file[PATH_MAX];
-                    const char *line_target = path;
+                    const char *line_target = mark_file;
                     p = skip_ws(p);
                     line_expanded = expand_text(st, p, path, cur_line, 0, NULL, diag);
                     if (line_expanded == NULL) {
@@ -7032,6 +7107,10 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         free(line_expanded);
                         goto fail;
                     }
+                    if (line_target != mark_file) {
+                        snprintf(mark_file, sizeof(mark_file), "%s", line_target);
+                    }
+                    out_next = (int)v;
                     line_no = (int)v;
                     free(line_expanded);
                 }
@@ -7092,7 +7171,9 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                             char *expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path,
                                                          code_start_line, 0, NULL, diag);
 
-                            if (expanded == NULL || pp_emit_text(st, out, expanded) != 0) {
+                            if (expanded == NULL ||
+                                pp_emit_code(st, out, &out_next, code_start_line, mark_file, expanded, code_accum.buf) !=
+                                    0) {
                                 free(expanded);
                                 goto fail;
                             }
@@ -7103,9 +7184,13 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                             }
                             code_paren_depth = 0;
                         }
-                        if (pp_emit_text(st, out, "#pragma ") != 0 || pp_emit_text(st, out, r) != 0 ||
+                        if (pp_sync_line(st, out, &out_next, cur_line, mark_file) != 0 ||
+                            pp_emit_text(st, out, "#pragma ") != 0 || pp_emit_text(st, out, r) != 0 ||
                             pp_emit_text(st, out, "\n") != 0) {
                             goto fail;
+                        }
+                        if (out_next > 0) {
+                            out_next++;
                         }
                     }
                 }
@@ -7154,7 +7239,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 if (expanded == NULL) {
                     goto fail;
                 }
-                if (pp_emit_keeping_lines(st, out, expanded, code_accum.buf) != 0) {
+                if (pp_emit_code(st, out, &out_next, code_start_line, mark_file, expanded, code_accum.buf) != 0) {
                     free(expanded);
                     goto fail;
                 }
@@ -7176,7 +7261,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
         if (expanded == NULL) {
             goto fail;
         }
-        if (pp_emit_keeping_lines(st, out, expanded, code_accum.buf) != 0) {
+        if (pp_emit_code(st, out, &out_next, code_start_line, mark_file, expanded, code_accum.buf) != 0) {
             free(expanded);
             goto fail;
         }
