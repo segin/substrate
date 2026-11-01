@@ -6,6 +6,7 @@
 
 #include "cc_x86_mir.h"
 
+#include "cc_options.h"
 #include "cc_x86.h"
 
 #include <stdlib.h>
@@ -351,8 +352,10 @@ int xi_mem_ok(const xinst_t *in, int k) {
     case XI_IDIV:
     case XI_MUL1:
     case XI_PUSH:
-    case XI_CALL:
         return 1;
+    case XI_CALL:
+        /* (a call through a thunk has its target in a register: -mindirect-branch=thunk-extern) */
+        return !cc_options_current()->indirect_thunk;
     default:
         return 0;
     }
@@ -573,7 +576,16 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
 
             fprintf(fp, "\tleaq .L%s_jt%d(%%rip), %%r11\n", fn_name, in->aux);
             fprintf(fp, "\tmovslq (%%r11,%s,4), %s\n", ix, ix);
-            fprintf(fp, "\taddq %%r11, %s\n\tjmp *%s\n", ix, ix);
+            fprintf(fp, "\taddq %%r11, %s\n", ix);
+            x86_emit_indirect_branch(fp, "jmp", ix);
+            return;
+        }
+        if (cc_options_current()->indirect_thunk) {
+            /* the target into the index's register, which the selector's copy of the index leaves free */
+            const char *ix = xr_name(in->o[0].reg, word);
+
+            fprintf(fp, "\tmov%c .L%s_jt%d(,%s,%d), %s\n", suffix(word), fn_name, in->aux, ix, word, ix);
+            x86_emit_indirect_branch(fp, "jmp", ix);
             return;
         }
         fprintf(fp, "\tjmp *.L%s_jt%d(,%s,%d)\n", fn_name, in->aux, xr_name(in->o[0].reg, word), word);
@@ -599,6 +611,8 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
     case XI_CALL:
         if (in->nops == 0) {
             fprintf(fp, "\tcall %s\n", in->sym);
+        } else if (in->o[0].kind == XO_REG) {
+            x86_emit_indirect_branch(fp, "call", xr_name(in->o[0].reg, word));
         } else {
             fputs("\tcall *", fp);
             print_op(fp, xf, &in->o[0], word);

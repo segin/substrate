@@ -1526,6 +1526,30 @@ static void emit_compiler_stamp(FILE *fp) {
     fprintf(fp, "\n\t.ident \"Substrate C Compiler v0.1\"\n");
 }
 
+/**
+ * Print an indirect call or jump through a register, as -mindirect-branch has it: `call *%rax`, or under
+ * thunk-extern `call __x86_indirect_thunk_rax`, the retpoline the program supplies (Linux's, which objtool
+ * finds every indirect branch of a CONFIG_MITIGATION_RETPOLINE kernel going through) -- and before one through
+ * %r8..%r15 a cs prefix under -mindirect-branch-cs-prefix, as gcc puts it, which makes the call 6 bytes,
+ * room for Linux to rewrite it in place as `lfence; call *%r11`.
+ *
+ * @param fp   the assembly output
+ * @param op   "call" or "jmp"
+ * @param reg  the register the target is in, its name with the %
+ */
+void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg) {
+    const cc_options_t *o = cc_options_current();
+
+    if (!o->indirect_thunk) {
+        fprintf(fp, "\t%s *%s\n", op, reg);
+        return;
+    }
+    if (o->indirect_cs_prefix && reg[1] == 'r' && reg[2] >= '0' && reg[2] <= '9') {
+        fputs("\tcs\n", fp);
+    }
+    fprintf(fp, "\t%s __x86_indirect_thunk_%s\n", op, reg + 1);
+}
+
 void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags) {
     if (name == NULL || name[0] == '\0') {
         return;

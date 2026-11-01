@@ -125,6 +125,11 @@ long x86_64_param_size_bytes(const cc_ssa_function_t *f, int param_index, long f
 
 void emit_text_section(FILE *fp, const char *section_name);
 void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags);
+/**
+ * Print an indirect call or jump, @p op "call" or "jmp", through register @p reg (its name with the %): the
+ * instruction, or under -mindirect-branch=thunk-extern one to __x86_indirect_thunk_<reg>.
+ */
+void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg);
 /** Register a constructor or destructor in .init_array or .fini_array. */
 void emit_lifecycle_attr(FILE *fp, const char *section, const char *section_type, const char *name, int is_64bit);
 /** Write string literal @p literal of instruction @p instr_index, then return to section @p restore_sec. */

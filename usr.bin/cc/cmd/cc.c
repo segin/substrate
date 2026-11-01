@@ -103,6 +103,8 @@ typedef struct {
   int wrapv;          /* -fwrapv, -fno-strict-overflow; the last of them and -fno-wrapv, -fstrict-overflow */
   int syntax_only;    /* -fsyntax-only: C checked, nothing written, nothing assembled or linked */
   int cf_protection;  /* -fcf-protection[=]: 1 branches, 2 returns, 3 both (opt_cf_protection()) */
+  int indirect_thunk; /* -mindirect-branch=thunk-extern (opt_indirect_branch()) */
+  int indirect_cs_prefix; /* -mindirect-branch-cs-prefix */
 
   const char *std;
   const char *opt_level;
@@ -203,6 +205,8 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->wrapv = o->wrapv;
   out->syntax_only = o->syntax_only;
   out->cf_branch = (o->cf_protection & 1) != 0;
+  out->indirect_thunk = o->indirect_thunk;
+  out->indirect_cs_prefix = o->indirect_cs_prefix;
 }
 
 
@@ -1343,13 +1347,6 @@ static int opt_sanitize(cc_opts_t *o, const driver_opt_t *d, const char *as, con
 }
 
 /**
- * -ftrivial-auto-var-init=zero|pattern|uninitialized: whether an automatic
- * variable with no initializer starts as zero, as Linux builds with, as
- * gcc's pattern (every byte 0xfe), or as whatever the stack held.
- *
- * @return 0, or -1 for another value
- */
-/**
  * -fcf-protection=full|branch|return|none|check, and -fcf-protection alone (full): which of Intel CET's
  * protections the code is made for, 1 indirect branches (an endbr at each place one may land) and 2 returns
  * (a shadow stack, which asks nothing of the code).  cc took any of them and ignored it.
@@ -1374,6 +1371,37 @@ static int opt_cf_protection(cc_opts_t *o, const driver_opt_t *d, const char *as
   return 0;
 }
 
+/**
+ * -mindirect-branch=keep|thunk-extern: whether an indirect call or jump is the instruction (keep), or one
+ * through __x86_indirect_thunk_<reg>, the retpoline the program supplies -- Linux's, with
+ * CONFIG_MITIGATION_RETPOLINE.  gcc's thunk and thunk-inline, which emit the thunk themselves, cc has not.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_indirect_branch(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  if (val != NULL && strcmp(val, "keep") == 0) {
+    o->indirect_thunk = 0;
+  } else if (val != NULL && strcmp(val, "thunk-extern") == 0) {
+    o->indirect_thunk = 1;
+  } else if (val != NULL && (strcmp(val, "thunk") == 0 || strcmp(val, "thunk-inline") == 0)) {
+    fprintf(stderr, "cc: error: %s%s is not supported: cc calls an external thunk only (thunk-extern)\n", as, val);
+    return -1;
+  } else {
+    fprintf(stderr, "cc: error: %s%s: the argument must be keep, thunk, thunk-inline or thunk-extern\n", as,
+            val != NULL ? val : "");
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * -ftrivial-auto-var-init=zero|pattern|uninitialized: whether an automatic
+ * variable with no initializer starts as zero, as Linux builds with, as
+ * gcc's pattern (every byte 0xfe), or as whatever the stack held.
+ *
+ * @return 0, or -1 for another value
+ */
 static int opt_trivial_auto_var_init(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
   (void)d;
   o->trivial_auto_var_init_zero = 0;
@@ -1491,6 +1519,10 @@ static const driver_opt_t options[] = {
     {"-fsyntax-only", OPT_FLAG, 0, opt_int, F(syntax_only), 1},
     {"-fcf-protection=", OPT_PREFIX, 0, opt_cf_protection, 0, 0},
     {"-fcf-protection", OPT_FLAG, 0, opt_int, F(cf_protection), 3},
+    {"-mindirect-branch=", OPT_PREFIX, 0, opt_indirect_branch, 0, 0},
+    /* (a thunk's target is always in a register: there is no memory form of the call) */
+    {"-mindirect-branch-register", OPT_FLAG, 0, NULL, 0, 0},
+    {"-mindirect-branch-cs-prefix", OPT_FLAG, 0, opt_int, F(indirect_cs_prefix), 1},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},

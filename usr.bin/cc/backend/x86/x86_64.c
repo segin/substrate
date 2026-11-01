@@ -1043,7 +1043,7 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     }
     if (in->op == CC_SSA_CALLI) {
         emit_x86_64_load_int_value_to_reg(fp, f, lay, in->lhs, "%r11");
-        fprintf(fp, "\tcall *%%r11\n");
+        x86_emit_indirect_branch(fp, "call", "%r11");
     } else {
         if (in->call_chain > 0) {
             /* a GNU nested function's environment, in the static chain register */

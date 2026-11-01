@@ -2201,12 +2201,32 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
     }
 }
 
-static void emit_i386_call_target(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
-                                  const cc_ssa_instr_t *in) {
+/**
+ * Call @p in's target: a symbol, a stack object's address (by %eax), or a pointer from its slot -- loaded
+ * first, under -mindirect-branch=thunk-extern, into a register the arguments leave free, the thunk's.
+ *
+ * @param busy  the registers the arguments are in: 1 %eax, 2 %edx, 4 %ecx
+ * @return 0, or -1 when a thunk needs a register and all three hold arguments
+ */
+static int emit_i386_call_target(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                 const cc_ssa_instr_t *in, unsigned busy) {
+    static const char *const scratch[3] = {"%eax", "%edx", "%ecx"};
+
     if (in->op == CC_SSA_CALLI) {
         if (is_stackalloc_value(lay, in->lhs)) {
             fprintf(fp, "\tleal %d(%%ebp), %%eax\n", stackalloc_off(lay, in->lhs));
-            fprintf(fp, "\tcall *%%eax\n");
+            x86_emit_indirect_branch(fp, "call", "%eax");
+        } else if (cc_options_current()->indirect_thunk) {
+            int r = 0;
+
+            while (r < 3 && (busy & (1u << r)) != 0) {
+                ++r;
+            }
+            if (r == 3) {
+                return -1;
+            }
+            fprintf(fp, "\tmovl %d(%%ebp), %s\n", slot_off(lay, in->lhs), scratch[r]);
+            x86_emit_indirect_branch(fp, "call", scratch[r]);
         } else {
             fprintf(fp, "\tcall *%d(%%ebp)\n", slot_off(lay, in->lhs));
         }
@@ -2217,6 +2237,7 @@ static void emit_i386_call_target(FILE *fp, const cc_ssa_function_t *f, const sl
         }
         emit_i386_call_sym(fp, in->sym, in->call_binds_local);
     }
+    return 0;
 }
 
 static void emit_i386_capture_call_result(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
@@ -2457,6 +2478,9 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
     int plain = i386_call_plain(f, lay, in);
     i386_arg_move_t mv[3];
     int nmv = 0;
+    int k;
+    int r;
+    unsigned busy = 0;   /* the registers the arguments are in: 1 %eax, 2 %edx, 4 %ecx */
     int target_reg = -1; /* an indirect plain call's target's register */
 
     if (offs == NULL) {
@@ -2557,6 +2581,13 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
     /* regparm: the register arguments last, once nothing else needs %eax, %edx, %ecx */
     if (plain) {
         emit_i386_arg_moves(fp, lay, ist, mv, nmv);
+        for (k = 0; k < nmv; ++k) {
+            for (r = 0; r < 3; ++r) {
+                if (strcmp(ist->regs[mv[k].target], i386_regparm_regs[r]) == 0) {
+                    busy |= 1u << r;
+                }
+            }
+        }
     } else {
         unsigned rp = emit_i386_load_regparm_args(fp, f, lay, in);
 
@@ -2570,12 +2601,13 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
         if ((rp & 4u) != 0 && in->op == CC_SSA_CALL && in->call_chain > 0) {
             return -1; /* a nested function's static chain is %ecx too */
         }
+        busy = rp;
     }
 
     if (target_reg >= 0) {
-        fprintf(fp, "\tcall *%s\n", ist->regs[target_reg]);
-    } else {
-        emit_i386_call_target(fp, f, lay, in);
+        x86_emit_indirect_branch(fp, "call", ist->regs[target_reg]);
+    } else if (emit_i386_call_target(fp, f, lay, in, busy) != 0) {
+        return -1;
     }
 
     /* the callee popped the hidden pointer itself (ret $4) */

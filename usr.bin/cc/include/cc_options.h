@@ -72,6 +72,11 @@ typedef struct {
     int syntax_only;         /**< -fsyntax-only: the source checked, and nothing written */
     int cf_branch;           /**< -fcf-protection=branch or full: an endbr where an indirect branch may land --
                                   each function's entry and each label whose address is taken (Intel CET IBT) */
+    int indirect_thunk;      /**< -mindirect-branch=thunk-extern: an indirect call or jump is one through
+                                  __x86_indirect_thunk_<reg>, the retpoline the program supplies (Linux's), its
+                                  target in that register */
+    int indirect_cs_prefix;  /**< -mindirect-branch-cs-prefix: such a call or jump through %r8..%r15 has a cs
+                                  prefix, the byte Linux's rewriting of it in place needs */
 } cc_options_t;
 
 /**
