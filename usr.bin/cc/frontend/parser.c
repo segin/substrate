@@ -9605,9 +9605,19 @@ static cc_attr_flags_t with_pragma_visibility(cc_attr_flags_t flags, unsigned ch
         return flags | CC_ATTR_VIS_PROTECTED;
     case CC_LEX_VIS_INTERNAL:
         return flags | CC_ATTR_VIS_INTERNAL;
+    case CC_LEX_VIS_PUSHED_DEFAULT:
+        return flags | CC_ATTR_VIS_DEFAULT; /* (said, so that -fvisibility leaves it) */
     default:
         return flags;
     }
+}
+
+/**
+ * @p flags with -fvisibility's visibility (cc_options_t.default_visibility), which a definition takes when it
+ * names none itself and `#pragma GCC visibility` gave it none (with_pragma_visibility()), as gcc has it.
+ */
+static cc_attr_flags_t with_default_visibility(cc_attr_flags_t flags) {
+    return with_pragma_visibility(flags, (unsigned char)cc_options_current()->default_visibility);
 }
 
 static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int need_semi) {
@@ -9709,6 +9719,11 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         merged_format_index = merged_attrs.format_index;
         merged_format_first_to_check = merged_attrs.format_first_to_check;
         s.attr_flags = with_pragma_visibility(merged_attrs.flags, start_vis);
+        if (p->scope_depth == 0 && !is_typedef && s.ctype != NULL && s.ctype->kind != CC_CT_FUNCTION &&
+            (s.storage & (CC_STORAGE_EXTERN | CC_STORAGE_STATIC)) == 0) {
+            /* (an object defined here, not one declared to be elsewhere) */
+            s.attr_flags = with_default_visibility(s.attr_flags);
+        }
         s.attr_align = merged_attrs.align;
         if (typedef_align_for(base_typedef_align, base_spec, s.ctype) > s.attr_align) {
             s.attr_flags |= CC_ATTR_ALIGNED;
@@ -11092,7 +11107,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         decl_attrs_clear(&merged_attrs);
         return -1;
     }
-    f->attr_flags = with_pragma_visibility(merged_attrs.flags, f_start_vis);
+    f->attr_flags = with_default_visibility(with_pragma_visibility(merged_attrs.flags, f_start_vis));
     f->attr_align = merged_attrs.align;
     f->attr_format_index = merged_attrs.format_index;
     f->attr_format_first_to_check = merged_attrs.format_first_to_check;

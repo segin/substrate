@@ -122,6 +122,7 @@ typedef struct {
   int ssp_guard_seg;  /* -mstack-protector-guard-reg=fs|gs: CC_SSA_SEG_*; 0 the target's */
   long ssp_guard_offset; /* -mstack-protector-guard-offset=N; -1 the target's */
   const char *ssp_guard_symbol; /* -mstack-protector-guard-symbol=S */
+  int default_visibility; /* -fvisibility=: 0 default, 1 hidden, 2 protected, 3 internal (opt_visibility()) */
 
   const char *std;
   const char *opt_level;
@@ -251,6 +252,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->ssp_guard_seg = o->ssp_guard_seg;
   out->ssp_guard_offset = o->ssp_guard_offset;
   out->ssp_guard_symbol = o->ssp_guard_symbol;
+  out->default_visibility = o->default_visibility;
 }
 
 
@@ -1561,6 +1563,29 @@ static int opt_ssp_guard(cc_opts_t *o, const driver_opt_t *d, const char *as, co
 }
 
 /**
+ * -fvisibility=default|hidden|protected|internal: the visibility of each definition that names none of its
+ * own and has none from `#pragma GCC visibility`, as gcc has it -- Linux's kexec purgatory is -fpic
+ * -fvisibility=hidden, its symbols bound within it.  A declaration of something defined elsewhere keeps the
+ * default.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_visibility(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  static const char *const names[] = {"default", "hidden", "protected", "internal"};
+  int i;
+
+  (void)d;
+  for (i = 0; i < 4; ++i) {
+    if (val != NULL && strcmp(val, names[i]) == 0) {
+      o->default_visibility = i;
+      return 0;
+    }
+  }
+  fprintf(stderr, "cc: error: unrecognized visibility value '%s' in %s\n", val != NULL ? val : "", as);
+  return -1;
+}
+
+/**
  * -fmin-function-alignment=N: each function starts on N bytes, at least -- its patchable nops before it do,
  * so that with Linux's 16,16 padding the function itself is on 16 too.  N is a power of 2: an alignment of
  * another the assembler refuses.
@@ -1741,6 +1766,7 @@ static const driver_opt_t options[] = {
      * keeps in meaning: a call it expands -- memcpy, memset -- does what the function does)
      */
     {"-ffreestanding -fhosted", OPT_FLAG, FWD_CPP, NULL, 0, 0},
+    {"-fvisibility=", OPT_PREFIX, 0, opt_visibility, 0, 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},

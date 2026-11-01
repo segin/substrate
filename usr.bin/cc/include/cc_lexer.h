@@ -16,7 +16,8 @@ enum {
     CC_LEX_VIS_DEFAULT = 0, /**< none set: a declaration's own attributes decide */
     CC_LEX_VIS_HIDDEN,
     CC_LEX_VIS_PROTECTED,
-    CC_LEX_VIS_INTERNAL
+    CC_LEX_VIS_INTERNAL,
+    CC_LEX_VIS_PUSHED_DEFAULT /**< push(default): default, which -fvisibility does not change */
 };
 
 typedef struct {

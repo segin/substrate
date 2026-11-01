@@ -104,6 +104,8 @@ typedef struct {
     long ssp_guard_offset;   /**< -mstack-protector-guard-offset=N; -1 for the target's (40, 20) */
     const char *ssp_guard_symbol; /**< -mstack-protector-guard-symbol=S: the canary at S in the segment (Linux's
                                        __ref_stack_chk_guard); NULL for the offset alone */
+    int default_visibility;  /**< -fvisibility=: what a definition with none of its own has, as CC_LEX_VIS_*:
+                                  default (0), hidden (1), protected (2), internal (3) */
 } cc_options_t;
 
 /**

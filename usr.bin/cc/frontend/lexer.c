@@ -279,7 +279,7 @@ static void lx_note_visibility_pragma(cc_lexer_t *lx, size_t start, size_t end) 
     static const struct {
         const char *name;
         unsigned char vis;
-    } names[] = {{"default", CC_LEX_VIS_DEFAULT},
+    } names[] = {{"default", CC_LEX_VIS_PUSHED_DEFAULT},
                  {"hidden", CC_LEX_VIS_HIDDEN},
                  {"protected", CC_LEX_VIS_PROTECTED},
                  {"internal", CC_LEX_VIS_INTERNAL}};
