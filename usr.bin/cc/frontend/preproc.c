@@ -119,6 +119,10 @@ typedef struct {
     int target_supports_mmx;
     int target_supports_avx;
     int target_supports_avx2;
+    int target_off_sse;  /**< -mno-sse, the last of it and -msse: no SSE (nor SSE2) macro, even where the
+                              target's floating point is SSE's */
+    int target_off_sse2; /**< -mno-sse2, likewise */
+    int target_off_mmx;  /**< -mno-mmx, likewise */
     int unsigned_char; /**< -funsigned-char: __CHAR_UNSIGNED__ */
     int short_wchar;   /**< -fshort-wchar: wchar_t's macros those of unsigned short */
     int freestanding;  /**< -ffreestanding: __STDC_HOSTED__ 0 */
@@ -2107,7 +2111,10 @@ static int add_builtin_macros(pp_state_t *st) {
         }
     }
     {
-        /* the target's own macros, then the ISA's: a target whose floating point is SSE has MMX to SSE2 always */
+        /*
+         * the target's own macros, then the ISA's: a target whose floating point is SSE has MMX to SSE2 but where
+         * -mno-mmx, -mno-sse or -mno-sse2 takes them away (Linux's x86-64, as gcc has it); no SSE, no SSE2
+         */
         const char *const *p;
         const char *isa[5];
         int on[5];
@@ -2119,11 +2126,11 @@ static int add_builtin_macros(pp_state_t *st) {
             }
         }
         isa[0] = "__MMX__";
-        on[0] = tgt->sse_fp || st->target_has_mmx;
-        isa[1] = "__SSE__";
-        on[1] = tgt->sse_fp || st->target_has_sse;
+        on[0] = (tgt->sse_fp && !st->target_off_mmx) || st->target_has_mmx;
         isa[2] = "__SSE2__";
-        on[2] = tgt->sse_fp || st->target_has_sse2;
+        on[2] = ((tgt->sse_fp && !st->target_off_sse2) || st->target_has_sse2) && !st->target_off_sse;
+        isa[1] = "__SSE__";
+        on[1] = (tgt->sse_fp && !st->target_off_sse) || st->target_has_sse || on[2];
         isa[3] = "__AVX__";
         on[3] = st->target_has_avx;
         isa[4] = "__AVX2__";
@@ -2370,20 +2377,26 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             if (st->target_supports_sse) {
                 st->target_has_sse = 1;
             }
+            st->target_off_sse = 0;
         } else if (strcmp(f, "-mno-sse") == 0) {
             st->target_has_sse = 0;
+            st->target_off_sse = 1;
         } else if (strcmp(f, "-msse2") == 0) {
             if (st->target_supports_sse2) {
                 st->target_has_sse2 = 1;
             }
+            st->target_off_sse2 = 0;
         } else if (strcmp(f, "-mno-sse2") == 0) {
             st->target_has_sse2 = 0;
+            st->target_off_sse2 = 1;
         } else if (strcmp(f, "-mmmx") == 0) {
             if (st->target_supports_mmx) {
                 st->target_has_mmx = 1;
             }
+            st->target_off_mmx = 0;
         } else if (strcmp(f, "-mno-mmx") == 0) {
             st->target_has_mmx = 0;
+            st->target_off_mmx = 1;
         } else if (strcmp(f, "-mavx") == 0) {
             /* any x86-64 -march may add AVX by flag, as with gcc */
             if (st->target_supports_avx || st->target->id == CC_TARGET_X86_64) {
