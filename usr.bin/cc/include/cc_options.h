@@ -89,6 +89,8 @@ typedef struct {
     int patchable_count;     /**< -fpatchable-function-entry=N,M: N nops at each function's entry, for the
                                   program to patch -- Linux's call padding */
     int patchable_before;    /**< M of them before the entry */
+    int min_function_alignment; /**< -fmin-function-alignment=N: each function's code starts on N bytes (with
+                                     -fpatchable-function-entry, its nops before it do); 0 for none */
 } cc_options_t;
 
 /**

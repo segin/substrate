@@ -3418,8 +3418,8 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
             }
         }
         emit_visibility_attr(fp, f->name, f->attr_flags);
-        if (f->attr_align > 1) {
-            fprintf(fp, ".align %ld\n", f->attr_align);
+        if (x86_function_alignment(f) > 1) {
+            fprintf(fp, ".align %ld\n", x86_function_alignment(f));
         }
         x86_emit_patchable_entry(fp, 0);
         fprintf(fp, ".type %s, @function\n", f->name);

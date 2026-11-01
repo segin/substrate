@@ -113,6 +113,7 @@ typedef struct {
   int nop_mcount;     /* -mnop-mcount, the last of it and -mno-nop-mcount */
   int patchable_count;  /* -fpatchable-function-entry=N[,M]: N (opt_patchable_function_entry()) */
   int patchable_before; /* M */
+  int min_function_alignment; /* -fmin-function-alignment=N (opt_min_function_alignment()) */
 
   const char *std;
   const char *opt_level;
@@ -234,6 +235,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->nop_mcount = o->nop_mcount;
   out->patchable_count = o->patchable_count;
   out->patchable_before = o->patchable_before;
+  out->min_function_alignment = o->min_function_alignment;
 }
 
 
@@ -1504,6 +1506,27 @@ static int opt_patchable_function_entry(cc_opts_t *o, const driver_opt_t *d, con
 }
 
 /**
+ * -fmin-function-alignment=N: each function starts on N bytes, at least -- its patchable nops before it do,
+ * so that with Linux's 16,16 padding the function itself is on 16 too.  N is a power of 2: an alignment of
+ * another the assembler refuses.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_min_function_alignment(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  char *end = NULL;
+  long n;
+
+  (void)d;
+  n = val != NULL ? strtol(val, &end, 10) : -1;
+  if (end == NULL || end == val || *end != '\0' || n < 0 || n > 65536 || (n & (n - 1)) != 0) {
+    fprintf(stderr, "cc: error: %s%s: the alignment must be a power of 2\n", as, val != NULL ? val : "");
+    return -1;
+  }
+  o->min_function_alignment = (int)n;
+  return 0;
+}
+
+/**
  * -ftrivial-auto-var-init=zero|pattern|uninitialized: whether an automatic
  * variable with no initializer starts as zero, as Linux builds with, as
  * gcc's pattern (every byte 0xfe), or as whatever the stack held.
@@ -1642,6 +1665,7 @@ static const driver_opt_t options[] = {
     {"-mnop-mcount", OPT_FLAG, 0, opt_int, F(nop_mcount), 1},
     {"-mno-nop-mcount", OPT_FLAG, 0, opt_int, F(nop_mcount), 0},
     {"-fpatchable-function-entry=", OPT_PREFIX, 0, opt_patchable_function_entry, 0, 0},
+    {"-fmin-function-alignment=", OPT_PREFIX, 0, opt_min_function_alignment, 0, 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},

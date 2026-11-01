@@ -4278,8 +4278,8 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         fprintf(fp, (f->attr_flags & CC_ATTR_WEAK) != 0 ? ".weak %s\n" : ".globl %s\n", f->name);
     }
     emit_visibility_attr(fp, f->name, f->attr_flags);
-    if (f->attr_align > 1) {
-        fprintf(fp, ".align %ld\n", f->attr_align);
+    if (x86_function_alignment(f) > 1) {
+        fprintf(fp, ".align %ld\n", x86_function_alignment(f));
     }
     x86_emit_patchable_entry(fp, 0);
     fprintf(fp, ".type %s, @function\n", f->name);

@@ -1597,6 +1597,23 @@ void x86_emit_return(FILE *fp, int pop) {
  *                     its kind has
  */
 /**
+ * The alignment function @p f's code starts on: its `aligned` attribute's, raised to
+ * -fmin-function-alignment's, as gcc has it -- before -fpatchable-function-entry's nops ahead of its label,
+ * which x86_emit_patchable_entry() prints after it.
+ *
+ * @param f  the function
+ * @return   the alignment in bytes; 1 or less for none
+ */
+long x86_function_alignment(const cc_ssa_function_t *f) {
+    long a = f->attr_align;
+
+    if (cc_options_current()->min_function_alignment > a) {
+        a = cc_options_current()->min_function_alignment;
+    }
+    return a;
+}
+
+/**
  * Print -fpatchable-function-entry=N,M's nops at a function's entry: M before its label, the rest after it
  * (after an endbr, before -pg's call), as gcc puts them, and the address of the first in section
  * __patchable_function_entries.  That is gcc's section without the "o" flag, the one it writes for an
