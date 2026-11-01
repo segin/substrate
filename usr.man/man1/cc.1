@@ -175,6 +175,35 @@ for the full install and
 .Ev PATH
 workflow.
 .Sh OPTIONS
+An
+.Fl f
+or
+.Fl m
+option cc does not know is refused, as
+.Xr gcc 1
+refuses one it does not know, so that a build probing for it finds it
+missing.
+Some of
+.Xr gcc 1 Ns 's
+options whose effect cc has already are taken and do nothing more:
+.Fl fno-strict-aliasing ,
+.Fl fno-delete-null-pointer-checks ,
+.Fl fno-common ,
+.Fl fms-extensions ,
+.Fl fno-allow-store-data-races ,
+.Fl fno-stack-check ,
+.Fl fno-stack-clash-protection ,
+.Fl fno-zero-initialized-in-bss ,
+.Fl fno-builtin Ns Op - Ns Ar function ,
+.Fl mno-red-zone ,
+.Fl mskip-rax-setup ,
+the options of ISA extensions cc makes no instruction of
+.Pq such as Fl msse4.2 , Fl mno-3dnow , Fl mavx512f ,
+.Xr gcc 1 Ns 's
+own optimization choices
+.Pq Fl falign- Ns Ar * , Fl fconserve-stack , Fl fno-gcse No and the like ,
+and those of how diagnostics read
+.Pq Fl fdiagnostics- Ns Ar * .
 .Bl -tag -width "-pedantic-errors"
 .It Fl E
 Preprocess only.

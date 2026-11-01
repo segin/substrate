@@ -1825,6 +1825,44 @@ static const driver_opt_t options[] = {
     {"-fno-optimize-sibling-calls", OPT_FLAG, 0, opt_int, F(no_sibling_calls), 1},
     {"-foptimize-sibling-calls", OPT_FLAG, 0, opt_int, F(no_sibling_calls), 0},
 
+    /*
+     * gcc's options whose effect cc has already, taken and nothing more done; any other -f or -m option cc
+     * does not know is refused (parse_args()), as gcc refuses one it does not know, so that a build probing
+     * for one finds it missing rather than taken and ignored.  What cc does that these ask for:
+     */
+    /* no type-based alias analysis, no null check deleted, no common symbol, no store made that the program
+     * does not make, no stack probed, an object initialized to 0 in .data */
+    {"-fno-strict-aliasing -fstrict-aliasing -fno-delete-null-pointer-checks -fdelete-null-pointer-checks "
+     "-fno-common -fno-allow-store-data-races -fno-stack-check -fno-stack-clash-protection "
+     "-fno-zero-initialized-in-bss",
+     OPT_FLAG, 0, NULL, 0, 0},
+    /* an anonymous member of a structure or union type always taken (Linux's -fms-extensions) */
+    {"-fms-extensions", OPT_FLAG, 0, NULL, 0, 0},
+    /* a library function cc expands in line (memcpy, memset) keeps its meaning, as one not a builtin does */
+    {"-fno-builtin", OPT_FLAG, 0, NULL, 0, 0},
+    {"-fno-builtin-", OPT_PREFIX, 0, NULL, 0, 0},
+    /* nothing below the stack pointer; %al set for a variadic call, which -mskip-rax-setup lets it skip */
+    {"-mno-red-zone -mskip-rax-setup", OPT_FLAG, 0, NULL, 0, 0},
+    /* ISA extensions cc makes no instruction of: allowed, or not, alike */
+    {"-mno-3dnow -m3dnow -mno-3dnowa -m3dnowa -mno-sse3 -msse3 -mno-ssse3 -mssse3 -mno-sse4 -msse4 "
+     "-mno-sse4.1 -msse4.1 -mno-sse4.2 -msse4.2 -mno-sse4a -msse4a -mno-fma -mfma -mno-fma4 -mfma4 -mno-xop -mxop "
+     "-mno-bmi -mbmi -mno-bmi2 -mbmi2 -mno-lzcnt -mlzcnt -mno-popcnt -mpopcnt -mno-abm -mabm -mno-aes -maes "
+     "-mno-pclmul -mpclmul -mno-sha -msha -mno-rdrnd -mrdrnd -mno-rdseed -mrdseed -mno-f16c -mf16c -mno-movbe "
+     "-mmovbe -mno-adx -madx -mno-cx16 -mcx16 -mno-sahf -msahf -mno-xsave -mxsave -mno-xsaveopt -mxsaveopt "
+     "-mno-fsgsbase -mfsgsbase -mno-rtm -mrtm -mno-crc32 -mcrc32 -mno-gfni -mgfni -mno-vaes -mvaes "
+     "-mno-vpclmulqdq -mvpclmulqdq",
+     OPT_FLAG, 0, NULL, 0, 0},
+    {"-mavx512 -mno-avx512", OPT_PREFIX, 0, NULL, 0, 0},
+    /* gcc's own optimization choices, which leave the meaning of the program alone: cc makes its own */
+    {"-fconserve-stack -fno-conserve-stack -fsched-pressure -fschedule-insns -fno-schedule-insns "
+     "-fschedule-insns2 -fno-schedule-insns2 -fno-reorder-blocks -fno-ipa-cp-clone -fno-partial-inlining "
+     "-fno-gcse -fno-tree-loop-im -fno-inline-functions-called-once -fno-tree-vectorize",
+     OPT_FLAG, 0, NULL, 0, 0},
+    {"-falign- -fno-align-", OPT_PREFIX, 0, NULL, 0, 0},
+    /* how diagnostics and the assembly read, not what the code does */
+    {"-fdiagnostics- -fno-diagnostics- -fmessage-length=", OPT_PREFIX, 0, NULL, 0, 0},
+    {"-fverbose-asm", OPT_FLAG, 0, NULL, 0, 0},
+
     /* the preprocessor */
     {"-I -D -U -iquote -isystem -idirafter", OPT_LETTER, FWD_CPP | FWD_C, NULL, 0, 0},
     {"-include -imacros -MF -MT -MQ", OPT_LETTER, FWD_CPP, NULL, 0, 0},
@@ -2008,6 +2046,16 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       continue;
     }
     d = opt_find(a, as, sizeof(as), &val);
+    if (d == NULL && (a[1] == 'f' || a[1] == 'm')) {
+      /*
+       * an -f or -m option cc does not know: refused, as gcc refuses one, rather than taken and ignored, so
+       * that a build probing for it (Linux's cc-option, a configure script) finds it missing; cc acted on none
+       * it took this way, Linux's retpolines, canaries and ftrace calls among them
+       */
+      o->parse_bad_arg = a;
+      fprintf(stderr, "cc: error: unrecognized command-line option '%s'\n", a);
+      return -1;
+    }
     if (d == NULL) {
       if (cc_strvec_push(&o->c_flags, a) != 0) {
         return -1;
