@@ -8326,8 +8326,15 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     return dst;
 }
 
-static cc_expr_t *parse_postfix(parser_t *p) {
-    cc_expr_t *e = parse_primary(p);
+/**
+ * Parse the postfix operators after an operand: calls, subscripts, member
+ * accesses, `++` and `--`.
+ *
+ * @param p  the parser, at the token after the operand
+ * @param e  the operand (owned; freed on error), or NULL
+ * @return   the expression with its postfix operators, or NULL on error
+ */
+static cc_expr_t *parse_postfix_ops(parser_t *p, cc_expr_t *e) {
     while (e != NULL) {
         if (p->tok.kind == TOK_LPAREN) {
             cc_expr_t *call = new_expr(CC_EXPR_CALL);
@@ -8483,6 +8490,10 @@ static cc_expr_t *parse_postfix(parser_t *p) {
         break;
     }
     return e;
+}
+
+static cc_expr_t *parse_postfix(parser_t *p) {
+    return parse_postfix_ops(p, parse_primary(p));
 }
 
 /**
@@ -8781,7 +8792,8 @@ static cc_expr_t *parse_unary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                return e;
+                /* a postfix expression (C11 6.5.2): `(const int[]){ 64, 63 }[i]` */
+                return parse_postfix_ops(p, e);
             }
             e->lhs = parse_unary(p);
             if (e->lhs == NULL) {
