@@ -5780,6 +5780,106 @@ static int lower_member_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
     return in.dst;
 }
 
+static int fold_double_const(const cc_translation_unit_t *tu, const cc_expr_t *e, double *out);
+
+/**
+ * The value, converted to double, of @p e, an operand of a double constant expression (fold_double_const()):
+ * a double one, or an integer constant.
+ *
+ * @param tu   the translation unit
+ * @param e    the operand
+ * @param out  receives its value
+ * @return     0, or -1 when it is not constant so
+ */
+static int fold_double_operand(const cc_translation_unit_t *tu, const cc_expr_t *e, double *out) {
+    long long iv = 0;
+    double fv = 0.0;
+    int isf = 0;
+    char *sym = NULL;
+
+    if (e == NULL) {
+        return -1;
+    }
+    if (lower_has_kind(e, CC_CT_DOUBLE)) {
+        return fold_double_const(tu, e, out);
+    }
+    if (!cc_ct_is_integer(lower_value_ctype(e)) || eval_global_init_expr(tu, e, &iv, &fv, &isf, &sym) != 0) {
+        return -1;
+    }
+    if (isf || sym != NULL) {
+        free(sym);
+        return -1;
+    }
+    *out = lower_is_unsigned(e) ? (double)(unsigned long long)iv : (double)iv;
+    return 0;
+}
+
+/**
+ * The value of @p e when it is a double constant expression -- a literal, an integer constant converted to
+ * double, the negation, sum, difference, product or quotient of such -- computed in double, as gcc folds it.
+ * Negation is lowered as a flip of the sign bit through memory, which the optimizer does not see through: `-3.0`
+ * stayed a floating computation, and Linux's `(s32)(-41.25 * 4)` (rtw89's RTW89_MIN_DBM) was refused under
+ * -mno-80387 -mno-sse.
+ *
+ * @param tu   the translation unit
+ * @param e    the expression, of type double
+ * @param out  receives its value
+ * @return     0, or -1 when it is not constant so
+ */
+static int fold_double_const(const cc_translation_unit_t *tu, const cc_expr_t *e, double *out) {
+    double a;
+    double b;
+
+    if (e == NULL || !lower_has_kind(e, CC_CT_DOUBLE)) {
+        return -1;
+    }
+    switch (e->kind) {
+    case CC_EXPR_FLOAT:
+        *out = e->float_val;
+        return 0;
+    case CC_EXPR_CAST:
+        if (e->excess_precision || e->encoded_literal) {
+            return -1;
+        }
+        return fold_double_operand(tu, e->lhs, out);
+    case CC_EXPR_BIN:
+        if (e->unary_form == CC_UNARY_RHS) {
+            /* `-x`, `+x`: `-1 * x`, `1 * x` */
+            if (e->op != CC_BIN_MUL || e->lhs == NULL || e->lhs->kind != CC_EXPR_INT ||
+                fold_double_operand(tu, e->rhs, &b) != 0) {
+                return -1;
+            }
+            *out = e->lhs->int_val < 0 ? -b : b;
+            return 0;
+        }
+        if (e->unary_form != 0 || fold_double_operand(tu, e->lhs, &a) != 0 ||
+            fold_double_operand(tu, e->rhs, &b) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case CC_BIN_ADD:
+            *out = a + b;
+            return 0;
+        case CC_BIN_SUB:
+            *out = a - b;
+            return 0;
+        case CC_BIN_MUL:
+            *out = a * b;
+            return 0;
+        case CC_BIN_DIV:
+            if (b == 0.0) {
+                return -1; /* (left to the code, as it was) */
+            }
+            *out = a / b;
+            return 0;
+        default:
+            return -1;
+        }
+    default:
+        return -1;
+    }
+}
+
 /**
  * Lower a binary operator: arithmetic, bitwise, shift, comparison, logical, comma (CC_EXPR_BIN).
  *
@@ -5960,6 +6060,21 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         (lower_has_kind(e->rhs, CC_CT_FLOAT) || lower_has_kind(e->rhs, CC_CT_DOUBLE) ||
          lower_has_kind(e->rhs, CC_CT_LDOUBLE))) {
         const cc_ctype_t *store_t = fp_builtin_storage_type(e->rhs);
+        double folded;
+
+        if (lower_has_kind(e, CC_CT_DOUBLE) && fold_double_const(tu, e, &folded) == 0) {
+            /* a constant: its value, which the optimizer can fold on, not a flip of its bits in memory */
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_CONST;
+            in.dst = cc_ir_new_value(sf, CC_VAL_F64);
+            in.fimm = folded;
+            in.fimm_ld = (long double)folded;
+            if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+                set_diag(diag, "out of memory lowering a floating constant");
+                return -1;
+            }
+            return in.dst;
+        }
         rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
         if (rhs < 0) {
             return -1;
