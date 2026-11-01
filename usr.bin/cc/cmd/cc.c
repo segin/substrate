@@ -101,6 +101,7 @@ typedef struct {
   int no_sse;        /* -mno-sse, the last of it and -msse */
   int no_jump_tables; /* -fno-jump-tables, the last of it and -fjump-tables */
   int wrapv;          /* -fwrapv, -fno-strict-overflow; the last of them and -fno-wrapv, -fstrict-overflow */
+  int syntax_only;    /* -fsyntax-only: C checked, nothing written, nothing assembled or linked */
 
   const char *std;
   const char *opt_level;
@@ -199,6 +200,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->no_sse = o->no_sse;
   out->no_jump_tables = o->no_jump_tables;
   out->wrapv = o->wrapv;
+  out->syntax_only = o->syntax_only;
 }
 
 
@@ -1459,6 +1461,7 @@ static const driver_opt_t options[] = {
     {"-fno-omit-frame-pointer", OPT_FLAG, FWD_C, opt_int, F(omit_frame_pointer), 0},
     {"-fjump-tables", OPT_FLAG, FWD_C, opt_int, F(no_jump_tables), 0},
     {"-fno-jump-tables", OPT_FLAG, FWD_C, opt_int, F(no_jump_tables), 1},
+    {"-fsyntax-only", OPT_FLAG, 0, opt_int, F(syntax_only), 1},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
@@ -2501,6 +2504,11 @@ int cc_main(int argc, char **argv) {
       continue;
     }
 
+    if (o.syntax_only && !input_is_c) {
+      /* only C has a syntax to check: an assembly or object input is left alone, as gcc leaves it */
+      continue;
+    }
+
     if (input_is_S) {
       char out_s[PATH_MAX];
       char out_o[PATH_MAX];
@@ -2614,7 +2622,7 @@ int cc_main(int argc, char **argv) {
         }
       }
 
-      if (o.mode_S) {
+      if (o.mode_S || o.syntax_only) {
         continue;
       }
 
@@ -2692,7 +2700,7 @@ int cc_main(int argc, char **argv) {
     goto out;
   }
 
-  if (o.mode_E || o.mode_S || o.mode_c) {
+  if (o.mode_E || o.mode_S || o.mode_c || o.syntax_only) {
     rc = 0;
     goto out;
   }

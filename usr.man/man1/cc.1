@@ -458,6 +458,11 @@ A function that takes its frame's address, moves the stack pointer itself
 takes variadic arguments, or has an inline asm whose operand is a memory slot
 or an asm goto keeps one, and so does every function under
 .Fl g .
+.It Fl fsyntax-only
+Check each C input \(em its syntax and what it means \(em and write
+nothing: no assembly or object is made and nothing is linked.
+Assembly and object inputs are left alone, as with
+.Xr gcc 1 .
 .It Fl fwrapv , Fl fno-strict-overflow , Fl fno-wrapv , Fl fstrict-overflow
 Whether signed integer arithmetic wraps on overflow, as under the first
 two \(em Linux builds with

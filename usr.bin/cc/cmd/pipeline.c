@@ -154,6 +154,12 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         cc_tu_free(&tu);
         return -1;
     }
+    if (opts != NULL && opts->syntax_only) {
+        /* -fsyntax-only: checked as far as what the program means, and nothing written */
+        cc_ssa_module_free(&ssa);
+        cc_tu_free(&tu);
+        return 0;
+    }
     if (timings) {
         t_ast2ir = now_seconds() - t0;
         fprintf(stderr, "cc: timing ast2ir=%.3fs\n", t_ast2ir);

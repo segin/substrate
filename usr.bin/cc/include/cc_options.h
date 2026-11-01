@@ -69,6 +69,7 @@ typedef struct {
     int wrapv;               /**< -fwrapv or -fno-strict-overflow, the last of them and -fno-wrapv, -fstrict-overflow:
                                   signed arithmetic wraps, as Linux builds; else its overflow is undefined, as C has
                                   it, and an int's sum is not extended again */
+    int syntax_only;         /**< -fsyntax-only: the source checked, and nothing written */
 } cc_options_t;
 
 /**
