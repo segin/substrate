@@ -1980,6 +1980,9 @@ static int builtin_typedef_type_n(const char *name, size_t len, const cc_ctype_t
                     int wide = cc_target_pointer_size() > 4;
                     kind = kind == -1 ? (wide ? CC_CT_ULONG : CC_CT_UINT) : (wide ? CC_CT_LONG : CC_CT_INT);
                 }
+                if (strcmp(names[i].name, "wchar_t") == 0 && cc_options_current()->short_wchar) {
+                    kind = CC_CT_USHORT; /* -fshort-wchar */
+                }
                 *out_type = cc_ct_basic((cc_ctype_kind_t)kind);
             }
             return 1;
@@ -4221,15 +4224,16 @@ static char *canonicalize_narrow_string_token(const cc_token_t *tok) {
 
 /**
  * The element type of a string literal token, from its encoding prefix:
- * char for none and `u8`, wchar_t (int) for `L`, char16_t (unsigned
- * short) for `u`, char32_t (unsigned int) for `U`.
+ * char for none and `u8`, wchar_t (int, or unsigned short under
+ * -fshort-wchar) for `L`, char16_t (unsigned short) for `u`, char32_t
+ * (unsigned int) for `U`.
  */
 static const cc_ctype_t *string_token_char_type(const parser_t *p, const cc_token_t *tok) {
     if (p != NULL && tok != NULL && tok->kind == TOK_STR && tok->start != NULL && tok->start > p->lx.src) {
         char c1 = tok->start[-1]; /* `u8"..."` ends its prefix in '8': a char string */
 
         if (c1 == 'L') {
-            return cc_ct_basic(CC_CT_INT);
+            return cc_ct_basic(cc_options_current()->short_wchar ? CC_CT_USHORT : CC_CT_INT);
         }
         if (c1 == 'u') {
             return cc_ct_basic(CC_CT_USHORT);
@@ -7152,7 +7156,14 @@ static cc_expr_t *parse_primary(parser_t *p) {
         } else {
             cc_ctype_kind_t k;
 
-            if (p->tok.int_is_longlong) {
+            if (p->tok.char_prefix == 'L') {
+                /* a wide character constant is a wchar_t: int, or unsigned short under -fshort-wchar */
+                k = cc_options_current()->short_wchar ? CC_CT_USHORT : CC_CT_INT;
+            } else if (p->tok.char_prefix == 'u') {
+                k = CC_CT_USHORT; /* char16_t */
+            } else if (p->tok.char_prefix == 'U') {
+                k = CC_CT_UINT; /* char32_t */
+            } else if (p->tok.int_is_longlong) {
                 k = p->tok.int_is_unsigned ? CC_CT_ULLONG : CC_CT_LLONG;
             } else if (p->tok.int_is_long) {
                 k = p->tok.int_is_unsigned ? CC_CT_ULONG : CC_CT_LONG;

@@ -721,6 +721,8 @@ static int lex_ident_or_keyword(cc_lexer_t *lx, cc_token_t *out, size_t line, si
 static int lex_char_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, size_t col, int c) {
     long long v = 0;
     int is_plain = c == '\'';
+    char prefix = is_plain ? 0 : (char)c;
+
     if (c != '\'') {
         lx_adv(lx);
     }
@@ -808,6 +810,7 @@ static int lex_char_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, size_t
     out->is_float = 0;
     out->int_is_unsigned = 0;
     out->int_is_longlong = 0;
+    out->char_prefix = prefix;
     out->line = line;
     out->col = col;
     return 0;
@@ -1126,6 +1129,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->int_is_unsigned = 0;
     out->int_is_long = 0;
     out->int_is_longlong = 0;
+    out->char_prefix = 0;
     out->file = lx->logical_file;
     out->line = lx->line;
     out->col = lx->col;

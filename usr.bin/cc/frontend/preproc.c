@@ -120,6 +120,7 @@ typedef struct {
     int target_supports_avx;
     int target_supports_avx2;
     int unsigned_char; /**< -funsigned-char: __CHAR_UNSIGNED__ */
+    int short_wchar;   /**< -fshort-wchar: wchar_t's macros those of unsigned short */
     int enable_trigraphs;
     int std_version;
     int std_is_c11;
@@ -1508,6 +1509,12 @@ static int add_builtin_macros(pp_state_t *st) {
     tgt_int_max(tgt, uptr_t_type, 0, uintptr_max, sizeof(uintptr_max));
     tgt_int_max(tgt, tgt->wchar_type, 1, wchar_max, sizeof(wchar_max));
     snprintf(wchar_min, sizeof(wchar_min), "(-%s - 1%s)", wchar_max, tgt_int_suffix(tgt->wchar_type));
+    if (st->short_wchar) {
+        /* -fshort-wchar: wchar_t is unsigned short, as gcc's */
+        wchar_type = "short unsigned int";
+        snprintf(wchar_max, sizeof(wchar_max), "0xffff");
+        snprintf(wchar_min, sizeof(wchar_min), "0");
+    }
     tgt_int_max(tgt, tgt->int64_type, 1, int64_max, sizeof(int64_max));
     tgt_int_max(tgt, uint64_t_type, 1, uint64_max, sizeof(uint64_max));
     tgt_int_max(tgt, tgt->int_fast16_type, 1, int_fast_max, sizeof(int_fast_max));
@@ -1711,7 +1718,7 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__SIZEOF_PTRDIFF_T__", 0, 0, NULL, 0, ptr_size) != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__SIZEOF_WCHAR_T__", 0, 0, NULL, 0, "4") != 0) {
+    if (macro_set(&st->macros, "__SIZEOF_WCHAR_T__", 0, 0, NULL, 0, st->short_wchar ? "2" : "4") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__SIZEOF_WINT_T__", 0, 0, NULL, 0, "4") != 0) {
@@ -1900,7 +1907,7 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__SIZE_WIDTH__", 0, 0, NULL, 0, size_width) != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__WCHAR_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
+    if (macro_set(&st->macros, "__WCHAR_WIDTH__", 0, 0, NULL, 0, st->short_wchar ? "16" : "32") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__WINT_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
@@ -2389,6 +2396,10 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             st->unsigned_char = 1;
         } else if (strcmp(f, "-fsigned-char") == 0 || strcmp(f, "-fno-unsigned-char") == 0) {
             st->unsigned_char = 0;
+        } else if (strcmp(f, "-fshort-wchar") == 0) {
+            st->short_wchar = 1;
+        } else if (strcmp(f, "-fno-short-wchar") == 0) {
+            st->short_wchar = 0;
         }
     }
     /* AVX2 implies AVX, as in gcc: -mavx2 -mno-avx2 leaves neither, but an

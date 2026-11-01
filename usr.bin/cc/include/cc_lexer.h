@@ -146,6 +146,7 @@ typedef struct {
     int int_is_unsigned;
     int int_is_long;
     int int_is_longlong;
+    char char_prefix; /**< a character constant's prefix, 'L', 'u' or 'U', which gives its type; else 0 */
     const char *file;
     size_t line;
     size_t col;

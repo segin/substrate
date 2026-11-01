@@ -115,6 +115,7 @@ typedef struct {
   int patchable_before; /* M */
   int min_function_alignment; /* -fmin-function-alignment=N (opt_min_function_alignment()) */
   int unsigned_char;  /* -funsigned-char, -fno-signed-char; the last of them and -fsigned-char, -fno-unsigned-char */
+  int short_wchar;    /* -fshort-wchar, the last of it and -fno-short-wchar */
 
   const char *std;
   const char *opt_level;
@@ -238,6 +239,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->patchable_before = o->patchable_before;
   out->min_function_alignment = o->min_function_alignment;
   out->unsigned_char = o->unsigned_char;
+  out->short_wchar = o->short_wchar;
 }
 
 
@@ -1671,6 +1673,9 @@ static const driver_opt_t options[] = {
     /* (to the preprocessor too, for __CHAR_UNSIGNED__) */
     {"-funsigned-char -fno-signed-char", OPT_FLAG, FWD_CPP, opt_int, F(unsigned_char), 1},
     {"-fsigned-char -fno-unsigned-char", OPT_FLAG, FWD_CPP, opt_int, F(unsigned_char), 0},
+    /* (to the preprocessor too, for wchar_t's macros) */
+    {"-fshort-wchar", OPT_FLAG, FWD_CPP, opt_int, F(short_wchar), 1},
+    {"-fno-short-wchar", OPT_FLAG, FWD_CPP, opt_int, F(short_wchar), 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
