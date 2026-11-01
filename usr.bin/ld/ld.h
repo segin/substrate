@@ -676,6 +676,19 @@ int ld_warn(ld_ctx_t *ctx, const char *fmt, ...);
 #define LD_OPT_USAGE 2          /* a mistake on the command line, and said */
 #define LD_OPT_DONE (-1)        /* nothing more to do, and nothing wrong */
 void ld_usage(const char *prog);
+/**
+ * Replace each @file argument with the arguments that file holds, as GNU
+ * ld does, again for an @file among them; one naming no file it can read
+ * stays as it is.  The new vector, all of it malloc'd, goes in *argvp,
+ * NULL-terminated: ld_free_args() frees it.
+ *
+ * @param argcp  the argument count, updated
+ * @param argvp  the arguments, replaced
+ * @return       0, or what ld is to exit with (said)
+ */
+int ld_expand_response_files(int *argcp, char ***argvp);
+/** Free a vector of @p argc arguments ld_expand_response_files() made. */
+void ld_free_args(int argc, char **argv);
 int ld_parse_options(ld_ctx_t *ctx, int argc, char **argv);
 int set_explicit_mode(ld_ctx_t *ctx, int mode, const char *opt_text);
 int align_up_u64_checked(uint64_t v, uint64_t a, uint64_t *out);

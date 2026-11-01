@@ -41,6 +41,7 @@
 .Op Fl -compat Ns = Ns Ar gnu|lld
 .Op Fl -version
 .Op Fl -help
+.Op Cm @ Ns Ar file
 .Ar input ...
 .Sh DESCRIPTION
 .Nm
@@ -108,6 +109,23 @@ take it as the next argument or joined on with nothing between:
 .Fl o Ar file
 and
 .Fl o Ns Ar file .
+.Pp
+An argument
+.Cm @ Ns Ar file
+is replaced by the arguments
+.Ar file
+holds, as with GNU ld: white space separates them, and within
+.Ql \(aq...\(aq
+or
+.Ql \(dq...\(dq
+does not; a backslash takes the character after it as it is.
+An
+.Cm @ Ns Ar file
+among them is read in turn, up to 2000 files in all.
+One that names no file that can be read, or a directory, stays as it is: an
+input of that name.
+Linux links a module of more than one object as
+.Ql ld -r -o m.o @m.mod .
 A word is recognised before a letter is, so
 .Fl Ttext-segment
 is not

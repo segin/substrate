@@ -438,6 +438,238 @@ static int opt_matches(const ld_opt_t *o, const char *a, char *as, size_t as_cap
     return 0;
 }
 
+/** The response files one command line may expand, as GNU's limit: past it, @a naming @a is a loop. */
+#define LD_RESPONSE_FILE_LIMIT 2000
+
+/**
+ * Split the text of a response file into arguments as GNU ld does
+ * (libiberty's buildargv): white space separates them; within '...' or
+ * "..." it does not; a backslash takes the character after it as it is,
+ * quotes included.
+ *
+ * @param text   the file's text, NUL-terminated
+ * @param count  receives the number of arguments
+ * @return       the arguments (each malloc'd, the array too), or NULL out of memory
+ */
+static char **split_response_text(const char *text, int *count) {
+    size_t len = strlen(text);
+    char **args = NULL;
+    int n = 0;
+    int cap = 0;
+    const char *p = text;
+
+    *count = 0;
+    for (;;) {
+        char *arg;
+        char *o;
+        int squote = 0;
+        int dquote = 0;
+        int bsquote = 0;
+
+        while (*p != '\0' && isspace((unsigned char)*p)) {
+            ++p;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        arg = malloc(len + 1);
+        if (arg == NULL) {
+            goto oom;
+        }
+        o = arg;
+        for (; *p != '\0'; ++p) {
+            if (isspace((unsigned char)*p) && !squote && !dquote && !bsquote) {
+                break;
+            }
+            if (bsquote) {
+                bsquote = 0;
+                *o++ = *p;
+            } else if (*p == '\\') {
+                bsquote = 1;
+            } else if (squote) {
+                if (*p == '\'') {
+                    squote = 0;
+                } else {
+                    *o++ = *p;
+                }
+            } else if (dquote) {
+                if (*p == '"') {
+                    dquote = 0;
+                } else {
+                    *o++ = *p;
+                }
+            } else if (*p == '\'') {
+                squote = 1;
+            } else if (*p == '"') {
+                dquote = 1;
+            } else {
+                *o++ = *p;
+            }
+        }
+        *o = '\0';
+        if (n == cap) {
+            int ncap = cap > 0 ? cap * 2 : 16;
+            char **nargs = realloc(args, (size_t)ncap * sizeof(*nargs));
+
+            if (nargs == NULL) {
+                free(arg);
+                goto oom;
+            }
+            args = nargs;
+            cap = ncap;
+        }
+        args[n++] = arg;
+    }
+    if (args == NULL) {
+        args = malloc(sizeof(*args));
+        if (args == NULL) {
+            return NULL;
+        }
+    }
+    *count = n;
+    return args;
+oom:
+    while (n > 0) {
+        free(args[--n]);
+    }
+    free(args);
+    return NULL;
+}
+
+/**
+ * The text of response file @p path, as GNU ld reads one: NULL when it
+ * cannot be opened or is a directory, and the argument stays as it was.
+ *
+ * @param path  the file
+ * @param oom   set to 1 when it could not be held in memory
+ * @return      its text, NUL-terminated (malloc'd), or NULL
+ */
+static char *read_response_file(const char *path, int *oom) {
+    struct stat st;
+    FILE *f;
+    char *buf = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    size_t got;
+
+    if (stat(path, &st) != 0 || S_ISDIR(st.st_mode)) {
+        return NULL;
+    }
+    f = fopen(path, "r");
+    if (f == NULL) {
+        return NULL;
+    }
+    do {
+        if (cap - len < 4096) {
+            char *nbuf = realloc(buf, cap + 8192);
+
+            if (nbuf == NULL) {
+                free(buf);
+                fclose(f);
+                *oom = 1;
+                return NULL;
+            }
+            buf = nbuf;
+            cap += 8192;
+        }
+        got = fread(buf + len, 1, cap - len - 1, f);
+        len += got;
+    } while (got > 0);
+    fclose(f);
+    buf[len] = '\0';
+    return buf;
+}
+
+int ld_expand_response_files(int *argcp, char ***argvp) {
+    int argc = *argcp;
+    char **argv;
+    int expanded = 0;
+    int i;
+
+    /* each argument copied, so that one array of them, all malloc'd, is what the caller frees */
+    argv = malloc(((size_t)argc + 1) * sizeof(*argv));
+    if (argv == NULL) {
+        goto oom;
+    }
+    for (i = 0; i < argc; ++i) {
+        argv[i] = strdup((*argvp)[i]);
+        if (argv[i] == NULL) {
+            argc = i;
+            goto oom_free;
+        }
+    }
+    argv[argc] = NULL;
+    for (i = 1; i < argc;) {
+        char *text;
+        char **args;
+        char **nargv;
+        int n;
+        int oom = 0;
+
+        if (argv[i][0] != '@') {
+            ++i;
+            continue;
+        }
+        text = read_response_file(argv[i] + 1, &oom);
+        if (text == NULL) {
+            if (oom) {
+                goto oom_free;
+            }
+            ++i; /* not a file: the argument as it is, an input named so */
+            continue;
+        }
+        if (++expanded > LD_RESPONSE_FILE_LIMIT) {
+            free(text);
+            fprintf(stderr, "ld: error: too many @-files encountered\n");
+            for (i = 0; i < argc; ++i) {
+                free(argv[i]);
+            }
+            free(argv);
+            return LD_OPT_USAGE;
+        }
+        args = split_response_text(text, &n);
+        free(text);
+        if (args == NULL) {
+            goto oom_free;
+        }
+        nargv = realloc(argv, ((size_t)argc + (size_t)n) * sizeof(*argv));
+        if (nargv == NULL) {
+            while (n > 0) {
+                free(args[--n]);
+            }
+            free(args);
+            goto oom_free;
+        }
+        argv = nargv;
+        /* the file's arguments in its place, read again: one of them may be @another */
+        free(argv[i]);
+        memmove(&argv[i + n], &argv[i + 1], ((size_t)argc - (size_t)i) * sizeof(*argv));
+        memcpy(&argv[i], args, (size_t)n * sizeof(*argv));
+        free(args);
+        argc += n - 1;
+    }
+    *argcp = argc;
+    *argvp = argv;
+    return 0;
+oom_free:
+    for (i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+oom:
+    fprintf(stderr, "ld: out of memory reading the command line\n");
+    return 1;
+}
+
+void ld_free_args(int argc, char **argv) {
+    int i;
+
+    for (i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
 /*
  * Read the command line into ctx.  0, or what ld is to exit with;
  * LD_OPT_DONE if an option was all there was to do.

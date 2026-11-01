@@ -763,6 +763,12 @@ int main(int argc, char **argv) {
     opt->hash_style = LD_HASH_BOTH;
 
     ctx.dso_cache = ld_dso_cache_new();
+    /* @file, as GNU ld reads it: Linux links each module's objects so, `ld -r -o m.o @m.mod` */
+    rc = ld_expand_response_files(&argc, &argv);
+    if (rc != 0) {
+        ctx_free(&ctx);
+        return rc;
+    }
     rc = ctx.dso_cache != NULL ? ld_parse_options(&ctx, argc, argv) : 1;
     if (rc == 0 && opt->query_version && opt->inputs.count == 0) {
         printf("GNU ld (Substrate) 2.42.0\n");
@@ -797,6 +803,7 @@ int main(int argc, char **argv) {
     }
 
     ctx_free(&ctx);
+    ld_free_args(argc, argv);
     return rc == LD_OPT_DONE ? 0 : rc;
 }
 
