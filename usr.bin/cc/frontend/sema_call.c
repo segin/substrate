@@ -162,6 +162,34 @@ static int builtin_bswap_bits(const char *name) {
     return(cc_builtin_bswap_bits(name));
 }
 
+/**
+ * Make a call of a typed overflow builtin, `__builtin_uaddll_overflow`
+ * and kin, one of the generic builtin it is (cc_builtin_typed_overflow()),
+ * whose operands are then converted to its type.
+ *
+ * @param e     the call
+ * @param diag  receives an error
+ * @return      the operands' type, or NULL if @p e calls no such builtin
+ *              (or when out of memory, with @p diag set)
+ */
+static const cc_ctype_t *sema_typed_overflow(cc_expr_t *e, cc_diag_t *diag) {
+    const char *generic = NULL;
+    const cc_ctype_t *t = cc_builtin_typed_overflow(e->ident, &generic);
+    char *name;
+
+    if (t == NULL) {
+        return NULL;
+    }
+    name = cc_strdup(generic);
+    if (name == NULL) {
+        sema_diag(diag, "out of memory naming an overflow builtin");
+        return NULL;
+    }
+    free(e->ident);
+    e->ident = name;
+    return t;
+}
+
 static builtin_kind_t builtin_kind(const char *name) {
     if (name == NULL) {
         return BUILTIN_NONE;
@@ -1371,6 +1399,7 @@ int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *
                            int depth, cc_diag_t *diag) {
     size_t i;
     const cc_function_t *callee = NULL;
+    const cc_ctype_t *typed_overflow = sema_typed_overflow(e, diag);
     builtin_kind_t bk = builtin_kind(e->ident);
     int bswap_bits = builtin_bswap_bits(e->ident);
     if (e->ident != NULL && strcmp(e->ident, "__builtin_complex") == 0) {
@@ -1382,6 +1411,12 @@ int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *
     {
         int rc = sema_check_builtin_call(tu, e, vars, var_count, depth, bk, bswap_bits, callee, diag);
 
+        if (rc == 0 && typed_overflow != NULL &&
+            (sema_convert(&e->args[0], typed_overflow) != 0 || sema_convert(&e->args[1], typed_overflow) != 0)) {
+            /* the typed builtin's operands, of its type */
+            sema_diag(diag, "out of memory converting an overflow builtin's operands");
+            return -1;
+        }
         if (rc != SEMA_NOT_BUILTIN) {
             return rc;
         }

@@ -505,6 +505,7 @@ void cc_tu_free(cc_translation_unit_t *tu);
 int cc_builtin_is_recognized(const char *name);
 const char *cc_builtin_library_function(const char *name);
 int cc_builtin_bswap_bits(const char *name);
+const struct cc_ctype *cc_builtin_typed_overflow(const char *name, const char **generic);
 
 /** What an atomic read-modify-write builtin does to the object. */
 typedef enum {

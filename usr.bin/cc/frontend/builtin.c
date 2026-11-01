@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_ctype.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -109,13 +110,65 @@ const char *cc_builtin_library_function(const char *name) {
     return(NULL);
 }
 
+/**
+ * Whether @p name is one of the typed overflow builtins,
+ * `__builtin_{s,u}{add,sub,mul}{,l,ll}_overflow`, and which: each is the
+ * generic one with its two operands converted to its type (int, long or
+ * long long, unsigned for the u ones) and its result stored in one.
+ * Linux's crypto/ecc.c calls __builtin_uaddll_overflow.
+ *
+ * @param name     the called name
+ * @param generic  receives the generic builtin's name; may be NULL
+ * @return         the operands' type, or NULL if @p name is no such builtin
+ */
+const cc_ctype_t *cc_builtin_typed_overflow(const char *name, const char **generic) {
+    static const char *const ops[3][2] = {
+        {"add", "__builtin_add_overflow"},
+        {"sub", "__builtin_sub_overflow"},
+        {"mul", "__builtin_mul_overflow"},
+    };
+    static const cc_ctype_kind_t kinds[2][3] = {
+        {CC_CT_INT, CC_CT_LONG, CC_CT_LLONG},
+        {CC_CT_UINT, CC_CT_ULONG, CC_CT_ULLONG},
+    };
+    const char *p;
+    int is_unsigned;
+    size_t op;
+    int width;
+
+    if (name == NULL || strncmp(name, "__builtin_", 10) != 0 || (name[10] != 's' && name[10] != 'u')) {
+        return NULL;
+    }
+    is_unsigned = name[10] == 'u';
+    p = name + 11;
+    for (op = 0; op < 3; ++op) {
+        if (strncmp(p, ops[op][0], 3) == 0) {
+            break;
+        }
+    }
+    if (op == 3) {
+        return NULL;
+    }
+    p += 3;
+    width = strncmp(p, "ll", 2) == 0 ? 2 : *p == 'l' ? 1 : 0;
+    p += width;
+    if (strcmp(p, "_overflow") != 0) {
+        return NULL;
+    }
+    if (generic != NULL) {
+        *generic = ops[op][1];
+    }
+    return cc_ct_basic(kinds[is_unsigned][width]);
+}
+
 int cc_builtin_is_recognized(const char *name) {
     size_t i;
 
     if (name == NULL || name[0] == '\0') {
         return(0);
     }
-    if (cc_builtin_library_function(name) != NULL || cc_builtin_atomic_generic(name) != CC_AGEN_NONE) {
+    if (cc_builtin_library_function(name) != NULL || cc_builtin_atomic_generic(name) != CC_AGEN_NONE ||
+        cc_builtin_typed_overflow(name, NULL) != NULL) {
         return(1);
     }
     for (i = 0; i < sizeof(g_known_builtins) / sizeof(g_known_builtins[0]); ++i) {

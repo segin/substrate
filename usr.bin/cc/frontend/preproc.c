@@ -944,7 +944,8 @@ static int has_builtin_name(const char *name) {
         strcmp(name, "__builtin_unreachable") == 0 || strcmp(name, "__builtin_assume") == 0 ||
         strcmp(name, "__builtin_assume_aligned") == 0 || strcmp(name, "__builtin_unpredictable") == 0 ||
         strcmp(name, "__builtin_choose_expr") == 0 ||
-        strcmp(name, "__builtin_types_compatible_p") == 0 || strcmp(name, "__builtin_offsetof") == 0) {
+        strcmp(name, "__builtin_types_compatible_p") == 0 || strcmp(name, "__builtin_offsetof") == 0 ||
+        cc_builtin_typed_overflow(name, NULL) != NULL) {
         return 1;
     }
     return 0;
