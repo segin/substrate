@@ -60,7 +60,8 @@ int main(void)
 {
 	static const int v[] = {5, -3, 0x7fff0000, -0x7fff0000, 17, 1 << 20, -9, 1000};
 
-	printf("%ld %ld %ld %ld %d %d %ld %ld %ld\n", narrow2(0x7fffffff, 9), sum(v, 8), mix(v, 8, 3), mix(v, 5, -2), narrow(0x7fffffffL, 9),
+	/* (v + 2: mix(p, 5, -2) reads p[-2] and p[-1], which of v itself were what lay before v) */
+	printf("%ld %ld %ld %ld %d %d %ld %ld %ld\n", narrow2(0x7fffffff, 9), sum(v, 8), mix(v, 8, 3), mix(v + 2, 5, -2), narrow(0x7fffffffL, 9),
 	       narrow(-0x80000000L, -1), uwrap(0xfffffff0u, 0x20u), widen(-0x40000000, 0x3fffffff), widen(7, 9));
 	return 0;
 }
