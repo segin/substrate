@@ -4198,6 +4198,18 @@ static int print_asm(FILE *fp, const xsel_t *s, const xinst_t *in, cc_diag_t *di
 }
 
 /** Print the function: its string literals, its header, prologue, body and trailer. */
+/** Whether some instruction of @p f takes the address of its label @p label (`&&label`). */
+static int label_address_taken(const cc_ssa_function_t *f, int label) {
+    size_t i;
+
+    for (i = 0; i < f->instr_count; ++i) {
+        if (f->instrs[i].op == CC_SSA_LADDR && f->instrs[i].label == label) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_debug, cc_diag_t *diag) {
     const cc_ssa_function_t *f = s->f;
     const xsel_target_t *t = s->t;
@@ -4214,6 +4226,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     int nrets;
     int share;
     int tail_ok;
+    int cf_labels; /* -fcf-protection=branch, and a label's address taken: an endbr at such a label */
     size_t j;
     int i;
     int r;
@@ -4276,6 +4289,10 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         fprintf(fp, "\t.cfi_startproc\n\t.cfi_def_cfa_offset %d\n\t.cfi_offset %s, -%d\n", 2 * w,
                 xr_name(XR_BP, w), 2 * w);
     }
+    if (cc_options_current() != NULL && cc_options_current()->cf_branch) {
+        /* where an indirect call may land, under -fcf-protection=branch (CET IBT): Linux's kernel faults else */
+        fputs(w == 8 ? "\tendbr64\n" : "\tendbr32\n", fp);
+    }
     if (!s->fpo) {
         fprintf(fp, "\tpush%c %s\n\tmov%c %s, %s\n", sfx, xr_name(XR_BP, w), sfx, xr_name(XR_SP, w),
                 xr_name(XR_BP, w));
@@ -4323,6 +4340,12 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         }
     }
     share = nrets > 1 && nsaved > 0;
+    cf_labels = 0;
+    if (cc_options_current() != NULL && cc_options_current()->cf_branch) {
+        for (j = 0; j < f->instr_count && !cf_labels; ++j) {
+            cf_labels = f->instrs[j].op == CC_SSA_LADDR;
+        }
+    }
     /* tail calls, where nothing the callee may reach is in this frame (no frame object's address made) */
     tail_ok = !emit_debug && !s->has_goto && !s->has_dynalloc && s->nbind == 0;
     for (i = 0; tail_ok && i < s->xf.nins; ++i) {
@@ -4338,6 +4361,10 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
             emit_local_label(fp, f->name, in->label);
             fputs(":\n", fp);
             s->xf.sp_depth = 0; /* (a call's pushes never span a label) */
+            if (cf_labels && label_address_taken(f, in->label)) {
+                /* a computed goto lands here: an endbr, as at a function's entry (CET IBT) */
+                fputs(w == 8 ? "\tendbr64\n" : "\tendbr32\n", fp);
+            }
         } else if (in->op == XI_JCC && share && i + 1 < last_ret && s->xf.ins[i + 1].op == XI_RET &&
                    label_here(&s->xf, i + 2, in->label)) {
             /* a branch over a return: the other way to the epilogue */

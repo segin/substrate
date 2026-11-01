@@ -1238,6 +1238,10 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             fprintf(fp, "\t.cfi_def_cfa_offset 16\n");
             fprintf(fp, "\t.cfi_offset %%rbp, -16\n");
         }
+        if (cc_options_current() != NULL && cc_options_current()->cf_branch) {
+            /* -fcf-protection=branch: where an indirect call may land (CET IBT), as the MIR emitter has it */
+            fputs("\tendbr64\n", fp);
+        }
 
         fprintf(fp, "\tpushq %%rbp\n");
         fprintf(fp, "\tmovq %%rsp, %%rbp\n");

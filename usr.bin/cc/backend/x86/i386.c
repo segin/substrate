@@ -3392,6 +3392,10 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
 
+        if (cc_options_current() != NULL && cc_options_current()->cf_branch) {
+            /* -fcf-protection=branch: where an indirect call may land (CET IBT), as the MIR emitter has it */
+            fputs("\tendbr32\n", fp);
+        }
         if (emit_debug) {
             fprintf(fp, "\t.cfi_startproc\n");
             fprintf(fp, "\t.cfi_def_cfa_offset 8\n");

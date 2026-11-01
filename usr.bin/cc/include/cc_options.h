@@ -70,6 +70,8 @@ typedef struct {
                                   signed arithmetic wraps, as Linux builds; else its overflow is undefined, as C has
                                   it, and an int's sum is not extended again */
     int syntax_only;         /**< -fsyntax-only: the source checked, and nothing written */
+    int cf_branch;           /**< -fcf-protection=branch or full: an endbr where an indirect branch may land --
+                                  each function's entry and each label whose address is taken (Intel CET IBT) */
 } cc_options_t;
 
 /**

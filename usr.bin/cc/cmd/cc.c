@@ -102,6 +102,7 @@ typedef struct {
   int no_jump_tables; /* -fno-jump-tables, the last of it and -fjump-tables */
   int wrapv;          /* -fwrapv, -fno-strict-overflow; the last of them and -fno-wrapv, -fstrict-overflow */
   int syntax_only;    /* -fsyntax-only: C checked, nothing written, nothing assembled or linked */
+  int cf_protection;  /* -fcf-protection[=]: 1 branches, 2 returns, 3 both (opt_cf_protection()) */
 
   const char *std;
   const char *opt_level;
@@ -201,6 +202,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->no_jump_tables = o->no_jump_tables;
   out->wrapv = o->wrapv;
   out->syntax_only = o->syntax_only;
+  out->cf_branch = (o->cf_protection & 1) != 0;
 }
 
 
@@ -1347,6 +1349,31 @@ static int opt_sanitize(cc_opts_t *o, const driver_opt_t *d, const char *as, con
  *
  * @return 0, or -1 for another value
  */
+/**
+ * -fcf-protection=full|branch|return|none|check, and -fcf-protection alone (full): which of Intel CET's
+ * protections the code is made for, 1 indirect branches (an endbr at each place one may land) and 2 returns
+ * (a shadow stack, which asks nothing of the code).  cc took any of them and ignored it.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_cf_protection(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  if (val != NULL && (strcmp(val, "full") == 0)) {
+    o->cf_protection = 3;
+  } else if (val != NULL && strcmp(val, "branch") == 0) {
+    o->cf_protection = 1;
+  } else if (val != NULL && strcmp(val, "return") == 0) {
+    o->cf_protection = 2;
+  } else if (val != NULL && (strcmp(val, "none") == 0 || strcmp(val, "check") == 0)) {
+    o->cf_protection = 0;
+  } else {
+    fprintf(stderr, "cc: error: %s%s: the argument must be full, branch, return, none or check\n", as,
+            val != NULL ? val : "");
+    return -1;
+  }
+  return 0;
+}
+
 static int opt_trivial_auto_var_init(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
   (void)d;
   o->trivial_auto_var_init_zero = 0;
@@ -1462,6 +1489,8 @@ static const driver_opt_t options[] = {
     {"-fjump-tables", OPT_FLAG, FWD_C, opt_int, F(no_jump_tables), 0},
     {"-fno-jump-tables", OPT_FLAG, FWD_C, opt_int, F(no_jump_tables), 1},
     {"-fsyntax-only", OPT_FLAG, 0, opt_int, F(syntax_only), 1},
+    {"-fcf-protection=", OPT_PREFIX, 0, opt_cf_protection, 0, 0},
+    {"-fcf-protection", OPT_FLAG, 0, opt_int, F(cf_protection), 3},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
@@ -1699,13 +1728,20 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
  * a kernel with CONFIG_FORTIFY_SOURCE had no fortified string functions,
  * and lib/string_helpers.c, which names its enum, did not build.
  *
+ * And __CET__, the -fcf-protection asked for: 1 branches, 2 returns, 3
+ * both.
+ *
  * @param o     the parsed command line
- * @param defs  receives the -D options, at most 2
+ * @param defs  receives the -D options, at most 3
  * @return      how many
  */
-static size_t optimize_predefines(const cc_opts_t *o, const char *defs[2]) {
+static size_t optimize_predefines(const cc_opts_t *o, const char *defs[3]) {
+  static const char *const cet[] = {NULL, "-D__CET__=1", "-D__CET__=2", "-D__CET__=3"};
   size_t n = 0;
 
+  if (o->cf_protection > 0 && o->cf_protection <= 3) {
+    defs[n++] = cet[o->cf_protection];
+  }
   if (opt_level_num(o) == 0) {
     defs[n++] = "-D__NO_INLINE__=1";
     return n;
@@ -1776,7 +1812,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     size_t j;
     size_t extra = (target_flag != NULL && target_flag[0] != '\0') ? 1 : 0;
     size_t first = 0;
-    const char *opt_defs[2];
+    const char *opt_defs[3];
     size_t opt_def_count = optimize_predefines(o, opt_defs);
 
     extra += opt_def_count;
