@@ -34,11 +34,11 @@ if [ ! -f "$T/usr.bin/cc/frontend/preproc.d" ]; then
 	exit 1
 fi
 pre=$(stat -c %Y "$T/usr.bin/cc/frontend/preproc.o")
-lex=$(stat -c %Y "$T/usr.bin/cc/frontend/lexer.o")
+lex=$(stat -c %Y "$T/usr.bin/cc/frontend/decimal.o")
 sleep 1
-# cc_options.h: preproc.c includes it, lexer.c does not
-if grep -q 'cc_options.h' "$T/usr.bin/cc/frontend/lexer.c"; then
-	echo "run_native_header_deps: lexer.c includes cc_options.h now; pick another bystander"
+# cc_options.h: preproc.c includes it, decimal.c (and cc_decimal.h) does not
+if grep -q 'cc_options.h' "$T/usr.bin/cc/frontend/decimal.c" "$T/usr.bin/cc/include/cc_decimal.h"; then
+	echo "run_native_header_deps: decimal.c includes cc_options.h now; pick another bystander"
 	exit 1
 fi
 touch "$T/usr.bin/cc/include/cc_options.h"
@@ -47,8 +47,8 @@ if [ "$(stat -c %Y "$T/usr.bin/cc/frontend/preproc.o")" = "$pre" ]; then
 	echo "run_native_header_deps: touching cc_options.h did not rebuild frontend/preproc.o, which includes it"
 	exit 1
 fi
-if [ "$(stat -c %Y "$T/usr.bin/cc/frontend/lexer.o")" != "$lex" ]; then
-	echo "run_native_header_deps: touching cc_options.h rebuilt frontend/lexer.o, which does not include it"
+if [ "$(stat -c %Y "$T/usr.bin/cc/frontend/decimal.o")" != "$lex" ]; then
+	echo "run_native_header_deps: touching cc_options.h rebuilt frontend/decimal.o, which does not include it"
 	exit 1
 fi
 echo "run_native_header_deps: ok"
