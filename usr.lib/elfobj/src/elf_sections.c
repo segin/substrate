@@ -296,6 +296,28 @@ elf_err_t elf_section_set_merge(elf_section_t *section, uint64_t entsize, int st
     return ELF_OK;
 }
 
+/**
+ * Make @p section one ordered by @p to, SHF_LINK_ORDER: its sh_link is @p to's number in the object when it
+ * is written, as GNU as makes it for a `.section name, "o", @progbits, sym` (gcc's
+ * __patchable_function_entries, one for each function, each by its function's section).
+ *
+ * @param section  the section
+ * @param to       the section it is ordered by, of the same object
+ * @return ELF_OK, or ELF_ERR_STATE for a section of no object, another object's, or one that is not mutable
+ */
+elf_err_t elf_section_set_link_order(elf_section_t *section, elf_section_t *to) {
+    if (section == NULL || section->obj == NULL || to == NULL || to->obj != section->obj) {
+        return ELF_ERR_STATE;
+    }
+    if (!is_mutable_obj(section->obj)) {
+        return ELF_ERR_STATE;
+    }
+    section->flags |= SHF_LINK_ORDER;
+    section->link_order = to;
+    section->obj->dirty = 1;
+    return ELF_OK;
+}
+
 elf_err_t elf_section_set_tls(elf_section_t *section, int enable) {
     if (section == NULL || section->obj == NULL) {
         return ELF_ERR_STATE;

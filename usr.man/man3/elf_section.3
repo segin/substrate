@@ -10,6 +10,7 @@
 .Nm elf_section_set_flags ,
 .Nm elf_section_set_group ,
 .Nm elf_section_set_merge ,
+.Nm elf_section_set_link_order ,
 .Nm elf_section_set_tls ,
 .Nm elf_section_set_note_info ,
 .Nm elf_remove_section ,
@@ -69,6 +70,11 @@
 .Fa "elf_section_t *section"
 .Fa "uint64_t entsize"
 .Fa "int strings"
+.Fc
+.Ft elf_err_t
+.Fo elf_section_set_link_order
+.Fa "elf_section_t *section"
+.Fa "elf_section_t *to"
 .Fc
 .Ft elf_err_t
 .Fo elf_section_set_tls
@@ -232,6 +238,16 @@ Updates the section flags bitmask.
 Marks section as part of a section group and optionally COMDAT.
 .It Fn elf_section_set_merge "section" "entsize" "strings"
 Enables merge semantics and optional string-merge behavior.
+.It Fn elf_section_set_link_order "section" "to"
+Sets
+.Dv SHF_LINK_ORDER
+on the section and makes it ordered by
+.Fa to ,
+a section of the same object: its
+.Va sh_link
+is
+.Fa to Ns 's
+number when the object is written.
 .It Fn elf_section_set_tls "section" "enable"
 Enables or disables
 .Dv SHF_TLS

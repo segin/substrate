@@ -116,6 +116,7 @@ struct elf_section {
     uint32_t group_index;
     uint8_t comdat;
     char *group_signature;
+    struct elf_section *link_order; /* SHF_LINK_ORDER: the section it is ordered by, made sh_link when written */
     uint32_t note_type;
     char *note_name;
     uint8_t *data;

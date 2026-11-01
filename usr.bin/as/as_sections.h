@@ -19,6 +19,11 @@ typedef struct {
     unsigned subsection;
     char *group;
     int comdat;
+    /* `o` (SHF_LINK_ORDER): the symbol it is ordered by, whose section is
+     * its sh_link; NULL for none.  Such a section is one of each symbol,
+     * as GNU as has it: its name here is "name\1symbol", and the object's
+     * is the name alone (as_section_elf_name()). */
+    char *link_sym;
 } as_section_t;
 
 typedef struct {
@@ -45,6 +50,10 @@ typedef struct {
 } section_track_t;
 
 const char *section_from_directive(const as_directive_t *d);
+/* The object's name of section @p name: the name of a link-order one,
+ * "name\1symbol", without its symbol, in @p buf (NULL if it does not fit);
+ * any other's, @p name itself. */
+const char *as_section_elf_name(const char *name, char *buf, size_t cap);
 int section_track_apply_directive(section_track_t *st, const as_directive_t *d);
 void section_track_free(section_track_t *st);
 int section_track_init(section_track_t *st, unsigned initial_code_bits);

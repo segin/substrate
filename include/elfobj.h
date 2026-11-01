@@ -1393,6 +1393,8 @@ elf_err_t elf_section_set_name(elf_section_t *section, const char *name);
 elf_err_t elf_section_set_group(elf_section_t *section, uint32_t group, int comdat);
 elf_err_t elf_section_set_group_signature(elf_section_t *section, const char *signature);
 elf_err_t elf_section_set_merge(elf_section_t *section, uint64_t entsize, int strings);
+/** Make @p section ordered by @p to (SHF_LINK_ORDER): its sh_link is @p to's number when written. */
+elf_err_t elf_section_set_link_order(elf_section_t *section, elf_section_t *to);
 elf_err_t elf_section_set_tls(elf_section_t *section, int enable);
 elf_err_t elf_section_set_note_info(elf_section_t *section, uint32_t note_type, const char *note_name);
 elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section);

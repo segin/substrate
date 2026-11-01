@@ -638,6 +638,32 @@ int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         return -1;
     }
     if (trace_emit_phase) fprintf(stderr, "as: emit-phase dot locations done count=%zu\n", dot_count);
+    /* a link-order section: ordered by the section of the symbol it names, which is its sh_link */
+    for (i = 0; ctx->sections != NULL && i < ctx->sections->count; ++i) {
+        const as_section_t *ls = &ctx->sections->items[i];
+        const sym_loc_t *to;
+        elf_section_t *es;
+
+        if (ls->link_sym == NULL) {
+            continue;
+        }
+        to = find_sym_loc(locs, &loc_index, ls->link_sym);
+        es = section_for_name(ctx, ls->name);
+        /* (or a section's name, which is that section, as gas has it) */
+        if (es != NULL && (to == NULL || to->sec == NULL) && section_for_name(ctx, ls->link_sym) != NULL) {
+            if (elf_section_set_link_order(es, section_for_name(ctx, ls->link_sym)) == ELF_OK) {
+                continue;
+            }
+        }
+        if (to == NULL || to->sec == NULL || es == NULL || elf_section_set_link_order(es, to->sec) != ELF_OK) {
+            set_err(ctx, "section %.*s: the symbol %s it is ordered by is not defined",
+                    (int)strcspn(ls->name, "\1"), ls->name, ls->link_sym);
+            free_sym_locs(locs, loc_count);
+            free_dot_locs(dot_locs);
+            free_name_index(&loc_index);
+            return -1;
+        }
+    }
 
     for (i = 0; i < symtab->count; ++i) {
         const as_symbol_t *s = &symtab->items[i];

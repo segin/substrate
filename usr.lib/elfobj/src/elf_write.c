@@ -864,6 +864,29 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             goto done;
         }
     }
+    /* a section ordered by another (SHF_LINK_ORDER): its sh_link that one's number, now that each has one */
+    {
+        size_t last = 0; /* (the section the one before was ordered by: most are by a few) */
+
+        for (i = 0; i < obj->section_count; ++i) {
+            const struct elf_section *s = obj->sections[i];
+            size_t j;
+
+            if (s->link_order == NULL || obj_sec_to_out[i] == 0) {
+                continue;
+            }
+            if (obj->sections[last] != s->link_order) {
+                for (j = 0; j < obj->section_count && obj->sections[j] != s->link_order; ++j) {
+                }
+                if (j == obj->section_count || obj_sec_to_out[j] == 0) {
+                    err = ELF_ERR_FORMAT;
+                    goto done;
+                }
+                last = j;
+            }
+            secs[obj_sec_to_out[i]].link = (uint32_t)obj_sec_to_out[last];
+        }
+    }
 
     for (i = 0; i < obj->section_count; ++i) {
         const struct elf_section *target = obj->sections[i];

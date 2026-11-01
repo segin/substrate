@@ -74,6 +74,7 @@ void as_section_state_free(as_section_state_t *s) {
     for (i = 0; i < s->count; ++i) {
         free(s->items[i].name);
         free(s->items[i].group);
+        free(s->items[i].link_sym);
     }
     free(s->items);
     as_strmap_free(&s->by_name);
@@ -375,8 +376,71 @@ static void infer_section_defaults(const char *name, unsigned *flags, unsigned *
     }
 }
 
+/**
+ * The symbol a `.section name, "...o...", @type[, entsize], symbol` orders its section by (SHF_LINK_ORDER):
+ * the argument after the type, or after M's entry size.
+ *
+ * @param d    the directive
+ * @param len  receives the symbol's length
+ * @return     where it starts in the directive's arguments, or NULL for none
+ */
+static const char *section_link_symbol(const as_directive_t *d, size_t *len) {
+    size_t at = 3;
+    const char *a;
+    size_t n;
+
+    if (d->arg_count < 4 || d->args[1] == NULL || strchr(d->args[1], 'o') == NULL) {
+        return NULL;
+    }
+    if (strchr(d->args[1], 'M') != NULL) {
+        at++;
+    }
+    if (d->arg_count <= at || d->args[at] == NULL) {
+        return NULL;
+    }
+    a = d->args[at];
+    while (*a != '\0' && isspace((unsigned char)*a)) {
+        a++;
+    }
+    n = strlen(a);
+    while (n > 0 && isspace((unsigned char)a[n - 1])) {
+        n--;
+    }
+    if (n == 0) {
+        return NULL;
+    }
+    *len = n;
+    return a;
+}
+
+/**
+ * The name section @p name has in the object: a link-order section's, "name\1symbol" here, is the name alone.
+ *
+ * @param name  the section's name here
+ * @param buf   receives a link-order section's object name
+ * @param cap   the size of @p buf
+ * @return      the name: @p name itself, or @p buf; NULL when it does not fit
+ */
+const char *as_section_elf_name(const char *name, char *buf, size_t cap) {
+    const char *sep = name != NULL ? strchr(name, '\1') : NULL;
+    size_t n;
+
+    if (sep == NULL) {
+        return name;
+    }
+    n = (size_t)(sep - name);
+    if (n + 1 > cap) {
+        return NULL;
+    }
+    memcpy(buf, name, n);
+    buf[n] = '\0';
+    return buf;
+}
+
 const char *section_from_directive(const as_directive_t *d) {
     const char *arg;
+    const char *link;
+    size_t link_len = 0;
     /* The name out of its quotes, good until the next is asked for; as
      * long as the name is, where it had been 255 bytes of it. */
     static char *secbuf;
@@ -402,38 +466,48 @@ const char *section_from_directive(const as_directive_t *d) {
         while (*arg != '\0' && isspace((unsigned char)*arg)) {
             arg++;
         }
-        if (strlen(arg) + 1 > secbuf_cap) {
-            char *grown = (char *)realloc(secbuf, strlen(arg) + 1);
+        /* (and room for "\1symbol", a link-order section's) */
+        link = section_link_symbol(d, &link_len);
+        if (strlen(arg) + link_len + 2 > secbuf_cap) {
+            char *grown = (char *)realloc(secbuf, strlen(arg) + link_len + 2);
 
             if (grown == NULL) {
                 return NULL;
             }
             secbuf = grown;
-            secbuf_cap = strlen(arg) + 1;
+            secbuf_cap = strlen(arg) + link_len + 2;
         }
         if (*arg == '"' || *arg == '\'') {
             char q = *arg++;
             while (*arg != '\0' && *arg != q && n + 1 < secbuf_cap) {
                 secbuf[n++] = *arg++;
             }
-            secbuf[n] = '\0';
-            return secbuf;
-        }
-        /* (The argument is the name, all of it: one written in quotes
-         * may have a space in it, and comes here without the quotes.
-         * It was cut at the space, and the section the table of them
-         * has by its whole name was "unknown section".) */
-        for (i = 0; arg[i] != '\0' && n + 1 < secbuf_cap; ++i) {
-            if (arg[i] == ',') {
-                break;
+        } else {
+            /* (The argument is the name, all of it: one written in quotes
+             * may have a space in it, and comes here without the quotes.
+             * It was cut at the space, and the section the table of them
+             * has by its whole name was "unknown section".) */
+            for (i = 0; arg[i] != '\0' && n + 1 < secbuf_cap; ++i) {
+                if (arg[i] == ',') {
+                    break;
+                }
+                secbuf[n++] = arg[i];
             }
-            secbuf[n++] = arg[i];
+            while (n > 0 && isspace((unsigned char)secbuf[n - 1])) {
+                n--;
+            }
+            if (n == 0) {
+                return NULL;
+            }
         }
-        while (n > 0 && isspace((unsigned char)secbuf[n - 1])) {
-            n--;
+        /* a link-order section is one of each symbol it is ordered by, as GNU as has it */
+        if (link != NULL) {
+            secbuf[n++] = '\1';
+            memcpy(secbuf + n, link, link_len);
+            n += link_len;
         }
         secbuf[n] = '\0';
-        return n > 0 ? secbuf : NULL;
+        return secbuf;
     }
     return NULL;
 }
@@ -657,6 +731,25 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     if (name == NULL) {
         return -1;
     }
+    {
+        /* a link-order section, "name\1symbol": one of each symbol, as section_from_directive() names it */
+        size_t link_len = 0;
+        const char *link = section_link_symbol(d, &link_len);
+
+        if (link != NULL) {
+            size_t n = strlen(name);
+            char *keyed = (char *)realloc(name, n + link_len + 2);
+
+            if (keyed == NULL) {
+                free(name);
+                return -1;
+            }
+            name = keyed;
+            name[n] = '\1';
+            memcpy(name + n + 1, link, link_len);
+            name[n + 1 + link_len] = '\0';
+        }
+    }
 
     existing = find_section_index(s, name, 0);
     /*
@@ -766,6 +859,14 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
         next_arg++;
     }
     if ((flags & SHF_LINK_ORDER) != 0 && d->arg_count > next_arg) {
+        /* the symbol it is ordered by: its section is the sh_link (emit_symbols()) */
+        if (s->items[s->current_index].link_sym == NULL) {
+            s->items[s->current_index].link_sym = trim_copy(d->args[next_arg]);
+            if (s->items[s->current_index].link_sym == NULL) {
+                free(name);
+                return -1;
+            }
+        }
         next_arg++;
     }
     /* Entries to be merged have a size, or are not merged. */

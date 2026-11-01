@@ -3729,7 +3729,10 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
 
     for (i = 0; i < sections->count; ++i) {
         const as_section_t *s = &sections->items[i];
-        elf_section_t *es = elf_add_section(ctx.obj, s->name, s->type, s->flags);
+        char elf_name_buf[512];
+        /* (a link-order section's name is the name alone there: one of each symbol, all of that name) */
+        const char *elf_name = as_section_elf_name(s->name, elf_name_buf, sizeof(elf_name_buf));
+        elf_section_t *es = elf_name != NULL ? elf_add_section(ctx.obj, elf_name, s->type, s->flags) : NULL;
         if (es == NULL) {
             set_err(&ctx, "failed to add section %s", s->name);
             goto fail;
