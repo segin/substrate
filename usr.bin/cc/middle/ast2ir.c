@@ -14392,6 +14392,53 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
     }
 }
 
+static long *ct_array_bounds(const cc_ctype_t *t, int *out_nd, const cc_ctype_t **out_scalar);
+
+/**
+ * Write a structure member that is an array of more than one dimension,
+ * of scalars, from its initializer into the object's bytes: row by row,
+ * braced or elided, a string filling a row of characters.  Taken from
+ * the structure's own list (braces elided), it ends at the next member
+ * designator.
+ *
+ * @param tu           the translation unit
+ * @param m            the member
+ * @param src_list     the member's braced list, or the structure's
+ * @param cursor       the next item of @p src_list to take, advanced
+ * @param field_off    the member's offset in @p buf
+ * @param buf          the object's bytes
+ * @param buf_size     their size
+ * @param relocs       receives relocations
+ * @param reloc_count  their count
+ * @param diag         receives an error
+ * @return             0, or -1 with @p diag set
+ */
+static int flatten_scalar_member_rows(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
+                                      const cc_expr_t *src_list, size_t *cursor, long field_off, unsigned char *buf,
+                                      long buf_size, global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
+    const cc_ctype_t *scalar = NULL;
+    cc_expr_t upto = *src_list;
+    size_t stop = *cursor;
+    long *dims;
+    int nd = 0;
+    int rc;
+
+    while (stop < src_list->arg_count && !is_member_designator_expr(src_list->args[stop])) {
+        ++stop;
+    }
+    upto.arg_count = stop;
+    dims = ct_array_bounds(member_decl_ctype(m), &nd, &scalar);
+    if (dims == NULL || nd < 2) {
+        free(dims);
+        set_diag(diag, nd < 0 ? "out of memory" : "invalid array-like struct member extent");
+        return -1;
+    }
+    rc = flatten_scalar_array_init_cursor(tu, scalar, dims, nd, &upto, cursor, field_off, buf, buf_size, relocs,
+                                          reloc_count, diag);
+    free(dims);
+    return rc;
+}
+
 static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
                                                        const cc_expr_t *src_list, size_t *cursor, long field_off,
                                                        unsigned char *buf, long buf_size, global_reloc_t **relocs,
@@ -14425,6 +14472,11 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
     if (max_elems <= 0) {
         set_diag(diag, "invalid array-like struct member extent");
         return -1;
+    }
+    if (elem != NULL && elem->kind == CC_CT_ARRAY && ct_record_id(ct_array_scalar(member_decl_ctype(m))) < 0) {
+        /* more dimensions, of scalars: a row at a time, a string filling a row of characters */
+        return flatten_scalar_member_rows(tu, m, src_list, cursor, field_off, buf, buf_size, relocs, reloc_count,
+                                          diag);
     }
     for (j = 0; j < max_elems && *cursor < src_list->arg_count; ++j) {
         const cc_expr_t *raw = src_list->args[*cursor];
