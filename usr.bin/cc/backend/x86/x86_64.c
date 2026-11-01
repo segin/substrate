@@ -1242,9 +1242,11 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             /* -fcf-protection=branch: where an indirect call may land (CET IBT), as the MIR emitter has it */
             fputs("\tendbr64\n", fp);
         }
+        x86_emit_profile_call(fp, f, 0);
 
         fprintf(fp, "\tpushq %%rbp\n");
         fprintf(fp, "\tmovq %%rsp, %%rbp\n");
+        x86_emit_profile_call(fp, f, 1);
         if (emit_debug) {
             fprintf(fp, "\t.cfi_def_cfa_register %%rbp\n");
             if (src_path != NULL) {

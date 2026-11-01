@@ -4291,10 +4291,12 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         /* where an indirect call may land, under -fcf-protection=branch (CET IBT): Linux's kernel faults else */
         fputs(w == 8 ? "\tendbr64\n" : "\tendbr32\n", fp);
     }
+    x86_emit_profile_call(fp, f, 0);
     if (!s->fpo) {
         fprintf(fp, "\tpush%c %s\n\tmov%c %s, %s\n", sfx, xr_name(XR_BP, w), sfx, xr_name(XR_SP, w),
                 xr_name(XR_BP, w));
     }
+    x86_emit_profile_call(fp, f, 1);
     if (emit_debug) {
         fprintf(fp, "\t.cfi_def_cfa_register %s\n", xr_name(XR_BP, w));
         if (src_path != NULL) {

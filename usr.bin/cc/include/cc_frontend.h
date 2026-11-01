@@ -63,6 +63,7 @@ typedef unsigned long long cc_attr_flags_t;
 #define CC_ATTR_CONSTRUCTOR (1ULL << 31)
 #define CC_ATTR_DESTRUCTOR (1ULL << 32)
 #define CC_ATTR_GNU_INLINE (1ULL << 33) /* GNU89 inline meaning: `extern inline` defines nothing outside, `inline` does */
+#define CC_ATTR_NO_INSTRUMENT (1ULL << 34) /* no_instrument_function: no -pg call at its entry (Linux's notrace) */
 
 typedef enum {
     CC_BIN_ADD = 0,

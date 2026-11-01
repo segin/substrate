@@ -1584,6 +1584,40 @@ void x86_emit_return(FILE *fp, int pop) {
     fputs("\tjmp __x86_return_thunk\n", fp);
 }
 
+/**
+ * Print -pg's call at function @p f's entry, where gcc puts it: to __fentry__ first thing (after an endbr),
+ * under -mfentry and x86-64's default, or to mcount once the frame pointer is set up -- Linux's ftrace patches
+ * the former.  None in a function declared no_instrument_function (Linux's notrace, which its `inline`
+ * carries).  Under -mrecord-mcount the call's address goes in section __mcount_loc, where Linux finds the
+ * calls to patch; under -mnop-mcount it is a 5-byte nop, gcc's, for the program to make a call later.
+ *
+ * @param fp           the assembly output
+ * @param f            the function
+ * @param after_frame  0 at the entry, 1 once the frame pointer is set up: the call is printed at the one
+ *                     its kind has
+ */
+void x86_emit_profile_call(FILE *fp, const cc_ssa_function_t *f, int after_frame) {
+    const cc_options_t *o = cc_options_current();
+    int is_64bit = o->target == CC_TARGET_X86_64;
+
+    if (o->profile == 0 || (o->profile == 2) == (after_frame != 0) || (f->attr_flags & CC_ATTR_NO_INSTRUMENT) != 0) {
+        return;
+    }
+    if (o->record_mcount) {
+        fputs("1:", fp);
+    }
+    if (o->nop_mcount) {
+        fputs("\t.byte 0x0f, 0x1f, 0x44, 0x00, 0x00\n", fp);
+    } else {
+        /* (i386 position-independent code is refused with -pg: its PLT call would need %ebx the GOT's) */
+        fprintf(fp, "\tcall %s%s\n", o->profile == 2 ? "__fentry__" : "mcount",
+                is_64bit && (o->pic || o->pie) ? "@PLT" : "");
+    }
+    if (o->record_mcount) {
+        fprintf(fp, "\t.section __mcount_loc, \"a\",@progbits\n\t%s 1b\n\t.previous\n", is_64bit ? ".quad" : ".long");
+    }
+}
+
 void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags) {
     if (name == NULL || name[0] == '\0') {
         return;

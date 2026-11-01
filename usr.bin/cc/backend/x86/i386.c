@@ -3433,9 +3433,11 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
             fprintf(fp, "\t.cfi_def_cfa_offset 8\n");
             fprintf(fp, "\t.cfi_offset %%ebp, -8\n");
         }
+        x86_emit_profile_call(fp, f, 0);
 
         fprintf(fp, "\tpushl %%ebp\n");
         fprintf(fp, "\tmovl %%esp, %%ebp\n");
+        x86_emit_profile_call(fp, f, 1);
         if (emit_debug) {
             fprintf(fp, "\t.cfi_def_cfa_register %%ebp\n");
             if (src_path != NULL) {

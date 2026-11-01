@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 static cc_options_t g_current = {
-    {"gnu17", 2017, 1}, CC_TARGET_X86_64, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 6, 1, 1, 1, CC_FPMATH_AUTO, 0, 0, NULL, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    {"gnu17", 2017, 1}, CC_TARGET_X86_64, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 6, 1, 1, 1, CC_FPMATH_AUTO, 0, 0, NULL, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
 
 /**
@@ -53,6 +53,9 @@ void cc_options_init(cc_options_t *o) {
     o->indirect_cs_prefix = 0;
     o->return_thunk = 0;
     o->harden_sls = 0;
+    o->profile = 0;
+    o->record_mcount = 0;
+    o->nop_mcount = 0;
 }
 
 /**

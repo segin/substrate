@@ -5147,6 +5147,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_may_alias;
     int is_mode;
     int is_regparm;
+    int is_no_instrument;
     int has_num = 0;
     int has_num2 = 0;
     long num = 0;
@@ -5200,13 +5201,14 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_may_alias = tok_is_gnu_attr_name(p, "may_alias");
     is_mode = tok_is_gnu_attr_name(p, "mode");
     is_regparm = tok_is_gnu_attr_name(p, "regparm");
+    is_no_instrument = tok_is_gnu_attr_name(p, "no_instrument_function");
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
                 is_always_inline || is_gnu_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
                 is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_counted_by ||
                 is_constructor ||
                 is_destructor || is_transparent_union ||
-                is_vector_size || is_ext_vector_type || is_may_alias || is_mode || is_regparm;
+                is_vector_size || is_ext_vector_type || is_may_alias || is_mode || is_regparm || is_no_instrument;
 
     if (next_tok(p) != 0) {
         return -1;
@@ -5333,6 +5335,9 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         }
         if (is_flatten) {
             out_attrs->flags |= CC_ATTR_FLATTEN;
+        }
+        if (is_no_instrument) {
+            out_attrs->flags |= CC_ATTR_NO_INSTRUMENT;
         }
         if (is_target) {
             out_attrs->flags |= CC_ATTR_TARGET;

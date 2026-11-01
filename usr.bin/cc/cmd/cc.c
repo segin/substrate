@@ -107,6 +107,10 @@ typedef struct {
   int indirect_cs_prefix; /* -mindirect-branch-cs-prefix */
   int return_thunk;   /* -mfunction-return=thunk-extern (opt_function_return()) */
   int harden_sls;     /* -mharden-sls=: 1 returns, 2 indirect jumps (opt_harden_sls()) */
+  int pg;             /* -pg */
+  int fentry;         /* -mfentry 1, -mno-fentry 0, neither -1 (x86-64's default, i386's not) */
+  int record_mcount;  /* -mrecord-mcount, the last of it and -mno-record-mcount */
+  int nop_mcount;     /* -mnop-mcount, the last of it and -mno-nop-mcount */
 
   const char *std;
   const char *opt_level;
@@ -166,6 +170,18 @@ static int opt_level_num(const cc_opts_t *o) {
 }
 
 /**
+ * Whether -pg's call is to __fentry__, at the very entry, rather than to
+ * mcount once the frame is made: under -mfentry, and by default on
+ * x86-64, as gcc has it.
+ *
+ * @param o  the parsed command line
+ * @return   1 if it is, else 0
+ */
+static int profile_fentry(const cc_opts_t *o) {
+  return o->fentry > 0 || (o->fentry < 0 && o->target == CC_TARGET_X86_64);
+}
+
+/**
  * Collect the settings the compiler proper needs from the parsed
  * command line.
  *
@@ -211,6 +227,9 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->indirect_cs_prefix = o->indirect_cs_prefix;
   out->return_thunk = o->return_thunk;
   out->harden_sls = o->harden_sls;
+  out->profile = !o->pg ? 0 : profile_fentry(o) ? 2 : 1;
+  out->record_mcount = o->record_mcount;
+  out->nop_mcount = o->nop_mcount;
 }
 
 
@@ -1579,6 +1598,14 @@ static const driver_opt_t options[] = {
     {"-mindirect-branch-cs-prefix", OPT_FLAG, 0, opt_int, F(indirect_cs_prefix), 1},
     {"-mfunction-return=", OPT_PREFIX, 0, opt_function_return, 0, 0},
     {"-mharden-sls=", OPT_PREFIX, 0, opt_harden_sls, 0, 0},
+    /* -pg: a call at each function's entry (and the link's runtime gcrt1.o, as gcc's) */
+    {"-pg", OPT_FLAG, 0, opt_int, F(pg), 1},
+    {"-mfentry", OPT_FLAG, 0, opt_int, F(fentry), 1},
+    {"-mno-fentry", OPT_FLAG, 0, opt_int, F(fentry), 0},
+    {"-mrecord-mcount", OPT_FLAG, 0, opt_int, F(record_mcount), 1},
+    {"-mno-record-mcount", OPT_FLAG, 0, opt_int, F(record_mcount), 0},
+    {"-mnop-mcount", OPT_FLAG, 0, opt_int, F(nop_mcount), 1},
+    {"-mno-nop-mcount", OPT_FLAG, 0, opt_int, F(nop_mcount), 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
@@ -1794,6 +1821,19 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
   if (o->mode_E + o->mode_S + o->mode_c > 1) {
     o->parse_bad_arg = "-E/-S/-c";
     fprintf(stderr, "cc: -E, -S, and -c are mutually exclusive\n");
+    return -1;
+  }
+  if (o->pg && o->omit_frame_pointer) {
+    /* (gcc refuses them together, -mfentry or not) */
+    o->parse_bad_arg = "-pg";
+    fprintf(stderr, "cc: error: -pg and -fomit-frame-pointer are incompatible\n");
+    return -1;
+  }
+  if (o->pg && o->target == CC_TARGET_I386 && (o->pic || o->fpie)) {
+    /* gcc's i386 calls mcount through the PLT, with %ebx the GOT's address first; cc's prologue does not */
+    o->parse_bad_arg = "-pg";
+    fprintf(stderr, profile_fentry(o) ? "cc: error: -mfentry isn't supported for 32-bit in combination with -fpic\n"
+                                      : "cc: error: -pg with -fpic is not supported for 32-bit\n");
     return -1;
   }
 
@@ -2260,6 +2300,12 @@ static int run_ld(const cc_opts_t *o, const cc_strvec_t *objs, const char *out) 
      * bin/, sbin/, usr.bin/, lib/, usr.lib/ to .so.0).  Stop forcing
      * -static here and route the link through ld.so so cc-built
      * programs match every other binary on the system. */
+    if (o->pg) {
+      /* (gcc links gcrt1.o, whose startup and mcount profile the program: Substrate's libc has neither) */
+      fprintf(stderr, "cc: error: -pg: Substrate's libc has no profiling runtime to link\n");
+      free(argv);
+      return -1;
+    }
     if (gcc_print_runtime_file("crt0.o", o->target, crt0) != 0 ||
         gcc_print_runtime_file("libc.so.0", o->target, libc_path) != 0) {
       fprintf(stderr, "cc: failed to discover Substrate runtime paths\n");
@@ -2282,7 +2328,8 @@ static int run_ld(const cc_opts_t *o, const cc_strvec_t *objs, const char *out) 
                                              : CC_SUBSTRATE_LDSO64;
     argv[at++] = crt0;
 #else
-    if (gcc_print_runtime_file("crt1.o", o->target, crt1) != 0 ||
+    /* (-pg: gcrt1.o, whose startup profiles the program and writes gmon.out, as gcc links) */
+    if (gcc_print_runtime_file(o->pg ? "gcrt1.o" : "crt1.o", o->target, crt1) != 0 ||
         gcc_print_runtime_file("crti.o", o->target, crti) != 0 ||
         gcc_print_runtime_file("crtbegin.o", o->target, crtbegin) != 0 ||
         gcc_print_runtime_file("crtend.o", o->target, crtend) != 0 ||
@@ -2509,6 +2556,7 @@ int cc_main(int argc, char **argv) {
   o.i386_supports_mmx = 1;
   o.i386_fp_math_mode = CC_FPMATH_AUTO;
   o.implicit_funcdecl_override = -1;
+  o.fentry = -1;
 #ifdef CC_SUBSTRATE_BUILD
   o.target = CC_DEFAULT_TARGET;
 #else

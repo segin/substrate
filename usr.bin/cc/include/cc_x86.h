@@ -135,6 +135,11 @@ void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg);
  * -mfunction-return=thunk-extern a jump to __x86_return_thunk.
  */
 void x86_emit_return(FILE *fp, int pop);
+/**
+ * Print -pg's call at function @p f's entry (@p after_frame 0) or once its frame pointer is set up (1),
+ * whichever the call's kind has: __fentry__ the one, mcount the other.
+ */
+void x86_emit_profile_call(FILE *fp, const cc_ssa_function_t *f, int after_frame);
 /** Register a constructor or destructor in .init_array or .fini_array. */
 void emit_lifecycle_attr(FILE *fp, const char *section, const char *section_type, const char *name, int is_64bit);
 /** Write string literal @p literal of instruction @p instr_index, then return to section @p restore_sec. */

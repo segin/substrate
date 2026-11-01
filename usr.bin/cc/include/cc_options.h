@@ -81,6 +81,11 @@ typedef struct {
                                   program's (Linux's, with CONFIG_MITIGATION_RETHUNK) */
     int harden_sls;          /**< -mharden-sls=: an int3 after each return (1) and indirect jump (2), where the
                                   processor may run on straight past it (Linux's CONFIG_MITIGATION_SLS) */
+    int profile;             /**< -pg: a call at each function's entry, 0 none, 1 to mcount once the frame is
+                                  made, 2 to __fentry__ before anything (-mfentry, x86-64's default) -- Linux's
+                                  ftrace patches the latter */
+    int record_mcount;       /**< -mrecord-mcount: each such call's address in section __mcount_loc */
+    int nop_mcount;          /**< -mnop-mcount: the call a 5-byte nop, for the program to make one later */
 } cc_options_t;
 
 /**
