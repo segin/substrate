@@ -986,6 +986,10 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
             gi = find_function(m, call->sym);
         }
         g = gi >= 0 ? &m->funcs[gi] : NULL;
+        /* at -O0 only what must be: an always_inline function, as gcc inlines it there too */
+        if (g != NULL && opt_level <= 0 && (g->attr_flags & CC_ATTR_ALWAYS_INLINE) == 0) {
+            g = NULL;
+        }
         if (g != NULL && (size_t)gi != fi && ready[gi] &&
             (cc_inline_candidate(g) ||
              (once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&

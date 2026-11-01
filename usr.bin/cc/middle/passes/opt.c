@@ -3727,7 +3727,13 @@ static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag)
         oom = optimize_function(&m->funcs[i], opt_level) != 0;
     }
     /* gcc inlines static inline functions from -O1 and folds what they make constant */
-    if (!oom && opt_level > 0) {
+    if (!oom && opt_level <= 0) {
+        /*
+         * at -O0, always_inline functions only, as gcc: an asm's "i" operand of one's parameter is the caller's
+         * constant only so -- it was 0
+         */
+        oom = inline_module(m, opt_level) != 0;
+    } else if (!oom) {
         oom = inline_module(m, opt_level) != 0 || drop_effectless_calls(m, opt_level) != 0;
     }
     /* last, once nothing reasons about the slots: a scalar local is a value, not memory */
