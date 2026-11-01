@@ -589,6 +589,9 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
             return;
         }
         fprintf(fp, "\tjmp *.L%s_jt%d(,%s,%d)\n", fn_name, in->aux, xr_name(in->o[0].reg, word), word);
+        if ((cc_options_current()->harden_sls & 2) != 0) {
+            fputs("\tint3\n", fp); /* (-mharden-sls=indirect-jmp, as x86_emit_indirect_branch() has it) */
+        }
         return;
     case XI_JCC:
         fprintf(fp, "\tj%s .L%s_%d\n", xcc_name((xcc_t)in->cc), fn_name, in->label);

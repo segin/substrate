@@ -79,6 +79,8 @@ typedef struct {
                                   prefix, the byte Linux's rewriting of it in place needs */
     int return_thunk;        /**< -mfunction-return=thunk-extern: a return is a jump to __x86_return_thunk, the
                                   program's (Linux's, with CONFIG_MITIGATION_RETHUNK) */
+    int harden_sls;          /**< -mharden-sls=: an int3 after each return (1) and indirect jump (2), where the
+                                  processor may run on straight past it (Linux's CONFIG_MITIGATION_SLS) */
 } cc_options_t;
 
 /**

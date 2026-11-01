@@ -1531,7 +1531,8 @@ static void emit_compiler_stamp(FILE *fp) {
  * thunk-extern `call __x86_indirect_thunk_rax`, the retpoline the program supplies (Linux's, which objtool
  * finds every indirect branch of a CONFIG_MITIGATION_RETPOLINE kernel going through) -- and before one through
  * %r8..%r15 a cs prefix under -mindirect-branch-cs-prefix, as gcc puts it, which makes the call 6 bytes,
- * room for Linux to rewrite it in place as `lfence; call *%r11`.
+ * room for Linux to rewrite it in place as `lfence; call *%r11`.  After a jump, either way, an int3 under
+ * -mharden-sls=indirect-jmp (or all), as gcc puts one.
  *
  * @param fp   the assembly output
  * @param op   "call" or "jmp"
@@ -1542,12 +1543,15 @@ void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg) {
 
     if (!o->indirect_thunk) {
         fprintf(fp, "\t%s *%s\n", op, reg);
-        return;
+    } else {
+        if (o->indirect_cs_prefix && reg[1] == 'r' && reg[2] >= '0' && reg[2] <= '9') {
+            fputs("\tcs\n", fp);
+        }
+        fprintf(fp, "\t%s __x86_indirect_thunk_%s\n", op, reg + 1);
     }
-    if (o->indirect_cs_prefix && reg[1] == 'r' && reg[2] >= '0' && reg[2] <= '9') {
-        fputs("\tcs\n", fp);
+    if ((o->harden_sls & 2) != 0 && strcmp(op, "jmp") == 0) {
+        fputs("\tint3\n", fp);
     }
-    fprintf(fp, "\t%s __x86_indirect_thunk_%s\n", op, reg + 1);
 }
 
 /**
@@ -1555,7 +1559,8 @@ void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg) {
  * structure result's hidden pointer), or under thunk-extern `jmp __x86_return_thunk`, the program's (Linux's,
  * which objtool finds every return of a CONFIG_MITIGATION_RETHUNK kernel going through).  One popping its
  * arguments takes the return address into %ecx, which no result is in, pops them, and jumps to
- * __x86_return_thunk_ecx, as gcc does.
+ * __x86_return_thunk_ecx, as gcc does.  After a ret, an int3 under -mharden-sls=return (or all); a jump to
+ * the thunk has none, as gcc's has not.
  *
  * @param fp   the assembly output
  * @param pop  the bytes of arguments the return pops; 0 for none
@@ -1566,6 +1571,9 @@ void x86_emit_return(FILE *fp, int pop) {
             fprintf(fp, "\tret $%d\n", pop);
         } else {
             fputs("\tret\n", fp);
+        }
+        if ((cc_options_current()->harden_sls & 1) != 0) {
+            fputs("\tint3\n", fp);
         }
         return;
     }

@@ -106,6 +106,7 @@ typedef struct {
   int indirect_thunk; /* -mindirect-branch=thunk-extern (opt_indirect_branch()) */
   int indirect_cs_prefix; /* -mindirect-branch-cs-prefix */
   int return_thunk;   /* -mfunction-return=thunk-extern (opt_function_return()) */
+  int harden_sls;     /* -mharden-sls=: 1 returns, 2 indirect jumps (opt_harden_sls()) */
 
   const char *std;
   const char *opt_level;
@@ -209,6 +210,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->indirect_thunk = o->indirect_thunk;
   out->indirect_cs_prefix = o->indirect_cs_prefix;
   out->return_thunk = o->return_thunk;
+  out->harden_sls = o->harden_sls;
 }
 
 
@@ -1423,6 +1425,31 @@ static int opt_function_return(cc_opts_t *o, const driver_opt_t *d, const char *
 }
 
 /**
+ * -mharden-sls=none|all|return|indirect-jmp: after which of a return and an indirect jump an int3 stops
+ * the processor running on straight past it (straight-line speculation) -- Linux's CONFIG_MITIGATION_SLS,
+ * which objtool checks for.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_harden_sls(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  if (val != NULL && strcmp(val, "none") == 0) {
+    o->harden_sls = 0;
+  } else if (val != NULL && strcmp(val, "all") == 0) {
+    o->harden_sls = 3;
+  } else if (val != NULL && strcmp(val, "return") == 0) {
+    o->harden_sls = 1;
+  } else if (val != NULL && strcmp(val, "indirect-jmp") == 0) {
+    o->harden_sls = 2;
+  } else {
+    fprintf(stderr, "cc: error: %s%s: the argument must be none, all, return or indirect-jmp\n", as,
+            val != NULL ? val : "");
+    return -1;
+  }
+  return 0;
+}
+
+/**
  * -ftrivial-auto-var-init=zero|pattern|uninitialized: whether an automatic
  * variable with no initializer starts as zero, as Linux builds with, as
  * gcc's pattern (every byte 0xfe), or as whatever the stack held.
@@ -1551,6 +1578,7 @@ static const driver_opt_t options[] = {
     {"-mindirect-branch-register", OPT_FLAG, 0, NULL, 0, 0},
     {"-mindirect-branch-cs-prefix", OPT_FLAG, 0, opt_int, F(indirect_cs_prefix), 1},
     {"-mfunction-return=", OPT_PREFIX, 0, opt_function_return, 0, 0},
+    {"-mharden-sls=", OPT_PREFIX, 0, opt_harden_sls, 0, 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
