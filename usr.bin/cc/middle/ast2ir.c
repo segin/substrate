@@ -29,6 +29,8 @@ static int lower_nested_trampoline(const cc_translation_unit_t *tu, cc_ssa_funct
 static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym);
 static int eval_global_init_ld_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *out);
+static int eval_global_init_truth(const cc_translation_unit_t *tu, const cc_expr_t *e, int *out);
+static const cc_expr_t *global_init_string(const cc_translation_unit_t *tu, const cc_expr_t *e);
 static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const cc_expr_t *e, char **out_sym,
                                           long *out_addend);
 static const cc_expr_t *selected_generic_expr(const cc_expr_t *e);
@@ -13100,29 +13102,14 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         }
         return -1;
     case CC_EXPR_TERNARY: {
-        long long cv = 0;
-        double cf = 0.0;
-        int cisf = 0;
-        char *csym = NULL;
-        if (e->lhs == NULL || e->third == NULL) {
+        int truth = 0;
+
+        if (e->lhs == NULL || e->third == NULL || eval_global_init_truth(tu, e->lhs, &truth) != 0) {
             return -1;
         }
-        if (eval_global_init_expr(tu, e->lhs, &cv, &cf, &cisf, &csym) != 0) {
-            free(csym);
-            return -1;
-        }
-        free(csym);
-        if ((cisf ? cf : (double)cv) != 0.0) {
-            if (e->rhs == NULL) {
-                *out_i = cv;
-                *out_f = cf;
-                *out_is_float = cisf;
-                if (out_sym != NULL) {
-                    *out_sym = NULL;
-                }
-                return 0;
-            }
-            return eval_global_init_expr(tu, e->rhs, out_i, out_f, out_is_float, out_sym);
+        if (truth) {
+            /* GNU `x ?: y`: x itself */
+            return eval_global_init_expr(tu, e->rhs != NULL ? e->rhs : e->lhs, out_i, out_f, out_is_float, out_sym);
         }
         return eval_global_init_expr(tu, e->third, out_i, out_f, out_is_float, out_sym);
     }
@@ -13275,6 +13262,78 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
     default:
         return -1;
     }
+}
+
+/**
+ * Whether a symbol a static initializer's address names is weak, so that
+ * its address may be null: a weak object or function of the translation
+ * unit.
+ *
+ * @param tu   the translation unit
+ * @param sym  the symbol, perhaps with an addend (`name+8`)
+ * @return     1 or 0
+ */
+static int global_init_symbol_is_weak(const cc_translation_unit_t *tu, const char *sym) {
+    char name[256];
+    size_t n = strcspn(sym, "+-");
+    long i;
+
+    if (n >= sizeof(name)) {
+        return 0;
+    }
+    memcpy(name, sym, n);
+    name[n] = '\0';
+    for (i = cc_tu_global_first(tu, name); i >= 0; i = cc_tu_global_next(tu, i)) {
+        if ((tu->globals[i].attr_flags & CC_ATTR_WEAK) != 0) {
+            return 1;
+        }
+    }
+    for (i = cc_tu_function_first(tu, name); i >= 0; i = cc_tu_function_next(tu, i)) {
+        if ((tu->funcs[i].attr_flags & CC_ATTR_WEAK) != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * The truth of a static initializer's `?:` condition, as gcc folds it: a
+ * number's, or true for the address of a string literal or of a symbol
+ * that is not weak.
+ *
+ * @param tu   the translation unit
+ * @param e    the condition
+ * @param out  receives 1 or 0
+ * @return     0, or -1 if the condition is no constant
+ */
+static int eval_global_init_truth(const cc_translation_unit_t *tu, const cc_expr_t *e, int *out) {
+    long long iv = 0;
+    double fv = 0.0;
+    int isf = 0;
+    char *sym = NULL;
+
+    if (global_init_string(tu, e) != NULL) {
+        /* a string literal's address is not null */
+        *out = 1;
+        return 0;
+    }
+    if (eval_global_init_expr(tu, e, &iv, &fv, &isf, &sym) != 0) {
+        free(sym);
+        return -1;
+    }
+    if (sym != NULL) {
+        /* an object's or function's address is not null, unless the symbol is weak: not a constant then (gcc) */
+        int weak = global_init_symbol_is_weak(tu, sym);
+
+        free(sym);
+        if (weak) {
+            return -1;
+        }
+        *out = 1;
+        return 0;
+    }
+    *out = isf ? fv != 0.0 : iv != 0;
+    return 0;
 }
 
 static int eval_global_init_ld_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *out) {
@@ -13999,16 +14058,12 @@ static const cc_expr_t *global_init_string(const cc_translation_unit_t *tu, cons
             }
             e = e->lhs;
         } else if (e->kind == CC_EXPR_TERNARY && e->lhs != NULL && e->rhs != NULL && e->third != NULL) {
-            long long cv = 0;
-            double cf = 0.0;
-            int cisf = 0;
-            char *csym = NULL;
+            int truth = 0;
 
-            if (eval_global_init_expr(tu, e->lhs, &cv, &cf, &cisf, &csym) != 0 || csym != NULL) {
-                free(csym);
+            if (eval_global_init_truth(tu, e->lhs, &truth) != 0) {
                 return NULL;
             }
-            e = (cisf ? cf != 0.0 : cv != 0) ? e->rhs : e->third;
+            e = truth ? e->rhs : e->third;
         } else if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_COMMA) {
             e = e->rhs;
         } else {
