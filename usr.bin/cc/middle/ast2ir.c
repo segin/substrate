@@ -13035,6 +13035,10 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         }
         return 0;
     case CC_EXPR_ADDR:
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
+            /* `&*p` is p, a null one too (C11 6.5.3.2p3): Linux's `&sysrq_showlocks_op`, a `(*(T *)NULL)` */
+            return eval_global_init_expr(tu, e->lhs->lhs, out_i, out_f, out_is_float, out_sym);
+        }
         *out_i = 0;
         *out_f = 0.0;
         *out_is_float = 0;
