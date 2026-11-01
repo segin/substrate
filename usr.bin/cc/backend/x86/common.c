@@ -1494,6 +1494,49 @@ static void emit_bss_section(FILE *fp, const char *section_name) {
     }
 }
 
+/**
+ * The section function @p f's code goes in: its section attribute's; under -ffunction-sections one of its
+ * own, .text.<name> -- .text.hot.<name> or .text.unlikely.<name> for a hot or cold one -- as gcc names them;
+ * else .text.
+ *
+ * @param f    the function
+ * @param buf  receives a name made for it
+ * @param cap  the size of @p buf
+ * @return     the section's name (@p buf, the attribute's, or ".text")
+ */
+const char *x86_function_section(const cc_ssa_function_t *f, char *buf, size_t cap) {
+    const char *sec = f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL;
+    int n;
+
+    if (!cc_options_current()->function_sections ||
+        (sec != NULL && strcmp(sec, ".text.hot") != 0 && strcmp(sec, ".text.unlikely") != 0)) {
+        return sec != NULL ? sec : ".text";
+    }
+    /* (hot and cold are where ast2ir put them, not a section the program named) */
+    n = snprintf(buf, cap, "%s.%s", sec != NULL ? sec : ".text", f->name);
+    return n >= 0 && (size_t)n < cap ? buf : sec != NULL ? sec : ".text";
+}
+
+/**
+ * The section object @p name of section @p base (".data", ".bss", ".rodata") goes in under -fdata-sections:
+ * one of its own, <base>.<name>, as gcc names it; else @p base.
+ *
+ * @param base  the section it would be in
+ * @param name  the object's name
+ * @param buf   receives a name made for it
+ * @param cap   the size of @p buf
+ * @return      the section's name
+ */
+const char *x86_data_section(const char *base, const char *name, char *buf, size_t cap) {
+    int n;
+
+    if (!cc_options_current()->data_sections) {
+        return base;
+    }
+    n = snprintf(buf, cap, "%s.%s", base, name);
+    return n >= 0 && (size_t)n < cap ? buf : base;
+}
+
 void emit_text_section(FILE *fp, const char *section_name) {
     if (section_name != NULL && section_name[0] != '\0') {
         fprintf(fp, "\t.section %s,\"ax\",@progbits\n", section_name);
@@ -2211,8 +2254,15 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
         long align = default_object_align(sz);
         int is_static = (g->storage & CC_STORAGE_STATIC) != 0;
         int is_extern = (g->storage & CC_STORAGE_EXTERN) != 0;
-        const char *data_sec = g->attr_section != NULL && g->attr_section[0] != '\0' ? g->attr_section : ".data";
-        const char *bss_sec = g->attr_section != NULL && g->attr_section[0] != '\0' ? g->attr_section : ".bss";
+        int has_sec = g->attr_section != NULL && g->attr_section[0] != '\0';
+        char data_buf[1024];
+        char bss_buf[1024];
+        /* (its section attribute's, -fdata-sections' own, or none: .data and .bss) */
+        const char *data_sec =
+            has_sec ? g->attr_section : x86_data_section(".data", g->name, data_buf, sizeof(data_buf));
+        const char *bss_sec = has_sec ? g->attr_section : x86_data_section(".bss", g->name, bss_buf, sizeof(bss_buf));
+        const char *data_arg = strcmp(data_sec, ".data") != 0 ? data_sec : NULL;
+        const char *bss_arg = strcmp(bss_sec, ".bss") != 0 ? bss_sec : NULL;
 
         if (pointer_size == 4 && g->attr_section != NULL && g->attr_section[0] != '\0' && g->type_align > 0) {
             /*
@@ -2257,7 +2307,7 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
             continue;
         }
         if (!g->has_init) {
-            emit_bss_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? bss_sec : NULL);
+            emit_bss_section(fp, bss_arg);
             if (!is_static) {
                 if ((g->attr_flags & CC_ATTR_WEAK) != 0) {
                     fprintf(fp, ".weak %s\n", g->name);
@@ -2274,7 +2324,7 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
             fprintf(fp, "\t.zero %ld\n", sz);
             continue;
         }
-        emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
+        emit_data_section(fp, data_arg);
         if (!is_static) {
             if ((g->attr_flags & CC_ATTR_WEAK) != 0) {
                 fprintf(fp, ".weak %s\n", g->name);
@@ -2299,7 +2349,7 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
                         fprintf(fp, "\t.section .rodata\n");
                         fprintf(fp, ".L__cc_gstream_%zu_%zu:\n", i, j);
                         emit_asciz_literal(fp, it->init_str);
-                        emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
+                        emit_data_section(fp, data_arg);
                     }
                 }
 
@@ -2411,7 +2461,7 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_garr_%zu_%zu:\n", i, j);
                 emit_asciz_literal(fp, it->init_str);
-                emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
+                emit_data_section(fp, data_arg);
             }
             for (j = 0; j < g->init_item_count; ++j) {
                 const cc_ssa_global_init_item_t *it = &g->init_items[j];
@@ -2463,7 +2513,7 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_gstr_%zu:\n", i);
                 emit_asciz_literal(fp, g->init_str);
-                emit_data_section(fp, g->attr_section != NULL && g->attr_section[0] != '\0' ? data_sec : NULL);
+                emit_data_section(fp, data_arg);
                 if (pointer_size == 4) {
                     fprintf(fp, "\t.long .L__cc_gstr_%zu\n", i);
                 } else {

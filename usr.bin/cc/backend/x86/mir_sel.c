@@ -4283,7 +4283,8 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     const xsel_target_t *t = s->t;
     int w = t->word;
     char sfx = w == 8 ? 'q' : 'l';
-    const char *func_sec = (f->attr_section != NULL && f->attr_section[0] != '\0') ? f->attr_section : ".text";
+    char func_sec_buf[1024];
+    const char *func_sec = x86_function_section(f, func_sec_buf, sizeof(func_sec_buf));
     const int *sv = s->fpo ? s->fp_saved : t->saved; /* the callee-saved registers, in the order pushed */
     int nsv = s->fpo ? s->fp_nsaved : t->nsaved;
     unsigned callee = 0;
@@ -4342,7 +4343,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         }
     }
     fprintf(fp, "\n");
-    emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
+    emit_text_section(fp, strcmp(func_sec, ".text") != 0 ? func_sec : NULL);
     if ((f->storage & CC_STORAGE_STATIC) == 0 &&
         !(((f->storage & CC_STORAGE_INLINE) != 0) && ((f->storage & CC_STORAGE_EXTERN) == 0))) {
         fprintf(fp, (f->attr_flags & CC_ATTR_WEAK) != 0 ? ".weak %s\n" : ".globl %s\n", f->name);

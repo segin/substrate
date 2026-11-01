@@ -125,6 +125,8 @@ typedef struct {
   int default_visibility; /* -fvisibility=: 0 default, 1 hidden, 2 protected, 3 internal (opt_visibility()) */
   int no_80387;       /* -mno-80387, the last of it and -m80387 */
   int no_fp_ret_in_387; /* -mno-fp-ret-in-387, the last of it and -mfp-ret-in-387 */
+  int function_sections; /* -ffunction-sections, the last of it and -fno-function-sections */
+  int data_sections;  /* -fdata-sections, the last of it and -fno-data-sections */
 
   const char *std;
   const char *opt_level;
@@ -257,6 +259,8 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->default_visibility = o->default_visibility;
   out->no_80387 = o->no_80387;
   out->no_fp_ret_in_387 = o->no_fp_ret_in_387;
+  out->function_sections = o->function_sections;
+  out->data_sections = o->data_sections;
 }
 
 
@@ -1776,6 +1780,10 @@ static const driver_opt_t options[] = {
     {"-m80387", OPT_FLAG, 0, opt_int, F(no_80387), 0},
     {"-mno-fp-ret-in-387", OPT_FLAG, 0, opt_int, F(no_fp_ret_in_387), 1},
     {"-mfp-ret-in-387", OPT_FLAG, 0, opt_int, F(no_fp_ret_in_387), 0},
+    {"-ffunction-sections", OPT_FLAG, 0, opt_int, F(function_sections), 1},
+    {"-fno-function-sections", OPT_FLAG, 0, opt_int, F(function_sections), 0},
+    {"-fdata-sections", OPT_FLAG, 0, opt_int, F(data_sections), 1},
+    {"-fno-data-sections", OPT_FLAG, 0, opt_int, F(data_sections), 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},

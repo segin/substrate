@@ -124,6 +124,10 @@ long x86_64_param_size_bytes(const cc_ssa_function_t *f, int param_index, long f
 /* common.c: sections, symbols, string literals */
 
 void emit_text_section(FILE *fp, const char *section_name);
+/** The section function @p f's code goes in (its attribute's, -ffunction-sections' own, or ".text"). */
+const char *x86_function_section(const cc_ssa_function_t *f, char *buf, size_t cap);
+/** The section an object @p name of section @p base goes in: -fdata-sections' <base>.<name>, else @p base. */
+const char *x86_data_section(const char *base, const char *name, char *buf, size_t cap);
 void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags);
 /**
  * Print an indirect call or jump, @p op "call" or "jmp", through register @p reg (its name with the %): the

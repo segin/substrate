@@ -1142,7 +1142,8 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
 
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *f = &m->funcs[i];
-        const char *func_sec = (f->attr_section != NULL && f->attr_section[0] != '\0') ? f->attr_section : ".text";
+        char func_sec_buf[1024];
+        const char *func_sec = x86_function_section(f, func_sec_buf, sizeof(func_sec_buf));
         slot_layout_t lay;
         int_reg_state_t ist;
         size_t j;
@@ -1238,7 +1239,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         }
 
         fprintf(fp, "\n");
-        emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
+        emit_text_section(fp, strcmp(func_sec, ".text") != 0 ? func_sec : NULL);
         if ((f->storage & CC_STORAGE_STATIC) == 0 &&
             !(((f->storage & CC_STORAGE_INLINE) != 0) && ((f->storage & CC_STORAGE_EXTERN) == 0))) {
             if ((f->attr_flags & CC_ATTR_WEAK) != 0) {

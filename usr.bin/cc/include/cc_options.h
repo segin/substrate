@@ -108,6 +108,8 @@ typedef struct {
                                   default (0), hidden (1), protected (2), internal (3) */
     int no_80387;            /**< -mno-80387: no x87 instruction; floating point that needs one is refused */
     int no_fp_ret_in_387;    /**< -mno-fp-ret-in-387: no result in %st0; a function or call with one is refused */
+    int function_sections;   /**< -ffunction-sections: each function in a section of its own, .text.<name> */
+    int data_sections;       /**< -fdata-sections: each object in one of its own, .data.<name>, .bss.<name> */
 } cc_options_t;
 
 /**
