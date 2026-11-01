@@ -4427,7 +4427,8 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         }
     }
     /* tail calls, where nothing the callee may reach is in this frame (no frame object's address made) */
-    tail_ok = !emit_debug && !s->has_goto && !s->has_dynalloc && s->nbind == 0 && !(s->ssp_obj >= 0 && w == 4);
+    tail_ok = !emit_debug && !s->has_goto && !s->has_dynalloc && s->nbind == 0 && !(s->ssp_obj >= 0 && w == 4) &&
+              !cc_options_current()->no_sibling_calls;
     for (i = 0; tail_ok && i < s->xf.nins; ++i) {
         const xinst_t *in = &s->xf.ins[i];
 

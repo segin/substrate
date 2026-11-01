@@ -127,6 +127,7 @@ typedef struct {
   int no_fp_ret_in_387; /* -mno-fp-ret-in-387, the last of it and -mfp-ret-in-387 */
   int function_sections; /* -ffunction-sections, the last of it and -fno-function-sections */
   int data_sections;  /* -fdata-sections, the last of it and -fno-data-sections */
+  int no_sibling_calls; /* -fno-optimize-sibling-calls, the last of it and -foptimize-sibling-calls */
 
   const char *std;
   const char *opt_level;
@@ -261,6 +262,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->no_fp_ret_in_387 = o->no_fp_ret_in_387;
   out->function_sections = o->function_sections;
   out->data_sections = o->data_sections;
+  out->no_sibling_calls = o->no_sibling_calls;
 }
 
 
@@ -1820,6 +1822,8 @@ static const driver_opt_t options[] = {
     {"-fPIE -fpie", OPT_FLAG, FWD_C, opt_int, F(fpie), 1},
     {"-fno-PIE -fno-pie", OPT_FLAG, FWD_C, opt_int, F(fpie), 0},
     {"-fno-PIC -fno-pic", OPT_FLAG, FWD_C, opt_int, F(pic), 0},
+    {"-fno-optimize-sibling-calls", OPT_FLAG, 0, opt_int, F(no_sibling_calls), 1},
+    {"-foptimize-sibling-calls", OPT_FLAG, 0, opt_int, F(no_sibling_calls), 0},
 
     /* the preprocessor */
     {"-I -D -U -iquote -isystem -idirafter", OPT_LETTER, FWD_CPP | FWD_C, NULL, 0, 0},

@@ -110,6 +110,8 @@ typedef struct {
     int no_fp_ret_in_387;    /**< -mno-fp-ret-in-387: no result in %st0; a function or call with one is refused */
     int function_sections;   /**< -ffunction-sections: each function in a section of its own, .text.<name> */
     int data_sections;       /**< -fdata-sections: each object in one of its own, .data.<name>, .bss.<name> */
+    int no_sibling_calls;    /**< -fno-optimize-sibling-calls: no tail call, a call and a return, so that each
+                                  caller is on the stack (Linux keeps some for its stack traces) */
 } cc_options_t;
 
 /**
