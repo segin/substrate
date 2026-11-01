@@ -71,4 +71,27 @@ if ! diff -bB "$CC_TMP/g.i" "$CC_TMP/c.i" >"$CC_TMP/d"; then
 	cat "$CC_TMP/d"
 	exit 1
 fi
+# what parts them is no character of a string # makes: Linux's trace headers
+# `#include __stringify(PATH/name.h)` of a PATH ending in `/`
+mkdir -p "$CC_TMP/inc/sub"
+echo 'int from_sub = 2;' >"$CC_TMP/inc/sub/vt.h"
+cat >"$CC_TMP/i.c" <<'EOF2'
+#define __stringify_1(x...) #x
+#define __stringify(x...) __stringify_1(x)
+#define TRACE_INCLUDE_PATH sub/
+#define TRACE_INCLUDE_FILE vt
+#define __TRACE_INCLUDE(system) __stringify(TRACE_INCLUDE_PATH/system.h)
+#define TRACE_INCLUDE(system) __TRACE_INCLUDE(system)
+const char *s = TRACE_INCLUDE(TRACE_INCLUDE_FILE);
+#include TRACE_INCLUDE(TRACE_INCLUDE_FILE)
+EOF2
+want=$(gcc -E -P -I"$CC_TMP/inc" "$CC_TMP/i.c")
+if ! got=$("$CC_BIN" -E -P -I"$CC_TMP/inc" "$CC_TMP/i.c" 2>"$CC_TMP/i.err"); then
+	echo "run_pp_avoid_paste: a stringified include: $(head -1 "$CC_TMP/i.err")"
+	exit 1
+fi
+if [ "$got" != "$want" ]; then
+	echo "run_pp_avoid_paste: a stringified include gives [$got], gcc's [$want]"
+	exit 1
+fi
 echo "run_pp_avoid_paste: ok"

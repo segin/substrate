@@ -41,6 +41,14 @@
 #define PP_EMPTY_ARG_MARKER '\x1f'
 #define PP_HIDE_MACRO_BEGIN '\x1d'
 #define PP_HIDE_MACRO_END '\x1c'
+/**
+ * Between two tokens an expansion put side by side that would read as
+ * one (pp_avoid_paste()): a token break, a space in the result, and
+ * nothing in a string `#` makes of it -- gcc's stringification spells the
+ * tokens, and Linux's `__stringify(PATH/name.h)` of a PATH ending in `/`
+ * is a file name with `//` in it.
+ */
+#define PP_PASTE_GUARD '\x1e'
 
 typedef struct {
     char *name;
@@ -3995,6 +4003,11 @@ static char *stringify_macro_arg(const char *arg) {
     }
     while (arg != NULL && arg[i] != '\0') {
         unsigned char c = (unsigned char)arg[i];
+        if (c == (unsigned char)PP_PASTE_GUARD) {
+            /* a token break, no character of the spelling */
+            i++;
+            continue;
+        }
         if (c == '\\' || c == '"') {
             if (sb_append_c(&out, '\\') != 0 || sb_append_c(&out, (char)c) != 0) {
                 sb_free(&out);
@@ -4189,7 +4202,7 @@ static char *replace_ident_token(const char *text, const char *from, const char 
 
 /** Whether @p c is one of the expansion's markers, which are no text. */
 static int pp_is_marker(char c) {
-    return c == PP_EMPTY_ARG_MARKER || c == PP_HIDE_MACRO_BEGIN || c == PP_HIDE_MACRO_END;
+    return c == PP_EMPTY_ARG_MARKER || c == PP_HIDE_MACRO_BEGIN || c == PP_HIDE_MACRO_END || c == PP_PASTE_GUARD;
 }
 
 /**
@@ -4211,9 +4224,12 @@ static int pp_would_paste(const sb_t *out, char b) {
     size_t k;
 
     while (n > 0 && pp_is_marker(out->buf[n - 1])) {
+        if (out->buf[n - 1] == PP_PASTE_GUARD) {
+            return 0; /* parted already */
+        }
         n--;
     }
-    if (n == 0 || b == '\0' || b == ' ' || b == '\t' || b == '\n') {
+    if (n == 0 || b == '\0' || b == ' ' || b == '\t' || b == '\n' || b == PP_PASTE_GUARD) {
         return 0;
     }
     a = out->buf[n - 1];
@@ -4270,10 +4286,10 @@ static int pp_would_paste(const sb_t *out, char b) {
  * @return 0, or -1 when out of memory
  */
 static int pp_avoid_paste(sb_t *out, const char *next) {
-    while (*next != '\0' && pp_is_marker(*next)) {
+    while (*next != '\0' && pp_is_marker(*next) && *next != PP_PASTE_GUARD) {
         next++;
     }
-    return pp_would_paste(out, *next) ? sb_append_c(out, ' ') : 0;
+    return pp_would_paste(out, *next) ? sb_append_c(out, PP_PASTE_GUARD) : 0;
 }
 
 static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_args, size_t arg_count, int allow_va_opt,
@@ -5420,7 +5436,7 @@ static char *unmask_hidden_macro_tokens(const char *src) {
             i++;
             continue;
         }
-        if (sb_append_c(&out, src[i]) != 0) {
+        if (sb_append_c(&out, src[i] == PP_PASTE_GUARD ? ' ' : src[i]) != 0) {
             sb_free(&out);
             return NULL;
         }
