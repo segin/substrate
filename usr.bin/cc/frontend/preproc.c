@@ -4186,6 +4186,95 @@ static char *replace_ident_token(const char *text, const char *from, const char 
     return out.buf != NULL ? out.buf : cc_strdup("");
 }
 
+/** Whether @p c is one of the expansion's markers, which are no text. */
+static int pp_is_marker(char c) {
+    return c == PP_EMPTY_ARG_MARKER || c == PP_HIDE_MACRO_BEGIN || c == PP_HIDE_MACRO_END;
+}
+
+/**
+ * Whether text ending in @p out, followed by text starting with @p b,
+ * would read as one token where an expansion put two side by side: `-`
+ * and `-1` as `--1`.  Tokens are not text, and `NF_DROP_ERR(-EPERM)`,
+ * `(-x)` of `-1`, is the minus of a minus, but cc's preprocessor works on
+ * text and its result is read again.  gcc's rule (cpp_avoid_paste()):
+ * the punctuators that join, a name or number and what continues it, a
+ * number and `.`, `+` or `-`.
+ *
+ * @param out  the text so far
+ * @param b    the next character
+ * @return     1 if a space must part them, else 0
+ */
+static int pp_would_paste(const sb_t *out, char b) {
+    size_t n = out->len;
+    char a;
+    size_t k;
+
+    while (n > 0 && pp_is_marker(out->buf[n - 1])) {
+        n--;
+    }
+    if (n == 0 || b == '\0' || b == ' ' || b == '\t' || b == '\n') {
+        return 0;
+    }
+    a = out->buf[n - 1];
+    switch (a) {
+    case '>':
+        return b == '>' || b == '=';
+    case '<':
+        return b == '<' || b == '=' || b == '%' || b == ':';
+    case '+':
+        return b == '+' || b == '=';
+    case '-':
+        return b == '-' || b == '=' || b == '>';
+    case '&':
+        return b == '&' || b == '=';
+    case '|':
+        return b == '|' || b == '=';
+    case ':':
+        return b == ':' || b == '>';
+    case '*':
+    case '!':
+    case '^':
+    case '=':
+        return b == '=';
+    case '/':
+        return b == '=' || b == '*' || b == '/';
+    case '%':
+        return b == '=' || b == '>' || b == ':';
+    case '#':
+        return b == '#' || b == '%';
+    case '.':
+        return b == '.' || b == '%' || isdigit((unsigned char)b);
+    default:
+        break;
+    }
+    if (!is_ident_char((unsigned char)a)) {
+        return 0;
+    }
+    if (is_ident_char((unsigned char)b) || b == '"' || b == '\'') {
+        return 1;
+    }
+    /* a number (its run starts with a digit, or with a dot) and what continues one */
+    k = n;
+    while (k > 0 && (is_ident_char((unsigned char)out->buf[k - 1]) || out->buf[k - 1] == '.')) {
+        k--;
+    }
+    return (isdigit((unsigned char)out->buf[k]) || out->buf[k] == '.') && (b == '.' || b == '+' || b == '-');
+}
+
+/**
+ * Part text ending in @p out from @p next, an expansion's text or what
+ * follows it, with a space where they would read as one token
+ * (pp_would_paste()).
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int pp_avoid_paste(sb_t *out, const char *next) {
+    while (*next != '\0' && pp_is_marker(*next)) {
+        next++;
+    }
+    return pp_would_paste(out, *next) ? sb_append_c(out, ' ') : 0;
+}
+
 static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_args, size_t arg_count, int allow_va_opt,
                            int allow_gnu_ext) {
     sb_t out;
@@ -4361,7 +4450,8 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
                                 sb_free(&out);
                                 return NULL;
                             }
-                        } else if (sb_append(&out, aval) != 0) {
+                        } else if ((!paste_left && pp_avoid_paste(&out, aval) != 0) || sb_append(&out, aval) != 0 ||
+                                   (!paste_right && pp_avoid_paste(&out, m->body + j) != 0)) {
                             free(va_args_exp);
                             free(va_args_raw);
                             sb_free(&out);
@@ -4398,7 +4488,8 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
                         sb_free(&out);
                         return NULL;
                     }
-                } else if (sb_append(&out, va_val) != 0) {
+                } else if ((!paste_left && pp_avoid_paste(&out, va_val) != 0) || sb_append(&out, va_val) != 0 ||
+                           (!paste_right && pp_avoid_paste(&out, m->body + j) != 0)) {
                     free(va_args_exp);
                     free(va_args_raw);
                     sb_free(&out);
@@ -4853,7 +4944,9 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                                         free(alias_args[ai]);
                                     }
                                     free(alias_args);
-                                    if (sb_append(&out, exp_body) != 0 || sb_append_n(&out, src + j, call_end - j) != 0) {
+                                    if (pp_avoid_paste(&out, exp_body) != 0 || sb_append(&out, exp_body) != 0 ||
+                                        pp_avoid_paste(&out, src + j) != 0 ||
+                                        sb_append_n(&out, src + j, call_end - j) != 0) {
                                         free(alias_name);
                                         free(exp_body);
                                         free(name);
@@ -4870,7 +4963,8 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                             free(alias_name);
                         }
                     }
-                    if (sb_append(&out, exp_body) != 0) {
+                    if (pp_avoid_paste(&out, exp_body) != 0 || sb_append(&out, exp_body) != 0 ||
+                        pp_avoid_paste(&out, src + j) != 0) {
                         free(exp_body);
                         free(name);
                         sb_free(&out);
@@ -5045,7 +5139,8 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         return NULL;
                     }
                     exp_subst = masked_subst;
-                    if (sb_append(&out, exp_subst) != 0) {
+                    if (pp_avoid_paste(&out, exp_subst) != 0 || sb_append(&out, exp_subst) != 0 ||
+                        pp_avoid_paste(&out, src + call_end) != 0) {
                         free(exp_subst);
                         free(subst);
                         free(name);
