@@ -1725,6 +1725,45 @@ const char *x86_ssp_guard(char *buf, size_t cap) {
     return n >= 0 && (size_t)n < cap ? buf : NULL;
 }
 
+/** x86_for_each_use()'s test for a floating value among an instruction's operands (function_computes_float()). */
+typedef struct {
+    const cc_ssa_function_t *f;
+    int found;
+} float_use_t;
+
+static void note_float_use(int v, void *ctx) {
+    float_use_t *u = (float_use_t *)ctx;
+
+    if (v >= 0 && cc_ssa_value_class(u->f, v) == CC_VAL_F64) {
+        u->found = 1;
+    }
+}
+
+/**
+ * Whether an instruction of function @p f makes or uses a floating value.  The values of instructions folded
+ * away stay in its table: `(int)3.5`, Linux's `(s32)(3.141592653589 * 32768.0)`, left a double there, and the
+ * function was refused under -mno-80387 though nothing computed it.
+ *
+ * @param f  the function
+ * @return   1 if one does, else 0
+ */
+static int function_computes_float(const cc_ssa_function_t *f) {
+    float_use_t u;
+    size_t j;
+
+    u.f = f;
+    u.found = 0;
+    for (j = 0; !u.found && j < f->instr_count; ++j) {
+        const cc_ssa_instr_t *in = &f->instrs[j];
+
+        if (in->dst >= 0 && cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
+            return 1;
+        }
+        x86_for_each_use(f, in, note_float_use, &u);
+    }
+    return u.found;
+}
+
 /**
  * Refuse what -mno-80387 and -mno-fp-ret-in-387 forbid in function @p f, as gcc refuses it, rather than make
  * x87 code it was told not to: a result in %st0 -- its own (any floating one on i386, a long double on
@@ -1744,7 +1783,6 @@ int x86_check_x87_options(const cc_ssa_function_t *f, int legacy, cc_diag_t *dia
     const char *why = NULL;
     char msg[512];
     size_t j;
-    int v;
 
     if (!o->no_80387 && !o->no_fp_ret_in_387) {
         return 0;
@@ -1761,16 +1799,12 @@ int x86_check_x87_options(const cc_ssa_function_t *f, int legacy, cc_diag_t *dia
             why = "calls a function whose result is in the x87's %st0";
         }
     }
-    for (v = 0; why == NULL && o->no_80387 && legacy && v < f->value_count; ++v) {
-        if (cc_ssa_value_class(f, v) == CC_VAL_F64) {
-            why = "has floating point, which cc computes on the x87 here";
-        }
+    if (why == NULL && o->no_80387 && legacy && function_computes_float(f)) {
+        why = "has floating point, which cc computes on the x87 here";
     }
-    for (v = 0; why == NULL && o->no_80387 && is_64bit && o->no_sse && v < f->value_count; ++v) {
+    if (why == NULL && o->no_80387 && is_64bit && o->no_sse && function_computes_float(f)) {
         /* (-mgeneral-regs-only, or -mno-sse -mno-80387: neither SSE nor the x87 to compute it, as gcc refuses) */
-        if (cc_ssa_value_class(f, v) == CC_VAL_F64) {
-            why = "has floating point, with neither SSE nor the x87";
-        }
+        why = "has floating point, with neither SSE nor the x87";
     }
     if (why == NULL) {
         return 0;
