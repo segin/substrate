@@ -3203,8 +3203,12 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
     const cc_global_t *ident_global = NULL;
     const cc_ctype_t *ptr_fnt = NULL; /* a call through a pointer: the function type pointed to */
     if (e->ident != NULL) {
-        callee = find_fn(tu, e->ident);
         ident_var_idx = var_find_visible(vars, var_count, e->ident, depth);
+        /* a variable of the name hides the function (a parameter `down` is called, not down()), as in sema */
+        if (ident_var_idx < 0 || lower_var_ctype(&vars[ident_var_idx]) == NULL ||
+            lower_var_ctype(&vars[ident_var_idx])->unqual->kind == CC_CT_FUNCTION) {
+            callee = find_fn(tu, e->ident);
+        }
         ident_global = find_global(tu, e->ident);
         if (callee == NULL && ident_var_idx < 0 && cc_builtin_atomic_generic(e->ident) != CC_AGEN_NONE) {
             return lower_atomic_generic(tu, sf, ctx, vars, var_count, depth, e, diag);

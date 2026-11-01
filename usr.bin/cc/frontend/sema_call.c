@@ -39,8 +39,10 @@ static const cc_ctype_t *sema_callee_ret_ctype(const cc_ctype_t *t);
 static int sx_is_arith(const cc_expr_t *x);
 static int printf_like_format_index(const char *name, size_t *idx_out);
 static char *rewrite_printf_long_double_format(const char *literal);
-static const cc_function_t *generic_selected_function(const cc_translation_unit_t *tu, const cc_expr_t *e);
-static const cc_function_t *infer_callee_function_expr(const cc_translation_unit_t *tu, const cc_expr_t *e);
+static const cc_function_t *generic_selected_function(const cc_translation_unit_t *tu, const cc_expr_t *e,
+                                                      var_entry_t *vars, size_t var_count, int depth);
+static const cc_function_t *infer_callee_function_expr(const cc_translation_unit_t *tu, const cc_expr_t *e,
+                                                       var_entry_t *vars, size_t var_count, int depth);
 static int builtin_bswap_bits(const char *name);
 static builtin_kind_t builtin_kind(const char *name);
 static int atomic_memorder_is_valid(long mo);
@@ -106,7 +108,8 @@ static char *rewrite_printf_long_double_format(const char *literal) {
     return NULL;
 }
 
-static const cc_function_t *generic_selected_function(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+static const cc_function_t *generic_selected_function(const cc_translation_unit_t *tu, const cc_expr_t *e,
+                                                      var_entry_t *vars, size_t var_count, int depth) {
     const cc_expr_t *sel;
     if (tu == NULL || e == NULL || e->kind != CC_EXPR_GENERIC || e->args == NULL || e->arg_count == 0) {
         return NULL;
@@ -115,13 +118,28 @@ static const cc_function_t *generic_selected_function(const cc_translation_unit_
         return NULL;
     }
     sel = e->args[e->generic_selected];
-    if (sel == NULL || sel->kind != CC_EXPR_IDENT || sel->ident == NULL) {
+    if (sel == NULL || sel->kind != CC_EXPR_IDENT || sel->ident == NULL ||
+        vars_find_visible(vars, var_count, sel->ident, depth) >= 0) {
         return NULL;
     }
     return find_function(tu, sel->ident);
 }
 
-static const cc_function_t *infer_callee_function_expr(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+/**
+ * The function a callee expression designates, `*f` and `&f` and a
+ * conditional of two included: by its name, unless a variable of the name
+ * hides it -- `(*down)(...)` of a parameter `down` calls the parameter,
+ * not Linux's semaphore down().
+ *
+ * @param tu         the translation unit
+ * @param e          the callee expression
+ * @param vars       the variables in scope
+ * @param var_count  their number
+ * @param depth      the scope depth
+ * @return           the function, or NULL if it names none
+ */
+static const cc_function_t *infer_callee_function_expr(const cc_translation_unit_t *tu, const cc_expr_t *e,
+                                                       var_entry_t *vars, size_t var_count, int depth) {
     const cc_function_t *a;
     const cc_function_t *b;
 
@@ -130,20 +148,20 @@ static const cc_function_t *infer_callee_function_expr(const cc_translation_unit
     }
     switch (e->kind) {
     case CC_EXPR_IDENT:
-        if (e->ident == NULL) {
+        if (e->ident == NULL || vars_find_visible(vars, var_count, e->ident, depth) >= 0) {
             return NULL;
         }
         return find_function(tu, e->ident);
     case CC_EXPR_ADDR:
     case CC_EXPR_DEREF:
     case CC_EXPR_CAST:
-        return infer_callee_function_expr(tu, e->lhs);
+        return infer_callee_function_expr(tu, e->lhs, vars, var_count, depth);
     case CC_EXPR_TERNARY:
         if (e->rhs == NULL || e->third == NULL) {
             return NULL;
         }
-        a = infer_callee_function_expr(tu, e->rhs);
-        b = infer_callee_function_expr(tu, e->third);
+        a = infer_callee_function_expr(tu, e->rhs, vars, var_count, depth);
+        b = infer_callee_function_expr(tu, e->third, vars, var_count, depth);
         if (a == NULL || b == NULL) {
             return NULL;
         }
@@ -152,7 +170,7 @@ static const cc_function_t *infer_callee_function_expr(const cc_translation_unit
         }
         return a;
     case CC_EXPR_GENERIC:
-        return generic_selected_function(tu, e);
+        return generic_selected_function(tu, e, vars, var_count, depth);
     default:
         return NULL;
     }
@@ -1406,7 +1424,15 @@ int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *
         return sema_builtin_complex(tu, e, vars, var_count, depth, diag);
     }
     if (e->ident != NULL) {
-        callee = find_function(tu, e->ident);
+        int shadow = vars_find_visible(vars, var_count, e->ident, depth);
+
+        /*
+         * a variable of the name hides the function: Linux's walk_tg_tree_from() has a parameter `down`, a
+         * pointer to a function, and calls it -- not the semaphore's down() a header declares
+         */
+        if (shadow < 0 || vars[shadow].ctype == NULL || vars[shadow].ctype->unqual->kind == CC_CT_FUNCTION) {
+            callee = find_function(tu, e->ident);
+        }
     }
     {
         int rc = sema_check_builtin_call(tu, e, vars, var_count, depth, bk, bswap_bits, callee, diag);
@@ -1543,10 +1569,10 @@ int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *
         /* a builtin with no rule of its own, or C89's undeclared function: extern int f(...) */
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
     } else {
-        const cc_function_t *fn = generic_selected_function(tu, e->lhs);
+        const cc_function_t *fn = generic_selected_function(tu, e->lhs, vars, var_count, depth);
 
         if (fn == NULL) {
-            fn = infer_callee_function_expr(tu, e->lhs);
+            fn = infer_callee_function_expr(tu, e->lhs, vars, var_count, depth);
         }
         if (fn == NULL && sema_callee_ret_ctype(cc_ct_decay(e->lhs->ctype)) == NULL) {
             sema_diag(diag, "called object is not a function or function pointer");
