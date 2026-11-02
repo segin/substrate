@@ -381,6 +381,9 @@ static int phase_merge(ld_link_t *l) {
         if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
             err = elf_link_plan_set_section_rank_hooks(plan, script_input_rank, script_rank_gap, ctx);
         }
+        if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
+            err = elf_link_plan_set_section_fill_hook(plan, script_rank_fill, ctx);
+        }
     } else if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
         err = elf_link_plan_set_section_name_hook(plan, default_output_name, NULL);
     }

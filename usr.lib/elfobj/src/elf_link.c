@@ -412,15 +412,13 @@ static elf_err_t append_section_data(struct elf_section *dst, const uint8_t *src
     return ELF_OK;
 }
 
-/**
- * Fill @p n bytes at @p p, padding before an input section in output
- * section @p dst, as GNU ld's bfd_arch_i386_fill() fills it: in code on
- * x86-64 (and x32) the 10-byte NOP over and over and the NOP of what is
- * left, on i386 `66 90` over and over and a `90`; zeros otherwise.  A
+/*
+ * A gap in an output section: a linker script's fill if it gives one,
+ * else the default, GNU ld's bfd_arch_i386_fill() in code.  A
  * disassembler -- Linux's objtool on vmlinux.o -- reads through the
  * padding to the next function, where zeros take it out of step.
  */
-static void fill_alignment_padding(const struct elf_section *dst, uint8_t *p, size_t n) {
+void elf_section_fill_gap(const elf_section_t *dst, const uint8_t *pattern, size_t len, uint8_t *p, size_t n) {
     static const uint8_t nops[10][10] = {
         {0x90},
         {0x66, 0x90},
@@ -434,7 +432,14 @@ static void fill_alignment_padding(const struct elf_section *dst, uint8_t *p, si
         {0x66, 0x2e, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
     };
     size_t step;
+    size_t i;
 
+    if (pattern != NULL && len != 0) {
+        for (i = 0; i < n; ++i) {
+            p[i] = pattern[i % len];
+        }
+        return;
+    }
     if ((dst->flags & SHF_EXECINSTR) == 0 || dst->obj == NULL ||
         (dst->obj->machine != EM_X86_64 && dst->obj->machine != EM_386)) {
         memset(p, 0, n);
@@ -497,7 +502,8 @@ static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, u
         if (buf == NULL) {
             return ELF_ERR_OOM;
         }
-        fill_alignment_padding(dst, buf + dst->data_size, (size_t)newsz - dst->data_size);
+        elf_section_fill_gap(dst, dst->gap_fill, dst->gap_fill_len, buf + dst->data_size,
+                             (size_t)newsz - dst->data_size);
         dst->data = buf;
         dst->owns_data = 1;
         dst->data_size = (size_t)newsz;
@@ -752,7 +758,11 @@ static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj
 }
 
 /* Pad merged section @p dst out to @p offset (which it has not passed). */
-static elf_err_t pad_merged_section_to(struct elf_section *dst, uint64_t offset) {
+/*
+ * Grow @p dst to @p offset: with @p filled a gap, filled as
+ * elf_section_fill_gap() fills it; without, zeros (what was bss).
+ */
+static elf_err_t pad_merged_section_to(struct elf_section *dst, uint64_t offset, int filled) {
     uint64_t base = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
     uint8_t *buf;
 
@@ -770,7 +780,12 @@ static elf_err_t pad_merged_section_to(struct elf_section *dst, uint64_t offset)
     if (buf == NULL) {
         return ELF_ERR_OOM;
     }
-    memset(buf + dst->data_size, 0, (size_t)offset - dst->data_size);
+    if (filled) {
+        elf_section_fill_gap(dst, dst->gap_fill, dst->gap_fill_len, buf + dst->data_size,
+                             (size_t)offset - dst->data_size);
+    } else {
+        memset(buf + dst->data_size, 0, (size_t)offset - dst->data_size);
+    }
     dst->data = buf;
     dst->owns_data = 1;
     dst->data_size = (size_t)offset;
@@ -810,7 +825,7 @@ static elf_err_t rank_begin(elf_link_plan_t *plan, struct elf_section *dst, cons
     if (align > dst->addralign) {
         dst->addralign = align;
     }
-    err = pad_merged_section_to(dst, offset);
+    err = pad_merged_section_to(dst, offset, 1);
     if (err != ELF_OK) {
         return err;
     }
@@ -1025,7 +1040,7 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                 dst->type = SHT_PROGBITS;
                 dst->size = 0;
                 dst->data_size = 0;
-                err = pad_merged_section_to(dst, zeros);
+                err = pad_merged_section_to(dst, zeros, 0);
                 if (err != ELF_OK) {
                     free(inflated);
                     return err;
@@ -1105,6 +1120,13 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
             if (plan->rank_hook != NULL) {
                 /* the first of its rank starts where the script's statements before it say */
                 rank = plan->rank_hook(src->name, input->name, plan->rank_user);
+                dst->gap_fill = NULL;
+                dst->gap_fill_len = 0;
+                if (plan->fill_hook != NULL &&
+                    plan->fill_hook(out_name, rank, &dst->gap_fill, &dst->gap_fill_len, plan->fill_user) != 0) {
+                    free(inflated);
+                    return ELF_ERR_FORMAT;
+                }
                 err = rank_begin(plan, dst, out_name, rank);
                 if (err != ELF_OK) {
                     free(inflated);
@@ -1118,7 +1140,7 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
             }
             if (src->type == SHT_NOBITS && dst->type != SHT_NOBITS) {
                 /* zeros into a section with contents: written out */
-                err = pad_merged_section_to(dst, sec_bases[j] + src->size);
+                err = pad_merged_section_to(dst, sec_bases[j] + src->size, 0);
             } else {
                 err = append_section_data(dst, src_data, src_size, NULL);
                 if (err == ELF_OK && src->type == SHT_NOBITS && src->size > 0) {
@@ -1621,6 +1643,16 @@ elf_err_t elf_link_plan_set_section_rank_hooks(elf_link_plan_t *plan, elf_link_s
     plan->rank_hook = rank;
     plan->gap_hook = gap;
     plan->rank_user = user;
+    return ELF_OK;
+}
+
+elf_err_t elf_link_plan_set_section_fill_hook(elf_link_plan_t *plan, elf_link_section_fill_hook_t hook,
+                                              void *user) {
+    if (plan == NULL) {
+        return ELF_ERR_STATE;
+    }
+    plan->fill_hook = hook;
+    plan->fill_user = user;
     return ELF_OK;
 }
 

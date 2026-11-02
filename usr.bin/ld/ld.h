@@ -413,7 +413,8 @@ typedef enum {
     LDS_ST_ASSERT,              /* ASSERT(expr, "message") */
     LDS_ST_OUTSEC,              /* name [addr] : { body } [>region] [:phdr] */
     LDS_ST_INPUT,               /* file(sections...), KEEP(...) */
-    LDS_ST_DATA                 /* BYTE(expr) and its kind: not implemented */
+    LDS_ST_DATA,                /* BYTE(expr) and its kind: not implemented */
+    LDS_ST_FILL                 /* FILL(expr) */
 } lds_stmt_kind_t;
 
 typedef enum {
@@ -423,6 +424,14 @@ typedef enum {
 } lds_where_t;
 
 typedef struct lds_stmt lds_stmt_t;
+
+/* A gap the location counter left in an output section, and its fill. */
+typedef struct {
+    uint64_t off;               /* from the start of the section */
+    uint64_t len;
+    const uint8_t *fill;        /* the pattern, or NULL for the default */
+    size_t fill_len;
+} lds_fill_run_t;
 
 typedef struct {
     lds_stmt_t *items;
@@ -454,6 +463,11 @@ struct lds_stmt {
     defsymvec_t gap_locals;     /* OUTSEC, in the merge: symbols its body sets, as offsets in it */
     char *region;               /* OUTSEC: >region */
     uint64_t pad;               /* OUTSEC: what its body adds to its end */
+    uint8_t *fill;              /* OUTSEC: =fill; FILL: its value -- the bytes repeated over a gap */
+    size_t fill_len;            /* 0: none given */
+    lds_fill_run_t *runs;       /* OUTSEC, from the walk: the gaps the location counter leaves in it */
+    size_t run_count;
+    size_t run_cap;
     int keep;                   /* INPUT: KEEP() */
     int ext_have;               /* INPUT: its sections went in at [ext_start, ext_end) of the output section */
     uint64_t ext_start;
@@ -776,6 +790,7 @@ int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_input_rank(const char *section, const char *file, void *user);
 int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *align, void *user);
+int script_rank_fill(const char *name, int rank, const uint8_t **pattern, size_t *len, void *user);
 void script_note_extents(ld_ctx_t *ctx, const elf_link_plan_t *plan);
 int script_make_data_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out);

@@ -38,5 +38,6 @@ run:
 	./test_build_id.sh
 	./test_code_padding.sh
 	./test_local_global_same_name.sh
+	./test_script_fill.sh
 
 clean:

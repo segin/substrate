@@ -881,6 +881,26 @@ is true of both kinds.
 A statement may use a symbol that a later statement of the script
 defines.
 .Pp
+Every gap in an output section, the padding an input section's
+alignment leaves and the room an assignment to
+.Ql \&.
+makes, is filled with the fill in effect where it is: the last
+.Ic FILL Ns Pq Ar expr
+before it in the section's body, else the section's
+.Ql = Ns Ar fill ,
+else no-ops in code
+.Pq what GNU ld's x86 back end writes
+and zeros elsewhere.
+A fill written as a hex number is that string of bytes, as long as it
+is written
+.Po
+.Ql 0x123
+is the bytes 01 23
+.Pc ;
+any other expression is worked out as the script is read, a
+nonconstant one being an error, and is 4 bytes, most significant first.
+Each gap starts the pattern over.
+.Pp
 Read and not acted on:
 .Ic OUTPUT_FORMAT ,
 .Ic OUTPUT_ARCH ,
@@ -898,8 +918,7 @@ Read and not acted on:
 the load address
 .Pq Ic AT ,
 .Ic SUBALIGN ,
-.Ic FILL
-and the fill value of an output section, and the sorting of
+and the sorting of
 .Ic SORT .
 Refused:
 .Ic BYTE ,

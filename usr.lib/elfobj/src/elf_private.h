@@ -134,6 +134,8 @@ struct elf_section {
     struct elf_reloc **relocs;
     size_t reloc_count;
     size_t reloc_cap;
+    const uint8_t *gap_fill;    /* in the merge: the fill of the gaps the sections going in leave, */
+    size_t gap_fill_len;        /* 0 for the default (elf_section_fill_gap()) */
 };
 
 struct elf_segment {
@@ -273,6 +275,8 @@ struct elf_link_plan {
     elf_link_section_rank_hook_t rank_hook;
     elf_link_section_gap_hook_t gap_hook;
     void *rank_user;
+    elf_link_section_fill_hook_t fill_hook;
+    void *fill_user;
     struct elf_link_rank_extent *extents; /* with rank hooks: where each rank's sections went */
     size_t extent_count;
     size_t extent_cap;

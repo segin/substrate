@@ -1330,6 +1330,13 @@ typedef int (*elf_link_section_rank_hook_t)(const char *section_name, const char
  * input descriptions.  0, or -1 to fail the link. */
 typedef int (*elf_link_section_gap_hook_t)(const char *output_name, int rank, uint64_t *offset,
                                            uint64_t *align, void *user);
+/* The fill of the gaps before and among the sections of a rank in an
+ * output section: a linker script's `=fill` or the FILL() before the
+ * input description, *pattern its *len bytes repeated from the start of
+ * each gap; *len 0 for the default (no-ops in code, zeros elsewhere).
+ * The pattern must last the link.  0, or -1 to fail the link. */
+typedef int (*elf_link_section_fill_hook_t)(const char *output_name, int rank, const uint8_t **pattern,
+                                            size_t *len, void *user);
 typedef int (*elf_link_archive_hook_t)(const char *archive_path, const char *member_name, void *user);
 typedef int (*elf_link_gc_hook_t)(const elf_section_t *section, void *user);
 typedef void (*elf_link_incremental_hook_t)(const char *key, const char *value, void *user);
@@ -1504,6 +1511,31 @@ elf_err_t elf_link_plan_set_section_name_hook(elf_link_plan_t *plan,
 elf_err_t elf_link_plan_set_merge_sections(elf_link_plan_t *plan, int enable);
 elf_err_t elf_link_plan_set_section_rank_hooks(elf_link_plan_t *plan, elf_link_section_rank_hook_t rank,
                                                elf_link_section_gap_hook_t gap, void *user);
+/**
+ * @brief How the gaps among the sections of each rank are filled (with the rank hooks).
+ *
+ * @param plan the link
+ * @param hook the fill of a rank's gaps, or NULL for the default
+ * @param user passed to @p hook
+ * @return ELF_OK, or ELF_ERR_STATE for no plan
+ */
+elf_err_t elf_link_plan_set_section_fill_hook(elf_link_plan_t *plan, elf_link_section_fill_hook_t hook,
+                                              void *user);
+/**
+ * @brief Fill a gap in an output section as GNU ld fills it.
+ *
+ * With a pattern, its bytes over and over from the start of the gap; without, in code on x86-64 (and
+ * x32) the 10-byte NOP over and over and the NOP of what is left, on i386 `66 90` over and over and a
+ * `90`, as bfd_arch_i386_fill() makes them; zeros otherwise.
+ *
+ * @param section the output section the gap is in
+ * @param pattern the fill's bytes, or NULL for the default
+ * @param len     how many bytes @p pattern has; 0 for the default
+ * @param p       the gap
+ * @param n       its size
+ */
+void elf_section_fill_gap(const elf_section_t *section, const uint8_t *pattern, size_t len, uint8_t *p,
+                          size_t n);
 /* After elf_link_plan_link() with rank hooks: where the sections of a rank
  * lie in an output section, [*start, *end); 1, or 0 if it has none. */
 int elf_link_plan_rank_extent(const elf_link_plan_t *plan, const char *output_name, int rank,

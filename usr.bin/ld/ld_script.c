@@ -1571,6 +1571,8 @@ static void lds_stmtvec_free(lds_stmtvec_t *v) {
         strvec_free(&st->phdrs);
         strvec_free(&st->patterns);
         strvec_free(&st->excludes);
+        free(st->fill);
+        free(st->runs);
     }
     free(v->items);
     memset(v, 0, sizeof(*v));
@@ -1891,6 +1893,84 @@ static int lp_expr(lds_parser_t *p, lds_tokvec_t *out, int colon, int juxta) {
         return -1;
     }
     return 0;
+}
+
+/**
+ * A fill's value, `=fill` or FILL(fill), read into @p st, as GNU ld's
+ * exp_get_fill() makes it: a number written in hex (0x..., no K or M)
+ * is its digits as a string of bytes, as long as they are, a leading
+ * 0 supplying an odd one's first; anything else is worked out as the
+ * script is read and is 4 bytes, big-endian.
+ *
+ * @param p      the parser, at the expression
+ * @param st     the output section or FILL statement it is the fill of
+ * @param juxta  the expression ends where a second operand follows a
+ *               first with nothing between (the next output section
+ *               after `=fill`)
+ * @return 0, or -1 with the error reported
+ */
+static int lp_fill(lds_parser_t *p, lds_stmt_t *st, int juxta) {
+    lds_tokvec_t e;
+    size_t lo, hi;
+    int rc = -1;
+
+    memset(&e, 0, sizeof(e));
+    if (lp_expr(p, &e, 0, juxta) != 0) {
+        goto out;
+    }
+    /* (0x90) is 0x90: no node of its own in GNU ld's tree */
+    lo = 0;
+    hi = e.count;
+    while (hi - lo >= 3 && e.items[lo].kind == LDS_TOK_LPAREN && e.items[hi - 1].kind == LDS_TOK_RPAREN) {
+        lo++;
+        hi--;
+    }
+    free(st->fill);
+    st->fill = NULL;
+    st->fill_len = 0;
+    if (hi - lo == 1 && e.items[lo].kind == LDS_TOK_NUMBER && e.items[lo].text != NULL &&
+        e.items[lo].text[0] == '0' && (e.items[lo].text[1] == 'x' || e.items[lo].text[1] == 'X') &&
+        e.items[lo].text[2] != '\0' && strspn(e.items[lo].text + 2, "0123456789abcdefABCDEF") ==
+        strlen(e.items[lo].text + 2)) {
+        const char *s = e.items[lo].text + 2;
+        size_t n = strlen(s);
+        size_t i;
+
+        st->fill_len = (n + 1) / 2;
+        st->fill = (uint8_t *)calloc(1, st->fill_len);
+        if (st->fill == NULL) {
+            goto out;
+        }
+        /* from the last digit back: an odd count leaves the first byte one digit */
+        for (i = 0; i < n; ++i) {
+            char c = s[n - 1 - i];
+            unsigned d = c <= '9' ? (unsigned)(c - '0') : (unsigned)((c | 0x20) - 'a' + 10);
+
+            st->fill[st->fill_len - 1 - i / 2] |= (uint8_t)(i % 2 == 0 ? d : d << 4);
+        }
+    } else {
+        lds_eval_ctx_t ec;
+        uint64_t v;
+
+        memset(&ec, 0, sizeof(ec));
+        if (lds_eval_expr_slice(&ec, e.items, 0, e.count, &v) != 0) {
+            lp_error(p, &e.items[0], "nonconstant expression for fill value");
+            goto out;
+        }
+        st->fill = (uint8_t *)malloc(4);
+        if (st->fill == NULL) {
+            goto out;
+        }
+        st->fill[0] = (uint8_t)(v >> 24);
+        st->fill[1] = (uint8_t)(v >> 16);
+        st->fill[2] = (uint8_t)(v >> 8);
+        st->fill[3] = (uint8_t)v;
+        st->fill_len = 4;
+    }
+    rc = 0;
+out:
+    lds_tokvec_free(&e);
+    return rc;
 }
 
 /*
@@ -2253,7 +2333,12 @@ static int lp_body_statement(lds_parser_t *p, lds_stmtvec_t *v) {
             rc = lp_expect(p, LDS_TOK_RPAREN, "expected ')'");
         }
     } else if (strcmp(head.text, "FILL") == 0 && t->kind == LDS_TOK_LPAREN) {
-        rc = lp_skip_group(p, LDS_TOK_LPAREN, LDS_TOK_RPAREN, "FILL( is not closed");
+        lds_stmt_t *st = lds_stmt_new(v, LDS_ST_FILL, LDS_IN_BODY, &head);
+
+        lp_take(p);
+        if (st != NULL && lp_fill(p, st, 0) == 0) {
+            rc = lp_expect(p, LDS_TOK_RPAREN, "expected ')' after FILL");
+        }
     } else if (lds_word_in(head.text, nothing)) {
         rc = 0;
     } else if (t->kind == LDS_TOK_LPAREN) {
@@ -2396,15 +2481,9 @@ static int lp_outsec(lds_parser_t *p, lds_stmtvec_t *v, const lds_tok_t *name) {
             lp_take(p);
         } else if (t->kind == LDS_TOK_EQUAL) {
             lp_take(p);
-            t = lp_peek(p, 0);
-            if (t == NULL) {
+            if (lp_fill(p, st, 1) != 0) {
                 return -1;
             }
-            if (t->kind != LDS_TOK_NUMBER && t->kind != LDS_TOK_IDENT) {
-                lp_error(p, t, "expected the fill value");
-                return -1;
-            }
-            lp_take(p);
         } else {
             if (t->kind == LDS_TOK_COMMA) {
                 lp_take(p);
@@ -3003,6 +3082,45 @@ int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *alig
     return 0;
 }
 
+/**
+ * The fill in effect at statement @p k of output section @p os's body:
+ * the last FILL() before it, or the section's `=fill`.
+ */
+static void script_fill_at(const lds_stmt_t *os, size_t k, const uint8_t **pattern, size_t *len) {
+    *pattern = os->fill;
+    *len = os->fill_len;
+    while (k-- > 0) {
+        if (os->body.items[k].kind == LDS_ST_FILL) {
+            *pattern = os->body.items[k].fill;
+            *len = os->body.items[k].fill_len;
+            return;
+        }
+    }
+}
+
+/*
+ * The elfobj fill hook: the gaps among the sections of input description
+ * `rank` of output section `name` take the fill in effect there.
+ */
+int script_rank_fill(const char *name, int rank, const uint8_t **pattern, size_t *len, void *user) {
+    ld_ctx_t *ctx = (ld_ctx_t *)user;
+    size_t i;
+
+    *pattern = NULL;
+    *len = 0;
+    for (i = 0; ctx->script != NULL && i < ctx->script->stmts.count; ++i) {
+        const lds_stmt_t *os = &ctx->script->stmts.items[i];
+
+        if (os->kind == LDS_ST_OUTSEC && !os->discard && strcmp(os->at.text, name) == 0) {
+            if (rank >= 0 && (size_t)rank <= os->body.count) {
+                script_fill_at(os, (size_t)rank, pattern, len);
+            }
+            return 0;
+        }
+    }
+    return 0;
+}
+
 /* After the merge: where each input description's sections went in its
  * output section, for the walk to place what stands between them. */
 void script_note_extents(ld_ctx_t *ctx, const elf_link_plan_t *plan) {
@@ -3499,11 +3617,35 @@ static int lw_data(lds_walk_t *w, const lds_stmt_t *os, const lds_stmt_t *st, ui
     return 0;
 }
 
+/**
+ * Note the gap statement @p k of output section @p os's body leaves,
+ * [@p off, @p off + @p len) of the section, for script_fill_gaps() to
+ * fill with the fill in effect there: each gap starts the pattern over,
+ * as GNU ld's padding statements do.
+ */
+static int lw_fill_run(lds_stmt_t *os, size_t k, uint64_t off, uint64_t len) {
+    lds_fill_run_t *r;
+
+    if (len == 0) {
+        return 0;
+    }
+    if (ld_vec_room(&os->runs, &os->run_cap, os->run_count, sizeof(os->runs[0])) != 0) {
+        return -1;
+    }
+    r = &os->runs[os->run_count++];
+    r->off = off;
+    r->len = len;
+    script_fill_at(os, k, &r->fill, &r->fill_len);
+    return 0;
+}
+
 static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t start, uint64_t size,
                    uint64_t *end_out) {
     size_t first = os->body.count, last = 0, k;
     uint64_t end = start + size;
     int have_extents = 0;
+
+    os->run_count = 0;
 
     for (k = 0; sec != NULL && k < os->body.count; ++k) {
         have_extents |= os->body.items[k].kind == LDS_ST_INPUT && os->body.items[k].ext_have;
@@ -3555,6 +3697,9 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
                 cur += lds_data_size(st->at.text);
                 continue;
             }
+            if (st->kind == LDS_ST_FILL) {
+                continue;
+            }
             if (st->kind == LDS_ST_ASSERT) {
                 if (lw_assert(w, st, 1, dot) != 0) {
                     return -1;
@@ -3566,6 +3711,9 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
             }
             if (dot < start + cur) {
                 lds_report_error(NULL, &st->at, "the location counter may not move backwards");
+                return -1;
+            }
+            if (lw_fill_run(os, k, cur, dot - start - cur) != 0) {
                 return -1;
             }
             cur = dot - start;
@@ -3605,6 +3753,9 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
             end += lds_data_size(st->at.text);
             continue;
         }
+        if (st->kind == LDS_ST_FILL) {
+            continue;
+        }
         if (size != 0 && first != os->body.count && k > first && k < last) {
             lds_report_error(NULL, &st->at,
                              "a statement between two input section descriptions is not supported");
@@ -3627,6 +3778,9 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
         if (!at_start) {
             if (dot < end) {
                 lds_report_error(NULL, &st->at, "the location counter may not move backwards");
+                return -1;
+            }
+            if (lw_fill_run(os, k, end - start, dot - end) != 0) {
                 return -1;
             }
             end = dot;
@@ -3669,6 +3823,7 @@ static int lw_run(lds_walk_t *w, size_t lo, size_t hi) {
                 return -1;
             }
             st->pad = 0;
+            st->run_count = 0;
             if (st->expr.count == 0) {
                 dot = end;
             }
@@ -3949,17 +4104,19 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
         elf_section_t *sec;
         size_t size;
 
-        if (os->kind != LDS_ST_OUTSEC || os->pad == 0 || (sec = elf_find_section(out, os->at.text)) == NULL) {
+        if (os->kind != LDS_ST_OUTSEC || (os->pad == 0 && os->run_count == 0) ||
+            (sec = elf_find_section(out, os->at.text)) == NULL) {
             continue;
         }
         size = (size_t)elf_section_size(sec);
         if (elf_section_type(sec) == SHT_NOBITS) {
-            if (set_section_zero_data(sec, size + (size_t)os->pad) != 0) {
+            if (os->pad != 0 && set_section_zero_data(sec, size + (size_t)os->pad) != 0) {
                 return -1;
             }
         } else {
             const void *old = elf_section_data(sec, &size);
             uint8_t *buf = (uint8_t *)calloc(1, size + (size_t)os->pad);
+            size_t r;
             int ok;
 
             if (buf == NULL) {
@@ -3968,6 +4125,14 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
             if (old != NULL && size != 0) {
                 memcpy(buf, old, size);
             }
+            /* the gaps the location counter left: the fill in effect where each was made */
+            for (r = 0; r < os->run_count; ++r) {
+                const lds_fill_run_t *run = &os->runs[r];
+
+                if (run->off <= size + os->pad && run->len <= size + os->pad - run->off) {
+                    elf_section_fill_gap(sec, run->fill, run->fill_len, buf + run->off, (size_t)run->len);
+                }
+            }
             ok = elf_section_set_data(sec, buf, size + (size_t)os->pad) == ELF_OK;
             free(buf);
             if (!ok) {
@@ -3975,6 +4140,7 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
             }
         }
         os->pad = 0;
+        os->run_count = 0;
     }
     /* the data statements' values, in the bytes the padding made for them */
     for (i = 0; i < sc->data_count; ++i) {
