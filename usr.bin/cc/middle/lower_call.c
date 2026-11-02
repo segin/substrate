@@ -1689,9 +1689,14 @@ static int lower_inline_mem(cc_ssa_function_t *sf, int kind, int dst, int src, l
  */
 /** Where a va_list a builtin reads or writes is: a local variable, or memory at an address. */
 typedef struct {
-    int var_idx; /**< the local variable, or -1 */
-    int addr;    /**< else the address of the va_list object */
+    int var_idx;   /**< the local variable, or -1 */
+    int addr;      /**< else the address of the va_list object */
+    int is_record; /**< x86-64's va_list object, an array of one `struct __va_list_tag`: addr is the record's,
+                        which the builtins read and write in place (a va_list parameter is a pointer to one) */
 } va_list_slot_t;
+
+/** The bytes of x86-64's `struct __va_list_tag`. */
+#define VA_LIST_RECORD_BYTES 24
 
 /**
  * Find the va_list lvalue @p ap names: a local variable by name, or any
@@ -1707,11 +1712,20 @@ static int va_list_find(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, 
 
     slot->var_idx = -1;
     slot->addr = -1;
+    slot->is_record = 0;
     if (ap == NULL) {
         set_diag(diag, "missing va_list operand");
         return -1;
     }
-    if (ap->kind == CC_EXPR_IDENT && ap->ident != NULL) {
+    /* an array va_list (x86-64's), however sema decayed it: the record, by its address */
+    while (ap->kind == CC_EXPR_CAST && ap->lhs != NULL && ap->lhs->ctype != NULL &&
+           ap->lhs->ctype->unqual->kind == CC_CT_ARRAY) {
+        ap = ap->lhs;
+    }
+    if (ap->ctype != NULL && ap->ctype->unqual->kind == CC_CT_ARRAY) {
+        slot->is_record = 1;
+    }
+    if (!slot->is_record && ap->kind == CC_EXPR_IDENT && ap->ident != NULL) {
         slot->var_idx = var_find_visible(vars, var_count, ap->ident, depth);
         if (slot->var_idx >= 0) {
             return 0;
@@ -1730,10 +1744,13 @@ static int va_list_find(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, 
     return slot->addr < 0 ? -1 : 0;
 }
 
-/** The value of the va_list in @p slot: the pointer it holds. */
+/** The value of the va_list in @p slot: the pointer it holds; for a record (x86-64's object), its address. */
 static int va_list_load(cc_ssa_function_t *sf, var_entry_t *vars, const va_list_slot_t *slot, cc_diag_t *diag) {
     cc_ssa_instr_t ld;
 
+    if (slot->is_record) {
+        return slot->addr;
+    }
     if (slot->var_idx >= 0) {
         return emit_local_var_scalar_load(sf, &vars[slot->var_idx], diag);
     }
@@ -1751,11 +1768,22 @@ static int va_list_load(cc_ssa_function_t *sf, var_entry_t *vars, const va_list_
     return ld.dst;
 }
 
-/** Store @p v in the va_list in @p slot. */
+/**
+ * Store @p v in the va_list in @p slot.  On x86-64 @p v is a record's address and the va_list a record, which
+ * takes a copy of it, as gcc's va_start and va_copy fill one -- through the pointer, for a va_list parameter.
+ */
 static int va_list_store(cc_ssa_function_t *sf, var_entry_t *vars, const va_list_slot_t *slot, int v,
                          cc_diag_t *diag) {
     cc_ssa_instr_t st;
 
+    if (slot->is_record) {
+        return v == slot->addr ? 0 : emit_memcpy_instr(sf, slot->addr, v, VA_LIST_RECORD_BYTES, diag);
+    }
+    if (cc_target_current()->id == CC_TARGET_X86_64) {
+        int to = va_list_load(sf, vars, slot, diag);
+
+        return to < 0 ? -1 : emit_memcpy_instr(sf, to, v, VA_LIST_RECORD_BYTES, diag);
+    }
     if (slot->var_idx >= 0) {
         return emit_local_var_scalar_store(sf, &vars[slot->var_idx], v, diag);
     }

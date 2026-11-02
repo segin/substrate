@@ -349,6 +349,8 @@ typedef struct {
     /** for the structure standing for a complex type, `{ T __re, __im; }`: T (float, double or
      *  long double); NULL for any other structure */
     const struct cc_ctype *complex_elem;
+    /** x86-64's `struct __va_list_tag`, which __builtin_va_list is an array of one of */
+    int va_list_tag;
     /** for the structure standing for an integer type wider than 64 bits -- `_BitInt(N)` or
      *  `__int128`, `{ limb __limb[n]; }` with limbs of the target's word -- its width N; else 0 */
     long wide_bits;

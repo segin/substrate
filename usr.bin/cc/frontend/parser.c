@@ -1382,6 +1382,50 @@ static int parser_complex_struct(parser_t *p, cc_ctype_kind_t kind) {
 }
 
 /**
+ * The type __builtin_va_list names: on x86-64 gcc's `struct __va_list_tag
+ * { unsigned int gp_offset, fp_offset; void *overflow_arg_area,
+ * *reg_save_area; }[1]` (the psABI's), 24 bytes an object of it holds and
+ * a parameter of it a pointer to, so that a structure holding one and a
+ * va_list passed between gcc's code and cc's are gcc's; elsewhere a
+ * pointer, i386's `char *` in all but name.  The structure is made once,
+ * at file scope.
+ *
+ * @param p  the parser
+ * @return   the type, or NULL when out of memory
+ */
+static const cc_ctype_t *parser_va_list_ctype(parser_t *p) {
+    static const char tag[] = "__va_list_tag";
+    const cc_ctype_t *u32 = cc_ct_basic(CC_CT_UINT);
+    const cc_ctype_t *vp = cc_ct_pointer(cc_ct_basic(CC_CT_VOID));
+    size_t i;
+    int sid;
+    int saved_depth = p->scope_depth;
+
+    if (cc_target_pointer_size() != 8) {
+        return vp; /* (i386) */
+    }
+    for (i = 0; i < p->struct_count; ++i) {
+        if (p->structs[i].va_list_tag) {
+            return cc_ct_array(cc_ct_record((int)i), 1);
+        }
+    }
+    p->scope_depth = 0;
+    sid = struct_ensure(p, tag, sizeof(tag) - 1, 1);
+    p->scope_depth = saved_depth;
+    if (sid < 0 || struct_member_push(p, sid, "gp_offset", u32, 0, 4, 0, 0, 0, 0, 0, 0) < 0 ||
+        struct_member_push(p, sid, "fp_offset", u32, 4, 4, 0, 0, 0, 0, 0, 0) < 0 ||
+        struct_member_push(p, sid, "overflow_arg_area", vp, 8, 8, 0, 0, 0, 0, 0, 0) < 0 ||
+        struct_member_push(p, sid, "reg_save_area", vp, 16, 8, 0, 0, 0, 0, 0, 0) < 0) {
+        return NULL;
+    }
+    p->structs[sid].size = 24;
+    p->structs[sid].align = 8;
+    p->structs[sid].complete = 1;
+    p->structs[sid].va_list_tag = 1;
+    return cc_ct_array(cc_ct_record(sid), 1);
+}
+
+/**
  * The structure that is an integer type wider than 64 bits:
  * `{ limb __limb[n]; }`, the value's limbs least
  * significant first, a limb being the target's word (64 bits on x86-64, 32
@@ -2317,7 +2361,11 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 acc->seen = 1;
                 acc->seen_type = 1;
                 acc->seen_alias = 1;
-                acc->alias_ctype = cc_ct_pointer(cc_ct_basic(CC_CT_VOID));
+                acc->alias_ctype = parser_va_list_ctype(p);
+                if (acc->alias_ctype == NULL) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making __builtin_va_list");
+                    return -1;
+                }
                 if (next_tok(p) != 0) {
                     return -1;
                 }

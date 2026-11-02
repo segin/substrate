@@ -165,6 +165,17 @@ and the
 values gcc gives each
 .Fl march .
 .Pp
+On x86-64
+.Vt va_list
+is
+.Xr gcc 1 Ns 's,
+an array of one 24-byte
+.Vt struct __va_list_tag ,
+so a structure holding one and a
+.Vt va_list
+passed between the two compilers' code are alike; on i386 it is a
+pointer.
+.Pp
 .Vt _Decimal32 ,
 .Vt _Decimal64
 and
