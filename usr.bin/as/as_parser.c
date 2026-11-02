@@ -1448,6 +1448,29 @@ static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t
         return -1;
     }
     /*
+     * The segment may come before the star, `ljmp %cs:*(%eax)` (Linux's
+     * hv_trampoline.S), which GNU as takes for `ljmp *%cs:(%eax)`: so it is
+     * read.
+     */
+    if (n > 3 && tokv[0].kind == AS_TOK_REGISTER && tokv[1].kind == AS_TOK_PUNCT && strcmp(tokv[1].text, ":") == 0 &&
+        tok_is(&tokv[2], '*')) {
+        as_token_t *moved = (as_token_t *)malloc(n * sizeof(*moved));
+        int rc;
+
+        if (moved == NULL) {
+            return -1;
+        }
+        moved[0] = tokv[2];
+        moved[1] = tokv[0];
+        moved[2] = tokv[1];
+        memcpy(moved + 3, tokv + 3, (n - 3) * sizeof(*moved));
+        free(op->raw);
+        op->raw = NULL;
+        rc = parse_operand_tokens(ctx, moved, n, op);
+        free(moved);
+        return rc;
+    }
+    /*
      * AT&T indirect operands may be prefixed with '*', e.g. call *%r11 or
      * jmp *foo(%rip). Parse the inner operand normally.
      */
