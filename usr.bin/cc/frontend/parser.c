@@ -2520,6 +2520,13 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         return -1;
                     }
                     typeof_ctype = parser_expr_ctype(p, te);
+                    if (typeof_ctype == NULL && p->is_probe) {
+                        /*
+                         * a probe has no structures to find a member's type in, and wants only the declarator's
+                         * shape: Linux's qla_tmpl.c `typeof(qla27xx_fwdt_entry_call->call)(qla27xx_find_entry(...))`
+                         */
+                        typeof_ctype = cc_ct_basic(CC_CT_INT);
+                    }
                     if (typeof_ctype == NULL) {
                         /* a node built without a position: point at the `)` after the operand */
                         set_diag(p->diag, te->line != 0 ? te->line : p->tok.line, te->line != 0 ? te->col : p->tok.col,
