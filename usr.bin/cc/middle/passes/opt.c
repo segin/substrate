@@ -2755,6 +2755,7 @@ static int cse_function(cc_ssa_function_t *f) {
     cse_copies_t cp;
     size_t nv = (size_t)(f->value_count > 0 ? f->value_count : 1);
     unsigned gen = 1;
+    unsigned *defs;
     int changed = 0;
     size_t i;
 
@@ -2778,6 +2779,32 @@ static int cse_function(cc_ssa_function_t *f) {
     }
     for (i = 0; i < nv; ++i) {
         cp.of[i] = -1;
+    }
+    /* how often each value is written: a variable is written more than once */
+    defs = (unsigned *)calloc(nv, sizeof(*defs));
+    if (defs == NULL) {
+        free(tab);
+        free(ver);
+        free(cp.of);
+        free(cp.of_ver);
+        free(cp.own_ver);
+        free(cp.gen);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+
+        if (in->dst >= 0 && in->dst < f->value_count && in->op != CC_SSA_STORE) {
+            defs[in->dst]++;
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int o = in->asm_out_values[k];
+
+            if (!CC_SSA_ASM_MEM_INDIRECT_P(o) && o >= 0 && o < f->value_count) {
+                defs[o]++;
+            }
+        }
     }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
@@ -2804,6 +2831,15 @@ static int cse_function(cc_ssa_function_t *f) {
                     hit = e;
                     break;
                 }
+            }
+            if (hit != NULL && in->op == CC_SSA_CONST && defs[hit->dst] > 1) {
+                /*
+                 * a constant is not made a copy of a variable that holds it here: no cheaper, and the constant
+                 * is lost to what asks for one -- an asm's "i", Linux's static branch `"i"(branch)` inlined into
+                 * iavf_clean_rx_irq()'s loop beside `bool failure = false`, was refused
+                 */
+                hit = NULL;
+                slot = NULL;
             }
             if (hit != NULL) {
                 int from = hit->dst;
@@ -2861,6 +2897,7 @@ static int cse_function(cc_ssa_function_t *f) {
     free(cp.gen);
     free(tab);
     free(ver);
+    free(defs);
     return changed;
 }
 
