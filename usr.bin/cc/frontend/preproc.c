@@ -65,11 +65,20 @@ typedef struct {
     char *body;
 } pp_macro_t;
 
+/*
+ * The macros defined, in the order they were defined, and a hash index of
+ * them by name.  It was a sorted array, sorted again at the lookup after
+ * each new #define: Linux's headers define tens of thousands, and
+ * fs/ntfs/lcnalloc.c took a minute to preprocess where gcc takes a tenth
+ * of a second.
+ */
 typedef struct {
     pp_macro_t *items;
     size_t count;
     size_t cap;
-    int sorted;
+    size_t *index;     /**< open-addressed: an item's position + 1, 0 for an empty slot */
+    size_t index_cap;  /**< its size, a power of two, or 0 */
+    int index_valid;   /**< it indexes every item where it is (an #undef moves those after it) */
 } pp_macro_table_t;
 
 typedef struct {
@@ -243,18 +252,57 @@ static void macro_unset(pp_macro_table_t *t, const char *name);
 static char *mask_hidden_macro_name_tokens(const char *src, const char *name);
 static char *unmask_hidden_macro_tokens(const char *src);
 
-static int macro_item_name_cmp(const void *ap, const void *bp) {
-    const pp_macro_t *a = (const pp_macro_t *)ap;
-    const pp_macro_t *b = (const pp_macro_t *)bp;
-    return strcmp(a->name, b->name);
+/** FNV-1a hash of macro name @p s. */
+static size_t macro_name_hash(const char *s) {
+    size_t h = (size_t)14695981039346656037ULL;
+
+    while (*s != '\0') {
+        h ^= (unsigned char)*s++;
+        h *= (size_t)1099511628211ULL;
+    }
+    return h;
 }
 
-static void macro_table_ensure_sorted(pp_macro_table_t *t) {
-    if (t == NULL || t->count < 2 || t->sorted) {
-        return;
+/** Put item @p pos of table @p t in its hash index, which has room. */
+static void macro_index_put(pp_macro_table_t *t, size_t pos) {
+    size_t mask = t->index_cap - 1;
+    size_t h = macro_name_hash(t->items[pos].name) & mask;
+
+    while (t->index[h] != 0) {
+        h = (h + 1) & mask;
     }
-    qsort(t->items, t->count, sizeof(t->items[0]), macro_item_name_cmp);
-    t->sorted = 1;
+    t->index[h] = pos + 1;
+}
+
+/**
+ * Index every item of table @p t afresh, the index at least twice the
+ * items' number.
+ *
+ * @return 0, or -1 when out of memory (the index is then left invalid)
+ */
+static int macro_index_rebuild(pp_macro_table_t *t) {
+    size_t cap = t->index_cap > 0 ? t->index_cap : 256;
+    size_t i;
+
+    while (cap < 2 * t->count + 2) {
+        cap *= 2;
+    }
+    if (cap != t->index_cap) {
+        size_t *next = (size_t *)realloc(t->index, cap * sizeof(*next));
+
+        if (next == NULL) {
+            t->index_valid = 0;
+            return -1;
+        }
+        t->index = next;
+        t->index_cap = cap;
+    }
+    memset(t->index, 0, t->index_cap * sizeof(*t->index));
+    for (i = 0; i < t->count; ++i) {
+        macro_index_put(t, i);
+    }
+    t->index_valid = 1;
+    return 0;
 }
 
 static void strvec_pop_free(cc_strvec_t *v) {
@@ -491,24 +539,28 @@ static void pp_set_lang(pp_state_t *st, const cc_lang_t *lang) {
 }
 
 static pp_macro_t *macro_find(pp_macro_table_t *t, const char *name) {
-    size_t lo;
-    size_t hi;
+    size_t mask;
+    size_t h;
+    size_t i;
+
     if (t == NULL || name == NULL || t->count == 0) {
         return NULL;
     }
-    macro_table_ensure_sorted(t);
-    lo = 0;
-    hi = t->count;
-    while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-        int cmp = strcmp(t->items[mid].name, name);
-        if (cmp == 0) {
-            return &t->items[mid];
+    if (!t->index_valid && macro_index_rebuild(t) != 0) {
+        /* (out of memory for the index: a search item by item) */
+        for (i = 0; i < t->count; ++i) {
+            if (strcmp(t->items[i].name, name) == 0) {
+                return &t->items[i];
+            }
         }
-        if (cmp < 0) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
+        return NULL;
+    }
+    mask = t->index_cap - 1;
+    for (h = macro_name_hash(name) & mask; t->index[h] != 0; h = (h + 1) & mask) {
+        pp_macro_t *m = &t->items[t->index[h] - 1];
+
+        if (strcmp(m->name, name) == 0) {
+            return m;
         }
     }
     return NULL;
@@ -680,6 +732,8 @@ static int pragma_macro_pop(pp_state_t *st, const char *name) {
 static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int is_variadic, char **params,
                      size_t param_count, const char *body) {
     pp_macro_t *m = macro_find(t, name);
+    int added = 0;
+
     if (m == NULL) {
         pp_macro_t *next;
         if (t->count == t->cap) {
@@ -693,7 +747,7 @@ static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int
         }
         m = &t->items[t->count++];
         memset(m, 0, sizeof(*m));
-        t->sorted = 0;
+        added = 1;
     } else {
         macro_free_item(m);
     }
@@ -705,33 +759,50 @@ static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int
     m->body = cc_strdup(body != NULL ? body : "");
     if (m->name == NULL || m->body == NULL) {
         macro_free_item(m);
+        if (added) {
+            t->count--;
+        }
         return -1;
     }
     if (param_count > 0 && params != NULL) {
         m->param_lens = (size_t *)calloc(param_count, sizeof(*m->param_lens));
         if (m->param_lens == NULL) {
             macro_free_item(m);
+            if (added) {
+                t->count--;
+            }
             return -1;
         }
         for (size_t i = 0; i < param_count; ++i) {
             m->param_lens[i] = strlen(params[i]);
         }
     }
+    if (added) {
+        /* indexed now while there is room for it, else when next looked for */
+        if (t->index_valid && 2 * t->count + 2 <= t->index_cap) {
+            macro_index_put(t, t->count - 1);
+        } else {
+            t->index_valid = 0;
+        }
+    }
     return 0;
 }
 
 static void macro_unset(pp_macro_table_t *t, const char *name) {
+    pp_macro_t *m = macro_find(t, name);
     size_t i;
-    for (i = 0; i < t->count; ++i) {
-        if (strcmp(t->items[i].name, name) == 0) {
-            macro_free_item(&t->items[i]);
-            if (i + 1 < t->count) {
-                memmove(&t->items[i], &t->items[i + 1], (t->count - i - 1) * sizeof(t->items[0]));
-            }
-            t->count--;
-            return;
-        }
+
+    if (m == NULL) {
+        return;
     }
+    i = (size_t)(m - t->items);
+    macro_free_item(m);
+    if (i + 1 < t->count) {
+        memmove(&t->items[i], &t->items[i + 1], (t->count - i - 1) * sizeof(t->items[0]));
+    }
+    t->count--;
+    /* those after it have moved */
+    t->index_valid = 0;
 }
 
 static void macro_table_free(pp_macro_table_t *t) {
@@ -740,10 +811,13 @@ static void macro_table_free(pp_macro_table_t *t) {
         macro_free_item(&t->items[i]);
     }
     free(t->items);
+    free(t->index);
     t->items = NULL;
     t->count = 0;
     t->cap = 0;
-    t->sorted = 0;
+    t->index = NULL;
+    t->index_cap = 0;
+    t->index_valid = 0;
 }
 
 static const char *skip_ws(const char *s) {
