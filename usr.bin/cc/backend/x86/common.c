@@ -1052,6 +1052,15 @@ static int const_search_nesting;
 /** The most deeply find_const_i64_for_value() calls nest; a value past it is no known constant. */
 #define CONST_SEARCH_NESTING_MAX 8
 
+/*
+ * And how much one search, with all it nests, may look at, in instructions scanned: each nested search
+ * scans the function and may nest again for each store it weighs, so the work multiplied with every level
+ * and one asm's operand in Linux's fs/ntfs/lcnalloc.c (and mlx5's cmd.c, atp870u.c, ...) was searched for
+ * hours.  Past it, as past the nesting, a value is no known constant.
+ */
+#define CONST_SEARCH_BUDGET 4000000L
+static long const_search_budget;
+
 static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, size_t max_instr_index, long *out_imm) {
     int *def_index;
     unsigned char *visiting;
@@ -1061,6 +1070,13 @@ static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, size_
 
     if (f == NULL || value < 0 || value >= f->value_count || out_imm == NULL ||
         const_search_nesting >= CONST_SEARCH_NESTING_MAX) {
+        return -1;
+    }
+    if (const_search_nesting == 0) {
+        const_search_budget = CONST_SEARCH_BUDGET;
+    }
+    const_search_budget -= (long)f->instr_count + 1;
+    if (const_search_budget < 0) {
         return -1;
     }
     def_index = (int *)malloc((size_t)f->value_count * sizeof(*def_index));
