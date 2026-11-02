@@ -839,7 +839,11 @@ and
 make the symbol hidden.
 A symbol defined inside
 .Ic SECTIONS
-belongs to the section its address falls in, except one set with
+belongs to the section its address falls in (in an output section's body,
+that section, counting what its body adds to its end; in an output
+section nothing went into, which is not made, the section before it or
+the one after, whichever is more like it, of two alike the one after if
+the symbol is not before it, as GNU ld chooses), except one set with
 .Ql =
 between output sections or outside
 .Ic SECTIONS ,

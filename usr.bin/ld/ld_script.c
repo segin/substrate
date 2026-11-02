@@ -3701,6 +3701,53 @@ static elf_section_t *lw_dot_section(const lds_walk_t *w) {
 }
 
 /**
+ * The section a symbol at @p value goes in that the script sets in an
+ * output section nothing went into, which is not made: Linux's
+ * `.init.begin : { __init_begin = .; }`.  As GNU ld's fix_syms() chooses
+ * it, the one before or the one after, whichever is more like the section
+ * that is not (one that is allocated, writable and not code): of two alike
+ * the one after, if the symbol is not before it.  NULL, for absolute, if
+ * there is neither.
+ */
+static elf_section_t *lw_removed_section_home(lds_walk_t *w, uint64_t value) {
+    elf_section_t *before = (elf_section_t *)w->last_sec;
+    elf_section_t *after = NULL;
+    uint64_t fb, fa, d;
+    size_t i = 0;
+
+    if (before != NULL) {
+        while (i < elf_section_count(w->out) && elf_section_get(w->out, i) != before) {
+            i++;
+        }
+        i++;
+    }
+    for (; after == NULL && i < elf_section_count(w->out); ++i) {
+        elf_section_t *sec = elf_section_get(w->out, i);
+
+        if (sec != NULL && (elf_section_flags(sec) & SHF_ALLOC) != 0) {
+            after = sec;
+        }
+    }
+    if (before == NULL || after == NULL) {
+        return before != NULL ? before : after;
+    }
+    fb = elf_section_flags(before);
+    fa = elf_section_flags(after);
+    d = fb ^ fa;
+    if ((d & SHF_TLS) != 0) {
+        /* both are allocated, and the one before is not thread-local: the one after is */
+        return before;
+    }
+    if ((d & SHF_WRITE) != 0) {
+        return (fa & SHF_WRITE) == 0 ? before : after;
+    }
+    if ((d & SHF_EXECINSTR) != 0) {
+        return (fa & SHF_EXECINSTR) != 0 ? before : after;
+    }
+    return value < elf_section_addr(after) ? before : after;
+}
+
+/**
  * The symbol of the program that assignment @p st's expression names, if
  * it names one and no other, as GNU ld's assign_src has it: the symbol it
  * defines takes that one's type (Linux's `PROVIDE(sev_es_terminate =
@@ -3771,6 +3818,8 @@ static int lw_define(lds_walk_t *w, lds_stmt_t *st, uint64_t value, const lds_ev
     } else if (st->where != LDS_IN_TOP) {
         if (hint != NULL && value >= elf_section_addr(hint) && value <= hint_end) {
             home = hint;
+        } else if (hint == NULL && w->in_body && w->body_sec == NULL) {
+            home = lw_removed_section_home(w, value);
         }
         for (i = 0; home == NULL && i < elf_section_count(w->out); ++i) {
             elf_section_t *sec = elf_section_get(w->out, i);
@@ -4067,7 +4116,8 @@ static int lw_body_run(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64
                 }
                 continue;
             }
-            if (lw_assign(w, st, 1, &dot, sec, start + size) != 0) {
+            /* a symbol where the body has made the section longer is still in it: `. = ALIGN(64); _edata = .;` */
+            if (lw_assign(w, st, 1, &dot, sec, start + (cur > size ? cur : size)) != 0) {
                 return -1;
             }
             if (dot < start + cur) {
