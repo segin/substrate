@@ -1782,6 +1782,18 @@ int cc_propagate_copies(cc_ssa_function_t *f) {
             cc_ssa_value_is_unsigned(f, in->dst) != cc_ssa_value_is_unsigned(f, in->lhs)) {
             continue;
         }
+        {
+            /* not a copy of itself through others: `a = b; b = a;` of two values defined only so (read before
+             * they are set, as in Linux's vDSO) would send resolve_copy() round for ever */
+            int r = in->lhs;
+
+            while (r != in->dst && repl[r] != r) {
+                r = repl[r];
+            }
+            if (r == in->dst) {
+                continue;
+            }
+        }
         repl[in->dst] = in->lhs;
     }
     /* each read of a copy reads its source: the operands cc_ssa_for_each_use() names, an asm's aside */
