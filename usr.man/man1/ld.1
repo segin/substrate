@@ -807,6 +807,9 @@ address is taken has its PLT entry for an address, the same in every
 module; and a variable of a shared object gets a copy in the executable
 .Pq Pa .dynbss , Dv R_*_COPY ,
 under every name the shared object has for it.
+A PIE gets such a copy of a variable it refers to pc-relatively, as gcc
+compiles a PIE for x86-64 to do; one it refers to only by absolute
+address is relocated where it is referred to instead.
 A thread-local variable referred to that way is an error.
 .It
 .Fl z Cm text

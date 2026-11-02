@@ -20,5 +20,6 @@ run:
 	./test_nostdlib.sh
 	./test_response_file.sh
 	./test_library_script.sh
+	./test_pie_copy.sh
 
 clean:

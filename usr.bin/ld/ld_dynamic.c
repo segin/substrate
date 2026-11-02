@@ -521,9 +521,13 @@ static int symvec_push(elf_symbol_t ***items, size_t *count, size_t *cap, elf_sy
 
 static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t *imports) {
     uint16_t machine = elf_machine(out);
+    /* A PIE's code is position-independent but reaches data it does not define pc-relatively, as gcc
+     * compiles it (x86-64, since gcc 5): that data is copied, as GNU ld copies it; its other references
+     * can be relocated where they are. */
+    int pie = elf_type(out) == ET_DYN && ctx->opt.pie;
     size_t si, ri, k;
 
-    if (elf_type(out) != ET_EXEC || ctx->dso_inputs.count == 0) {
+    if ((elf_type(out) != ET_EXEC && !pie) || ctx->dso_inputs.count == 0) {
         return 0;
     }
     for (si = 0; si < elf_section_count(out); ++si) {
@@ -542,6 +546,7 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
 
             if (sym == NULL || !is_runtime_import_symbol(sym) ||
                 !reloc_is_direct_ref(machine, elf_reloc_type(rel), 1) ||
+                (pie && !(machine == EM_X86_64 && elf_reloc_type(rel) == R_X86_64_PC32)) ||
                 dso_find_definition(ctx, elf_symbol_name(sym), &def) != 0) {
                 continue;
             }
