@@ -3195,6 +3195,8 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
     size_t i;
 
     lower_expr_instr_init(&in);
+    in.src_line = (unsigned)e->line; /* (the call's place, for the backend's errors of it) */
+    in.src_col = (unsigned)e->col;
     const cc_function_t *callee = NULL;
     builtin_kind_t bk = builtin_kind(e->ident);
     int bswap_bits = builtin_bswap_bits(e->ident);

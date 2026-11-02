@@ -3304,6 +3304,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         int regparm_home = 0; /* regparm: where the prologue stores %eax, %edx, %ecx; 0 when nothing came in them */
         size_t pi;
 
+        x86_diag_at(f, NULL);
         if (opts->i386_mmx && opts->i386_isa_level < 5) {
             set_diag(diag, "i386 MMX codegen requires -march=i586 or newer");
             return -1;
@@ -3552,6 +3553,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 int_regs_flush(fp, f, &lay, &ist);
                 i386_store_home_uses(fp, f, &lay, &ist, in);
             }
+            x86_diag_at(f, in);
 
             switch (in->op) {
             case CC_SSA_PARAM: {

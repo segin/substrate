@@ -5710,6 +5710,8 @@ typedef struct {
     size_t count;
     size_t cap;
     char *name;        /**< the declared name, or NULL for an abstract declarator */
+    size_t name_line;  /**< where the name is */
+    size_t name_col;
     int nested;        /**< its direct part is a parenthesized declarator */
     int inner_arrays;  /**< array suffixes inside that parenthesized declarator */
     int outer_arrays;  /**< array suffixes after it (or after the name) */
@@ -6084,6 +6086,8 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
          * starts_nested_declarator() before this (C11 6.7.6.3p11).
          */
         inner.name = cc_strndup(p->tok.start, p->tok.len);
+        inner.name_line = p->tok.line;
+        inner.name_col = p->tok.col;
         if (inner.name == NULL || next_tok(p) != 0) {
             goto out;
         }
@@ -6174,6 +6178,8 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
     }
     if (inner.name != NULL) {
         d->name = inner.name;
+        d->name_line = inner.name_line;
+        d->name_col = inner.name_col;
         inner.name = NULL;
     }
     rc = 0;
@@ -7408,6 +7414,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return e;
         }
         char *name = cc_strndup(p->tok.start, p->tok.len);
+        size_t name_line = p->tok.line;
+        size_t name_col = p->tok.col;
         if (name == NULL) {
             return NULL;
         }
@@ -7423,6 +7431,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             e->ident = name;
+            e->line = name_line; /* (the call's place: its callee's name, as gcc gives it) */
+            e->col = name_col;
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -8430,6 +8440,9 @@ static cc_expr_t *parse_postfix_ops(parser_t *p, cc_expr_t *e) {
                 free_expr(e);
                 return NULL;
             }
+            /* (its place: the callee's where that has one, else the parenthesis) */
+            call->line = e->line != 0 ? e->line : p->tok.line;
+            call->col = e->line != 0 ? e->col : p->tok.col;
             if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
                 call->ident = e->ident;
                 e->ident = NULL;
@@ -11173,6 +11186,8 @@ static int parse_function_declarator(parser_t *p, cc_function_t *f, const cc_cty
     }
     f->ret_ctype = t->of;
     f->name = d.name;
+    f->name_line = d.name_line;
+    f->name_col = d.name_col;
     d.name = NULL;
     declarator_free(&d);
     return 0;

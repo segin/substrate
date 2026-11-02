@@ -394,6 +394,8 @@ typedef struct {
     char *name;
     size_t line;
     size_t col;
+    size_t name_line; /**< a definition's: where its name is (gcc's place for errors about the function) */
+    size_t name_col;
     const struct cc_ctype *ret_ctype; /**< the return type */
     int storage;
     cc_attr_flags_t attr_flags;

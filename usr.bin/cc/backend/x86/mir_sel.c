@@ -2961,6 +2961,8 @@ static void sel_instr(xsel_t *s, size_t j) {
     long long k;
     const char *sym;
 
+    x86_diag_at(f, in);
+
     /* the x87 stack emptied before what does not keep it, the block's reads counted */
     xs_fp_begin(s, j);
     if (j < s->skip_to) {

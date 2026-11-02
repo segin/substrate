@@ -11267,6 +11267,8 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
     in.dst = -1;
     in.lhs = -1;
     in.rhs = -1;
+    in.src_line = (unsigned)s->line;
+    in.src_col = (unsigned)s->col;
     in.asm_volatile = s->asm_is_volatile ? 1 : 0;
     in.asm_is_goto = s->asm_is_goto ? 1 : 0;
     in.asm_is_basic = s->asm_is_basic ? 1 : 0;
@@ -16580,6 +16582,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             cc_ssa_module_free(out);
             return -1;
         }
+        sf->src_line = af->name_line != 0 ? af->name_line : af->line;
+        sf->src_col = af->name_line != 0 ? af->name_col : af->col;
         {
             cc_ctype_kind_t rk = fn_ret_ctype(af) != NULL ? fn_ret_ctype(af)->kind : CC_CT_VOID;
 

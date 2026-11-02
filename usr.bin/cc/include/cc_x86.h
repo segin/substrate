@@ -77,6 +77,8 @@ typedef struct {
 
 /** Record an emitter error, which has no source position; the first is kept. */
 void set_diag(cc_diag_t *d, const char *msg);
+/** Say where set_diag()'s errors are: @p in's statement or call, else @p f's name (either may be NULL). */
+void x86_diag_at(const cc_ssa_function_t *f, const cc_ssa_instr_t *in);
 /** A fresh number for an emitter-made local label. */
 unsigned long next_aux_label_id(void);
 /** The name of an opcode, for diagnostics. */

@@ -84,15 +84,41 @@ const char *arg_reg64_xmm(size_t idx) {
     return regs[idx];
 }
 
+/* where the backend's errors are: x86_diag_at()'s */
+static size_t g_diag_line;
+static size_t g_diag_col;
+
 /**
- * Record an emission error.  It has no line; the file being compiled is
- * kept as its path.  The first one recorded is kept.
+ * Say where the backend is, for set_diag(): instruction @p in's statement
+ * or call, where lowering recorded it, else function @p f's name, as gcc
+ * places its errors.
+ *
+ * @param f   the function being emitted, or NULL for none
+ * @param in  the instruction being emitted, or NULL for the function itself
+ */
+void x86_diag_at(const cc_ssa_function_t *f, const cc_ssa_instr_t *in) {
+    if (in != NULL && in->src_line != 0) {
+        g_diag_line = in->src_line;
+        g_diag_col = in->src_col;
+    } else if (f != NULL) {
+        g_diag_line = f->src_line;
+        g_diag_col = f->src_col;
+    } else {
+        g_diag_line = 0;
+        g_diag_col = 0;
+    }
+}
+
+/**
+ * Record an emission error, at the place x86_diag_at() last said; the
+ * file being compiled is kept as its path.  The first one recorded is
+ * kept.
  *
  * @param d    the diagnostic
  * @param msg  the message
  */
 void set_diag(cc_diag_t *d, const char *msg) {
-    cc_diag_set(d, NULL, 0, 0, msg);
+    cc_diag_set(d, NULL, g_diag_line, g_diag_col, msg);
 }
 
 unsigned long next_aux_label_id(void) {
@@ -1902,6 +1928,7 @@ int x86_check_x87_options(const cc_ssa_function_t *f, int legacy, cc_diag_t *dia
             (in->call_ret_x87 ||
              (!is_64bit && in->dst >= 0 && cc_ssa_value_class(f, in->dst) == CC_VAL_F64))) {
             why = "calls a function whose result is in the x87's %st0";
+            x86_diag_at(f, in); /* (at the call, as gcc has it) */
         }
     }
     if (why == NULL && o->no_80387 && legacy && function_computes_float(f)) {
@@ -4229,6 +4256,7 @@ int x86_asm_plan(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t in
     asm_fp_t fpo;
     size_t i;
 
+    x86_diag_at(f, in); /* (its errors at the asm statement, as gcc's) */
     memset(p, 0, sizeof(*p));
     if (in->asm_is_goto) {
         return 1;
@@ -4417,6 +4445,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     size_t path;
     asm_fp_t fpo;               /* the operands in x87 stack or %xmm registers */
 
+    x86_diag_at(f, in); /* (its errors at the asm statement, as gcc's) */
     op_text = (char **)calloc(total, sizeof(*op_text));
     op_names = (char **)calloc(total, sizeof(*op_names));
     out_regs = (const char **)calloc(out_n, sizeof(*out_regs));
@@ -5700,12 +5729,14 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
     FILE *fp;
 
     if (diag != NULL) {
-        diag->path[0] = '\0';
+        /* (an error's file is the one compiled, as the front end's are) */
+        snprintf(diag->path, sizeof(diag->path), "%s", src_path != NULL ? src_path : "");
         diag->line = 0;
         diag->col = 0;
         diag->error_count = 0;
         diag->message[0] = '\0';
     }
+    x86_diag_at(NULL, NULL);
 
     fp = fopen(path, "w");
     if (fp == NULL) {

@@ -202,6 +202,9 @@ typedef struct {
     int call_chain;    /**< CALL: one more than the value to pass in the static chain register; 0 for none */
     unsigned char call_notrack; /**< CALLI: through a nocf_check function type (CC_CQ_NOCF): `notrack call`
                                      under -fcf-protection=branch, the _nt_ thunk under -mindirect-branch */
+    unsigned src_line; /**< ASM, CALL, CALLI: the statement's or the call's line, for the backend's errors;
+                            0 for none (then the function's) */
+    unsigned src_col;  /**< and its column */
     int call_binds_local; /**< CALL: the callee is static or hidden, protected or internal by its declaration,
                                so -fPIC calls it directly, not through the PLT */
     int agg_class;     /**< CALL, RET of an aggregate: CC_ABI_SSE0/SSE1/RET_* for how it is returned */
@@ -284,6 +287,8 @@ typedef struct {
 
 typedef struct cc_ssa_function {
     char *name;
+    size_t src_line; /**< where its name is in its definition, for the backend's errors (gcc's place); 0 unknown */
+    size_t src_col;
     cc_value_type_t ret_type;
     int storage;
     cc_attr_flags_t attr_flags;

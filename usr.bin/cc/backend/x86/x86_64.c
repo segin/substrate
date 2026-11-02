@@ -1172,6 +1172,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         {
             int mrc;
 
+            x86_diag_at(f, NULL);
             if (x86_check_x87_options(f, 0, diag) != 0) {
                 return -1;
             }
@@ -1336,6 +1337,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                         in->false_label);
             }
             int_regs_flush(fp, f, &lay, &ist);
+            x86_diag_at(f, in);
 
             switch (in->op) {
             case CC_SSA_PARAM: {
