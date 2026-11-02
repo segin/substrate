@@ -1,6 +1,8 @@
 #ifndef CC_TARGET_H
 #define CC_TARGET_H
 
+#include <stddef.h>
+
 /** The machines cc writes code for. */
 typedef enum {
     CC_TARGET_X86_64 = 0,
@@ -147,5 +149,97 @@ const cc_target_desc_t *cc_target_current(void);
  * @return 4 or 8
  */
 int cc_target_pointer_size(void);
+
+/**
+ * The x86 instruction-set extensions, as gcc names them (-m<name>): what
+ * an -march has, which -m<name> and -mno-<name> then change, and which
+ * the preprocessor's feature macros (__SSE2__, __POPCNT__, ...) say.
+ */
+typedef enum {
+    CC_ISA_MMX = 1u << 0,
+    CC_ISA_SSE = 1u << 1,
+    CC_ISA_SSE2 = 1u << 2,
+    CC_ISA_SSE3 = 1u << 3,
+    CC_ISA_SSSE3 = 1u << 4,
+    CC_ISA_SSE4_1 = 1u << 5,
+    CC_ISA_SSE4_2 = 1u << 6,
+    CC_ISA_POPCNT = 1u << 7,
+    CC_ISA_CRC32 = 1u << 8,
+    CC_ISA_AVX = 1u << 9,
+    CC_ISA_AVX2 = 1u << 10,
+    CC_ISA_FMA = 1u << 11,
+    CC_ISA_F16C = 1u << 12,
+    CC_ISA_BMI = 1u << 13,
+    CC_ISA_BMI2 = 1u << 14,
+    CC_ISA_LZCNT = 1u << 15,
+    CC_ISA_MOVBE = 1u << 16,
+    CC_ISA_XSAVE = 1u << 17,
+    CC_ISA_FXSR = 1u << 18,
+    CC_ISA_SAHF = 1u << 19, /**< lahf and sahf in 64-bit mode (32-bit mode always has them) */
+    CC_ISA_CX16 = 1u << 20,
+    CC_ISA_AVX512F = 1u << 21,
+    CC_ISA_AVX512BW = 1u << 22,
+    CC_ISA_AVX512CD = 1u << 23,
+    CC_ISA_AVX512DQ = 1u << 24,
+    CC_ISA_AVX512VL = 1u << 25,
+    CC_ISA_SSE4A = 1u << 26,
+    CC_ISA_ABM = 1u << 27
+} cc_isa_t;
+
+/**
+ * One -march (or -mtune) gcc knows, as cc has it: the extensions it
+ * has, how much of the i386 instruction set (3, the 386, to 7), and the
+ * macros gcc defines for it.
+ */
+typedef struct {
+    const char *name;               /**< the -march name: "pentium4", "x86-64-v2" */
+    int level;                      /**< 3 (i386) .. 7: cmpxchg from 4, cmpxchg8b from 5, cmov from 6 */
+    unsigned isa;                   /**< its extensions, cc_isa_t bits */
+    const char *const *arch_macros; /**< as -march: "__pentium4", "__pentium4__"; NULL-ended */
+    const char *const *tune_macros; /**< as -mtune (and -march without one): "__tune_pentium4__"; NULL-ended */
+} cc_arch_t;
+
+/**
+ * The -march or -mtune called @p name.
+ *
+ * @param name  the name, as on the command line
+ * @return      its description, or NULL for a name cc does not know
+ */
+const cc_arch_t *cc_arch_find(const char *name);
+
+/**
+ * Whether @p flag is an extension's option, -m<ext> or -mno-<ext>
+ * (-msse4.2, -mno-avx, -mavx512f, ...).
+ *
+ * @param flag  the option
+ * @return      1 if it is, else 0
+ */
+int cc_isa_is_flag(const char *flag);
+
+/**
+ * The extensions an -march with @p arch_isa has after options @p flags,
+ * as gcc decides them.  An option given again later, either way, counts
+ * only there (-mno-sse -msse is -msse).  -m<ext> turns on the extension
+ * and those it needs (-msse4.1 SSSE3 down to SSE), -mno-<ext> turns off
+ * it and those that need it (-mno-sse2 SSE3 up to AVX-512), and the
+ * -march's own are then added where no option said otherwise, as are
+ * those an extension brings: MMX with SSE, POPCNT and CRC32 with SSE4.2,
+ * LZCNT and POPCNT with ABM.  Other options among @p flags are passed
+ * over.
+ *
+ * @param arch_isa  the -march's extensions
+ * @param flags     the options, in order
+ * @param n         how many
+ * @return          the extensions, cc_isa_t bits
+ */
+unsigned cc_isa_from_flags(unsigned arch_isa, const char *const *flags, size_t n);
+
+/**
+ * The feature macro gcc defines for extension @p bit: "__SSE4_2__".
+ *
+ * @param bit  one cc_isa_t
+ * @return     the macro's name, or NULL for none (SAHF's depends on the mode)
+ */
+const char *cc_isa_macro(unsigned bit);
 
 #endif

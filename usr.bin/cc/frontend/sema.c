@@ -1617,8 +1617,8 @@ static long long sema_int_convert(long long v, const cc_ctype_t *t) {
 /**
  * Whether floating operations are evaluated in long double, as the target
  * says with FLT_EVAL_METHOD 2 (C11 5.2.4.2.2p9): on i386 when the x87
- * does them, which is the backend's rule -- -mfpmath=387, or no
- * -mfpmath and no SSE2.  Not under -mno-80387: soft-float evaluates each
+ * does them, which is the backend's rule, gcc's -- all but -mfpmath=sse,
+ * SSE2 or not.  Not under -mno-80387: soft-float evaluates each
  * operation in its type, as gcc's FLT_EVAL_METHOD 0 there says.
  *
  * @return 1 if they are, else 0
@@ -1630,7 +1630,7 @@ static int sema_eval_in_long_double(void) {
     if (tgt == NULL || tgt->id != CC_TARGET_I386 || o == NULL || o->no_80387) {
         return 0;
     }
-    return o->i386_fpmath == CC_FPMATH_387 || (o->i386_fpmath == CC_FPMATH_AUTO && !o->i386_sse2);
+    return o->i386_fpmath != CC_FPMATH_SSE;
 }
 
 /**

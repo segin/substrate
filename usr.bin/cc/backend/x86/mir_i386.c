@@ -43,13 +43,13 @@ static const int i386_saved[] = {XR_BX, XR_SI, XR_DI};
 #define I386_GPRS (XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_BX) | XR_BIT(XR_SI) | XR_BIT(XR_DI))
 
 /**
- * Whether doubles are SSE's, as i386.c chooses: under -mfpmath=sse, or with SSE2 and no -mfpmath=387; else the
- * x87's.
+ * Whether doubles are SSE's, as i386.c chooses: under -mfpmath=sse; else, with SSE2 or not, the x87's, as gcc
+ * has it.
  */
 static int i386_sse_fp(void) {
     const cc_options_t *o = cc_options_current();
 
-    return o->i386_fpmath == CC_FPMATH_SSE || (o->i386_fpmath != CC_FPMATH_387 && o->i386_sse2);
+    return o->i386_fpmath == CC_FPMATH_SSE;
 }
 
 /** The regparm registers, in the order arguments take them. */

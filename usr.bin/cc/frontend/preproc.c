@@ -113,21 +113,13 @@ typedef struct {
     char *dep_file;
     int target_quote;
     const cc_target_desc_t *target; /**< -m32 / -m64: the data model and the target's own macros */
-    int target_has_sse;
-    int target_has_sse2;
-    int target_has_mmx;
-    int target_has_avx;
-    int target_has_avx2;
-    int target_isa_level; /**< i386 -march: 3 (the 386) .. 7; 7 for x86-64 */
-    int target_supports_sse;
-    int target_supports_sse2;
-    int target_supports_mmx;
-    int target_supports_avx;
-    int target_supports_avx2;
-    int target_off_sse;  /**< -mno-sse, the last of it and -msse: no SSE (nor SSE2) macro, even where the
-                              target's floating point is SSE's */
-    int target_off_sse2; /**< -mno-sse2, likewise */
-    int target_off_mmx;  /**< -mno-mmx, likewise */
+    unsigned target_isa;           /**< the extensions (cc_isa_t), from -march and -m<ext> / -mno-<ext> */
+    const cc_arch_t *target_arch;  /**< -march, or the target's default: its macros (__pentium4__, ...) */
+    const cc_arch_t *target_tune;  /**< -mtune: its __tune_*__ macros; NULL for -march's own */
+    int target_tune_explicit;      /**< an -mtune was given (-mtune=generic, or one cc does not know: none) */
+    int target_isa_level;          /**< i386 -march: 3 (the 386) .. 7; 7 for x86-64 */
+    int target_fpmath;             /**< -mfpmath: 0 the target's own, 1 387, 2 sse, 3 both */
+    const char *target_cmodel;     /**< -mcmodel: "small", "kernel", ...; NULL for the default */
     int target_no_80387; /**< -mno-80387 (-msoft-float), the last of it and -m80387: _SOFT_FLOAT, and each
                               floating operation evaluated in its type (__FLT_EVAL_METHOD__ 0), as gcc has it */
     int unsigned_char; /**< -funsigned-char: __CHAR_UNSIGNED__ */
@@ -1562,6 +1554,141 @@ static void tgt_int_max(const cc_target_desc_t *tgt, cc_target_int_t t, int hex,
     snprintf(buf, cap, hex ? "0x%llx%s" : "%llu%s", max, tgt_int_suffix(t));
 }
 
+/**
+ * Which floating types are computed with SSE, as gcc decides it: on
+ * x86-64 by default, on i386 only under -mfpmath=sse; never under
+ * -mfpmath=387, and a type only where the extensions have it -- floats
+ * with SSE, doubles with SSE2.
+ *
+ * @param st          the preprocessor
+ * @param float_sse   set to whether floats are SSE's (__SSE_MATH__)
+ * @param double_sse  set to whether doubles are SSE's (__SSE2_MATH__)
+ */
+static void pp_sse_math(const pp_state_t *st, int *float_sse, int *double_sse) {
+    int sse = st->target_fpmath == 2 || st->target_fpmath == 3 ||
+              (st->target_fpmath == 0 && st->target->id == CC_TARGET_X86_64);
+
+    *float_sse = sse && (st->target_isa & CC_ISA_SSE) != 0;
+    *double_sse = *float_sse && (st->target_isa & CC_ISA_SSE2) != 0;
+}
+
+/**
+ * __FLT_EVAL_METHOD__, as gcc has it: 0 where each floating type is
+ * computed in its own precision -- SSE's, or soft-float's under
+ * -mno-80387 -- 2 where all are the x87's long double, and -1 where
+ * that depends on the type (floats SSE's and doubles the x87's, or
+ * -mfpmath=sse,387).  x86-64 keeps 0.
+ *
+ * @param st  the preprocessor
+ * @return    the macro's value
+ */
+static const char *pp_flt_eval_method(const pp_state_t *st) {
+    int float_sse;
+    int double_sse;
+
+    if (st->target->sse_fp || st->target_no_80387) {
+        return "0";
+    }
+    pp_sse_math(st, &float_sse, &double_sse);
+    if (!float_sse) {
+        return "2";
+    }
+    return double_sse && st->target_fpmath != 3 ? "0" : "-1";
+}
+
+/**
+ * Define @p name to 1.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int pp_define_one(pp_state_t *st, const char *name) {
+    return macro_set(&st->macros, name, 0, 0, NULL, 0, "1");
+}
+
+/**
+ * Define the macros of the instruction set, as gcc does: one per
+ * extension (__SSE4_2__, ...), __LAHF_SAHF__ (always in 32-bit mode),
+ * __MMX_WITH_SSE__, __SSE_MATH__ and __SSE2_MATH__, the -march's own
+ * (__pentium4__, ...) and the -mtune's (__tune_pentium4__, ...), the
+ * code model's, and the __sync builtins the instruction set has
+ * (cmpxchg from the 486, cmpxchg8b from the Pentium and on x86-64).
+ *
+ * @param st  the preprocessor
+ * @return    0, or -1 when out of memory
+ */
+static int pp_define_isa_macros(pp_state_t *st) {
+    const cc_arch_t *tune = st->target_tune_explicit ? st->target_tune : st->target_arch;
+    int x86_64 = st->target->id == CC_TARGET_X86_64;
+    const char *const *p;
+    const char *cmodel;
+    char name[64];
+    int float_sse;
+    int double_sse;
+    unsigned bit;
+
+    for (bit = 1; bit != 0; bit <<= 1) {
+        const char *m = cc_isa_macro(bit);
+
+        if ((st->target_isa & bit) != 0 && m != NULL && pp_define_one(st, m) != 0) {
+            return -1;
+        }
+    }
+    if ((!x86_64 || (st->target_isa & CC_ISA_SAHF) != 0) && pp_define_one(st, "__LAHF_SAHF__") != 0) {
+        return -1;
+    }
+    /* MMX's operations made of SSE2's, -mno-mmx or not */
+    if (x86_64 && (st->target_isa & CC_ISA_SSE2) != 0 && pp_define_one(st, "__MMX_WITH_SSE__") != 0) {
+        return -1;
+    }
+    /* AVX-512 at 256 bits, which AVX512VL is */
+    if ((st->target_isa & CC_ISA_AVX512VL) != 0 && pp_define_one(st, "__EVEX256__") != 0) {
+        return -1;
+    }
+    pp_sse_math(st, &float_sse, &double_sse);
+    if ((float_sse && pp_define_one(st, "__SSE_MATH__") != 0) ||
+        (double_sse && pp_define_one(st, "__SSE2_MATH__") != 0)) {
+        return -1;
+    }
+    /* fma() as fast as a multiply and an add: one instruction where FMA (or AVX-512's own) computes the type */
+    if ((st->target_isa & (CC_ISA_FMA | CC_ISA_AVX512F)) != 0 &&
+        ((float_sse && (pp_define_one(st, "__FP_FAST_FMAF") != 0 || pp_define_one(st, "__FP_FAST_FMAF32") != 0)) ||
+         (double_sse && (pp_define_one(st, "__FP_FAST_FMA") != 0 || pp_define_one(st, "__FP_FAST_FMAF64") != 0 ||
+                         pp_define_one(st, "__FP_FAST_FMAF32x") != 0)))) {
+        return -1;
+    }
+    /* (an i586's MMX macros only where it has MMX) */
+    for (p = st->target_arch != NULL ? st->target_arch->arch_macros : NULL; p != NULL && *p != NULL; ++p) {
+        if ((strstr(*p, "pentium_mmx") == NULL || (st->target_isa & CC_ISA_MMX) != 0) && pp_define_one(st, *p) != 0) {
+            return -1;
+        }
+    }
+    for (p = tune != NULL ? tune->tune_macros : NULL; p != NULL && *p != NULL; ++p) {
+        if (pp_define_one(st, *p) != 0) {
+            return -1;
+        }
+    }
+    cmodel = x86_64 ? (st->target_cmodel != NULL ? st->target_cmodel : "small") : "32";
+    snprintf(name, sizeof(name), "__code_model_%s__", cmodel);
+    if (pp_define_one(st, name) != 0) {
+        return -1;
+    }
+    if (x86_64 || st->target_isa_level >= 4) {
+        static const char *const sync[] = {"1", "2", "4", "8"};
+        size_t k;
+
+        for (k = 0; k < sizeof(sync) / sizeof(sync[0]); ++k) {
+            if (k == 3 && !x86_64 && st->target_isa_level < 5) {
+                break;
+            }
+            snprintf(name, sizeof(name), "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_%s", sync[k]);
+            if (pp_define_one(st, name) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int add_builtin_macros(pp_state_t *st) {
     /* the data model: what each typedef names, and the limits, come from the target */
     const cc_target_desc_t *tgt = st->target;
@@ -1593,7 +1720,7 @@ static int add_builtin_macros(pp_state_t *st) {
     const char *uint_fast32_type = uint_fast16_type;
     const char *int_fast64_type = int64_type;
     const char *uint_fast64_type = uint64_type;
-    const char *flt_eval_method = (tgt->sse_fp || st->target_has_sse2 || st->target_no_80387) ? "0" : "2";
+    const char *flt_eval_method = pp_flt_eval_method(st);
     char ptr_size[16];
     char long_size[16];
     char long_max[32];
@@ -2220,34 +2347,16 @@ static int add_builtin_macros(pp_state_t *st) {
         }
     }
     {
-        /*
-         * the target's own macros, then the ISA's: a target whose floating point is SSE has MMX to SSE2 but where
-         * -mno-mmx, -mno-sse or -mno-sse2 takes them away (Linux's x86-64, as gcc has it); no SSE, no SSE2
-         */
+        /* the target's own macros, then the instruction set's */
         const char *const *p;
-        const char *isa[5];
-        int on[5];
-        size_t k;
 
         for (p = tgt->predefined; p != NULL && *p != NULL; ++p) {
             if (macro_set(&st->macros, *p, 0, 0, NULL, 0, "1") != 0) {
                 return -1;
             }
         }
-        isa[0] = "__MMX__";
-        on[0] = (tgt->sse_fp && !st->target_off_mmx) || st->target_has_mmx;
-        isa[2] = "__SSE2__";
-        on[2] = ((tgt->sse_fp && !st->target_off_sse2) || st->target_has_sse2) && !st->target_off_sse;
-        isa[1] = "__SSE__";
-        on[1] = (tgt->sse_fp && !st->target_off_sse) || st->target_has_sse || on[2];
-        isa[3] = "__AVX__";
-        on[3] = st->target_has_avx;
-        isa[4] = "__AVX2__";
-        on[4] = st->target_has_avx2;
-        for (k = 0; k < 5; ++k) {
-            if (on[k] && macro_set(&st->macros, isa[k], 0, 0, NULL, 0, "1") != 0) {
-                return -1;
-            }
+        if (pp_define_isa_macros(st) != 0) {
+            return -1;
         }
     }
     {
@@ -2282,6 +2391,10 @@ static int add_builtin_macros(pp_state_t *st) {
         if (macro_set(&st->macros, "__GCC_ATOMIC_LLONG_LOCK_FREE", 0, 0, NULL, 0, dword) != 0) {
             return -1;
         }
+        /* what __atomic_test_and_set stores: x86's xchg of 1 */
+        if (macro_set(&st->macros, "__GCC_ATOMIC_TEST_AND_SET_TRUEVAL", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
     }
     if (st->std_is_gnu) {
         if (macro_set(&st->macros, "__BLOCKS__", 0, 0, NULL, 0, "1") != 0) {
@@ -2291,60 +2404,68 @@ static int add_builtin_macros(pp_state_t *st) {
     return 0;
 }
 
-/** The i386 ISA level -march=@p name names, 3 (the 386) to 7, as the driver has it; 0 for one not known. */
-static int pp_arch_level(const char *name) {
-    static const char *const by_level[][4] = {
-        {"i386", NULL},
-        {"i486", NULL},
-        {"i586", "pentium", "pentium-mmx", NULL},
-        {"i686", "pentiumpro", "pentium2", "pentium3"},
-    };
-    size_t l;
-    size_t k;
+/**
+ * Make -march @p name the preprocessor's: its extensions, its level and
+ * its macros.  A name cc does not know leaves them be, as the driver
+ * passes it over.
+ *
+ * @param st    the preprocessor
+ * @param name  the -march (or -mcpu) name
+ */
+static void pp_set_arch(pp_state_t *st, const char *name) {
+    const cc_arch_t *a = cc_arch_find(name);
 
-    for (l = 0; l < sizeof(by_level) / sizeof(by_level[0]); ++l) {
-        for (k = 0; k < 4 && by_level[l][k] != NULL; ++k) {
-            if (strcmp(name, by_level[l][k]) == 0) {
-                return (int)l + 3;
-            }
-        }
+    if (a != NULL) {
+        st->target_arch = a;
+        st->target_isa = a->isa;
+        st->target_isa_level = a->level;
     }
-    return strcmp(name, "pentium4") == 0 || strcmp(name, "prescott") == 0 || strcmp(name, "nocona") == 0 ||
-                   strcmp(name, "core2") == 0 || strncmp(name, "x86-64", 6) == 0
-               ? 7
-               : 0;
 }
 
+/**
+ * The value of option @p word at flags[*i]: the text after `=' in
+ * "-mfoo=V", or the next flag after "-mfoo" (which *i is then moved on
+ * to).
+ *
+ * @return the value, or NULL when flags[*i] is neither
+ */
+static const char *pp_flag_value(const char *const *flags, size_t flag_count, size_t *i, const char *word) {
+    size_t n = strlen(word);
+    const char *f = flags[*i];
+
+    if (strncmp(f, word, n) != 0) {
+        return NULL;
+    }
+    if (f[n] == '=') {
+        return f + n + 1;
+    }
+    if (f[n] == '\0' && *i + 1 < flag_count) {
+        ++*i;
+        return flags[*i];
+    }
+    return NULL;
+}
+
+/**
+ * Read the target's options among @p flags: -m32 / -m64, -march, -mtune,
+ * the extensions' -m<ext> and -mno-<ext>, -mfpmath, -mcmodel, and the
+ * others the predefined macros depend on.  Without an -march the target
+ * is gcc's -march=i686 (-m32, Substrate's) or -march=x86-64.
+ *
+ * @param st          the preprocessor
+ * @param flags       the options
+ * @param flag_count  how many
+ */
 static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t flag_count) {
     size_t i;
     int pass;
     int arch_explicit = 0;
 
-    st->target_has_sse = 0;
-    st->target_has_sse2 = 1;
-    st->target_has_mmx = 1;
-    st->target_has_avx = 0;
-    st->target_has_avx2 = 0;
-    st->target_supports_sse = 1;
-    st->target_supports_sse2 = 1;
-    st->target_supports_mmx = 1;
-    st->target_supports_avx = 1;
-    st->target_supports_avx2 = 1;
-
-    st->target_isa_level = st->target->id == CC_TARGET_I386 ? 6 : 7;
-    if (st->target->id == CC_TARGET_I386) {
-        /* an i686, as -m32 has it: no MMX, no SSE */
-        st->target_has_sse = 0;
-        st->target_has_sse2 = 0;
-        st->target_has_mmx = 0;
-        st->target_has_avx = 0;
-        st->target_has_avx2 = 0;
-        st->target_supports_sse = 0;
-        st->target_supports_sse2 = 0;
-        st->target_supports_mmx = 1;
-        st->target_supports_avx = 0;
-        st->target_supports_avx2 = 0;
-    }
+    pp_set_arch(st, st->target->id == CC_TARGET_I386 ? "i686" : "x86-64");
+    st->target_tune = NULL;
+    st->target_tune_explicit = 0;
+    st->target_fpmath = 0;
+    st->target_cmodel = NULL;
 
     /*
      * Two passes, so the result does not depend on the order of the flags,
@@ -2355,175 +2476,44 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
     for (pass = 0; pass < 2; ++pass)
     for (i = 0; i < flag_count; ++i) {
         const char *f = flags[i];
-        int is_base = strcmp(f, "-m32") == 0 || strcmp(f, "-m64") == 0 || strcmp(f, "-march") == 0 ||
-                      strcmp(f, "-mcpu") == 0 || strncmp(f, "-march=", 7) == 0 || strncmp(f, "-mcpu=", 6) == 0;
+        const char *v;
+        int is_base = strcmp(f, "-m32") == 0 || strcmp(f, "-m16") == 0 || strcmp(f, "-m64") == 0 ||
+                      strcmp(f, "-march") == 0 || strcmp(f, "-mcpu") == 0 || strncmp(f, "-march=", 7) == 0 ||
+                      strncmp(f, "-mcpu=", 6) == 0;
         if (is_base != (pass == 0)) {
             continue;
         }
-        if (strcmp(f, "-m32") == 0) {
+        if (strcmp(f, "-m32") == 0 || strcmp(f, "-m16") == 0) {
             st->target = cc_target_get(CC_TARGET_I386);
             if (!arch_explicit) {
-                st->target_isa_level = 6;
-                /* an i686, as the driver has it: no MMX, no SSE */
-                st->target_has_sse = 0;
-                st->target_has_sse2 = 0;
-                st->target_has_mmx = 0;
-                st->target_has_avx = 0;
-                st->target_has_avx2 = 0;
-                st->target_supports_sse = 0;
-                st->target_supports_sse2 = 0;
-                st->target_supports_mmx = 1;
-                st->target_supports_avx = 0;
-                st->target_supports_avx2 = 0;
+                pp_set_arch(st, "i686");
             }
         } else if (strcmp(f, "-m64") == 0) {
             st->target = cc_target_get(CC_TARGET_X86_64);
             if (!arch_explicit) {
-                st->target_isa_level = 7;
-                /* the x86-64 baseline; an explicit -march keeps its own */
-                st->target_has_sse = 1;
-                st->target_has_sse2 = 1;
-                st->target_has_mmx = 1;
-                st->target_has_avx = 0;
-                st->target_has_avx2 = 0;
-                st->target_supports_sse = 1;
-                st->target_supports_sse2 = 1;
-                st->target_supports_mmx = 1;
-                st->target_supports_avx = 1;
-                st->target_supports_avx2 = 1;
+                pp_set_arch(st, "x86-64");
             }
-        } else if ((strcmp(f, "-march") == 0 || strcmp(f, "-mcpu") == 0) && i + 1 < flag_count) {
-            const char *name = flags[++i];
+        } else if ((v = pp_flag_value(flags, flag_count, &i, "-march")) != NULL ||
+                   (v = pp_flag_value(flags, flag_count, &i, "-mcpu")) != NULL) {
+            pp_set_arch(st, v);
             arch_explicit = 1;
-            if (pp_arch_level(name) > 0) {
-                st->target_isa_level = pp_arch_level(name);
-            }
-            if (strcmp(name, "i386") == 0 || strcmp(name, "i486") == 0) {
-                st->target_has_sse = 0;
-                st->target_has_sse2 = 0;
-                st->target_has_mmx = 0;
-                st->target_has_avx = 0;
-                st->target_has_avx2 = 0;
-                st->target_supports_sse = 0;
-                st->target_supports_sse2 = 0;
-                st->target_supports_mmx = 0;
-                st->target_supports_avx = 0;
-                st->target_supports_avx2 = 0;
-            } else if (strcmp(name, "i586") == 0 || strcmp(name, "pentium") == 0) {
-                st->target_has_sse = 0;
-                st->target_has_sse2 = 0;
-                st->target_has_mmx = 0;
-                st->target_has_avx = 0;
-                st->target_has_avx2 = 0;
-                st->target_supports_sse = 0;
-                st->target_supports_sse2 = 0;
-                st->target_supports_mmx = 1;
-                st->target_supports_avx = 0;
-                st->target_supports_avx2 = 0;
-            } else if (strcmp(name, "pentium-mmx") == 0) {
-                st->target_has_sse = 0;
-                st->target_has_sse2 = 0;
-                st->target_has_mmx = 1;
-                st->target_has_avx = 0;
-                st->target_has_avx2 = 0;
-                st->target_supports_sse = 0;
-                st->target_supports_sse2 = 0;
-                st->target_supports_mmx = 1;
-                st->target_supports_avx = 0;
-                st->target_supports_avx2 = 0;
-            } else if (strcmp(name, "i686") == 0 || strcmp(name, "pentiumpro") == 0 || strcmp(name, "pentium2") == 0) {
-                st->target_has_sse = 0;
-                st->target_has_sse2 = 0;
-                st->target_has_mmx = strcmp(name, "pentium2") == 0; /* the Pentium Pro has no MMX */
-                st->target_has_avx = 0;
-                st->target_has_avx2 = 0;
-                st->target_supports_sse = 0;
-                st->target_supports_sse2 = 0;
-                st->target_supports_mmx = 1;
-                st->target_supports_avx = 0;
-                st->target_supports_avx2 = 0;
-            } else if (strcmp(name, "pentium3") == 0) {
-                st->target_has_sse = 1;
-                st->target_has_sse2 = 0;
-                st->target_has_mmx = 1;
-                st->target_has_avx = 0;
-                st->target_has_avx2 = 0;
-                st->target_supports_sse = 1;
-                st->target_supports_sse2 = 0;
-                st->target_supports_mmx = 1;
-                st->target_supports_avx = 0;
-                st->target_supports_avx2 = 0;
-            } else if (strcmp(name, "pentium4") == 0 || strcmp(name, "prescott") == 0 || strcmp(name, "nocona") == 0 ||
-                       strcmp(name, "core2") == 0 || strcmp(name, "x86-64") == 0 || strcmp(name, "x86-64-v1") == 0 ||
-                       strcmp(name, "x86-64-v2") == 0 || strcmp(name, "x86-64-v3") == 0 || strcmp(name, "x86-64-v4") == 0) {
-                st->target_has_sse = 1;
-                st->target_has_sse2 = 0;
-                st->target_has_mmx = 1;
-                st->target_has_avx = 0;
-                st->target_has_avx2 = 0;
-                st->target_supports_sse = 1;
-                st->target_supports_sse2 = 1;
-                st->target_supports_mmx = 1;
-                st->target_supports_avx = 0;
-                st->target_supports_avx2 = 0;
-                if (strcmp(name, "x86-64-v3") == 0 || strcmp(name, "x86-64-v4") == 0) {
-                    st->target_has_avx = 1;
-                    st->target_has_avx2 = 1;
-                    st->target_supports_avx = 1;
-                    st->target_supports_avx2 = 1;
-                }
-            }
-        } else if (strncmp(f, "-march=", 7) == 0 || strncmp(f, "-mcpu=", 6) == 0) {
-            const char *name = strchr(f, '=');
-            if (name != NULL) {
-                const char *tmpv[2];
-                tmpv[0] = "-march";
-                tmpv[1] = name + 1;
-                scan_target_flags(st, tmpv, 2);
-                arch_explicit = 1;
-            }
-        } else if (strcmp(f, "-msse") == 0) {
-            if (st->target_supports_sse) {
-                st->target_has_sse = 1;
-            }
-            st->target_off_sse = 0;
-        } else if (strcmp(f, "-mno-sse") == 0) {
-            st->target_has_sse = 0;
-            st->target_off_sse = 1;
-        } else if (strcmp(f, "-msse2") == 0) {
-            if (st->target_supports_sse2) {
-                st->target_has_sse2 = 1;
-            }
-            st->target_off_sse2 = 0;
-        } else if (strcmp(f, "-mno-sse2") == 0) {
-            st->target_has_sse2 = 0;
-            st->target_off_sse2 = 1;
-        } else if (strcmp(f, "-mmmx") == 0) {
-            if (st->target_supports_mmx) {
-                st->target_has_mmx = 1;
-            }
-            st->target_off_mmx = 0;
-        } else if (strcmp(f, "-mno-mmx") == 0) {
-            st->target_has_mmx = 0;
-            st->target_off_mmx = 1;
+        } else if ((v = pp_flag_value(flags, flag_count, &i, "-mtune")) != NULL) {
+            st->target_tune = cc_arch_find(v);
+            st->target_tune_explicit = 1;
+        } else if ((v = pp_flag_value(flags, flag_count, &i, "-mfpmath")) != NULL) {
+            st->target_fpmath = strcmp(v, "387") == 0 ? 1
+                                : strcmp(v, "sse") == 0 ? 2
+                                : strcmp(v, "sse,387") == 0 || strcmp(v, "387,sse") == 0 || strcmp(v, "both") == 0
+                                    ? 3
+                                    : st->target_fpmath;
+        } else if ((v = pp_flag_value(flags, flag_count, &i, "-mcmodel")) != NULL) {
+            st->target_cmodel = v;
+        } else if (cc_isa_is_flag(f)) {
+            /* an extension's -m<ext> or -mno-<ext>: below, all at once */
         } else if (strcmp(f, "-mno-80387") == 0 || strcmp(f, "-msoft-float") == 0) {
             st->target_no_80387 = 1;
         } else if (strcmp(f, "-m80387") == 0 || strcmp(f, "-mhard-float") == 0) {
             st->target_no_80387 = 0;
-        } else if (strcmp(f, "-mavx") == 0) {
-            /* any x86-64 -march may add AVX by flag, as with gcc */
-            if (st->target_supports_avx || st->target->id == CC_TARGET_X86_64) {
-                st->target_has_avx = 1;
-            }
-        } else if (strcmp(f, "-mno-avx") == 0) {
-            st->target_has_avx = 0;
-            st->target_has_avx2 = 0;
-        } else if (strcmp(f, "-mavx2") == 0) {
-            if (st->target_supports_avx2 || st->target->id == CC_TARGET_X86_64) {
-                st->target_has_avx2 = 1;
-            }
-        } else if (strcmp(f, "-mno-avx2") == 0) {
-            st->target_has_avx2 = 0;
         } else if (strcmp(f, "-funsigned-char") == 0 || strcmp(f, "-fno-signed-char") == 0) {
             st->unsigned_char = 1;
         } else if (strcmp(f, "-fsigned-char") == 0 || strcmp(f, "-fno-unsigned-char") == 0) {
@@ -2538,11 +2528,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             st->freestanding = 0;
         }
     }
-    /* AVX2 implies AVX, as in gcc: -mavx2 -mno-avx2 leaves neither, but an
-     * AVX that -mavx or -march gave stays */
-    if (st->target_has_avx2) {
-        st->target_has_avx = 1;
-    }
+    st->target_isa = cc_isa_from_flags(st->target_arch != NULL ? st->target_arch->isa : 0, flags, flag_count);
 }
 
 #ifndef CC_SUBSTRATE_BUILD

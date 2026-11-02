@@ -3301,10 +3301,9 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 return -1;
             }
             fn_x87_fp = 0;
-        } else if (opts->i386_fpmath == CC_FPMATH_387) {
-            fn_x87_fp = 1;
         } else {
-            fn_x87_fp = opts->i386_sse2 ? 0 : 1;
+            /* -mfpmath=387, and gcc's i386 default with SSE2 or without it */
+            fn_x87_fp = 1;
         }
         /* through machine IR and the register allocator, when that path handles all the function does */
         {

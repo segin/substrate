@@ -80,12 +80,8 @@ typedef struct {
   int gnu89_inline_mode;
   int gnu89_inline_override;
   int i386_isa_level;
-  int i386_has_sse;
-  int i386_has_sse2;
-  int i386_has_mmx;
-  int i386_supports_sse;
-  int i386_supports_sse2;
-  int i386_supports_mmx;
+  const cc_arch_t *arch; /* -march; NULL for the target's own (i686, x86-64) */
+  cc_strvec_t isa_flags; /* the extensions' -m<ext> and -mno-<ext>, in order */
   int i386_fp_math_mode;
   int implicit_funcdecl_override;
   int i386_arch_explicit;
@@ -99,7 +95,6 @@ typedef struct {
   int i386_stack_boundary; /* -mpreferred-stack-boundary=N: 2^N, or 0 */
   int cmodel_kernel; /* -mcmodel=kernel */
   int omit_frame_pointer; /* -fomit-frame-pointer, -fno-omit-frame-pointer */
-  int no_sse;        /* -mno-sse, the last of it and -msse */
   int no_jump_tables; /* -fno-jump-tables, the last of it and -fjump-tables */
   int wrapv;          /* -fwrapv, -fno-strict-overflow; the last of them and -fno-wrapv, -fstrict-overflow */
   int syntax_only;    /* -fsyntax-only: C checked, nothing written, nothing assembled or linked */
@@ -199,6 +194,20 @@ static int profile_fentry(const cc_opts_t *o) {
 }
 
 /**
+ * The instruction set's extensions: the -march's (the target's own
+ * without one: i686, x86-64) and the options' on them, as gcc settles
+ * them (cc_isa_from_flags()).
+ *
+ * @param o  the parsed command line
+ * @return   cc_isa_t bits
+ */
+static unsigned driver_isa(const cc_opts_t *o) {
+  const cc_arch_t *a = o->arch != NULL ? o->arch : cc_arch_find(o->target == CC_TARGET_I386 ? "i686" : "x86-64");
+
+  return cc_isa_from_flags(a != NULL ? a->isa : 0, (const char *const *)o->isa_flags.items, o->isa_flags.count);
+}
+
+/**
  * Collect the settings the compiler proper needs from the parsed
  * command line.
  *
@@ -222,10 +231,15 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->gnu89_inline = o->gnu89_inline_override ? o->gnu89_inline_mode : -1;
   out->implicit_funcdecl = o->implicit_funcdecl_override;
   out->i386_isa_level = o->i386_isa_level;
-  out->i386_sse2 = o->i386_has_sse2;
-  out->i386_mmx = o->i386_has_mmx;
-  /* SSE2 implies SSE, and -mno-sse turns both off, as in gcc */
-  out->i386_sse = (o->i386_has_sse || o->i386_has_sse2) && !o->no_sse;
+  {
+    unsigned isa = driver_isa(o);
+
+    out->i386_sse2 = (isa & CC_ISA_SSE2) != 0;
+    out->i386_mmx = (isa & CC_ISA_MMX) != 0;
+    out->i386_sse = (isa & CC_ISA_SSE) != 0;
+    /* x86-64: -mno-sse, no SSE register touched */
+    out->no_sse = (isa & CC_ISA_SSE) == 0;
+  }
   out->i386_fpmath = (cc_fpmath_t)o->i386_fp_math_mode;
   out->i386_regparm = o->i386_regparm;
   out->i386_reg_struct_return = o->i386_reg_struct_return;
@@ -235,7 +249,6 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->i386_stack_boundary = o->i386_stack_boundary;
   out->cmodel_kernel = o->cmodel_kernel;
   out->omit_frame_pointer = o->omit_frame_pointer;
-  out->no_sse = o->no_sse;
   out->no_jump_tables = o->no_jump_tables;
   out->wrapv = o->wrapv;
   out->syntax_only = o->syntax_only;
@@ -297,6 +310,7 @@ static void sigchld_guard_end(sigchld_guard_t *guard) {
 static void opts_free(cc_opts_t *o) {
   cc_strvec_free(&o->cpp_flags);
   cc_strvec_free(&o->c_flags);
+  cc_strvec_free(&o->isa_flags);
   cc_strvec_free(&o->as_flags);
   cc_strvec_free(&o->ld_flags);
   cc_strvec_free(&o->inputs);
@@ -931,93 +945,6 @@ static void usage(const char *prog) {
           prog);
 }
 
-static int i386_features_from_arch_name(const char *name, int *out_level,
-                                        int *out_has_sse, int *out_has_sse2,
-                                        int *out_has_mmx, int *out_supports_sse,
-                                        int *out_supports_sse2,
-                                        int *out_supports_mmx) {
-  if (name == NULL || name[0] == '\0') {
-    return 0;
-  }
-  if (strcmp(name, "i386") == 0) {
-    *out_level = 3;
-    *out_has_sse = 0;
-    *out_has_sse2 = 0;
-    *out_has_mmx = 0;
-    *out_supports_sse = 0;
-    *out_supports_sse2 = 0;
-    *out_supports_mmx = 0;
-    return 1;
-  }
-  if (strcmp(name, "i486") == 0) {
-    *out_level = 4;
-    *out_has_sse = 0;
-    *out_has_sse2 = 0;
-    *out_has_mmx = 0;
-    *out_supports_sse = 0;
-    *out_supports_sse2 = 0;
-    *out_supports_mmx = 0;
-    return 1;
-  }
-  if (strcmp(name, "i586") == 0 || strcmp(name, "pentium") == 0) {
-    *out_level = 5;
-    *out_has_sse = 0;
-    *out_has_sse2 = 0;
-    *out_has_mmx = 0;
-    *out_supports_sse = 0;
-    *out_supports_sse2 = 0;
-    *out_supports_mmx = 1;
-    return 1;
-  }
-  if (strcmp(name, "pentium-mmx") == 0) {
-    *out_level = 5;
-    *out_has_sse = 0;
-    *out_has_sse2 = 0;
-    *out_has_mmx = 1;
-    *out_supports_sse = 0;
-    *out_supports_sse2 = 0;
-    *out_supports_mmx = 1;
-    return 1;
-  }
-  /* the Pentium Pro has no MMX; the Pentium II adds it */
-  if (strcmp(name, "i686") == 0 || strcmp(name, "pentiumpro") == 0 ||
-      strcmp(name, "pentium2") == 0) {
-    *out_level = 6;
-    *out_has_sse = 0;
-    *out_has_sse2 = 0;
-    *out_has_mmx = strcmp(name, "pentium2") == 0;
-    *out_supports_sse = 0;
-    *out_supports_sse2 = 0;
-    *out_supports_mmx = 1;
-    return 1;
-  }
-  if (strcmp(name, "pentium3") == 0) {
-    *out_level = 6;
-    *out_has_sse = 1;
-    *out_has_sse2 = 0;
-    *out_has_mmx = 1;
-    *out_supports_sse = 1;
-    *out_supports_sse2 = 0;
-    *out_supports_mmx = 1;
-    return 1;
-  }
-  if (strcmp(name, "pentium4") == 0 || strcmp(name, "prescott") == 0 ||
-      strcmp(name, "nocona") == 0 || strcmp(name, "core2") == 0 ||
-      strcmp(name, "x86-64") == 0 || strcmp(name, "x86-64-v1") == 0 ||
-      strcmp(name, "x86-64-v2") == 0 || strcmp(name, "x86-64-v3") == 0 ||
-      strcmp(name, "x86-64-v4") == 0) {
-    *out_level = 7;
-    *out_has_sse = 1;
-    *out_has_sse2 = 0;
-    *out_has_mmx = 1;
-    *out_supports_sse = 1;
-    *out_supports_sse2 = 1;
-    *out_supports_mmx = 1;
-    return 1;
-  }
-  return 0;
-}
-
 /* ---- the command line ---------------------------------------------- */
 
 /** How an option takes its value. */
@@ -1230,12 +1157,7 @@ static int opt_rdynamic(cc_opts_t *o, const driver_opt_t *d, const char *as, con
  */
 static void i386_default_isa(cc_opts_t *o) {
   o->i386_isa_level = 6;
-  o->i386_has_sse = 0;
-  o->i386_has_sse2 = 0;
-  o->i386_has_mmx = 0;
-  o->i386_supports_sse = 0;
-  o->i386_supports_sse2 = 0;
-  o->i386_supports_mmx = 1;
+  o->arch = NULL;
 }
 
 /**
@@ -1256,45 +1178,26 @@ static int opt_target(cc_opts_t *o, const driver_opt_t *d, const char *as, const
 }
 
 /**
- * -march / -mcpu name the i386 ISA; -mtune is accepted and changes
- * nothing.  An architecture cc does not know is passed over.
+ * -march / -mcpu name the instruction set (common/target.c's table,
+ * gcc's): its level and its extensions; -mtune is accepted and changes
+ * nothing but the preprocessor's macros.  An architecture cc does not
+ * know is passed over.
  *
  * @return 0
  */
 static int opt_arch(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
-  int level = 0;
-  int has_sse = 0;
-  int has_sse2 = 0;
-  int has_mmx = 0;
-  int supports_sse = 0;
-  int supports_sse2 = 0;
-  int supports_mmx = 0;
+  const cc_arch_t *a = cc_arch_find(val);
 
   (void)d;
-  if (strcmp(as, "-mtune") == 0 ||
-      !i386_features_from_arch_name(val, &level, &has_sse, &has_sse2, &has_mmx,
-                                    &supports_sse, &supports_sse2,
-                                    &supports_mmx)) {
+  if (strcmp(as, "-mtune") == 0 || a == NULL) {
     return 0;
   }
-  o->i386_isa_level = level;
-  o->i386_has_sse = has_sse;
-  o->i386_has_sse2 = has_sse2;
-  o->i386_has_mmx = has_mmx;
-  o->i386_supports_sse = supports_sse;
-  o->i386_supports_sse2 = supports_sse2;
-  o->i386_supports_mmx = supports_mmx;
+  o->i386_isa_level = a->level;
+  o->arch = a;
   o->i386_arch_explicit = 1;
   return 0;
 }
 
-/**
- * -m[no-]sse, -m[no-]sse2, -m[no-]mmx.  d->field is the has_ member,
- * d->n the supports_ member's offset, and the spelling says on or off.
- * Turning a feature on that the chosen -march lacks is an error on i386.
- *
- * @return 0, or -1 for a feature the architecture lacks
- */
 /**
  * -mgeneral-regs-only: no register but the general ones -- no SSE, MMX or x87 -- as gcc has it, so
  * -mno-sse -mno-sse2 -mno-mmx -mno-80387, the preprocessor told too (no __SSE__, __SSE2__, __MMX__).
@@ -1310,33 +1213,32 @@ static int opt_general_regs_only(cc_opts_t *o, const driver_opt_t *d, const char
   (void)d;
   (void)as;
   (void)val;
-  o->i386_has_sse = 0;
-  o->i386_has_sse2 = 0;
-  o->i386_has_mmx = 0;
-  o->no_sse = 1;
   o->no_80387 = 1;
   for (k = 0; k < sizeof(off) / sizeof(off[0]); ++k) {
-    if (cc_strvec_push(&o->cpp_flags, off[k]) != 0) {
+    if (cc_strvec_push(&o->cpp_flags, off[k]) != 0 || cc_strvec_push(&o->isa_flags, off[k]) != 0) {
       return -1;
     }
   }
   return 0;
 }
 
-static int opt_isa_feature(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
-  int on = strncmp(as, "-mno-", 5) != 0;
-  int supported = *(int *)((char *)o + d->n);
+/**
+ * An extension's -m<ext> or -mno-<ext> (-msse, -mno-sse2, -mmmx,
+ * -msse4.2, -mno-avx, -mavx512f, ...), kept in order for
+ * compile_options(), which settles them all at once as gcc does
+ * (cc_isa_from_flags()).  cc makes instructions of SSE, SSE2 and MMX
+ * alone, but what the others imply of them is the code's too: -msse3
+ * turns on SSE2, and with it 16-byte vectors in %xmm registers on i386.
+ * As with gcc, any -march may have them added.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int opt_isa_ext(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  char flag[64];
 
-  (void)val;
-  if (on && o->target == CC_TARGET_I386 && !supported) {
-    fprintf(stderr, "cc: error: %s is not supported for selected -march level\n", as);
-    return -1;
-  }
-  *(int *)((char *)o + d->field) = on;
-  if (d->field == offsetof(cc_opts_t, i386_has_sse)) {
-    o->no_sse = !on;
-  }
-  return 0;
+  (void)d;
+  snprintf(flag, sizeof(flag), "%s%s", as, val != NULL ? val : "");
+  return cc_strvec_push(&o->isa_flags, flag);
 }
 
 /**
@@ -1747,16 +1649,16 @@ static const driver_opt_t options[] = {
     {"-m32 -m16", OPT_FLAG, FWD_C | FWD_CPP, opt_target, 0, CC_TARGET_I386},
     {"-m64", OPT_FLAG, FWD_C | FWD_CPP, opt_target, 0, CC_TARGET_X86_64},
     {"-march -mcpu -mtune", OPT_VALUE, FWD_C | FWD_CPP, opt_arch, 0, 0},
-    {"-msse -mno-sse", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_sse), (int)F(i386_supports_sse)},
-    {"-msse2 -mno-sse2", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_sse2), (int)F(i386_supports_sse2)},
-    {"-mmmx -mno-mmx", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_mmx), (int)F(i386_supports_mmx)},
+    {"-msse -mno-sse -msse2 -mno-sse2 -mmmx -mno-mmx", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_ext, 0, 0},
     {"-mgeneral-regs-only", OPT_FLAG, 0, opt_general_regs_only, 0, 0},
-    {"-mavx -mno-avx -mavx2 -mno-avx2", OPT_FLAG, FWD_C | FWD_CPP, NULL, 0, 0},
-    {"-mfpmath", OPT_VALUE, FWD_C, opt_fpmath, 0, 0},
+    {"-mavx -mno-avx -mavx2 -mno-avx2", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_ext, 0, 0},
+    /* (to the preprocessor too, for __SSE_MATH__, __SSE2_MATH__ and __FLT_EVAL_METHOD__) */
+    {"-mfpmath", OPT_VALUE, FWD_C | FWD_CPP, opt_fpmath, 0, 0},
     {"-mregparm", OPT_VALUE, FWD_C, opt_regparm, 0, 0},
     {"-ftrivial-auto-var-init", OPT_VALUE, FWD_C, opt_trivial_auto_var_init, 0, 0},
     {"-mpreferred-stack-boundary", OPT_VALUE, FWD_C, opt_stack_boundary, 0, 0},
-    {"-mcmodel", OPT_VALUE, FWD_C, opt_cmodel, 0, 0},
+    /* (to the preprocessor too, for __code_model_kernel__ and the others) */
+    {"-mcmodel", OPT_VALUE, FWD_C | FWD_CPP, opt_cmodel, 0, 0},
     {"-fno-asynchronous-unwind-tables -fno-unwind-tables", OPT_FLAG, FWD_C, opt_int, F(no_unwind_tables), 1},
     {"-fasynchronous-unwind-tables -funwind-tables", OPT_FLAG, FWD_C, opt_int, F(no_unwind_tables), 0},
     /* i386: structures of 1, 2, 4 or 8 bytes come back in %eax(:%edx), one float or double in %st0 (gcc) */
@@ -1852,9 +1754,9 @@ static const driver_opt_t options[] = {
      "-mno-pclmul -mpclmul -mno-sha -msha -mno-rdrnd -mrdrnd -mno-rdseed -mrdseed -mno-f16c -mf16c -mno-movbe "
      "-mmovbe -mno-adx -madx -mno-cx16 -mcx16 -mno-sahf -msahf -mno-xsave -mxsave -mno-xsaveopt -mxsaveopt "
      "-mno-fsgsbase -mfsgsbase -mno-rtm -mrtm -mno-crc32 -mcrc32 -mno-gfni -mgfni -mno-vaes -mvaes "
-     "-mno-vpclmulqdq -mvpclmulqdq",
-     OPT_FLAG, 0, NULL, 0, 0},
-    {"-mavx512 -mno-avx512", OPT_PREFIX, 0, NULL, 0, 0},
+     "-mno-vpclmulqdq -mvpclmulqdq -mno-fxsr -mfxsr",
+     OPT_FLAG, FWD_CPP, opt_isa_ext, 0, 0},
+    {"-mavx512 -mno-avx512", OPT_PREFIX, FWD_CPP, opt_isa_ext, 0, 0},
     /* gcc's own optimization choices, which leave the meaning of the program alone: cc makes its own */
     {"-fconserve-stack -fno-conserve-stack -fsched-pressure -fschedule-insns -fno-schedule-insns "
      "-fschedule-insns2 -fno-schedule-insns2 -fno-reorder-blocks -fno-ipa-cp-clone -fno-partial-inlining "
@@ -2695,12 +2597,6 @@ int cc_main(int argc, char **argv) {
   o.self_path = (argc > 0) ? argv[0] : NULL;
   memset(&obj_files, 0, sizeof(obj_files));
   o.i386_isa_level = 6;
-  o.i386_has_sse = 0;
-  o.i386_has_sse2 = 1;
-  o.i386_has_mmx = 1;
-  o.i386_supports_sse = 1;
-  o.i386_supports_sse2 = 1;
-  o.i386_supports_mmx = 1;
   o.i386_fp_math_mode = CC_FPMATH_AUTO;
   o.implicit_funcdecl_override = -1;
   o.fentry = -1;
@@ -2729,6 +2625,11 @@ int cc_main(int argc, char **argv) {
     }
     usage(argv[0]);
     goto out;
+  }
+  /* -mfpmath=sse where the extensions have no SSE: the x87's, as gcc warns and makes it */
+  if (o.target == CC_TARGET_I386 && o.i386_fp_math_mode == CC_FPMATH_SSE && (driver_isa(&o) & CC_ISA_SSE) == 0) {
+    fprintf(stderr, "cc: warning: SSE instruction set disabled, using 387 arithmetics\n");
+    o.i386_fp_math_mode = CC_FPMATH_387;
   }
 
   if (o.query_print_file_name) {

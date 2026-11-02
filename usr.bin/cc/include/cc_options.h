@@ -26,7 +26,7 @@
 
 /** Scalar floating-point code on i386 (-mfpmath=). */
 typedef enum {
-    CC_FPMATH_AUTO = 0, /**< SSE2 when the target has it, else x87 */
+    CC_FPMATH_AUTO = 0, /**< the target's own: SSE on x86-64, the x87 on i386 (SSE2 or not), as gcc's */
     CC_FPMATH_SSE = 1,  /**< -mfpmath=sse */
     CC_FPMATH_387 = 2   /**< -mfpmath=387 */
 } cc_fpmath_t;

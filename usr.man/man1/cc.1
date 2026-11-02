@@ -199,6 +199,9 @@ options whose effect cc has already are taken and do nothing more:
 .Fl mskip-rax-setup ,
 the options of ISA extensions cc makes no instruction of
 .Pq such as Fl msse4.2 , Fl mno-3dnow , Fl mavx512f ,
+which give the preprocessor's macros as
+.Fl march
+does, and SSE, SSE2 and MMX where they imply them,
 .Xr gcc 1 Ns 's
 own optimization choices
 .Pq Fl falign- Ns Ar * , Fl fconserve-stack , Fl fno-gcse No and the like ,
@@ -384,7 +387,7 @@ A 64-bit program is linked as a position-independent executable; a
 32-bit one is not, as the i386 code generator writes position-dependent
 code.
 .It Fl march Ns = Ns Ar cpu
-i386: the CPU the code runs on, whose instructions alone it uses:
+The CPU the code runs on, whose instructions alone it uses:
 .Cm i386 ,
 .Cm i486 ,
 .Cm i586
@@ -394,8 +397,46 @@ i386: the CPU the code runs on, whose instructions alone it uses:
 .Pq Cm pentiumpro ,
 .Cm pentium2 ,
 .Cm pentium3 ,
-.Cm pentium4
-and later.
+.Cm pentium-m ,
+.Cm pentium4 ,
+.Cm prescott ,
+.Cm nocona ,
+.Cm core2 ,
+.Cm nehalem ,
+.Cm x86-64
+and
+.Cm x86-64-v2
+to
+.Cm v4 .
+Each has gcc's extensions, which
+.Fl m Ns Ar ext
+and
+.Fl mno- Ns Ar ext
+then change as gcc's do: one turned on turns on those it needs, one
+turned off those that need it, and an option given again later counts
+only there.
+The preprocessor defines gcc's macros for them
+.Pq Dv __SSE2__ , __SSE4_2__ , __POPCNT__ , __LAHF_SAHF__ ... ,
+for the CPU
+.Pq Dv __pentium4__ , __k8__ ...
+and for its tuning, or
+.Fl mtune Ns 's
+.Pq Dv __tune_pentium4__ ,
+and
+.Dv __SSE_MATH__
+and
+.Dv __SSE2_MATH__
+where SSE computes floats and doubles: on x86-64, and on i386 only under
+.Fl mfpmath=sse ;
+SSE2 or not, i386 floating point is otherwise the x87's, as gcc's, and
+.Fl mfpmath=sse
+with no SSE is warned of and is the x87's too.
+.Dv __GCC_HAVE_SYNC_COMPARE_AND_SWAP_16
+is not defined, as
+.Nm
+has no 16-byte
+.Fn __sync_*
+builtins.
 An atomic builtin the CPU has no instruction for is a call, as gcc makes
 it:
 .Fn __sync_ Ns Ar op Ns Fn _ Ns Ar N
@@ -437,7 +478,9 @@ a function with an object of 16-byte alignment in its frame keeps a
 frame pointer and aligns the stack pointer to 16 bytes itself, as gcc
 does.
 .It Fl msse , Fl mno-sse
-On i386, whether SSE instructions may be used.
+On i386, whether SSE instructions may be used, with any
+.Fl march ,
+as with gcc.
 On x86-64,
 .Fl mno-sse
 leaves the vector registers alone where nothing uses them: a variadic
@@ -828,7 +871,7 @@ or a
 .Fn __fixxfsi
 and the rest.
 This applies where the x87 would do the doubles; where SSE does them
-.Pq Fl mfpmath=sse , or Fl msse2 without Fl mfpmath=387
+.Pq Fl mfpmath=sse
 only a
 .Ic long double
 is soft-float, as

@@ -96,9 +96,8 @@ cc_softfloat_mode_t cc_softfloat_i386_mode(void) {
     if (!o->no_80387) {
         return o->no_fp_ret_in_387 ? CC_SOFTFLOAT_RETURNS : CC_SOFTFLOAT_NONE;
     }
-    return (o->i386_fpmath == CC_FPMATH_SSE || (o->i386_fpmath != CC_FPMATH_387 && o->i386_sse2))
-               ? CC_SOFTFLOAT_LDOUBLE
-               : CC_SOFTFLOAT_ALL;
+    /* SSE does the floats and doubles only under -mfpmath=sse: gcc -m32 -mno-80387 -msse2 calls __adddf3 */
+    return o->i386_fpmath == CC_FPMATH_SSE ? CC_SOFTFLOAT_LDOUBLE : CC_SOFTFLOAT_ALL;
 }
 
 /** Fail with message @p msg, naming the function; the first failure's message is kept. */
