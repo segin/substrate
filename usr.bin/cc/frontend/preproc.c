@@ -898,6 +898,32 @@ static size_t count_pp_tokens(const char *src) {
     return count;
 }
 
+/**
+ * Whether `defined`, #ifdef and #ifndef take @p name for defined: a macro,
+ * or one of the preprocessor's operators, which gcc reports defined so
+ * that `#ifdef __has_include` can ask before using one.
+ *
+ * @param st    the preprocessor state
+ * @param name  the name
+ * @return      1 if so, else 0
+ */
+static int pp_name_is_defined(pp_state_t *st, const char *name) {
+    static const char *const operators[] = {
+        "__has_include", "__has_include_next", "__has_attribute", "__has_c_attribute",
+        "__has_builtin", "__has_feature", "__has_extension", "__has_embed", NULL};
+    size_t i;
+
+    if (macro_find(&st->macros, name) != NULL) {
+        return 1;
+    }
+    for (i = 0; operators[i] != NULL; ++i) {
+        if (strcmp(name, operators[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* What gcc's __has_c_attribute and __has_attribute are for a standard attribute: C23's date. */
 #define PP_STD_ATTRIBUTE_VALUE 202311L
 
@@ -5896,7 +5922,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         sb_free(&out);
                         return -1;
                     }
-                    is_def = macro_find(&st->macros, name) != NULL;
+                    is_def = pp_name_is_defined(st, name);
                     free(name);
                     if (sb_append(&out, is_def ? "1" : "0") != 0) {
                         sb_free(&out);
@@ -7178,7 +7204,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     if (name == NULL) {
                         goto fail;
                     }
-                    cond = (macro_find(&st->macros, name) != NULL);
+                    cond = pp_name_is_defined(st, name);
                     free(name);
                 }
                 fr.parent_active = active;
@@ -7204,7 +7230,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     if (name == NULL) {
                         goto fail;
                     }
-                    cond = (macro_find(&st->macros, name) == NULL);
+                    cond = !pp_name_is_defined(st, name);
                     free(name);
                 }
                 fr.parent_active = active;
@@ -7258,7 +7284,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     if (name == NULL) {
                         goto fail;
                     }
-                    cond = (macro_find(&st->macros, name) != NULL);
+                    cond = pp_name_is_defined(st, name);
                     free(name);
                 }
                 if (!cond_stack[cond_count - 1].parent_active || cond_stack[cond_count - 1].any_taken) {
@@ -7296,7 +7322,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     if (name == NULL) {
                         goto fail;
                     }
-                    cond = (macro_find(&st->macros, name) == NULL);
+                    cond = !pp_name_is_defined(st, name);
                     free(name);
                 }
                 if (!cond_stack[cond_count - 1].parent_active || cond_stack[cond_count - 1].any_taken) {
