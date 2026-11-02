@@ -13871,6 +13871,53 @@ static const cc_expr_t *flexible_init_string(const cc_expr_t *item) {
     return item != NULL && item->kind == CC_EXPR_STR ? item : NULL;
 }
 
+static long *ct_array_bounds(const cc_ctype_t *t, int *out_nd, const cc_ctype_t **out_scalar);
+
+/**
+ * The size of a flexible array member's element, what each index of it
+ * is: a row of `const int map[][4]`, 16 bytes, where member_elem_size()
+ * is the innermost element's.
+ *
+ * @param tu  the translation unit
+ * @param m   the member
+ * @return    the size, or -1
+ */
+static long flexible_elem_size(const cc_translation_unit_t *tu, const cc_struct_member_t *m) {
+    const cc_ctype_t *t = member_decl_ctype(m);
+    long n = t != NULL && t->kind == CC_CT_ARRAY && t->of != NULL ? cc_ct_size(t->of, tu) : -1;
+
+    return n > 0 ? n : member_elem_size(tu, m);
+}
+
+/**
+ * How many rows the list @p item gives a flexible array member whose
+ * elements are arrays of scalars (`const int map[][4]`): each braced row,
+ * or string for a row of characters, is one where a row begins; scalars
+ * with their braces elided fill rows of @p row_scalars, a braced one in
+ * a part-filled row among them, and a part-filled last row counts.
+ *
+ * @param item         the member's braced initializer
+ * @param row_scalars  the scalars in a row
+ * @return             the count
+ */
+static long flexible_row_count(const cc_expr_t *item, long row_scalars) {
+    long rows = 0;
+    long loose = 0;
+    size_t i;
+
+    for (i = 0; i < item->arg_count; ++i) {
+        const cc_expr_t *a = item->args[i];
+
+        if (loose == 0 && a != NULL && (a->kind == CC_EXPR_INIT_LIST || a->kind == CC_EXPR_STR)) {
+            rows++;
+        } else if (++loose == row_scalars) {
+            rows++;
+            loose = 0;
+        }
+    }
+    return rows + (loose + row_scalars - 1) / row_scalars;
+}
+
 static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
                                               const cc_expr_t *item) {
     const cc_expr_t *str = flexible_init_string(item);
@@ -13885,11 +13932,11 @@ static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, c
         return -1;
     }
     elem_sid = ct_record_id(member_elem_ctype(m));
-    elem_size = member_elem_size(tu, m);
+    elem_size = flexible_elem_size(tu, m);
     if (elem_size <= 0) {
         return -1;
     }
-    if (str != NULL && elem_sid < 0) {
+    if (str != NULL && elem_sid < 0 && (member_elem_ctype(m) == NULL || member_elem_ctype(m)->kind != CC_CT_ARRAY)) {
         wide = cc_string_literal_is_wide(str);
         if (decode_string_units(str, wide, &units, &unit_count) != 0) {
             free(units);
@@ -13899,6 +13946,19 @@ static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, c
         elems = (long)unit_count + 1; /* the terminating null */
     } else if (elem_sid >= 0 && item->kind == CC_EXPR_INIT_LIST) {
         elems = infer_struct_array_len_from_init_list(tu, elem_sid, item);
+    } else if (item->kind == CC_EXPR_INIT_LIST && member_elem_ctype(m) != NULL &&
+               member_elem_ctype(m)->kind == CC_CT_ARRAY) {
+        /* rows of an array of arrays, `const int map[][4]` (Linux's ata_piix piix_map_db) */
+        const cc_ctype_t *scalar = NULL;
+        int nd = 0;
+        long *dims = ct_array_bounds(member_elem_ctype(m), &nd, &scalar);
+        long ssz = dims != NULL && scalar != NULL ? cc_ct_size(scalar, tu) : -1;
+
+        free(dims);
+        if (ssz <= 0 || elem_size % ssz != 0) {
+            return -1;
+        }
+        elems = flexible_row_count(item, elem_size / ssz);
     } else if (item->kind == CC_EXPR_INIT_LIST) {
         elems = (long)item->arg_count;
     } else {
@@ -13943,11 +14003,8 @@ static long infer_flexible_struct_tail_extra_bytes(const cc_translation_unit_t *
             next_member = struct_next_init_member_index(sd, member_idx);
         }
         if (member_idx + 1 == sd->member_count && struct_has_flexible_tail(sd)) {
-            long elem_size = member_elem_size(tu, m);
+            long elem_size = flexible_elem_size(tu, m);
             long elems;
-            if (elem_size <= 0) {
-                elem_size = member_elem_size(tu, m);
-            }
             elems = infer_flexible_array_member_elems(tu, m, item);
             if (elem_size <= 0 || elems <= 0 || elems > LONG_MAX / elem_size) {
                 return -1;
@@ -14552,7 +14609,7 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
                                       global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
     const cc_ctype_t *elem = member_elem_ctype(m);
     int elem_sid = ct_record_id(elem);
-    long elem_size = member_elem_size(tu, m);
+    long elem_size = flexible_elem_size(tu, m);
     const cc_expr_t *str = flexible_init_string(item);
     size_t cur = 0;
     long k;
@@ -14561,7 +14618,7 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
         set_diag(diag, "flexible array initializer exceeds its object");
         return -1;
     }
-    if (str != NULL && elem_sid < 0) {
+    if (str != NULL && elem_sid < 0 && (elem == NULL || elem->kind != CC_CT_ARRAY)) {
         unsigned long *units = NULL;
         size_t count = 0;
         size_t u;
@@ -14611,6 +14668,27 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
         }
         return 0;
     }
+    if (elem != NULL && elem->kind == CC_CT_ARRAY) {
+        /* rows: the member's dimensions, its own first, of the scalar they end in */
+        const cc_ctype_t *scalar = NULL;
+        int nd = 0;
+        long *inner = ct_array_bounds(elem, &nd, &scalar);
+        long *dims;
+        int rc;
+
+        if (inner == NULL || (dims = (long *)malloc((size_t)(nd + 1) * sizeof(*dims))) == NULL) {
+            free(inner);
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        dims[0] = elems;
+        memcpy(dims + 1, inner, (size_t)nd * sizeof(*dims));
+        free(inner);
+        rc = flatten_scalar_array_init_cursor(tu, scalar, dims, nd + 1, item, &cur, base, buf, buf_size, relocs,
+                                              reloc_count, diag);
+        free(dims);
+        return rc;
+    }
     {
         long dims[1];
         dims[0] = elems;
@@ -14618,8 +14696,6 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
                                                 relocs, reloc_count, diag);
     }
 }
-
-static long *ct_array_bounds(const cc_ctype_t *t, int *out_nd, const cc_ctype_t **out_scalar);
 
 /**
  * Write a structure member that is an array of more than one dimension,
