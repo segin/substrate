@@ -1607,6 +1607,7 @@ int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, lon
 
     env.sizeof_bytes = sema_const_sizeof;
     env.type_bytes = cc_const_tu_type_bytes;
+    env.object_init = NULL;
     env.ctx = (void *)tu;
     return cc_const_eval_ll(&env, e, out);
 }
@@ -3500,6 +3501,7 @@ static int sema_constexpr_parts_exact(const cc_translation_unit_t *tu, const cc_
     }
     env.sizeof_bytes = NULL;
     env.type_bytes = cc_const_tu_type_bytes;
+    env.object_init = NULL;
     env.ctx = (void *)tu;
     if (cc_const_eval(&env, e, &v) == 0 && !cc_const_fits(&v, t)) {
         sema_diag(diag, "'constexpr' initializer not representable in type of object");
@@ -4958,6 +4960,7 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
 
         env.sizeof_bytes = sema_const_sizeof;
         env.type_bytes = cc_const_tu_type_bytes;
+        env.object_init = NULL;
         env.ctx = (void *)tu;
         if (cc_const_is_null_pointer(&env, x)) {
             t = b;

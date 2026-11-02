@@ -825,6 +825,21 @@ int cc_const_eval(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out
     case CC_EXPR_IDENT:
     case CC_EXPR_MEMBER:
         /* a named constant (C23 6.6p7): a constexpr object or member, its value recorded where it is named */
+        if (e->named_const_type == NULL && e->kind == CC_EXPR_IDENT && env->object_init != NULL) {
+            /* a const object the context knows the value of (env->object_init), as gcc folds its read */
+            static int depth;
+            const cc_ctype_t *t = NULL;
+            const cc_expr_t *init = env->object_init(env->ctx, e, &t);
+            int rc;
+
+            if (init == NULL || t == NULL || depth > 16) {
+                return -1;
+            }
+            depth++;
+            rc = cc_const_eval(env, init, &a);
+            depth--;
+            return rc != 0 ? -1 : const_convert(&a, const_unqual(t), out);
+        }
         if (e->named_const_type == NULL) {
             return -1;
         }

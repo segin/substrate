@@ -47,6 +47,21 @@ typedef struct {
      */
     long (*type_bytes)(void *ctx, const cc_ctype_t *t);
 
+    /**
+     * What a name of an object stands for when it is read, if the object
+     * never changes and its value is known: the initializer of a const,
+     * non-volatile object defined with one, and its type; NULL to know no
+     * object's value.  gcc folds such a read in an initializer --
+     * Linux's `unsigned int x = rseq_slice_ext_nsecs_min;` of a
+     * `static const unsigned int` -- where C asks only for a constant.
+     *
+     * @param ctx       the caller's context
+     * @param e         the CC_EXPR_IDENT node
+     * @param[out] type the object's type
+     * @return          the initializer, or NULL if the value is not known so
+     */
+    const cc_expr_t *(*object_init)(void *ctx, const cc_expr_t *e, const cc_ctype_t **type);
+
     void *ctx; /**< passed to the callbacks */
 } cc_const_env_t;
 

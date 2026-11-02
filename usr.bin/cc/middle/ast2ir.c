@@ -1099,12 +1099,51 @@ static void ssa_global_set_bytes(cc_ssa_global_t *g, long nbytes) {
  * @param out  receives the value
  * @return     0, or -1 if @p e is not an integer constant expression
  */
+/**
+ * Whether file-scope initializers are being laid out, where every name is a file-scope one: a const object's
+ * value is folded there (const_object_init()), and only there, a local of a function's being able to hide one.
+ */
+static int g_file_scope_init;
+
+/**
+ * For the constant evaluator (cc_const_env_t.object_init): the initializer of the file-scope object @p e
+ * names, if it is const and not volatile, defined here with a constant initializer, and neither weak nor an
+ * alias, and its type; as gcc folds a read of one in an initializer.  Only while file-scope initializers are
+ * laid out (g_file_scope_init).
+ *
+ * @return the initializer, or NULL
+ */
+static const cc_expr_t *const_object_init(void *ctx, const cc_expr_t *e, const cc_ctype_t **type) {
+    const cc_translation_unit_t *tu = (const cc_translation_unit_t *)ctx;
+    size_t i;
+
+    if (!g_file_scope_init || tu == NULL || e == NULL || e->ident == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < tu->global_count; ++i) {
+        const cc_global_t *g = &tu->globals[i];
+        const cc_ctype_t *t = g->ctype;
+
+        if (g->name == NULL || strcmp(g->name, e->ident) != 0 || g->init == NULL || t == NULL) {
+            continue;
+        }
+        if ((t->quals & CC_CQ_CONST) == 0 || (t->quals & CC_CQ_VOLATILE) != 0 || !cc_ct_is_integer(t->unqual) ||
+            (g->attr_flags & CC_ATTR_WEAK) != 0 || g->attr_alias != NULL || g->init->kind == CC_EXPR_INIT_LIST) {
+            return NULL;
+        }
+        *type = t;
+        return g->init;
+    }
+    return NULL;
+}
+
 int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const cc_expr_t *e,
                                           const_integral_value_t *out) {
     cc_const_env_t env;
 
     env.sizeof_bytes = NULL;
     env.type_bytes = cc_const_tu_type_bytes;
+    env.object_init = const_object_init;
     env.ctx = (void *)tu;
     return cc_const_eval(&env, e, out);
 }
@@ -15927,6 +15966,7 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
 
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag) {
     if (!tu || !out) return -1;
+    g_file_scope_init = 0;
 
     size_t i;
     size_t def_count = 0;
@@ -16013,6 +16053,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             return -1;
         }
         out->global_count = tu->global_count;
+        /* (a const object's value folds into these initializers, as gcc folds it: const_object_init()) */
+        g_file_scope_init = 1;
         for (i = 0; i < tu->global_count; ++i) {
             long long init_i = 0;
             double init_f = 0.0;
@@ -16627,6 +16669,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             out->globals[i].init_is_symbol = init_sym != NULL;
             out->globals[i].init_sym = init_sym;
         }
+        g_file_scope_init = 0;
     }
 
     for (i = 0; i < tu->func_count; ++i) {
