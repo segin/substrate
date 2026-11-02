@@ -15,7 +15,9 @@ static void test_exec_dynstr_phdr(void) {
     elf_section_t *text;
     elf_section_t *dyn;
     elf_symbol_t *sym;
-    uint8_t code[] = {0x90, 0xC3};
+    /* Room for the 8 bytes R_X86_64_64 stores at offset 0: the library
+     * refuses a relocation that would write past its section. */
+    uint8_t code[] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xC3};
 
     obj = elf_create(ET_DYN, 62, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
     if (!obj) fail("elf_create ET_DYN");
@@ -23,10 +25,14 @@ static void test_exec_dynstr_phdr(void) {
     text = elf_add_section(obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
     if (!text) fail("add .text");
     if (elf_section_set_data(text, code, sizeof(code)) != ELF_OK) fail("set .text data");
+    /* An image's loaded sections each have an address of their own: the
+     * reader refuses two that overlap. */
+    if (elf_section_set_addr(text, 0x1000) != ELF_OK) fail("set .text addr");
 
     dyn = elf_add_section(obj, ".dynamic", SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE);
     if (!dyn) fail("add .dynamic");
     if (elf_section_set_data(dyn, code, 1) != ELF_OK) fail("set .dynamic data");
+    if (elf_section_set_addr(dyn, 0x2000) != ELF_OK) fail("set .dynamic addr");
 
     sym = elf_add_symbol(obj, "dynfunc", 0, sizeof(code), STB_GLOBAL, STT_FUNC);
     if (!sym) fail("add symbol");
@@ -37,7 +43,13 @@ static void test_exec_dynstr_phdr(void) {
 
     if (elf_open("tmp_dyn64.elf", &reopen) != ELF_OK) fail("open ET_DYN");
     if (elf_program_header_count(reopen) == 0) fail("missing program headers");
-    if (!elf_find_section(reopen, ".dynstr")) fail("missing .dynstr");
+    {
+        /* the .dynstr made up for it goes past the sections that were
+         * placed, not at address 0 */
+        elf_section_t *ds = elf_find_section(reopen, ".dynstr");
+        if (!ds) fail("missing .dynstr");
+        if (elf_section_addr(ds) < 0x2001) fail(".dynstr overlaps the placed sections");
+    }
     elf_close(reopen);
 }
 
@@ -47,7 +59,8 @@ static void test_rel_and_rela_emission(void) {
     elfobj_t *reopen;
     elf_section_t *text;
     elf_symbol_t *sym;
-    uint8_t code[] = {0x90, 0xC3};
+    /* Room for the 4 bytes R_386_32 and R_X86_64_PC32 store at offset 0. */
+    uint8_t code[] = {0x90, 0x90, 0x90, 0x90, 0xC3};
 
     obj32 = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
     if (!obj32) fail("create 32");

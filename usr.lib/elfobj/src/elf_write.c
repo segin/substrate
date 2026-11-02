@@ -100,6 +100,39 @@ static uint64_t align_with_page_mod(uint64_t off, uint64_t align, uint64_t addr,
     return off + steps;
 }
 
+/**
+ * @brief The address for a loaded section the writer made up itself.
+ *
+ * Nothing placed such a section (the .dynstr of a shared object built
+ * without one), so its address would be 0, over whatever else is there,
+ * and the reader refuses an image whose loaded sections overlap.  It goes
+ * past every other loaded section, at the same place in its page as its
+ * file offset, so the segment that maps the file maps it too.
+ *
+ * @param secs      the output sections
+ * @param sec_count how many there are
+ * @param self      the index of the made-up section
+ * @param off       its file offset
+ * @param page      the page size of the image
+ * @return its address
+ */
+static uint64_t place_made_up_section(const out_sec_t *secs, size_t sec_count, size_t self, uint64_t off,
+                                      uint64_t page) {
+    uint64_t high = 0;
+    size_t i;
+
+    for (i = 1; i < sec_count; ++i) {
+        uint64_t end;
+        if (i == self || (secs[i].flags & SHF_ALLOC) == 0) {
+            continue;
+        }
+        if (elf__u64_add(secs[i].addr, secs[i].size, &end) && end > high) {
+            high = end;
+        }
+    }
+    return high + ((off - high) & (page - 1));
+}
+
 static int u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
     return elf__u64_add(a, b, out);
 }
@@ -762,6 +795,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     size_t verdef_size = 0;
     size_t dynstr_size = 0;
     int has_dynstr_section = 0;
+    size_t made_dynstr_index = 0;   /* the .dynstr made up here, which nothing placed; 0 if none */
     int has_dynamic_section = 0;
     int has_gnu_versym = 0;
     int has_gnu_verdef = 0;
@@ -1139,6 +1173,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         dynst.data = dynstr_data;
         dynst.size = dynstr_size;
         dynst.owns_data = 1;
+        made_dynstr_index = sec_count;
         if (out_push(&secs, &sec_count, &sec_cap, &dynst) != ELF_OK) {
             err = ELF_ERR_OOM;
             goto done;
@@ -1391,6 +1426,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         if (secs[i].type == SHT_NOBITS) {
             secs[i].offset = 0;
             continue;
+        }
+        if (i == made_dynstr_index && made_dynstr_index != 0) {
+            secs[i].addr = place_made_up_section(secs, sec_count, i, off, out_page_size(obj));
         }
         /* in a linked image (one with program headers) address 0 is an address too: Linux's realmode
          * blob is linked at 0 */

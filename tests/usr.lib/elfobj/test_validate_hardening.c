@@ -105,8 +105,14 @@ static void test_relocation_width_check(void) {
     sym = elf_add_symbol(obj, "target", 0, sizeof(code), STB_GLOBAL, STT_FUNC);
     if (sym == NULL) fail("add relocation check symbol");
     if (elf_symbol_define(sym, text, 0) != ELF_OK) fail("define relocation check symbol");
-    if (elf_add_relocation(text, 0, sym, R_X86_64_64, 0) != ELF_OK) fail("add oversized relocation");
+    /* A relocation that would store past its section is refused when it
+     * is added, so nothing can apply it over the section's end. */
+    if (elf_add_relocation(text, 0, sym, R_X86_64_64, 0) != ELF_ERR_BOUNDS)
+        fail("oversized relocation should be refused");
 
+    /* One that fit, its section shrunk under it afterwards, is a warning. */
+    if (elf_add_relocation(text, 0, sym, R_X86_64_32, 0) != ELF_OK) fail("add 4-byte relocation");
+    if (elf_section_set_data(text, code, 2) != ELF_OK) fail("shrink text data");
     if (elf_validate(obj, &diag) != ELF_OK) fail("oversized relocation should be warning-only");
     if (diag == NULL || strstr(diag, "relocation width out of range") == NULL)
         fail("missing relocation width diagnostic");
