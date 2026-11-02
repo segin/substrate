@@ -15,7 +15,7 @@ awk '
             print name
         }
     }
-' "$HEADER" | sort -u > "$ACTUAL"
+' "$HEADER" | LC_ALL=C sort -u > "$ACTUAL"
 
 if ! diff -u "$EXPECTED" "$ACTUAL"; then
     echo "ABI surface mismatch for include/elfobj.h" >&2
