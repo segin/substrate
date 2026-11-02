@@ -353,8 +353,17 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
     size_t k;
 
     if (strcmp(name, "__builtin_constant_p") == 0) {
+        const cc_expr_t *a;
+
         if (e->arg_count != 1) {
             return -1;
+        }
+        /* a string or floating literal is a constant to gcc too, as lowering has it: Linux's printk index keeps
+         * a format `__builtin_constant_p(fmt) ? fmt : NULL` */
+        for (a = e->args[0]; a != NULL && a->kind == CC_EXPR_CAST && a->lhs != NULL; a = a->lhs) {
+        }
+        if (a != NULL && (a->kind == CC_EXPR_STR || a->kind == CC_EXPR_FLOAT)) {
+            return const_make(1, const_int(), out);
         }
         return const_make(cc_const_eval(env, e->args[0], &arg) == 0 ? 1 : 0, const_int(), out);
     }

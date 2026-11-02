@@ -7747,6 +7747,18 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     return NULL;
                 }
                 is_const = eval_const_array_bound_expr(p, arg, &cv) == 0;
+                {
+                    /* a string or floating literal is a constant to gcc: Linux's printk index keeps a format
+                     * `__builtin_constant_p(fmt) ? fmt : NULL` */
+                    const cc_expr_t *lit = arg;
+
+                    while (lit != NULL && lit->kind == CC_EXPR_CAST && lit->lhs != NULL) {
+                        lit = lit->lhs;
+                    }
+                    if (lit != NULL && (lit->kind == CC_EXPR_STR || lit->kind == CC_EXPR_FLOAT)) {
+                        is_const = 1;
+                    }
+                }
                 free_expr(arg);
                 free_expr(e);
                 e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_INT));
