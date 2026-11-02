@@ -23,5 +23,6 @@ run:
 	./test_pie_copy.sh
 	./test_copy_alias.sh
 	./test_execstack_rwx.sh
+	./test_link_order.sh
 
 clean:

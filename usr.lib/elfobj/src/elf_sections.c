@@ -429,6 +429,12 @@ elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section) {
         }
     }
     segment_compact_on_remove(obj, idx);
+    /* a section ordered by this one is no longer ordered by anything */
+    for (i = 0; i < obj->section_count; ++i) {
+        if (obj->sections[i]->link_order == section) {
+            obj->sections[i]->link_order = NULL;
+        }
+    }
 
     free(section->note_name);
     free(section->group_signature);

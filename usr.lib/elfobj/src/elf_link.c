@@ -644,13 +644,72 @@ static const char *output_section_name(const elf_link_plan_t *plan,
     return plan->section_name_hook(src->name, input->name, plan->section_name_user);
 }
 
+/**
+ * @brief The output section an input section ordered by another (SHF_LINK_ORDER) is ordered by.
+ *
+ * GNU ld keeps one output section of such a name for each output section the inputs are ordered by
+ * (gcc's __patchable_function_entries, one for each function's section), its sh_link that one, unless a
+ * script gathers them under a name of its own.  This is the output section @p src's own one went to.
+ *
+ * @param plan  the link
+ * @param out   the output
+ * @param input the input @p src is of
+ * @param src   the input section
+ * @return that output section, or NULL when @p src is not so ordered, is renamed, or its own is not merged
+ */
+static struct elf_section *link_order_target(const elf_link_plan_t *plan, elfobj_t *out,
+                                             const struct elf_link_input *input, const struct elf_section *src) {
+    const struct elf_section *to;
+    const char *name;
+    const char *to_name;
+
+    if ((src->flags & SHF_LINK_ORDER) == 0 || src->link == 0 || src->link >= input->obj->section_count) {
+        return NULL;
+    }
+    name = output_section_name(plan, input, src);
+    to = input->obj->sections[src->link];
+    if (name == NULL || strcmp(name, src->name) != 0 || to == NULL || to == src || to->name == NULL) {
+        return NULL;
+    }
+    to_name = output_section_name(plan, input, to);
+    return to_name != NULL ? elf_find_section(out, to_name) : NULL;
+}
+
+/**
+ * @brief The output section named @p name that is ordered by @p to, or by nothing when @p to is NULL.
+ *
+ * @param out  the output
+ * @param name its name
+ * @param to   the output section it is ordered by, or NULL
+ * @return it, or NULL if there is none yet
+ */
+static struct elf_section *find_ordered_output(elfobj_t *out, const char *name, const struct elf_section *to) {
+    size_t i;
+
+    for (i = 0; i < out->section_count; ++i) {
+        struct elf_section *s = out->sections[i];
+        if (s->name != NULL && strcmp(s->name, name) == 0 && s->link_order == to) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
 /* The output section an input section was merged into, if it was. */
 static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj_t *out,
                                              const struct elf_link_input *input,
                                              const struct elf_section *src) {
     const char *name = output_section_name(plan, input, src);
+    struct elf_section *to;
 
-    return name != NULL ? elf_find_section(out, name) : NULL;
+    if (name == NULL) {
+        return NULL;
+    }
+    to = link_order_target(plan, out, input, src);
+    if (to != NULL) {
+        return find_ordered_output(out, name, to);
+    }
+    return elf_find_section(out, name);
 }
 
 /* Pad merged section @p dst out to @p offset (which it has not passed). */
@@ -756,8 +815,16 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         return ELF_ERR_OOM;
     }
     err = mark_discarded_comdat_members(input, comdat_seen, sec_discard);
+    /* a section ordered by another after the rest, so that the one it is ordered by has gone to its output */
     for (j = 0; err == ELF_OK && j < input->obj->section_count; ++j) {
-        err = merge_one_section(plan, out, input, j, sec_bases, sec_included, sec_discard);
+        if (input->obj->sections[j] == NULL || (input->obj->sections[j]->flags & SHF_LINK_ORDER) == 0) {
+            err = merge_one_section(plan, out, input, j, sec_bases, sec_included, sec_discard);
+        }
+    }
+    for (j = 0; err == ELF_OK && j < input->obj->section_count; ++j) {
+        if (input->obj->sections[j] != NULL && (input->obj->sections[j]->flags & SHF_LINK_ORDER) != 0) {
+            err = merge_one_section(plan, out, input, j, sec_bases, sec_included, sec_discard);
+        }
     }
     free(sec_discard);
     return err;
@@ -770,6 +837,7 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
     {
         struct elf_section *src = input->obj->sections[j];
         struct elf_section *dst;
+        struct elf_section *order_to;   /* the output section dst is ordered by, if it is */
         elf_link_merge_action_t action = ELF_LINK_MERGE_APPEND;
         elf_err_t err;
         uint8_t *inflated = NULL;       /* src's contents, if it is compressed */
@@ -795,7 +863,8 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
         if (out_name == NULL) {
             return ELF_OK;
         }
-        dst = elf_find_section(out, out_name);
+        order_to = link_order_target(plan, out, input, src);
+        dst = order_to != NULL ? find_ordered_output(out, out_name, order_to) : elf_find_section(out, out_name);
         if (dst != NULL && plan->section_merge_hook != NULL) {
             action = plan->section_merge_hook(out_name, dst, src, plan->section_merge_user);
         }
@@ -833,6 +902,10 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                 return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
             }
             dst->addralign = src_align;
+            if (order_to != NULL && elf_section_set_link_order(dst, order_to) != ELF_OK) {
+                free(inflated);
+                return ELF_ERR_STATE;
+            }
         } else if (strcmp(src->name, ".ARM.attributes") == 0 && src->data_size != 0 &&
                    dst->data_size != 0 &&
                    (src->data_size != dst->data_size ||

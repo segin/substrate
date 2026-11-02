@@ -190,6 +190,15 @@ The default is not to.
 Produce relocatable
 .Dv ET_REL
 output.
+Input sections ordered by another
+.Pq Dv SHF_LINK_ORDER ,
+such as gcc's
+.Pa __patchable_function_entries ,
+go to one output section of their name for each output section they are
+ordered by, its
+.Va sh_link
+that section, as GNU ld makes them; so they do in a program too, unless a
+script gathers them under a name of its own.
 .It Fl shared
 Produce a shared object: no entry is needed, what it leaves undefined is
 for the program that loads it to supply, and it is not made executable.
