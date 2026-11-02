@@ -1367,7 +1367,9 @@ static elf_err_t parse_object(elfobj_t *obj) {
     }
 
     detect_special_sections(obj);
-    obj->readonly = 0;
+    /* an object read may be edited (elfedit), except a core file: what it holds is in segments the writer
+     * would not lay out again, and it is not to be written back */
+    obj->readonly = obj->type == ET_CORE;
     obj->dirty = 0;
     return ELF_OK;
 }

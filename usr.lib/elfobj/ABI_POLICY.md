@@ -22,7 +22,8 @@ This library follows a strict ABI policy.
 
 ## Lifecycle Contract
 
-- Objects from `elf_open()` / `elf_open_memory()` are read-only views.
+- Objects from `elf_open()` / `elf_open_memory()` may be edited (elfedit does), except a core file
+  (`ET_CORE`), which is read-only: its contents are in segments the writer would not lay out again.
 - Objects from `elf_create()` are mutable until `elf_finalize()`.
 - `elf_finalize()` freezes object layout and further mutation fails with `ELF_ERR_STATE`.
 - `elf_write_file()` finalizes mutable objects before writing.
