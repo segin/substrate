@@ -167,6 +167,12 @@ static int validate_output(const ld_ctx_t *ctx) {
             elf_close(obj);
             return -1;
         }
+    } else if (ctx->mode == LD_MODE_X32) {
+        if (elf_class(obj) != ELFOBJ_CLASS_32 || elf_machine(obj) != EM_X86_64) {
+            fprintf(stderr, "ld: expected x32 (x86_64 ELF32) output\n");
+            elf_close(obj);
+            return -1;
+        }
     } else {
         if (elf_class(obj) != ELFOBJ_CLASS_32 || elf_machine(obj) != EM_386) {
             fprintf(stderr, "ld: expected i386 ELF32 output\n");
@@ -525,7 +531,7 @@ static uint64_t image_base(const ld_link_t *l) {
     if (l->out_type == ET_DYN) {
         return 0;
     }
-    return l->ctx->mode == 64 ? 0x400000ULL : 0x08048000ULL;
+    return l->ctx->mode == 64 || l->ctx->mode == LD_MODE_X32 ? 0x400000ULL : 0x08048000ULL;
 }
 
 static int phase_assign_addresses(ld_link_t *l) {

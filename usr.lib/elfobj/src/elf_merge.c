@@ -560,7 +560,7 @@ static int prop_cmp(const void *a, const void *b) {
     return x < y ? -1 : x > y ? 1 : 0;
 }
 
-elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, size_t *size) {
+elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, size_t *size, uint64_t *align) {
     struct x86_prop acc[MERGE_MAX_PROPS];
     struct x86_prop in[MERGE_MAX_PROPS];
     int nacc = -1;
@@ -651,6 +651,25 @@ elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, si
     }
     *data = buf;
     *size = 16 + descsz;
+    /*
+     * Its alignment: the class's, or the strictest of the input notes it
+     * stands for where that is more, as GNU ld's output section is aligned
+     * (objcopy's x32 objects keep the 64-bit notes' 8).
+     */
+    *align = pad;
+    for (i = 0; i < plan->input_count; ++i) {
+        const elfobj_t *o = plan->inputs[i].obj;
+        size_t j;
+
+        for (j = 0; o != NULL && j < o->section_count; ++j) {
+            const struct elf_section *s = o->sections[j];
+
+            if (s != NULL && s->type == SHT_NOTE && s->name != NULL &&
+                strcmp(s->name, ".note.gnu.property") == 0 && s->addralign > *align) {
+                *align = s->addralign;
+            }
+        }
+    }
     return ELF_OK;
 }
 

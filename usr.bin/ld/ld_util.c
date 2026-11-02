@@ -341,6 +341,9 @@ int parse_mode_token(const char *tok) {
         strcmp(tok, "i386") == 0 || strcmp(tok, "x86") == 0 || strcmp(tok, "32") == 0) {
         return 32;
     }
+    if (strcmp(tok, "elf32_x86_64") == 0 || strcmp(tok, "elf32-x86-64") == 0 || strcmp(tok, "x32") == 0) {
+        return LD_MODE_X32;
+    }
     return 0;
 }
 
@@ -369,6 +372,9 @@ const char *canonical_mode_name(int mode) {
     }
     if (mode == 32) {
         return "i386";
+    }
+    if (mode == LD_MODE_X32) {
+        return "x32";
     }
     return "unknown";
 }
@@ -472,7 +478,7 @@ int ld_warn(ld_ctx_t *ctx, const char *fmt, ...) {
 
 int set_explicit_mode(ld_ctx_t *ctx, int mode, const char *opt_text) {
     (void)opt_text;
-    if (mode != 32 && mode != 64) {
+    if (mode != 32 && mode != 64 && mode != LD_MODE_X32) {
         return -1;
     }
     /* the last one given is the target, as GNU ld takes it: Linux links its 16-bit realmode blob with the

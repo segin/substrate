@@ -95,8 +95,12 @@ int obj_matches_mode(const elfobj_t *obj, int mode) {
     if (mode == 32) {
         return elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386;
     }
+    if (mode == LD_MODE_X32) {
+        return elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_X86_64;
+    }
     return (elf_class(obj) == ELFOBJ_CLASS_64 && elf_machine(obj) == EM_X86_64) ||
-           (elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386);
+           (elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386) ||
+           (elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_X86_64);
 }
 
 static int detect_object_mode(const elfobj_t *obj) {
@@ -108,6 +112,9 @@ static int detect_object_mode(const elfobj_t *obj) {
     }
     if (elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386) {
         return 32;
+    }
+    if (elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_X86_64) {
+        return LD_MODE_X32;
     }
     return 0;
 }
@@ -844,7 +851,8 @@ static int lib_candidate_suits(const ld_ctx_t *ctx, const char *path) {
     }
     /* e_ident[EI_CLASS], and e_machine at 18, little-endian. */
     mode = h[4] == 2 && h[18] == (EM_X86_64 & 0xff) && h[19] == 0 ? 64
-         : h[4] == 1 && h[18] == EM_386 && h[19] == 0 ? 32 : 0;
+         : h[4] == 1 && h[18] == EM_386 && h[19] == 0 ? 32
+         : h[4] == 1 && h[18] == (EM_X86_64 & 0xff) && h[19] == 0 ? LD_MODE_X32 : 0;
     if (mode != ctx->mode) {
         snprintf(lib_passed_over, sizeof(lib_passed_over), "%s", path);
     }

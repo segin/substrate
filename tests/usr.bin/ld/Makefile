@@ -33,5 +33,6 @@ run:
 	./test_reloc_section_symbols.sh
 	./test_import_types.sh
 	./test_dynstr_hash.sh
+	./test_x32.sh
 
 clean:

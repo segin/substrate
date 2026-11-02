@@ -822,13 +822,27 @@ static elf_err_t place_x86_note(elf_link_plan_t *plan, elfobj_t *out, const char
         return ELF_OK;  /* no property is left: no note, as GNU ld makes none */
     }
     if (!plan->x86_note_placed) {
-        dst = elf_add_section(out, out_name, SHT_NOTE, SHF_ALLOC);
+        uint64_t align = plan->x86_note_align;  /* (elf__x86_property_note() says) */
+        uint64_t base;
+        elf_err_t err;
+
+        /* a script may gather it with other notes into a section of their name: it goes in that one */
+        dst = elf_find_section(out, out_name);
         if (dst == NULL) {
-            return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
+            dst = elf_add_section(out, out_name, SHT_NOTE, SHF_ALLOC);
+            if (dst == NULL) {
+                return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
+            }
+            dst->addralign = align;
+        } else if (align > dst->addralign) {
+            dst->addralign = align;
         }
-        dst->addralign = out->cls == ELFOBJ_CLASS_64 ? 8 : 4;
-        if (elf_section_set_data(dst, plan->x86_note, plan->x86_note_size) != ELF_OK) {
-            return ELF_ERR_OOM;
+        err = align_merged_section(dst, align, &base);
+        if (err == ELF_OK) {
+            err = append_section_data(dst, plan->x86_note, plan->x86_note_size, NULL);
+        }
+        if (err != ELF_OK) {
+            return err;
         }
         plan->x86_note_placed = 1;
     }
@@ -1764,7 +1778,7 @@ static elf_err_t prepare_merge(elf_link_plan_t *plan) {
     plan->x86_note_merged = plan->input_count != 0 && plan->inputs[0].obj != NULL &&
                             (plan->inputs[0].obj->machine == EM_386 || plan->inputs[0].obj->machine == EM_X86_64);
     if (plan->x86_note_merged) {
-        elf_err_t err = elf__x86_property_note(plan, &plan->x86_note, &plan->x86_note_size);
+        elf_err_t err = elf__x86_property_note(plan, &plan->x86_note, &plan->x86_note_size, &plan->x86_note_align);
         if (err != ELF_OK) {
             return err;
         }

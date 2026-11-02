@@ -294,6 +294,7 @@ struct elf_link_plan {
     int x86_note_merged;                /* an x86 link: .note.gnu.property is the inputs' merged */
     uint8_t *x86_note;                  /* and this is it, NULL if no property is left */
     size_t x86_note_size;
+    uint64_t x86_note_align;
     int x86_note_placed;
 };
 
@@ -322,9 +323,10 @@ int elf__merge_offset(const elf_link_plan_t *plan, size_t input, size_t sec, uin
                       uint64_t *out_off);
 /**
  * The .note.gnu.property of an x86 link: the inputs' properties merged as GNU ld merges them (an AND
- * property gone if one input lacks it, an OR one ORed), in one note.  *@p data is NULL if none is left.
+ * property gone if one input lacks it, an OR one ORed), in one note.  *@p data is NULL if none is left;
+ * *@p align is its section's alignment: the class's, or the strictest input note's.
  */
-elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, size_t *size);
+elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, size_t *size, uint64_t *align);
 /** Free what the merge of one link kept. */
 void elf__merge_free(elf_link_plan_t *plan);
 

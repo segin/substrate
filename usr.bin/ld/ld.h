@@ -244,7 +244,7 @@ typedef struct {
  */
 typedef struct {
     ld_options_t opt;
-    int mode; /* 32 or 64: asked for, or what the first input is */
+    int mode; /* 32, 64 or LD_MODE_X32: asked for, or what the first input is */
     int explicit_mode;
     int mode_settled;           /* an input has said which machine */
     struct lds_script *script;  /* opt.script_path, parsed */
@@ -683,6 +683,13 @@ void symset_remove(symset_t *set, const char *sym);
 void symset_free(symset_t *set);
 void symstate_free(symstate_t *state);
 char *path_join(const char *dir, const char *leaf);
+/*
+ * The x32 link mode (-m elf32_x86_64): x86-64 code, relocations and dynamic tables in ELFCLASS32 objects
+ * (EM_X86_64, RELA), as Linux's x32 vDSO is linked from objects objcopy made so.  The other modes are the
+ * word sizes, 32 (i386) and 64 (x86-64).
+ */
+#define LD_MODE_X32 3264
+
 int default_mode(void);
 int parse_mode_token(const char *tok);
 int parse_compat_mode(const char *tok, ld_compat_mode_t *out_mode);

@@ -1202,7 +1202,7 @@ int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
     if (ctx == NULL || out == NULL) {
         return -1;
     }
-    if ((ctx->mode != 64 && ctx->mode != 32) || (elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0)) {
+    if ((ctx->mode != 64 && ctx->mode != 32 && ctx->mode != LD_MODE_X32) ||(elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0)) {
         return collect_local_got(ctx, out);
     }
     dyn_import_vec_free(&ctx->dyn_imports);
@@ -2182,7 +2182,8 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             }
         }
     }
-    emit_versym = dynsym_len > entsz || verdef_count != 0 || verneed_count != 0;
+    /* only where there are versions, as GNU ld makes it: a vDSO without its script's VERSION had one */
+    emit_versym = verdef_count != 0 || verneed_count != 0;
     if (emit_versym) {
         versym_sec = elf_find_section(out, ".gnu.version");
         if (versym_sec == NULL) {

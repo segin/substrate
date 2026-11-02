@@ -192,10 +192,10 @@ static const ld_arch_t arch_x86_64 = {
     .write_plt_entry = x64_write_plt_entry,
 };
 
-/* The description for a link mode (32, 64), or for a machine; NULL for
+/* The description for a link mode (32, 64, x32: x86-64's), or for a machine; NULL for
  * one the linker does not make dynamic sections for. */
 const ld_arch_t *ld_arch_of_mode(int mode) {
-    return mode == 32 ? &arch_i386 : mode == 64 ? &arch_x86_64 : NULL;
+    return mode == 32 ? &arch_i386 : mode == 64 || mode == LD_MODE_X32 ? &arch_x86_64 : NULL;
 }
 
 const ld_arch_t *ld_arch_of_machine(uint16_t machine) {

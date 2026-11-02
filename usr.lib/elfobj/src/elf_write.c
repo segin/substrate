@@ -662,6 +662,8 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
 
     if (obj->machine == EM_ARM) {
         use_rela_default = 0;
+    } else if (obj->machine == EM_X86_64) {
+        use_rela_default = 1;   /* ELF32 (x32) too */
     } else if (obj->machine == EM_AARCH64) {
         use_rela_default = 1;
     } else if (obj->machine == EM_RISCV) {

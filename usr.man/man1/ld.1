@@ -156,7 +156,25 @@ and
 each also under the name the Substrate GCC gives it,
 .Cm elf_i386_substrate
 and
-.Cm elf_x86_64_substrate .
+.Cm elf_x86_64_substrate ;
+and
+.Cm elf32_x86_64 ,
+x32: x86-64 code in
+.Dv ELFCLASS32
+objects of
+.Dv EM_X86_64
+with
+.Dv RELA
+relocations, as Linux links its x32 vDSO from objects
+.Ic objcopy -O elf32-x86-64
+made.
+Its program is at the x86-64 base, 0x400000.
+A GOT or PLT is made with x86-64's 8-byte entries, not x32's 4: a link
+that imports from a shared object, which needs them, does not come out
+right.
+Without
+.Fl m
+the first input's class and machine choose.
 Given more than once, the last is the one taken.
 .It Fl -eh-frame-hdr
 Make

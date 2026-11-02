@@ -1454,6 +1454,7 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     const strvec_t *current = NULL;
     elf_segment_t **segs = NULL;
     uint32_t *flags = NULL;
+    uint64_t *aligns = NULL;    /* the strictest alignment of a section in each header */
     size_t i, k;
     int pass;
     int rc = -1;
@@ -1474,10 +1475,11 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     }
     segs = (elf_segment_t **)calloc(phdrs->count, sizeof(*segs));
     flags = (uint32_t *)calloc(phdrs->count, sizeof(*flags));
-    if (segs == NULL || flags == NULL) {
+    aligns = (uint64_t *)calloc(phdrs->count, sizeof(*aligns));
+    if (segs == NULL || flags == NULL || aligns == NULL) {
         goto done;
     }
-    /* Once to learn each header's flags, once more to fill them. */
+    /* Once to learn each header's flags and alignment, once more to fill them. */
     for (pass = 0; pass < 2; ++pass) {
         if (pass == 1) {
             /* only the headers PHDRS lists: GNU ld makes none of its own, a PT_PHDR or a PT_INTERP not
@@ -1488,9 +1490,19 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 if (ph->type == PT_INTERP && ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0') {
                     segs[k] = elf_add_interp_segment(obj, ctx->opt.interp_path);
                 } else {
+                    /* a header not loaded is aligned as strictly as what is in it, as GNU ld's (x32's
+                     * .dynamic to 4, x86-64's to 8); one with nothing in it to the class's word (the
+                     * x32 vDSO's PT_GNU_PROPERTY, no input having a property note) */
+                    /* without FLAGS a header has its sections' permissions, none if it has none (an
+                     * empty PT_GNU_PROPERTY's are 0 in GNU ld's); a PT_GNU_STACK's are the parser's */
                     segs[k] = elf_add_segment(obj, ph->type,
-                                              ph->has_flags || ph->type != PT_LOAD ? ph->flags : (flags[k] | LD_PF_R),
-                                              ph->type == PT_LOAD ? ld_max_page_size(ctx) : ph->align);
+                                              ph->has_flags || ph->type == PT_GNU_STACK ? ph->flags
+                                              : ph->type == PT_LOAD || aligns[k] != 0  ? (flags[k] | LD_PF_R)
+                                                                                       : 0u,
+                                              ph->type == PT_LOAD                       ? ld_max_page_size(ctx)
+                                              : aligns[k] != 0                          ? aligns[k]
+                                              : elf_class(obj) == ELFOBJ_CLASS_64       ? 8u
+                                                                                        : 4u);
                 }
                 if (segs[k] == NULL) {
                     goto done;
@@ -1520,8 +1532,13 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                     goto done;
                 }
                 if (pass == 0) {
+                    uint64_t a = elf_section_align(sec);
+
                     flags[pidx] |= ((sflags & SHF_WRITE) != 0 ? LD_PF_W : 0) |
                                    ((sflags & SHF_EXECINSTR) != 0 ? LD_PF_X : 0);
+                    if (a > aligns[pidx]) {
+                        aligns[pidx] = a;
+                    }
                 } else if (phdrs->items[pidx].type != PT_INTERP &&
                            elf_segment_add_section(segs[pidx], sec) != ELF_OK) {
                     goto done;
@@ -1533,6 +1550,7 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
 done:
     free(segs);
     free(flags);
+    free(aligns);
     return rc;
 }
 

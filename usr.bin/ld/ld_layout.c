@@ -528,6 +528,8 @@ static int script_places_section(const ld_ctx_t *ctx, const char *name) {
 }
 
 int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
+    /* the alignment of the headers, .dynamic and the property notes: a word of the class (x32's is 4) */
+    uint64_t word = obj != NULL && elf_class(obj) == ELFOBJ_CLASS_64 ? 8 : 4;
     elf_segment_t *load_rx = NULL;
     elf_segment_t *load_ro = NULL;
     elf_segment_t *load_ro_pre = NULL;  /* -z separate-code: the read-only sections before the code */
@@ -563,7 +565,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
      * 0) need not load them, and a PT_PHDR no PT_LOAD covers is no ELF.
      */
     if (!(script_layout && (ctx->opt.interp_path == NULL || ctx->opt.interp_path[0] == '\0')) &&
-        elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
+        elf_add_segment(obj, PT_PHDR, LD_PF_R, word) == NULL) {
         return -1;
     }
     if (ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0') {
@@ -696,7 +698,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
         }
         if (is_alloc && name != NULL && strcmp(name, ".note.gnu.property") == 0) {
             if (gnu_property_seg == NULL) {
-                gnu_property_seg = elf_add_segment(obj, PT_GNU_PROPERTY, LD_PF_R, 8);
+                gnu_property_seg = elf_add_segment(obj, PT_GNU_PROPERTY, LD_PF_R, word);
                 if (gnu_property_seg == NULL) {
                     return -1;
                 }
@@ -735,7 +737,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
 
     dyn = elf_find_section(obj, ".dynamic");
     if (dyn != NULL) {
-        elf_segment_t *dyn_seg = elf_add_dynamic_segment(obj, 8);
+        elf_segment_t *dyn_seg = elf_add_dynamic_segment(obj, word);
         if (dyn_seg == NULL || elf_segment_add_section(dyn_seg, dyn) != ELF_OK) {
             return -1;
         }

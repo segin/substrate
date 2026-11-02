@@ -2808,7 +2808,12 @@ elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol
     rel->symbol = symbol;
     rel->type = type;
     rel->addend = addend;
-    rel->has_addend = section->obj->cls == ELFOBJ_CLASS_64 ? 1 : 0;
+    /* RELA but for the machines whose ABI is REL (i386, ARM, 32-bit MIPS): an ELF32 x86-64 object (x32) is
+     * RELA as an ELF64 one is, and the reader takes nothing else of it */
+    rel->has_addend = section->obj->machine == EM_386 || section->obj->machine == EM_ARM ||
+                              (section->obj->machine == EM_MIPS && section->obj->cls == ELFOBJ_CLASS_32)
+                          ? 0
+                          : 1;
 
     err = elf__section_push_reloc(section, rel);
     if (err != ELF_OK) {

@@ -102,7 +102,7 @@ static int opt_mode(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char
         fprintf(stderr,
                 "ld: unsupported emulation '%s' for -m "
                 "(supported: elf_x86_64, elf64-x86-64, x86_64, amd64, "
-                "elf_i386, elf32-i386, i386)\n",
+                "elf_i386, elf32-i386, i386, elf32_x86_64, elf32-x86-64, x32)\n",
                 val);
         return LD_OPT_USAGE;
     }

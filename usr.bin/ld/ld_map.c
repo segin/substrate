@@ -132,7 +132,7 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
         fprintf(stderr, "ld: failed to write --reproduce manifest %s: %s\n", manifest_path, strerror(errno));
         return -1;
     }
-    fprintf(mf, "mode=%s\n", ctx->mode == 64 ? "x86_64" : "i386");
+    fprintf(mf, "mode=%s\n", ctx->mode == 64 ? "x86_64" : ctx->mode == LD_MODE_X32 ? "x32" : "i386");
     fprintf(mf, "type=%u\n", (unsigned)ctx->opt.expect_type);
     if (ctx->opt.entry_symbol != NULL) {
         fputs("entry=", mf);
@@ -187,7 +187,8 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
     fprintf(sf, "#!/bin/sh\nset -eu\n");
     fprintf(sf, "DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n");
     fprintf(sf, "LD_TOOL=${LD_TOOL:-ld}\n");
-    fprintf(sf, "exec \"$LD_TOOL\" -m%s ", ctx->mode == 64 ? "64" : "32");
+    fprintf(sf, "exec \"$LD_TOOL\" %s ",
+            ctx->mode == 64 ? "-m64" : ctx->mode == LD_MODE_X32 ? "-m elf32_x86_64" : "-m32");
     if (ctx->opt.expect_type == ET_REL) {
         fprintf(sf, "-r ");
     } else if (ctx->opt.expect_type == ET_DYN) {
