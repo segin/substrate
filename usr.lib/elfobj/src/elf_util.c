@@ -472,6 +472,7 @@ static void elf_free_sections(elfobj_t *obj) {
             free(s->data);
         }
         free(s->relocs);
+        free(s->zero_gaps);
         free(s);
     }
     free(obj->sections);

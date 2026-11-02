@@ -136,6 +136,10 @@ struct elf_section {
     size_t reloc_cap;
     const uint8_t *gap_fill;    /* in the merge: the fill of the gaps the sections going in leave, */
     size_t gap_fill_len;        /* 0 for the default (elf_section_fill_gap()) */
+    uint64_t *zero_gaps;        /* in the merge: the gaps given the default fill while the section was not
+                                 * code, (offset, length) pairs, to be filled again if it becomes code */
+    size_t zero_gap_count;      /* pairs */
+    size_t zero_gap_cap;
 };
 
 struct elf_segment {

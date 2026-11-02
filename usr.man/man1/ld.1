@@ -923,7 +923,8 @@ before it in the section's body, else the section's
 .Ql = Ns Ar fill ,
 else no-ops in code
 .Pq what GNU ld's x86 back end writes
-and zeros elsewhere.
+and zeros elsewhere, by what the output section is once all its input
+sections are in it.
 A fill written as a hex number is that string of bytes, as long as it
 is written
 .Po

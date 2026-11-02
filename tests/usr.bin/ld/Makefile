@@ -46,5 +46,6 @@ run:
 	./test_loaded_after_debug.sh
 	./test_script_assert_relayout.sh
 	./test_script_phdr_empty.sh
+	./test_code_fill_late.sh
 
 clean:

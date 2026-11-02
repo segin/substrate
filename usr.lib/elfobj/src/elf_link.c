@@ -456,6 +456,60 @@ void elf_section_fill_gap(const elf_section_t *dst, const uint8_t *pattern, size
     }
 }
 
+/**
+ * @brief Fill a gap the merge leaves in @p dst, [@p off, @p off + @p n) of its data, with its fill.
+ *
+ * A gap given the default fill while the section is not code is noted: GNU ld fills by what the
+ * output section is in the end, and Linux's .data becomes code when its kexec code goes in after
+ * gaps in its data, which then hold no-ops.
+ *
+ * @param dst the output section
+ * @param off where the gap begins
+ * @param n   how long it is
+ * @return ELF_OK, or ELF_ERR_OOM
+ */
+static elf_err_t fill_merge_gap(struct elf_section *dst, size_t off, size_t n) {
+    elf_section_fill_gap(dst, dst->gap_fill, dst->gap_fill_len, dst->data + off, n);
+    if (n == 0 || (dst->gap_fill != NULL && dst->gap_fill_len != 0) || (dst->flags & SHF_EXECINSTR) != 0) {
+        return ELF_OK;
+    }
+    if (dst->zero_gap_count == dst->zero_gap_cap) {
+        size_t ncap = dst->zero_gap_cap == 0 ? 16 : dst->zero_gap_cap * 2;
+        uint64_t *grown = (uint64_t *)realloc(dst->zero_gaps, ncap * 2 * sizeof(*grown));
+
+        if (grown == NULL) {
+            return ELF_ERR_OOM;
+        }
+        dst->zero_gaps = grown;
+        dst->zero_gap_cap = ncap;
+    }
+    dst->zero_gaps[2 * dst->zero_gap_count] = off;
+    dst->zero_gaps[2 * dst->zero_gap_count + 1] = n;
+    dst->zero_gap_count++;
+    return ELF_OK;
+}
+
+/**
+ * @brief Forget the gaps fill_merge_gap() noted in @p dst, first filling them again if it is now code.
+ *
+ * @param dst the output section
+ */
+static void refill_merge_gaps(struct elf_section *dst) {
+    size_t i;
+
+    for (i = 0; (dst->flags & SHF_EXECINSTR) != 0 && i < dst->zero_gap_count; ++i) {
+        uint64_t off = dst->zero_gaps[2 * i], n = dst->zero_gaps[2 * i + 1];
+
+        if (dst->data != NULL && off <= dst->data_size && n <= dst->data_size - off) {
+            elf_section_fill_gap(dst, NULL, 0, dst->data + off, (size_t)n);
+        }
+    }
+    free(dst->zero_gaps);
+    dst->zero_gaps = NULL;
+    dst->zero_gap_count = 0;
+    dst->zero_gap_cap = 0;
+}
+
 static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, uint64_t *base_out) {
     uint64_t base;
     uint64_t pad;
@@ -495,6 +549,9 @@ static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, u
          * Compute one checked new size and derive the memset length from it. */
         uint64_t newsz;
         uint8_t *buf;
+        size_t at = dst->data_size;
+        elf_err_t err;
+
         if (!elf__u64_add(dst->data_size, pad, &newsz) || newsz > (uint64_t)SIZE_MAX) {
             return ELF_ERR_BOUNDS;
         }
@@ -502,12 +559,14 @@ static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, u
         if (buf == NULL) {
             return ELF_ERR_OOM;
         }
-        elf_section_fill_gap(dst, dst->gap_fill, dst->gap_fill_len, buf + dst->data_size,
-                             (size_t)newsz - dst->data_size);
         dst->data = buf;
         dst->owns_data = 1;
         dst->data_size = (size_t)newsz;
         dst->size = dst->data_size;
+        err = fill_merge_gap(dst, at, (size_t)newsz - at);
+        if (err != ELF_OK) {
+            return err;
+        }
         if (base_out != NULL) {
             *base_out = dst->data_size;
         }
@@ -765,6 +824,7 @@ static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj
 static elf_err_t pad_merged_section_to(struct elf_section *dst, uint64_t offset, int filled) {
     uint64_t base = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
     uint8_t *buf;
+    size_t at;
 
     if (offset <= base) {
         return ELF_OK;
@@ -780,16 +840,15 @@ static elf_err_t pad_merged_section_to(struct elf_section *dst, uint64_t offset,
     if (buf == NULL) {
         return ELF_ERR_OOM;
     }
-    if (filled) {
-        elf_section_fill_gap(dst, dst->gap_fill, dst->gap_fill_len, buf + dst->data_size,
-                             (size_t)offset - dst->data_size);
-    } else {
-        memset(buf + dst->data_size, 0, (size_t)offset - dst->data_size);
-    }
+    at = dst->data_size;
     dst->data = buf;
     dst->owns_data = 1;
     dst->data_size = (size_t)offset;
     dst->size = dst->data_size;
+    if (filled) {
+        return fill_merge_gap(dst, at, (size_t)offset - at);
+    }
+    memset(buf + at, 0, (size_t)offset - at);
     return ELF_OK;
 }
 
@@ -1079,6 +1138,10 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                 if (dst->entsize == 0) {
                     dst->entsize = src->entsize;
                 }
+            }
+            /* become code: the gaps so far hold no-ops, as GNU ld fills a code section's */
+            if ((dst->flags & SHF_EXECINSTR) != 0 && dst->zero_gap_count != 0) {
+                refill_merge_gaps(dst);
             }
         }
 

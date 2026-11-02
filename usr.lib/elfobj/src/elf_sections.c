@@ -443,6 +443,7 @@ elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section) {
         free(section->data);
     }
     free(section->relocs);
+    free(section->zero_gaps);
     free(section);
     memmove(&obj->sections[idx], &obj->sections[idx + 1],
             (obj->section_count - idx - 1) * sizeof(obj->sections[0]));
