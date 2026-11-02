@@ -31,5 +31,6 @@ run:
 	./test_separate_code.sh
 	./test_linker_symbols.sh
 	./test_reloc_section_symbols.sh
+	./test_import_types.sh
 
 clean:

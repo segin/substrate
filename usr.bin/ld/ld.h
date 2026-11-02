@@ -786,6 +786,20 @@ void ld_arch_put_rel(const ld_arch_t *a, uint8_t *p, elfobj_endian_t e, uint64_t
                      uint32_t sym, uint64_t addend);
 int reloc_is_direct_ref(uint16_t machine, uint32_t type, int data);
 int settle_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out);
+/**
+ * Give each undefined symbol of no type that a shared object of the link defines the type of that
+ * definition (a function, an object; an indirect function a function), as GNU ld's symbol tables have it.
+ *
+ * @return 0, or -1
+ */
+int type_imports_as_defined(const ld_ctx_t *ctx, elfobj_t *out);
+/**
+ * Once relocation is done, make the weak references settle_undefined_weak() made 0 undefined again in the
+ * symbol table, as GNU ld's .symtab has them (what refers to them was given 0 already).
+ *
+ * @return 0, or -1
+ */
+int restore_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out);
 int set_section_zero_data(elf_section_t *sec, size_t sz);
 int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out);
 int finalize_dynamic_imports(const ld_arch_t *a, elfobj_t *out, const dyn_import_vec_t *imports);

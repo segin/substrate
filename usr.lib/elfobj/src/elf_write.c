@@ -383,7 +383,25 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
         }
         p = buf + (idx * entsz);
         /* a name that is empty is 0, the string table's first byte (a section's symbol is read so) */
-        if (!(has_null && i == 0) && sym->name != NULL && sym->name[0] != '\0') {
+        if (!(has_null && i == 0) && sym->name != NULL && sym->name[0] != '\0' && sym->version_name != NULL &&
+            sym->version_name[0] != '\0' && strchr(sym->name, '@') == NULL) {
+            /* a versioned symbol is named with its version, name@ver (name@@ver where it is the default
+             * this object defines), as GNU ld's symbol table names it */
+            size_t len = strlen(sym->name) + strlen(sym->version_name) + 3;
+            char *vname = (char *)malloc(len);
+
+            if (vname == NULL) {
+                free(buf);
+                return NULL;
+            }
+            snprintf(vname, len, "%s%s%s", sym->name, sym->version_default ? "@@" : "@", sym->version_name);
+            st_name = elf__strtab_add(strtab, vname);
+            free(vname);
+            if (st_name == UINT32_MAX) {
+                free(buf);
+                return NULL;
+            }
+        } else if (!(has_null && i == 0) && sym->name != NULL && sym->name[0] != '\0') {
             st_name = elf__strtab_add(strtab, sym->name);
             if (st_name == UINT32_MAX) {
                 free(buf);

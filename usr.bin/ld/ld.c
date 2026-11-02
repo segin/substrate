@@ -502,7 +502,7 @@ static int phase_relax_tls(ld_link_t *l) {
 
 static int phase_plan_imports(ld_link_t *l) {
     return note_dso_names(l->ctx) != 0 || settle_undefined_weak(l->ctx, l->out) != 0 ||
-           plan_dynamic_imports(l->ctx, l->out) != 0 ? -1 : 0;
+           type_imports_as_defined(l->ctx, l->out) != 0 || plan_dynamic_imports(l->ctx, l->out) != 0 ? -1 : 0;
 }
 
 static int phase_plan_local_got(ld_link_t *l) {
@@ -612,7 +612,10 @@ static int phase_symbol_values(ld_link_t *l) {
 }
 
 static int phase_dynsym_values(ld_link_t *l) {
-    return patch_dynsym_symbol_values(l->ctx, l->out);
+    if (patch_dynsym_symbol_values(l->ctx, l->out) != 0) {
+        return -1;
+    }
+    return restore_undefined_weak(l->ctx, l->out);
 }
 
 static int phase_discard_locals(ld_link_t *l) {

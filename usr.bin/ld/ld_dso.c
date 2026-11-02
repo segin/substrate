@@ -1261,6 +1261,30 @@ static int is_copied_name(const ld_ctx_t *ctx, const char *base, size_t len) {
     return 0;
 }
 
+/**
+ * The output's symbol called @p base (@p len bytes), an import or a copy, has version @p ver of a shared
+ * object: its .symtab entry is named name@ver, as GNU ld names it.
+ *
+ * @return 0, or -1 out of memory
+ */
+static int note_import_version(elfobj_t *out, const char *base, size_t len, const char *ver) {
+    char *name = (char *)malloc(len + 1);
+    elf_symbol_t *sym;
+    int rc = 0;
+
+    if (name == NULL) {
+        return -1;
+    }
+    memcpy(name, base, len);
+    name[len] = '\0';
+    sym = elf_find_symbol(out, name);
+    if (sym != NULL && elf_symbol_set_version_name(sym, ver, 0) != ELF_OK) {
+        rc = -1;
+    }
+    free(name);
+    return rc;
+}
+
 int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_buf, size_t *dynstr_len,
                                         size_t *dynstr_cap, const uint8_t *dynsym_buf, size_t dynsym_len, size_t entsz,
                                         uint8_t *versym_buf, size_t versym_len, size_t *out_verdef_count,
@@ -1328,7 +1352,8 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
                 }
                 if (found > 0 && provider != NULL && auto_ver_name != NULL) {
                     if (dyn_ver_plan_get_or_add_need(&plan, provider, auto_ver_name, &assigned) != 0 ||
-                        versym_write_raw(versym_buf, versym_len, endian, i, assigned) != 0) {
+                        versym_write_raw(versym_buf, versym_len, endian, i, assigned) != 0 ||
+                        note_import_version(out, base, base_len, auto_ver_name) != 0) {
                         free(auto_ver_name);
                         dyn_ver_plan_free(&plan);
                         return -1;

@@ -697,6 +697,49 @@ int settle_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out) {
     return 0;
 }
 
+/* (below) */
+static uint16_t dynsym_shndx(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym);
+
+int restore_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out) {
+    size_t i;
+
+    for (i = 0; i < elf_symbol_count(out); ++i) {
+        elf_symbol_t *sym = elf_symbol_at(out, i);
+
+        if (sym != NULL && elf_symbol_shndx(sym) == SHN_ABS && dynsym_shndx(ctx, out, sym) == SHN_UNDEF &&
+            elf_symbol_set_shndx(sym, SHN_UNDEF) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int type_imports_as_defined(const ld_ctx_t *ctx, elfobj_t *out) {
+    size_t i;
+
+    if (ctx->dso_inputs.count == 0) {
+        return 0;
+    }
+    for (i = 0; i < elf_symbol_count(out); ++i) {
+        elf_symbol_t *sym = elf_symbol_at(out, i);
+        const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
+        int type;
+
+        if (name == NULL || name[0] == '\0' || elf_symbol_shndx(sym) != SHN_UNDEF ||
+            elf_symbol_type(sym) != STT_NOTYPE || (type = dso_definition_type(ctx, name)) < 0) {
+            continue;
+        }
+        /* an indirect function is a function to the program that calls it */
+        if (type == STT_GNU_IFUNC) {
+            type = STT_FUNC;
+        }
+        if (type != STT_NOTYPE && elf_symbol_set_type(sym, (uint8_t)type) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /**
  * The section number @p sym has in the output's .dynsym: its own, except a weak reference
  * settle_undefined_weak() made 0, which is still undefined there as GNU ld leaves it (and found nowhere
