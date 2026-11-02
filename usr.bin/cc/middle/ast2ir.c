@@ -10073,6 +10073,7 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         long double init_f_ld = 0.0L;
         int init_is_float = 0;
         char *init_sym = NULL;
+        char *init_str = NULL;
         long obj_size;
         if (ctx == NULL || ctx->mod == NULL) {
             set_diag(diag, "internal error: missing module context for static local");
@@ -10123,7 +10124,27 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             set_diag(diag, "initializer element is not constant");
             return -1;
         }
-        if (!is_array_obj && !is_struct_obj) {
+        if (!is_array_obj && !is_struct_obj && s->expr != NULL &&
+            (ct_is_pointer(decl_ct) || (cc_ct_is_integer(decl_ct) && obj_size == cc_target_pointer_size())) &&
+            (global_init_string(tu, s->expr) != NULL ||
+             (s->expr->kind == CC_EXPR_IDENT && s->expr->ident != NULL &&
+              (strcmp(s->expr->ident, "__func__") == 0 || strcmp(s->expr->ident, "__FUNCTION__") == 0 ||
+               strcmp(s->expr->ident, "__PRETTY_FUNCTION__") == 0)))) {
+            /*
+             * a string's address, a literal's or the function's name: laid out in the data, as a file-scope
+             * pointer's is -- Linux's tracepoint_string(__func__) keeps one in __tracepoint_str, which is read
+             * without the function ever running; it was set the first time through, and `__func__` was taken
+             * for a symbol of that name
+             */
+            init_str = global_init_string(tu, s->expr) != NULL
+                           ? string_literal_emit_text(tu, global_init_string(tu, s->expr))
+                           : quote_c_string(ctx->fn != NULL && ctx->fn->name != NULL ? ctx->fn->name : "");
+            if (init_str == NULL) {
+                set_diag(diag, "out of memory laying out a static local's string");
+                return -1;
+            }
+            have_const_init = 1;
+        } else if (!is_array_obj && !is_struct_obj) {
             if (s->expr != NULL &&
                 eval_global_init_expr(tu, s->expr, &init_i, &init_f, &init_is_float, &init_sym) == 0) {
                 if (init_is_float && eval_global_init_ld_expr(tu, s->expr, &init_f_ld) != 0) {
@@ -10166,10 +10187,13 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         g.init_is_float = init_is_float;
         g.init_is_symbol = init_sym != NULL;
         g.init_sym = init_sym;
+        g.init_is_string = init_str != NULL;
+        g.init_str = init_str;
         if (g.name == NULL || (s->attr_section != NULL && g.attr_section == NULL)) {
             free(g.name);
             free(g.attr_section);
             free(g.init_sym);
+            free(g.init_str);
             set_diag(diag, "out of memory creating static local symbol");
             return -1;
         }
