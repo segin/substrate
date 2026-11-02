@@ -1977,7 +1977,20 @@ static int expr_is_certainly_nonconstant(const cc_expr_t *e) {
         if (e->ident == NULL || strncmp(e->ident, "__builtin_", 10) != 0) {
             return 1;
         }
+        if (strcmp(e->ident, "__builtin_constant_p") == 0) {
+            /* a constant whatever it is asked of: Linux's printk index, `__builtin_constant_p(fmt) ? fmt : NULL` */
+            return 0;
+        }
         break;
+    case CC_EXPR_TERNARY: {
+        const_integral_value_t c;
+
+        if (e->lhs != NULL && e->rhs != NULL && e->third != NULL && eval_const_integral_expr_value(NULL, e->lhs, &c) == 0) {
+            /* a constant condition: only the arm it chooses is evaluated */
+            return expr_is_certainly_nonconstant(c.bits != 0 ? e->rhs : e->third);
+        }
+        break;
+    }
     default:
         break;
     }
