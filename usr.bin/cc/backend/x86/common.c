@@ -221,7 +221,7 @@ static int asm_constraint_is_immediate(const char *c) {
     }
     for (i = 0; c[i] != '\0'; ++i) {
         unsigned char ch = (unsigned char)c[i];
-        if (ch == 'i' || ch == 'n' || ch == 'e' || (ch >= 'I' && ch <= 'P')) {
+        if (ch == 'i' || ch == 'n' || ch == 'g' || ch == 'e' || (ch >= 'I' && ch <= 'P')) {
             return 1;
         }
     }
@@ -245,6 +245,9 @@ static int asm_immediate_fits(const char *c, long long v) {
         switch (c[i]) {
         case 'i':
         case 'n':
+        case 'g':
+            /* (g is "rmi": any constant is its immediate, as gcc takes it -- Linux's acrn_hypercall0() has
+             * `movl %1, %%r8d` of "g"(0x80000080UL), `$2147483776`, never a 64-bit register) */
             return 1;
         case 'e':
             if (v >= INT32_MIN && v <= INT32_MAX) return 1;
