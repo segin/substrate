@@ -36,5 +36,6 @@ run:
 	./test_x32.sh
 	./test_version_script.sh
 	./test_build_id.sh
+	./test_code_padding.sh
 
 clean:

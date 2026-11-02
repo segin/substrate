@@ -412,6 +412,45 @@ static elf_err_t append_section_data(struct elf_section *dst, const uint8_t *src
     return ELF_OK;
 }
 
+/**
+ * Fill @p n bytes at @p p, padding before an input section in output
+ * section @p dst, as GNU ld's bfd_arch_i386_fill() fills it: in code on
+ * x86-64 (and x32) the 10-byte NOP over and over and the NOP of what is
+ * left, on i386 `66 90` over and over and a `90`; zeros otherwise.  A
+ * disassembler -- Linux's objtool on vmlinux.o -- reads through the
+ * padding to the next function, where zeros take it out of step.
+ */
+static void fill_alignment_padding(const struct elf_section *dst, uint8_t *p, size_t n) {
+    static const uint8_t nops[10][10] = {
+        {0x90},
+        {0x66, 0x90},
+        {0x0f, 0x1f, 0x00},
+        {0x0f, 0x1f, 0x40, 0x00},
+        {0x0f, 0x1f, 0x44, 0x00, 0x00},
+        {0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00},
+        {0x0f, 0x1f, 0x80, 0x00, 0x00, 0x00, 0x00},
+        {0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x66, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x66, 0x2e, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+    };
+    size_t step;
+
+    if ((dst->flags & SHF_EXECINSTR) == 0 || dst->obj == NULL ||
+        (dst->obj->machine != EM_X86_64 && dst->obj->machine != EM_386)) {
+        memset(p, 0, n);
+        return;
+    }
+    step = dst->obj->machine == EM_X86_64 ? 10 : 2;
+    while (n >= step) {
+        memcpy(p, nops[step - 1], step);
+        p += step;
+        n -= step;
+    }
+    if (n != 0) {
+        memcpy(p, nops[n - 1], n);
+    }
+}
+
 static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, uint64_t *base_out) {
     uint64_t base;
     uint64_t pad;
@@ -458,7 +497,7 @@ static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, u
         if (buf == NULL) {
             return ELF_ERR_OOM;
         }
-        memset(buf + dst->data_size, 0, (size_t)newsz - dst->data_size);
+        fill_alignment_padding(dst, buf + dst->data_size, (size_t)newsz - dst->data_size);
         dst->data = buf;
         dst->owns_data = 1;
         dst->data_size = (size_t)newsz;
