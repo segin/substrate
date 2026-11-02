@@ -107,7 +107,8 @@ typedef struct {
     int default_visibility;  /**< -fvisibility=: what a definition with none of its own has, as CC_LEX_VIS_*:
                                   default (0), hidden (1), protected (2), internal (3) */
     int no_80387;            /**< -mno-80387: no x87 instruction; floating point that needs one is refused */
-    int no_fp_ret_in_387;    /**< -mno-fp-ret-in-387: no result in %st0; a function or call with one is refused */
+    int no_fp_ret_in_387;    /**< -mno-fp-ret-in-387: no result in %st0 -- on i386 one in the general registers
+                                  (softfloat_i386.c), on x86-64 a function or call with one refused */
     int function_sections;   /**< -ffunction-sections: each function in a section of its own, .text.<name> */
     int data_sections;       /**< -fdata-sections: each object in one of its own, .data.<name>, .bss.<name> */
     int no_sibling_calls;    /**< -fno-optimize-sibling-calls: no tail call, a call and a return, so that each

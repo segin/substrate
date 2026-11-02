@@ -19,20 +19,31 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag);
  */
 int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag);
 
-/**
- * Whether i386 floating point is soft-float (softfloat_i386.c): -mno-80387
- * (-msoft-float, -mgeneral-regs-only) where the x87, not SSE, would do the
- * doubles.
- *
- * @return 1 or 0
- */
-int cc_softfloat_i386_wanted(void);
+/** What softfloat_i386.c makes of i386 floating point (cc_softfloat_i386_mode()). */
+typedef enum {
+    CC_SOFTFLOAT_NONE = 0, /**< nothing: the x87 and SSE as ever */
+    CC_SOFTFLOAT_ALL,      /**< -mno-80387 where the x87 would do the doubles: every operation soft-float */
+    CC_SOFTFLOAT_RETURNS   /**< -mno-fp-ret-in-387 alone: the x87 computes, results come back in %eax, %edx and
+                                %ecx */
+} cc_softfloat_mode_t;
 
 /**
- * i386 soft-float of one function (softfloat_i386.c), before legalization:
- * every floating operation a call of libgcc's soft-float routines, and
- * floating values the bits of a double (8 bytes) or the address of a
- * long double's slot, passed and returned by gcc's -mno-80387 ABI.
+ * What i386 floating point is made of by softfloat_i386.c: soft-float
+ * under -mno-80387 (-msoft-float, -mgeneral-regs-only) where the x87, not
+ * SSE, would do the doubles; under -mno-fp-ret-in-387 alone, results in
+ * the general registers.
+ *
+ * @return the mode, CC_SOFTFLOAT_NONE on another target
+ */
+cc_softfloat_mode_t cc_softfloat_i386_mode(void);
+
+/**
+ * i386 soft-float of one function (softfloat_i386.c), before legalization,
+ * as cc_softfloat_i386_mode() says: every floating operation a call of
+ * libgcc's soft-float routines, and floating values the bits of a double
+ * (8 bytes) or the address of a long double's slot, passed and returned by
+ * gcc's -mno-80387 ABI; or, of the values the x87 keeps, only the results
+ * returned and received by that ABI.
  *
  * @param f     the function, rewritten in place
  * @param diag  receives an error

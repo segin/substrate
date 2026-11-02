@@ -8,8 +8,9 @@
 # at -O0 as well, and with -mno-sse besides.  One that would compute or
 # return in the x87 -- a long double on x86-64 -- is refused where gcc
 # refuses it; on i386 under -mno-80387 gcc compiles floating point as
-# soft-float calls, and so does cc (run_i386_soft_float.sh); with
-# neither option it compiles.
+# soft-float calls, and so does cc (run_i386_soft_float.sh), and under
+# -mno-fp-ret-in-387 alone returns in the general registers, as cc does
+# (run_i386_no_fp_ret_in_387.sh); with neither option it compiles.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -78,8 +79,8 @@ for path in mir legacy; do
 				echo "run_no_80387: -m$m $path [$f] $src: compiled, which gcc refuses"
 				exit 1
 			fi
-			if [ $m = 32 ] && [ "$f" = -mno-80387 ] && [ $gcc_ok = 1 ] && [ $cc_ok = 0 ]; then
-				echo "run_no_80387: -m$m $path [$f] $src: refused, which gcc compiles as soft-float: $(head -1 "$CC_TMP/c.err")"
+			if [ $m = 32 ] && [ $gcc_ok = 1 ] && [ $cc_ok = 0 ]; then
+				echo "run_no_80387: -m$m $path [$f] $src: refused, which gcc compiles: $(head -1 "$CC_TMP/c.err")"
 				exit 1
 			fi
 			if [ $cc_ok = 0 ] && ! grep -q -- "$f" "$CC_TMP/c.err"; then

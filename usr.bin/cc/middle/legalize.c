@@ -259,7 +259,7 @@ static int legalize_function(cc_ssa_function_t *f, cc_diag_t *diag) {
 int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag) {
     size_t i;
 
-    int softfloat = cc_softfloat_i386_wanted();
+    int softfloat = cc_softfloat_i386_mode() != CC_SOFTFLOAT_NONE;
 
     if (m == NULL) {
         return(0);
@@ -268,7 +268,8 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag) {
         const cc_target_desc_t *tgt = cc_target_current();
 
         /*
-         * floating point without the x87 made calls and integers first, which legalization then splits;
+         * floating point without the x87 made calls and integers first (and floating results without
+         * %st0 the general registers), which legalization then splits;
          * constants folded before a target splits what it cannot compute in one operation
          */
         if ((softfloat && cc_softfloat_i386_function(&m->funcs[i], diag) != 0) ||

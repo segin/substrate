@@ -28,6 +28,10 @@
  *
  * It applies only where the x87 would otherwise do the work: not when SSE does the doubles
  * (-mfpmath=sse, or SSE2 without -mfpmath=387), whose long doubles the backend still refuses.
+ *
+ * Under -mno-fp-ret-in-387 alone (CC_SOFTFLOAT_RETURNS) the x87 computes, and only the results move, as gcc
+ * returns them there: a function's floating result, and a call's, cross in the general registers by the same
+ * ABI, through a slot of the frame -- stored (rounded to the size returned), loaded as its words, and back.
  */
 #include "cc_diag.h"
 #include "cc_middle.h"
@@ -56,7 +60,9 @@ typedef struct {
     int *uses;           /**< how many operands read each of those values */
     int *defs;           /**< how many instructions write each of them */
     int *fbits;          /**< for a double written once from a float: the float's bits (4 bytes), else -1 */
+    unsigned char *nat;  /**< each value the pass leaves floating (an x87 one under CC_SOFTFLOAT_RETURNS): 1 */
     int zero_ld;         /**< a long double 0.0's slot, or -1 */
+    cc_softfloat_mode_t mode;
     cc_diag_t *diag;
     int failed;
 } sf_t;
@@ -69,17 +75,22 @@ typedef struct {
 } sf_arg_t;
 
 /**
- * Whether functions are compiled with soft-float: on i386 under -mno-80387, when the x87, not SSE, would do
- * the doubles (the backend's rule, i386.c).
+ * What functions are compiled with: on i386 under -mno-80387, soft-float when the x87, not SSE, would do the
+ * doubles (the backend's rule, i386.c); under -mno-fp-ret-in-387 with the x87, its results in the general
+ * registers.
  */
-int cc_softfloat_i386_wanted(void) {
+cc_softfloat_mode_t cc_softfloat_i386_mode(void) {
     const cc_options_t *o = cc_options_current();
     const cc_target_desc_t *tgt = cc_target_current();
 
-    if (o == NULL || tgt == NULL || tgt->id != CC_TARGET_I386 || !o->no_80387) {
-        return 0;
+    if (o == NULL || tgt == NULL || tgt->id != CC_TARGET_I386) {
+        return CC_SOFTFLOAT_NONE;
     }
-    return !(o->i386_fpmath == CC_FPMATH_SSE || (o->i386_fpmath != CC_FPMATH_387 && o->i386_sse2));
+    if (!o->no_80387) {
+        return o->no_fp_ret_in_387 ? CC_SOFTFLOAT_RETURNS : CC_SOFTFLOAT_NONE;
+    }
+    return (o->i386_fpmath == CC_FPMATH_SSE || (o->i386_fpmath != CC_FPMATH_387 && o->i386_sse2)) ? CC_SOFTFLOAT_NONE
+                                                                                                 : CC_SOFTFLOAT_ALL;
 }
 
 /** Fail with message @p msg, naming the function; the first failure's message is kept. */
@@ -276,6 +287,60 @@ static void sf_ld_const(sf_t *z, int dst, const cc_ssa_instr_t *in) {
         return;
     }
     sf_store_ld_const(z, dst, in->fimm_ld);
+}
+
+/** Whether @p v is a floating value the pass leaves floating (computed by the x87 or SSE). */
+static int sf_is_nat(const sf_t *z, int v) {
+    return v >= 0 && v < z->nvals && z->nat[v];
+}
+
+/**
+ * The bits of floating value @p v left floating, as @p size bytes (a float's 4, a double's 8; 12, a long
+ * double's in a frame slot): stored into a slot of the frame, rounded to that size as a store rounds it.
+ *
+ * @return a new integer value of the bits (of 4 or 8 bytes), or for 12 the slot's address; -1 if the pass failed
+ */
+static int sf_nat_bits(sf_t *z, int v, long size) {
+    int slot = sf_slot(z, -1);
+    cc_ssa_instr_t st = sf_blank(CC_SSA_STORE);
+    cc_ssa_instr_t ld = sf_blank(CC_SSA_LOAD);
+
+    st.lhs = slot;
+    st.rhs = v;
+    st.imm = size;
+    sf_put(z, &st);
+    if (size >= 10) {
+        return slot;
+    }
+    ld.dst = sf_value(z, (uint32_t)size, 0);
+    ld.lhs = slot;
+    ld.imm = size;
+    sf_put(z, &ld);
+    return ld.dst;
+}
+
+/**
+ * Floating value @p dst, left floating, made from the bits @p bits of @p size bytes: of a float (4) or a double
+ * (8) an integer value, stored into a slot of the frame; of a long double (12) the address of a slot holding
+ * them.  Then loaded as the floating value, widened from a float as a load widens it.
+ */
+static void sf_nat_from_bits(sf_t *z, int dst, int bits, long size) {
+    int slot = bits;
+    cc_ssa_instr_t ld = sf_blank(CC_SSA_LOAD);
+
+    if (size < 10) {
+        cc_ssa_instr_t st = sf_blank(CC_SSA_STORE);
+
+        slot = sf_slot(z, -1);
+        st.lhs = slot;
+        st.rhs = bits;
+        st.imm = size;
+        sf_put(z, &st);
+    }
+    ld.dst = dst;
+    ld.lhs = slot;
+    ld.imm = size;
+    sf_put(z, &ld);
 }
 
 /**
@@ -571,6 +636,14 @@ static int sf_touches_float(sf_t *z, const cc_ssa_instr_t *in) {
     if (sf_defines(in->op) && sf_kind(z, in->dst) != SF_NONE) {
         return 1;
     }
+    /* a floating result returned or received, though the pass leaves the value floating, or thrown away */
+    if ((in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) &&
+        (sf_is_nat(z, in->dst) || (in->dst < 0 && in->call_ret_x87))) {
+        return 1;
+    }
+    if (in->op == CC_SSA_RET && sf_is_nat(z, in->lhs)) {
+        return 1;
+    }
     w.z = z;
     w.found = 0;
     cc_ssa_for_each_use(in, sf_note_float_use, &w);
@@ -643,6 +716,25 @@ static void sf_rewrite_call(sf_t *z, const cc_ssa_instr_t *in0) {
         }
     }
     in.call_ret_x87 = 0;
+    if (sf_is_nat(z, in.dst)) {
+        /* a result the pass leaves floating, by the ABI in the general registers: through a slot into it */
+        int dst = in.dst;
+        long size = in.imm >= 10 ? 12 : (in.agg_class & CC_ABI_RET_FLOAT) != 0 ? 4 : 8;
+
+        in.agg_class &= ~CC_ABI_RET_FLOAT;
+        if (size == 12) {
+            in.dst = sf_slot(z, -1);
+            in.rhs = in.dst;
+            in.is_unsigned = 1;
+            in.agg_class = CC_ABI_RET_EAX_EDX;
+        } else {
+            in.dst = sf_value(z, (uint32_t)size, 0);
+        }
+        in.imm = size;
+        sf_put(z, &in);
+        sf_nat_from_bits(z, dst, in.dst, size);
+        return;
+    }
     if (sf_kind(z, in.dst) != SF_NONE && in.imm >= 10) {
         /* a long double result, in %eax:%edx:%ecx: into a slot of its own, then the value's (rounded, if the
          * value is a double) */
@@ -915,6 +1007,18 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
     case CC_SSA_RET:
         /* as the function returns it, whatever the value is held as */
         c.rhs = -1;
+        if (sf_is_nat(z, in->lhs)) {
+            /* a value the pass leaves floating: its bits through a slot, rounded to what is returned */
+            long size = z->f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE ? 12 : z->f->ret_abi == CC_CALL_ARG_ABI_FLOAT ? 4 : 8;
+
+            c.lhs = sf_nat_bits(z, in->lhs, size);
+            c.imm = size;
+            if (size == 12) {
+                c.agg_class = CC_ABI_RET_EAX_EDX;
+            }
+            sf_put(z, &c);
+            return;
+        }
         if (z->f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE) {
             /* its 12 bytes in %eax:%edx:%ecx, from its slot */
             c.lhs = sf_as_ld(z, in->lhs);
@@ -1048,21 +1152,28 @@ int cc_softfloat_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
     for (v = 0; v < f->value_count && !any; ++v) {
         any = cc_ssa_value_class(f, v) == CC_VAL_F64;
     }
+    for (i = 0; i < f->instr_count && !any; ++i) {
+        /* a long double result nothing reads, which would be popped from %st0 */
+        any = f->instrs[i].call_ret_x87 && (f->instrs[i].op == CC_SSA_CALL || f->instrs[i].op == CC_SSA_CALLI);
+    }
     if (!any) {
         return 0;
     }
     memset(&z, 0, sizeof(z));
     z.f = f;
     z.diag = diag;
+    z.mode = cc_softfloat_i386_mode();
     z.nvals = f->value_count;
     z.zero_ld = -1;
     z.kind = (unsigned char *)calloc((size_t)z.nvals + 1, sizeof(*z.kind));
+    z.nat = (unsigned char *)calloc((size_t)z.nvals + 1, sizeof(*z.nat));
     z.uses = (int *)calloc((size_t)z.nvals + 1, sizeof(*z.uses));
     z.defs = (int *)calloc((size_t)z.nvals + 1, sizeof(*z.defs));
     z.fbits = (int *)malloc(((size_t)z.nvals + 1) * sizeof(*z.fbits));
     fix = (cc_ssa_instr_t *)calloc(f->param_count + 1, sizeof(*fix));
-    if (z.kind == NULL || z.uses == NULL || z.defs == NULL || z.fbits == NULL || fix == NULL) {
+    if (z.kind == NULL || z.nat == NULL || z.uses == NULL || z.defs == NULL || z.fbits == NULL || fix == NULL) {
         free(z.kind);
+        free(z.nat);
         free(z.uses);
         free(z.defs);
         free(z.fbits);
@@ -1072,8 +1183,13 @@ int cc_softfloat_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
     }
     for (v = 0; v < z.nvals; ++v) {
         z.fbits[v] = -1;
-        if (cc_ssa_value_class(f, v) == CC_VAL_F64) {
+        if (cc_ssa_value_class(f, v) != CC_VAL_F64) {
+            continue;
+        }
+        if (z.mode == CC_SOFTFLOAT_ALL) {
             z.kind[v] = cc_ssa_value_size(f, v) >= 10 ? SF_LD : SF_D;
+        } else {
+            z.nat[v] = 1;
         }
     }
     sf_count_uses(&z);
@@ -1120,6 +1236,7 @@ int cc_softfloat_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
         sf_prologue(&z, fix, nfix, need_zero_ld);
     }
     free(fix);
+    free(z.nat);
     free(z.uses);
     free(z.defs);
     free(z.fbits);

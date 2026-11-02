@@ -837,9 +837,11 @@ A floating operand of an
 statement, and
 .Ic _Float16 ,
 are refused under it.
+On i386,
 .Fl mno-fp-ret-in-387
-alone still refuses a function that would return in
-.Li %st0 .
+alone returns a floating result in those general registers too, as
+.Xr gcc 1
+does, and takes a called function's from them; the x87 computes the rest.
 .It Fl ffunction-sections , Fl fno-function-sections , Fl fdata-sections , Fl fno-data-sections
 Put each function, or each object, in a section of its own, as
 .Xr gcc 1
