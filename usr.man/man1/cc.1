@@ -853,7 +853,19 @@ it needs
 .Fl msse2 .
 A floating operand of an
 .Ic asm
-statement is refused under it.
+statement is its bits, as
+.Xr gcc 1
+places them: a
+.Ic float
+in a general register, a
+.Ic double
+in a pair of them, either in memory; one in an x87 register
+.Pq Li t , u , f
+is refused, as
+.Xr gcc 1
+refuses it, and so is a
+.Ic long double
+in registers.
 On i386,
 .Fl mno-fp-ret-in-387
 alone returns a floating result in those general registers too, as

@@ -23,8 +23,9 @@
  * Float arithmetic stays double arithmetic rounded to float, exact for + - * / (a double has more than
  * twice a float's precision); only conversions that would round twice -- a 64-bit integer or a long double
  * to float -- call the routine that goes straight there.  Negation needs no call: lowering already flips
- * the sign bit in memory.  An asm operand of floating type, which would be the x87's or a register's
- * reinterpretation, is refused.  A _Float16 in memory is loaded and stored through __extendhfdf2 and
+ * the sign bit in memory.  An asm operand of floating type is its bits, as gcc has it there: a float's word in
+ * a general register, a double's pair (sf_rewrite_asm()); one in an x87 or SSE register, and a long double in
+ * registers, are refused.  A _Float16 in memory is loaded and stored through __extendhfdf2 and
  * __truncdfhf2, as the backends convert one, its bits on the stack and back in %xmm0 -- which needs SSE2, as
  * gcc says, and without it is refused.
  *
@@ -711,6 +712,87 @@ static void sf_half_store(sf_t *z, const cc_ssa_instr_t *in) {
     sf_put(z, &st);
 }
 
+/**
+ * Whether asm operand constraint @p con can hold a soft-float value in the general registers or memory as
+ * gcc lets it under -mno-80387: not an x87 register ("t", "u", "f": gcc's "impossible constraint") nor an SSE
+ * one ("x", "Y..."), which hold no integer.
+ */
+static int sf_asm_constraint_ok(const char *con) {
+    return con == NULL || strpbrk(con, "tufxY") == NULL;
+}
+
+/**
+ * Rewrite ASM @p in, whose register operands may be floating: a double (or a float held as one) the bits of
+ * its size -- a float's 4 in a register, a double's 8 in a pair, as gcc places them -- and an output of a
+ * float its bits, made a double after.  A long double in registers (three of them in gcc) and an operand in an
+ * x87 or SSE register are refused.  Memory operands are addresses already.
+ */
+static void sf_rewrite_asm(sf_t *z, const cc_ssa_instr_t *in) {
+    cc_ssa_instr_t c = *in;
+    int *outf = NULL; /* per output: the float value it is, whose bits the asm writes, or -1 */
+    size_t i;
+
+    for (i = 0; i < c.asm_in_count && !z->failed; ++i) {
+        int v = c.asm_in_values[i];
+
+        if (CC_SSA_ASM_MEM_INDIRECT_P(v) || sf_kind(z, v) == SF_NONE) {
+            continue;
+        }
+        if (sf_kind(z, v) == SF_LD) {
+            sf_fail(z, "a long double asm operand in registers, which soft-float (-mno-80387) does not hold");
+        } else if (!sf_asm_constraint_ok(c.asm_in_constraints != NULL ? c.asm_in_constraints[i] : NULL)) {
+            sf_fail(z, "impossible constraint in 'asm': a floating operand in an x87 or SSE register under "
+                       "-mno-80387");
+        } else if (c.asm_in_sizes != NULL && c.asm_in_sizes[i] == 4) {
+            c.asm_in_values[i] = sf_to_float(z, v);
+        }
+    }
+    for (i = 0; i < c.asm_out_count && !z->failed; ++i) {
+        int v = c.asm_out_values[i];
+
+        if (CC_SSA_ASM_MEM_INDIRECT_P(v) || sf_kind(z, v) == SF_NONE) {
+            continue;
+        }
+        if (sf_kind(z, v) == SF_LD) {
+            sf_fail(z, "a long double asm operand in registers, which soft-float (-mno-80387) does not hold");
+        } else if (!sf_asm_constraint_ok(c.asm_out_constraints != NULL ? c.asm_out_constraints[i] : NULL)) {
+            sf_fail(z, "impossible constraint in 'asm': a floating operand in an x87 or SSE register under "
+                       "-mno-80387");
+        } else if (c.asm_out_sizes != NULL && c.asm_out_sizes[i] == 4) {
+            if (outf == NULL) {
+                size_t k;
+
+                outf = (int *)malloc(c.asm_out_count * sizeof(*outf));
+                if (outf == NULL) {
+                    sf_fail(z, "out of memory in soft-float rewriting");
+                    break;
+                }
+                for (k = 0; k < c.asm_out_count; ++k) {
+                    outf[k] = -1;
+                }
+            }
+            outf[i] = v;
+            c.asm_out_values[i] = sf_value(z, 4, 0);
+            if (c.asm_out_constraints != NULL && c.asm_out_constraints[i] != NULL &&
+                strchr(c.asm_out_constraints[i], '+') != NULL) {
+                /* read as well as written: the float's bits in it first */
+                cc_ssa_instr_t mv = sf_blank(CC_SSA_MOV);
+
+                mv.lhs = sf_to_float(z, v);
+                mv.dst = c.asm_out_values[i];
+                sf_put(z, &mv);
+            }
+        }
+    }
+    sf_put(z, &c);
+    for (i = 0; outf != NULL && i < c.asm_out_count && !z->failed; ++i) {
+        if (outf[i] >= 0) {
+            sf_from_float(z, outf[i], c.asm_out_values[i]);
+        }
+    }
+    free(outf);
+}
+
 /** A compare (CMP) of two floating values: libgcc's, then its int against 0, as the routine's contract is. */
 static void sf_cmp(sf_t *z, const cc_ssa_instr_t *in) {
     static const char *const names[] = {"eq", "ne", "lt", "le", "gt", "ge"};
@@ -1212,7 +1294,7 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
         sf_put(z, &c);
         return;
     case CC_SSA_ASM:
-        sf_fail(z, "an asm operand of floating type needs the x87, which -mno-80387 turns off");
+        sf_rewrite_asm(z, in);
         return;
     default:
         break;
