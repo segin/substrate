@@ -91,6 +91,7 @@ int cc_ir_push(cc_ssa_function_t *f, cc_ssa_instr_t in) {
             }
             break;
         case CC_SSA_CMP:
+        case CC_SSA_ISCONST:
             cc_ir_set_size(f, in.dst, 4);
             break;
         case CC_SSA_GADDR:

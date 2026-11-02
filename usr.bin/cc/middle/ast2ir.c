@@ -1139,13 +1139,44 @@ static const cc_expr_t *const_object_init(void *ctx, const cc_expr_t *e, const c
 
 int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const cc_expr_t *e,
                                           const_integral_value_t *out) {
+    return eval_const_integral_in(tu, e, 0, out);
+}
+
+/**
+ * Evaluate an integer constant expression in lowering's context, as
+ * eval_const_integral_expr_value() does, saying whether a
+ * __builtin_constant_p the optimizer is to decide is no constant
+ * (cc_const_env_t's defer_constant_p).
+ *
+ * @param tu     the translation unit; may be NULL
+ * @param e      the expression
+ * @param defer  1 in a function's code at -O1 and above, else 0
+ * @param out    receives the value
+ * @return       0, or -1 if @p e is not an integer constant expression
+ */
+int eval_const_integral_in(const cc_translation_unit_t *tu, const cc_expr_t *e, int defer,
+                           const_integral_value_t *out) {
     cc_const_env_t env;
 
     env.sizeof_bytes = NULL;
     env.type_bytes = cc_const_tu_type_bytes;
     env.object_init = const_object_init;
     env.ctx = (void *)tu;
+    env.defer_constant_p = defer;
     return cc_const_eval(&env, e, out);
+}
+
+/**
+ * Whether __builtin_constant_p in a function's code is left to the
+ * optimizer when lowering cannot fold its argument: at -O1 and above, as
+ * gcc decides it after inlining and constant propagation; at -O0 it is 0.
+ *
+ * @return 1 if it is, else 0
+ */
+int lower_defers_constant_p(void) {
+    const cc_options_t *opts = cc_options_current();
+
+    return opts != NULL && opts->opt_level > 0;
 }
 
 
@@ -3025,7 +3056,8 @@ int eval_const_i64_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, lon
     if (e == NULL || out == NULL) {
         return -1;
     }
-    if (eval_const_integral_expr_value(tu, e, &value) != 0) {
+    /* (a function's code: a __builtin_constant_p the optimizer is to decide is no constant yet) */
+    if (eval_const_integral_in(tu, e, lower_defers_constant_p(), &value) != 0) {
         return -1;
     }
     *out = (long long)value.bits;

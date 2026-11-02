@@ -334,6 +334,132 @@ const cc_ctype_t *cc_const_type_of(const cc_expr_t *e) {
     }
 }
 
+static int const_expr_has_effects(const cc_expr_t *e, int depth);
+
+/**
+ * Whether a call names a builtin that only computes its value from its
+ * arguments, as gcc's const builtins do: a call of one is no side effect.
+ *
+ * @param name  the function called
+ * @return      1 if it is one, else 0
+ */
+static int const_builtin_only_computes(const char *name) {
+    static const char *const pure[] = {"__builtin_clz",      "__builtin_ctz",    "__builtin_ffs",
+                                       "__builtin_popcount", "__builtin_parity", "__builtin_clrsb",
+                                       "__builtin_bswap",    "__builtin_expect", "__builtin_constant_p"};
+    size_t i;
+
+    for (i = 0; name != NULL && i < sizeof(pure) / sizeof(pure[0]); ++i) {
+        if (strncmp(name, pure[i], strlen(pure[i])) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Whether the statements of a statement expression have a side effect:
+ * any but a declaration without a cleanup or a run-time array bound, an
+ * expression statement and a block of those, or one whose expression has.
+ *
+ * @param s      the statements
+ * @param n      their number
+ * @param depth  how deep the walk is, which ends it (as an effect) at 64
+ * @return       1 if they may have one, else 0
+ */
+static int const_stmts_have_effects(const cc_stmt_t *s, size_t n, int depth) {
+    size_t i;
+
+    for (i = 0; i < n; ++i) {
+        switch (s[i].kind) {
+        case CC_STMT_DECL:
+            if (s[i].attr_cleanup != NULL || s[i].array_bounds.count > 0 || const_expr_has_effects(s[i].expr, depth) ||
+                const_expr_has_effects(s[i].init_expr, depth)) {
+                return 1;
+            }
+            break;
+        case CC_STMT_EXPR:
+            if (const_expr_has_effects(s[i].expr, depth)) {
+                return 1;
+            }
+            break;
+        case CC_STMT_BLOCK:
+            if (const_stmts_have_effects(s[i].block_stmts, s[i].block_count, depth + 1)) {
+                return 1;
+            }
+            break;
+        default:
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Whether evaluating an expression may have a side effect, as gcc's
+ * TREE_SIDE_EFFECTS says: an assignment, an increment, a call but of a
+ * builtin that only computes, a volatile access, or a statement
+ * expression whose statements have one.  The operand of sizeof is not
+ * evaluated.
+ *
+ * @param e      the expression; may be NULL
+ * @param depth  how deep the walk is, which ends it (as an effect) at 64
+ * @return       1 if it may have one, else 0
+ */
+static int const_expr_has_effects(const cc_expr_t *e, int depth) {
+    size_t i;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (depth > 64) {
+        return 1;
+    }
+    if (e->ctype != NULL && (e->ctype->quals & CC_CQ_VOLATILE) != 0) {
+        return 1;
+    }
+    switch (e->kind) {
+    case CC_EXPR_SIZEOF:
+        return 0;
+    case CC_EXPR_ASSIGN:
+    case CC_EXPR_UPDATE:
+        return 1;
+    case CC_EXPR_CALL:
+        if (!const_builtin_only_computes(e->ident)) {
+            return 1;
+        }
+        break;
+    case CC_EXPR_STMT:
+        if (const_stmts_have_effects(e->stmt_expr_stmts, e->stmt_expr_count, depth + 1)) {
+            return 1;
+        }
+        break;
+    default:
+        break;
+    }
+    if (const_expr_has_effects(e->lhs, depth + 1) || const_expr_has_effects(e->rhs, depth + 1) ||
+        const_expr_has_effects(e->third, depth + 1)) {
+        return 1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (const_expr_has_effects(e->args[i], depth + 1)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int cc_constant_p_deferrable(const cc_expr_t *arg) {
+    const cc_ctype_t *t = arg != NULL ? arg->ctype : NULL;
+    long width;
+
+    if (t == NULL || !cc_ct_is_integer(t)) {
+        return 0;
+    }
+    width = cc_ct_int_width(t);
+    return width > 0 && width <= 64 && !const_expr_has_effects(arg, 0);
+}
+
 /**
  * Evaluate a call to one of the builtins that fold to a constant:
  * __builtin_constant_p, __builtin_expect, __builtin_choose_expr,
@@ -365,7 +491,14 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
         if (a != NULL && (a->kind == CC_EXPR_STR || a->kind == CC_EXPR_FLOAT)) {
             return const_make(1, const_int(), out);
         }
-        return const_make(cc_const_eval(env, e->args[0], &arg) == 0 ? 1 : 0, const_int(), out);
+        if (cc_const_eval(env, e->args[0], &arg) == 0) {
+            return const_make(1, const_int(), out);
+        }
+        /* in a function's code at -O1 and above, what the optimizer may yet find constant waits for it */
+        if (env->defer_constant_p && cc_constant_p_deferrable(e->args[0])) {
+            return -1;
+        }
+        return const_make(0, const_int(), out);
     }
     if (strcmp(name, "__builtin_expect") == 0) {
         if (e->arg_count != 2 || cc_const_eval(env, e->args[0], &arg) != 0) {

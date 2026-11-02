@@ -269,6 +269,7 @@ static size_t instr_uses(const cc_ssa_instr_t *in, int *out, size_t cap) {
     case CC_SSA_EXT:
     case CC_SSA_LO32:
     case CC_SSA_HI32:
+    case CC_SSA_ISCONST:
     case CC_SSA_BR_COND:
     case CC_SSA_RET:
     case CC_SSA_VA_START:
@@ -553,6 +554,10 @@ static void put_rhs(const dump_func_t *d, const cc_ssa_instr_t *in, FILE *out) {
     case CC_SSA_LO32:
     case CC_SSA_HI32:
         fprintf(out, "%s %s ", in->op == CC_SSA_LO32 ? "lo32" : "hi32", t);
+        put_value(out, in->lhs);
+        return;
+    case CC_SSA_ISCONST:
+        fprintf(out, "isconst %s ", t);
         put_value(out, in->lhs);
         return;
     case CC_SSA_EXT:

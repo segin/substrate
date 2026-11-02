@@ -960,6 +960,7 @@ static cc_const_env_t parser_const_env(parser_t *p) {
     env.type_bytes = parser_const_type_bytes;
     env.object_init = NULL;
     env.ctx = p;
+    env.defer_constant_p = 0;
     return env;
 }
 

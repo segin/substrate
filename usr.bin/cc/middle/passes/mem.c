@@ -1938,6 +1938,7 @@ static int defines_only(const cc_ssa_instr_t *in) {
     case CC_SSA_PAIR:
     case CC_SSA_GADDR:
     case CC_SSA_STR:
+    case CC_SSA_ISCONST:
         return 1;
     default:
         return 0;

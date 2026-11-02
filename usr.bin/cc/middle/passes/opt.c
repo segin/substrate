@@ -1146,6 +1146,7 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                 }
             }
             if (d->dst >= 0 && d->dst < f->value_count && d->op != CC_SSA_CMP && d->op != CC_SSA_MOV &&
+                d->op != CC_SSA_ISCONST &&
                 !(d->op == CC_SSA_CONST && (d->imm == 0 || d->imm == 1) &&
                   cc_ssa_value_class(f, d->dst) == CC_VAL_I64)) {
                 is_bool[d->dst] = 0;
@@ -1229,6 +1230,22 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                 /* a word taken of a pair is its low word: the high one's arithmetic may go */
                 in->lhs = pair_half[2 * in->lhs];
                 st[dst].known = 0;
+                changed = 1;
+            } else if (dst >= 0) {
+                st[dst].known = 0;
+            }
+            break;
+
+        case CC_SSA_ISCONST:
+            if (dst >= 0 && in->lhs >= 0 && in->lhs < f->value_count && st[in->lhs].known) {
+                /* __builtin_constant_p of what is known here: 1 (one never known is 0, resolve_isconst()) */
+                in->op = CC_SSA_CONST;
+                in->lhs = -1;
+                in->rhs = -1;
+                in->imm = 1;
+                st[dst].known = 1;
+                st[dst].type = CC_VAL_I64;
+                st[dst].i = 1;
                 changed = 1;
             } else if (dst >= 0) {
                 st[dst].known = 0;
@@ -1896,6 +1913,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_PAIR:
     case CC_SSA_UMULW:
     case CC_SSA_UMULH:
+    case CC_SSA_ISCONST:
         return 1;
     case CC_SSA_LABEL:
     case CC_SSA_BR:
@@ -2416,6 +2434,7 @@ static int truth_values(const cc_ssa_function_t *f, const int *defs, const long 
             }
             switch (in->op) {
             case CC_SSA_CMP:
+            case CC_SSA_ISCONST:
                 ok = 1;
                 break;
             case CC_SSA_CONST:
@@ -2661,6 +2680,7 @@ static int cse_candidate(const cc_ssa_instr_t *in) {
     case CC_SSA_F2I:
     case CC_SSA_FROUND32:
     case CC_SSA_FROUND64:
+    case CC_SSA_ISCONST:
         return in->op != CC_SSA_GADDR || in->sym != NULL;
     default:
         return 0;
@@ -4193,6 +4213,44 @@ static int settle_function(cc_ssa_function_t *f) {
     return 0;
 }
 
+/**
+ * Decide each __builtin_constant_p the folding has not found constant (CC_SSA_ISCONST): 0, as gcc's late
+ * folding makes it once inlining and constant propagation are done.  Run after them -- an always_inline
+ * function's is its caller's to decide, with the caller's constant argument -- and before anything that does
+ * not know the instruction.  A function that had one is folded again, so the compares, branches and calls
+ * they decided go: Linux's clamp() leaves a call of an undefined __compiletime_assert_N in the arm its
+ * BUILD_BUG_ON takes on a 0.
+ *
+ * @param m          the module
+ * @param opt_level  the -O level (below 1 lowering makes none)
+ * @return           0, or -1 when out of memory
+ */
+static int resolve_isconst(cc_ssa_module_t *m, int opt_level) {
+    size_t i;
+
+    for (i = 0; i < m->func_count; ++i) {
+        cc_ssa_function_t *f = &m->funcs[i];
+        size_t k;
+        int any = 0;
+
+        for (k = 0; k < f->instr_count; ++k) {
+            cc_ssa_instr_t *in = &f->instrs[k];
+
+            if (in->op == CC_SSA_ISCONST) {
+                in->op = CC_SSA_CONST;
+                in->lhs = -1;
+                in->rhs = -1;
+                in->imm = 0;
+                any = 1;
+            }
+        }
+        if (any && opt_level > 0 && (refold_function(f) != 0 || settle_function(f) != 0)) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag);
 
 /**
@@ -4269,6 +4327,8 @@ static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag)
     if (!oom && opt_level > 0) {
         oom = constant_args(m) != 0;
     }
+    /* what is still not known to be constant is not: no pass after this, nor a backend, sees a CC_SSA_ISCONST */
+    oom = oom || resolve_isconst(m, opt_level) != 0;
     for (i = 0; i < m->func_count && !oom && opt_level > 0; ++i) {
         /*
          * what the target split before the constants were known: a 64-bit division by one, as a shift

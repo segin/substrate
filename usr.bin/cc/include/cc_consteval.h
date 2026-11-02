@@ -63,6 +63,15 @@ typedef struct {
     const cc_expr_t *(*object_init)(void *ctx, const cc_expr_t *e, const cc_ctype_t **type);
 
     void *ctx; /**< passed to the callbacks */
+
+    /**
+     * Whether a __builtin_constant_p of an argument that is no constant here, but one the optimizer may yet find
+     * constant (cc_constant_p_deferrable()), is no constant expression either: so lowering a function's body
+     * at -O1 and above has it, which leaves the answer to the optimizer (CC_SSA_ISCONST), as gcc decides it
+     * after inlining and constant propagation.  0 everywhere else -- an initializer, an array bound, a case
+     * label, __builtin_choose_expr's condition -- where it is 0 now, as gcc's is.
+     */
+    int defer_constant_p;
 } cc_const_env_t;
 
 long cc_const_tu_type_bytes(void *ctx, const cc_ctype_t *t);
@@ -98,6 +107,18 @@ int cc_const_eval_ll(const cc_const_env_t *env, const cc_expr_t *e, long long *o
  * @return     1 if it is, else 0
  */
 int cc_const_is_null_pointer(const cc_const_env_t *env, const cc_expr_t *e);
+
+/**
+ * Whether gcc leaves __builtin_constant_p of @p arg, no constant expression, to its optimizer rather than
+ * answering 0 at once: @p arg is of an integer type of 64 bits or fewer and has no side effects -- no
+ * assignment, increment, call (but of a builtin that only computes), volatile access, nor a statement other
+ * than a declaration or an expression in a statement expression.  A pointer's or an aggregate's is 0 at once
+ * (gcc's fold_builtin_constant_p()); so, here, is a floating value's.  Needs sema's types.
+ *
+ * @param arg  the argument
+ * @return     1 if the optimizer decides it, else 0
+ */
+int cc_constant_p_deferrable(const cc_expr_t *arg);
 
 /**
  * Whether a constant reads as unsigned: its type is an unsigned integer

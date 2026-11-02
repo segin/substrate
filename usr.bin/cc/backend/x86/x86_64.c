@@ -2108,6 +2108,13 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                 slot_layout_free(&lay);
                 return -1;
 
+            case CC_SSA_ISCONST:
+                /* the optimizer decides every __builtin_constant_p it was left (passes/opt.c) */
+                set_diag(diag, "x86-64: undecided __builtin_constant_p in legal IR");
+                int_regs_free(&ist);
+                slot_layout_free(&lay);
+                return -1;
+
             case CC_SSA_RET:
                 if (has_sret) {
                     long copy_bytes = in->imm > 0 ? in->imm : sret_mem_size;

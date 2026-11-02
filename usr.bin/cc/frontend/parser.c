@@ -7841,6 +7841,20 @@ static cc_expr_t *parse_primary(parser_t *p) {
                         is_const = 1;
                     }
                 }
+                if (!is_const) {
+                    /*
+                     * not a constant expression: kept as the call, which a constant expression -- an initializer,
+                     * an array bound, __builtin_choose_expr's condition -- takes as 0 (consteval.c), and lowering
+                     * leaves to the optimizer at -O1 and above, as gcc decides it after inlining and constant
+                     * propagation: Linux's clamp() asks it of a local holding a constant
+                     */
+                    if (push_arg(e, arg) != 0) {
+                        free_expr(arg);
+                        free_expr(e);
+                        return NULL;
+                    }
+                    return e;
+                }
                 free_expr(arg);
                 free_expr(e);
                 e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_INT));

@@ -122,6 +122,13 @@ typedef enum {
     CC_SSA_ASM,
     CC_SSA_TRAP,
     CC_SSA_RET,
+    /**
+     * dst (an int) = whether integer lhs is a constant: __builtin_constant_p of an argument lowering could not
+     * fold, which the optimizer decides as gcc does after inlining and constant propagation.  Folding makes it
+     * 1 where lhs is known; the optimizer makes every one left 0 once inlining is done (passes/opt.c), so no
+     * backend sees one.  Pure: it reads nothing but lhs.
+     */
+    CC_SSA_ISCONST,
     /*
      * Legal IR only, written by a target's legalization (i386: 64-bit
      * integers as two 32-bit words, legalize_i386.c).

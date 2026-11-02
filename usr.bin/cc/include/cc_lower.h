@@ -330,6 +330,30 @@ int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const cc_exp
                                    const_integral_value_t *out);
 
 /**
+ * Evaluate an integer constant expression in lowering's context, as
+ * eval_const_integral_expr_value() does; @p defer says whether a
+ * __builtin_constant_p the optimizer is to decide is no constant
+ * (cc_const_env_t's defer_constant_p).
+ *
+ * @param tu     the translation unit; may be NULL
+ * @param e      the expression
+ * @param defer  1 in a function's code at -O1 and above, else 0
+ * @param out    receives the value
+ * @return       0, or -1 if @p e is not an integer constant expression
+ */
+int eval_const_integral_in(const cc_translation_unit_t *tu, const cc_expr_t *e, int defer,
+                           const_integral_value_t *out);
+
+/**
+ * Whether __builtin_constant_p in a function's code is left to the
+ * optimizer (CC_SSA_ISCONST) when lowering cannot fold its argument: at
+ * -O1 and above.
+ *
+ * @return 1 if it is, else 0
+ */
+int lower_defers_constant_p(void);
+
+/**
  * Convert integer value @p v by keeping its low @p bits bits, zero- or
  * sign-extended as @p is_unsigned says, in a new value of @p size bytes:
  * one EXT, which legalization expands for the target.

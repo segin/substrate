@@ -907,6 +907,7 @@ const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_ASM: return "asm";
     case CC_SSA_TRAP: return "trap";
     case CC_SSA_RET: return "ret";
+    case CC_SSA_ISCONST: return "isconst";
     default: return "unknown";
     }
 }

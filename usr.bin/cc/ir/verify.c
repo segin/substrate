@@ -233,6 +233,8 @@ static const op_info_t op_table[] = {
     {"umulh", FORM_BINARY, TC_INT, TC_INT},
     {"lo32", FORM_UNARY, TC_INT, TC_INT},
     {"hi32", FORM_UNARY, TC_INT, TC_INT},
+    /* neutral IR's __builtin_constant_p the optimizer decides (CC_SSA_ISCONST) */
+    {"isconst", FORM_UNARY, TC_INT, TC_INT},
     {"fadd", FORM_BINARY, TC_FP, TC_FP},
     {"fsub", FORM_BINARY, TC_FP, TC_FP},
     {"fmul", FORM_BINARY, TC_FP, TC_FP},

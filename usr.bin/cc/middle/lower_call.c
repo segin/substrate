@@ -1800,6 +1800,42 @@ static int va_list_store(cc_ssa_function_t *sf, var_entry_t *vars, const va_list
     return 0;
 }
 
+/**
+ * Lower __builtin_constant_p of @p arg, no constant here but one the
+ * optimizer may yet find constant (cc_constant_p_deferrable()): arg's
+ * value and a CC_SSA_ISCONST of it, which the optimizer makes 1 where
+ * folding knows the value -- a local's constant initializer, an inlined
+ * function's constant argument -- and 0 where it never does, as gcc
+ * decides it after inlining.  arg has no side effects, so computing it
+ * changes nothing, and what computes it goes once the answer is known.
+ *
+ * @return the result, an int, or -1 on error
+ */
+static int lower_constant_p_late(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                 var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *arg,
+                                 cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int v = lower_expr(tu, sf, ctx, vars, var_count, depth, arg, diag);
+
+    if (v < 0) {
+        return -1;
+    }
+    if (cc_ssa_value_class(sf, v) != CC_VAL_I64) {
+        /* (not an integer value after all: no constant gcc would find) */
+        return cc_ir_const(sf, 0);
+    }
+    lower_expr_instr_init(&in);
+    in.op = CC_SSA_ISCONST;
+    in.lhs = v;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering __builtin_constant_p");
+        return -1;
+    }
+    cc_ir_set_size(sf, in.dst, 4);
+    return in.dst;
+}
+
 static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e,
                               builtin_kind_t bk, int bswap_bits, cc_ssa_instr_t *in_io, cc_diag_t *diag) {
@@ -2033,6 +2069,9 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         if (e->args[0]->kind == CC_EXPR_FLOAT || e->args[0]->kind == CC_EXPR_STR ||
             eval_const_i64_expr(tu, e->args[0], &dummy) == 0) {
             is_const = 1;
+        }
+        if (!is_const && lower_defers_constant_p() && cc_constant_p_deferrable(e->args[0])) {
+            return lower_constant_p_late(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
         }
         return cc_ir_const(sf, is_const);
     }

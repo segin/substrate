@@ -195,7 +195,9 @@ static size_t body_cost(const cc_ssa_function_t *g) {
     for (i = 0; i < g->instr_count; ++i) {
         cc_ssa_opcode_t op = g->instrs[i].op;
 
-        if (op != CC_SSA_PARAM && op != CC_SSA_LABEL && op != CC_SSA_CONST && op != CC_SSA_SHL && op != CC_SSA_MOV) {
+        /* (an undecided __builtin_constant_p is a constant once decided) */
+        if (op != CC_SSA_PARAM && op != CC_SSA_LABEL && op != CC_SSA_CONST && op != CC_SSA_SHL && op != CC_SSA_MOV &&
+            op != CC_SSA_ISCONST) {
             n++;
         }
     }
