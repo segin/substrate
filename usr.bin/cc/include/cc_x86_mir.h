@@ -188,7 +188,8 @@ typedef struct {
     unsigned short op;  /**< an xi_op_t */
     unsigned char w;    /**< the operation's width in bytes, for its suffix: 1, 2, 4 or 8 */
     unsigned char cc;   /**< XI_JCC, XI_SETCC: an xcc_t; XI_ASM: the outputs (bit k of the first eight) a branch
-                             after reads from the flags the asm leaves, X86_ASM_FLAGS */
+                             after reads from the flags the asm leaves, X86_ASM_FLAGS; XI_CALL: 1 for a call
+                             through a nocf_check function type (`notrack`) */
     unsigned char nops; /**< the operands in o */
     xop_t o[3];
     int label;          /**< XI_LABEL, XI_JMP, XI_JCC */

@@ -60,7 +60,13 @@ enum {
     CC_CQ_ATOMIC = 8u,
     /** gcc's x86 named address spaces: an object reached through %fs or %gs, its address the offset there */
     CC_CQ_SEG_FS = 16u,
-    CC_CQ_SEG_GS = 32u
+    CC_CQ_SEG_GS = 32u,
+    /**
+     * a function type's: gcc's nocf_check type attribute on a pointer, typedef or member, which makes a call
+     * through it `notrack` under -fcf-protection=branch; part of the type, as gcc has it (a pointer to such a
+     * function and a plain one are not compatible)
+     */
+    CC_CQ_NOCF = 64u
 };
 
 /** The named address space bits of a set of qualifiers. */

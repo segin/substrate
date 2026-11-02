@@ -402,6 +402,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     if (indirect) {
         c = xi_make(XI_CALL, 4, 1, &target, NULL, NULL);
+        c.cc = in->call_notrack; /* (a call's cc: through a nocf_check type, notrack) */
     } else {
         c = xi_make(XI_CALL, 4, 0, NULL, NULL, NULL);
         c.sym = call_name(s, in->op == CC_SSA_CALLI ? target.sym : in->sym, in->call_binds_local, &rp_used);

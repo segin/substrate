@@ -2202,6 +2202,18 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
 }
 
 /**
+ * Call through register @p reg for indirect call @p in: notrack (or the _nt_ thunk) when its function type is
+ * nocf_check (x86_emit_nocf_branch()), else x86_emit_indirect_branch()'s call.
+ */
+static void emit_i386_indirect_call(FILE *fp, const cc_ssa_instr_t *in, const char *reg) {
+    if (in->call_notrack) {
+        x86_emit_nocf_branch(fp, "call", reg);
+    } else {
+        x86_emit_indirect_branch(fp, "call", reg);
+    }
+}
+
+/**
  * Call @p in's target: a symbol, a stack object's address (by %eax), or a pointer from its slot -- loaded
  * first, under -mindirect-branch=thunk-extern, into a register the arguments leave free, the thunk's.
  *
@@ -2215,7 +2227,7 @@ static int emit_i386_call_target(FILE *fp, const cc_ssa_function_t *f, const slo
     if (in->op == CC_SSA_CALLI) {
         if (is_stackalloc_value(lay, in->lhs)) {
             fprintf(fp, "\tleal %d(%%ebp), %%eax\n", stackalloc_off(lay, in->lhs));
-            x86_emit_indirect_branch(fp, "call", "%eax");
+            emit_i386_indirect_call(fp, in, "%eax");
         } else if (cc_options_current()->indirect_thunk) {
             int r = 0;
 
@@ -2226,9 +2238,10 @@ static int emit_i386_call_target(FILE *fp, const cc_ssa_function_t *f, const slo
                 return -1;
             }
             fprintf(fp, "\tmovl %d(%%ebp), %s\n", slot_off(lay, in->lhs), scratch[r]);
-            x86_emit_indirect_branch(fp, "call", scratch[r]);
+            emit_i386_indirect_call(fp, in, scratch[r]);
         } else {
-            fprintf(fp, "\tcall *%d(%%ebp)\n", slot_off(lay, in->lhs));
+            fprintf(fp, "\t%scall *%d(%%ebp)\n", in->call_notrack && cc_options_current()->cf_branch ? "notrack " : "",
+                    slot_off(lay, in->lhs));
         }
     } else {
         if (in->call_chain > 0) {
@@ -2605,7 +2618,7 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
     }
 
     if (target_reg >= 0) {
-        x86_emit_indirect_branch(fp, "call", ist->regs[target_reg]);
+        emit_i386_indirect_call(fp, in, ist->regs[target_reg]);
     } else if (emit_i386_call_target(fp, f, lay, in, busy) != 0) {
         return -1;
     }

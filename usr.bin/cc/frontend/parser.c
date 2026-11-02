@@ -1756,6 +1756,42 @@ static int parser_vector_struct(parser_t *p, const cc_ctype_t *elem, long n) {
 }
 
 /**
+ * The type a declaration of type @p t has with gcc's nocf_check
+ * attribute, which is the function type's: the function type @p t is, or
+ * the one a pointer to it (or an array of them) leads to, made
+ * CC_CQ_NOCF, so that a call through it is `notrack`.  A function
+ * declaration's own type is left be, as cc keeps the attribute on the
+ * declaration (CC_ATTR_NOCF_CHECK, no endbr at its entry).
+ *
+ * @param t  the declared type
+ * @return   the type, @p t itself where there is no function type in it,
+ *           or NULL when out of memory
+ */
+static const cc_ctype_t *parser_nocf_type(const cc_ctype_t *t) {
+    const cc_ctype_t *of;
+
+    if (t == NULL) {
+        return NULL;
+    }
+    switch (t->kind) {
+    case CC_CT_FUNCTION:
+        return cc_ct_qualified(t, CC_CQ_NOCF);
+    case CC_CT_POINTER:
+    case CC_CT_ARRAY:
+        of = parser_nocf_type(t->of);
+        if (of == NULL) {
+            return NULL;
+        }
+        if (of == t->of) {
+            return t;
+        }
+        return t->kind == CC_CT_POINTER ? cc_ct_qualified(cc_ct_pointer(of), t->quals) : cc_ct_array(of, t->count);
+    default:
+        return t;
+    }
+}
+
+/**
  * Apply a `vector_size(bytes)` or `ext_vector_type(count)` attribute in
  * @p attrs to the type *@p ctype it is written with: the type becomes the
  * vector of that element type.  The size must be a power-of-two multiple
@@ -2781,6 +2817,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 int mtypedef = 0;
                 const cc_ctype_t *mspec = NULL;
                 decl_attrs_t mspec_attrs;
+                int mspec_nocf = 0; /* nocf_check among the specifiers: each member's function type's */
                 long mspec_align = 0;
                 long mtypedef_align = 0; /* the alignment of a typedef name among the specifiers, or 0 */
                 if (p->structs[sid].has_flexible_array) {
@@ -2833,6 +2870,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 /* `_Alignas(T) char x;`: the specifiers' alignment applies to each member they declare */
                 mspec_align = (mspec_attrs.flags & CC_ATTR_ALIGNED) != 0 ? mspec_attrs.align : 0;
                 mtypedef_align = p->last_spec_align;
+                mspec_nocf = (mspec_attrs.flags & CC_ATTR_NOCF_CHECK) != 0;
                 decl_attrs_clear(&mspec_attrs);
                 if (mtypedef) {
                     decl_attrs_clear(&struct_attrs);
@@ -2896,6 +2934,12 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         free_expr(bw_expr);
                     }
                     if (skip_decl_gnu_suffix(p, &mdecl_attrs) != 0) {
+                        free(mname);
+                        decl_attrs_clear(&mdecl_attrs);
+                        return -1;
+                    }
+                    if ((mspec_nocf || (mdecl_attrs.flags & CC_ATTR_NOCF_CHECK) != 0) && md.ctype != NULL &&
+                        (md.ctype = parser_nocf_type(md.ctype)) == NULL) {
                         free(mname);
                         decl_attrs_clear(&mdecl_attrs);
                         return -1;
@@ -9790,6 +9834,15 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         merged_format_index = merged_attrs.format_index;
         merged_format_first_to_check = merged_attrs.format_first_to_check;
         s.attr_flags = with_pragma_visibility(merged_attrs.flags, start_vis);
+        if ((merged_attrs.flags & CC_ATTR_NOCF_CHECK) != 0 && s.ctype != NULL &&
+            (is_typedef || s.ctype->kind != CC_CT_FUNCTION)) {
+            /* a pointer's, a typedef's: the function type's, as gcc has it (a function's own: its declaration's) */
+            s.ctype = parser_nocf_type(s.ctype);
+            if (s.ctype == NULL) {
+                free_stmt(&s);
+                return -1;
+            }
+        }
         if (p->scope_depth == 0 && !is_typedef && s.ctype != NULL && s.ctype->kind != CC_CT_FUNCTION &&
             (s.storage & (CC_STORAGE_EXTERN | CC_STORAGE_STATIC)) == 0) {
             /* (an object defined here, not one declared to be elsewhere) */
@@ -9968,9 +10021,24 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 return -1;
             }
             s.ctype = fct;
-            if (skip_decl_gnu_suffix(p, NULL) != 0) {
-                free_stmt(&s);
-                return -1;
+            {
+                decl_attrs_t fn_attrs;
+
+                decl_attrs_reset(&fn_attrs);
+                if (skip_decl_gnu_suffix(p, &fn_attrs) != 0) {
+                    decl_attrs_clear(&fn_attrs);
+                    free_stmt(&s);
+                    return -1;
+                }
+                /* nocf_check, before or after: the function type's, as gcc has it */
+                if (((s.attr_flags | fn_attrs.flags) & CC_ATTR_NOCF_CHECK) != 0) {
+                    s.ctype = cc_ct_qualified(s.ctype, CC_CQ_NOCF);
+                }
+                decl_attrs_clear(&fn_attrs);
+                if (s.ctype == NULL) {
+                    free_stmt(&s);
+                    return -1;
+                }
             }
         }
         if (p->tok.kind == TOK_ASSIGN) {

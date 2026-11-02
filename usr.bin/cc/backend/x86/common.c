@@ -1697,6 +1697,66 @@ void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg) {
 }
 
 /**
+ * Print a call or jump through register @p reg whose function type is nocf_check, as gcc has it: under
+ * -fcf-protection=branch `notrack call *%rax` -- or under -mindirect-branch=thunk-extern a call of
+ * __x86_indirect_thunk_nt_rax, the thunk that jumps notrack -- and without it x86_emit_indirect_branch()'s.
+ *
+ * @param fp   the assembly output
+ * @param op   "call" or "jmp"
+ * @param reg  the register the target is in, its name with the %
+ */
+void x86_emit_nocf_branch(FILE *fp, const char *op, const char *reg) {
+    const cc_options_t *o = cc_options_current();
+
+    if (!o->cf_branch) {
+        x86_emit_indirect_branch(fp, op, reg);
+        return;
+    }
+    if (!o->indirect_thunk) {
+        fprintf(fp, "\tnotrack %s *%s\n", op, reg);
+    } else {
+        if (o->indirect_cs_prefix && reg[1] == 'r' && reg[2] >= '0' && reg[2] <= '9') {
+            fputs("\tcs\n", fp);
+        }
+        fprintf(fp, "\t%s __x86_indirect_thunk_nt_%s\n", op, reg + 1);
+    }
+    if ((o->harden_sls & 2) != 0 && strcmp(op, "jmp") == 0) {
+        fputs("\tint3\n", fp);
+    }
+}
+
+/**
+ * The prefix of a switch's jump through its table: under -fcf-protection=branch `notrack `, as gcc has it,
+ * so that the case labels need no endbr, which they have not -- an IBT CPU checks no jump with the prefix (but
+ * through a retpoline thunk, which gcc and cc reach the plain way); else nothing.
+ *
+ * @return "notrack " or ""
+ */
+const char *x86_table_jump_prefix(void) {
+    const cc_options_t *o = cc_options_current();
+
+    return o->cf_branch && !o->indirect_thunk ? "notrack " : "";
+}
+
+/**
+ * Print a switch's jump through its table to the address in register @p reg: x86_emit_indirect_branch()'s
+ * jump, with x86_table_jump_prefix() before it where it is not through a thunk.
+ *
+ * @param fp   the assembly output
+ * @param reg  the register the target is in, its name with the %
+ */
+void x86_emit_table_jump(FILE *fp, const char *reg) {
+    if (cc_options_current()->indirect_thunk) {
+        x86_emit_indirect_branch(fp, "jmp", reg);
+        return;
+    }
+    fprintf(fp, "\t%sjmp *%s\n", x86_table_jump_prefix(), reg);
+    if ((cc_options_current()->harden_sls & 2) != 0) {
+        fputs("\tint3\n", fp);
+    }
+}
+
+/**
  * Print a function's return, as -mfunction-return has it: `ret` (`ret $4`, an i386 function popping a
  * structure result's hidden pointer), or under thunk-extern `jmp __x86_return_thunk`, the program's (Linux's,
  * which objtool finds every return of a CONFIG_MITIGATION_RETHUNK kernel going through).  One popping its

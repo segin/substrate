@@ -134,6 +134,12 @@ void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags
  * instruction, or under -mindirect-branch=thunk-extern one to __x86_indirect_thunk_<reg>.
  */
 void x86_emit_indirect_branch(FILE *fp, const char *op, const char *reg);
+/** Print a call or jump through @p reg of a nocf_check function type: notrack, or the _nt_ thunk, as gcc. */
+void x86_emit_nocf_branch(FILE *fp, const char *op, const char *reg);
+/** A switch's jump through its table's prefix: `notrack ` under -fcf-protection=branch, but through a thunk. */
+const char *x86_table_jump_prefix(void);
+/** Print a switch's jump through its table to the address in register @p reg, notrack as gcc has it. */
+void x86_emit_table_jump(FILE *fp, const char *reg);
 /**
  * Print a function's return, popping @p pop bytes of arguments after the return address: `ret`, or under
  * -mfunction-return=thunk-extern a jump to __x86_return_thunk.

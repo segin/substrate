@@ -552,6 +552,21 @@ as does each label whose address is taken, where an indirect branch may
 land; a function declared
 .Ic __attribute__((nocf_check))
 has none.
+As with gcc, a switch's jump through its table, whose case labels have
+no
+.Li endbr ,
+is
+.Li notrack ,
+and so is a call through a function type with the attribute \(em a
+pointer's, a typedef's or a member's
+.Pq Li "nocf_check void (*p)(void)" ;
+under
+.Fl mindirect-branch=thunk-extern
+such a call goes through
+.Fn __x86_indirect_thunk_nt_ Ns Ar reg
+instead.
+Such a type is not compatible with a plain one in gcc; cc does not
+diagnose the mix.
 .Dv __CET__
 is defined as with
 .Xr gcc 1 :

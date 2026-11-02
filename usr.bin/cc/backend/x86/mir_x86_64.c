@@ -381,6 +381,7 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     if (indirect) {
         c = xi_make(XI_CALL, 8, 1, &target, NULL, NULL);
+        c.cc = in->call_notrack; /* (a call's cc: through a nocf_check type, notrack) */
     } else {
         c = xi_make(XI_CALL, 8, 0, NULL, NULL, NULL);
         c.sym = in->op == CC_SSA_CALLI ? target.sym : in->sym;

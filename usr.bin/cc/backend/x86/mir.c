@@ -618,7 +618,7 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
             fprintf(fp, "\tleaq .L%s_jt%d(%%rip), %%r11\n", fn_name, in->aux);
             fprintf(fp, "\tmovslq (%%r11,%s,4), %s\n", ix, ix);
             fprintf(fp, "\taddq %%r11, %s\n", ix);
-            x86_emit_indirect_branch(fp, "jmp", ix);
+            x86_emit_table_jump(fp, ix);
             return;
         }
         if (cc_options_current()->indirect_thunk) {
@@ -629,7 +629,8 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
             x86_emit_indirect_branch(fp, "jmp", ix);
             return;
         }
-        fprintf(fp, "\tjmp *.L%s_jt%d(,%s,%d)\n", fn_name, in->aux, xr_name(in->o[0].reg, word), word);
+        fprintf(fp, "\t%sjmp *.L%s_jt%d(,%s,%d)\n", x86_table_jump_prefix(), fn_name, in->aux,
+                xr_name(in->o[0].reg, word), word);
         if ((cc_options_current()->harden_sls & 2) != 0) {
             fputs("\tint3\n", fp); /* (-mharden-sls=indirect-jmp, as x86_emit_indirect_branch() has it) */
         }
@@ -656,9 +657,13 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
         if (in->nops == 0) {
             fprintf(fp, "\tcall %s\n", in->sym);
         } else if (in->o[0].kind == XO_REG) {
-            x86_emit_indirect_branch(fp, "call", xr_name(in->o[0].reg, word));
+            if (in->cc) {
+                x86_emit_nocf_branch(fp, "call", xr_name(in->o[0].reg, word));
+            } else {
+                x86_emit_indirect_branch(fp, "call", xr_name(in->o[0].reg, word));
+            }
         } else {
-            fputs("\tcall *", fp);
+            fputs(in->cc && cc_options_current()->cf_branch ? "\tnotrack call *" : "\tcall *", fp);
             print_op(fp, xf, &in->o[0], word);
             fputc('\n', fp);
         }

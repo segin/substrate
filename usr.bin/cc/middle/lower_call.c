@@ -3298,6 +3298,8 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
                 ct = ct->of;
             }
             ptr_fnt = ct != NULL && ct->unqual->kind == CC_CT_FUNCTION ? ct->unqual : NULL;
+            /* through a nocf_check function type: a call IBT does not check, as gcc makes it */
+            in.call_notrack = ptr_fnt != NULL && (ct->quals & CC_CQ_NOCF) != 0 ? 1 : 0;
         }
         /*
          * A pointer without a prototype may reach a variadic function;
