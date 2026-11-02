@@ -1358,7 +1358,16 @@ static void emit_asm_escaped_byte(FILE *fp, unsigned char ch) {
     fprintf(fp, "\\%03o", (unsigned)ch);
 }
 
-static void emit_asciz_literal(FILE *fp, const char *literal) {
+/**
+ * Write the bytes of C string literal @p literal as data, with
+ * @p directive: `.asciz` for them and the terminating null, `.ascii` for
+ * them alone.
+ *
+ * @param fp         the output
+ * @param literal    the literal as the source spells it, quoted or not
+ * @param directive  ".asciz" or ".ascii"
+ */
+static void emit_literal_directive(FILE *fp, const char *literal, const char *directive) {
     const char *p = literal;
     int quoted = 0;
 
@@ -1370,7 +1379,7 @@ static void emit_asciz_literal(FILE *fp, const char *literal) {
         p++;
     }
 
-    fputs("\t.asciz \"", fp);
+    fprintf(fp, "\t%s \"", directive);
     while (*p != '\0') {
         unsigned char out;
 
@@ -1472,6 +1481,10 @@ static void emit_asciz_literal(FILE *fp, const char *literal) {
         emit_asm_escaped_byte(fp, out);
     }
     fputs("\"\n", fp);
+}
+
+static void emit_asciz_literal(FILE *fp, const char *literal) {
+    emit_literal_directive(fp, literal, ".asciz");
 }
 
 void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_index, const char *literal,
@@ -2603,8 +2616,16 @@ static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_s
                     const cc_ssa_global_init_item_t *it = &g->init_items[j];
                     if (it->init_is_string) {
                         size_t slen = decoded_c_string_len(it->init_str);
-                        emit_asciz_literal(fp, it->init_str);
-                        emitted_bytes += (long)(slen + 1);
+
+                        if ((long)slen == sz - emitted_bytes) {
+                            /* `u8 m[4] = { "OTAR" }`: the characters fill the array, no room for the null
+                             * (C11 6.7.9p14) -- Linux's carl9170 otus_magic */
+                            emit_literal_directive(fp, it->init_str, ".ascii");
+                            emitted_bytes += (long)slen;
+                        } else {
+                            emit_asciz_literal(fp, it->init_str);
+                            emitted_bytes += (long)(slen + 1);
+                        }
                     } else {
                         emit_integer_data(fp, elem_size, it->init_i);
                         emitted_bytes += elem_size;
