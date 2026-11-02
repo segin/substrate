@@ -286,7 +286,30 @@ struct elf_link_plan {
     struct elf_link_map_entry_rec *map_entries;
     size_t map_count;
     size_t map_cap;
+
+    int merge_sections;                 /* SHF_MERGE sections are merged (elf_link_plan_set_merge_sections) */
+    struct elf_merge_state *merge;      /* for one link: elf_merge.c */
 };
+
+/* elf_merge.c: SHF_MERGE sections merged, as GNU ld merges them */
+/** Whether input section @p src can be merged: SHF_MERGE, whole entries, no relocations of its own. */
+int elf__merge_eligible(const struct elf_section *src);
+/** Take section @p sec of input @p input, going to output section @p out_name, into its merge group. */
+elf_err_t elf__merge_add(elf_link_plan_t *plan, size_t input, size_t sec, const char *out_name);
+/** Lay out every merge group's block, once every section is in. */
+elf_err_t elf__merge_finish(elf_link_plan_t *plan);
+/**
+ * If section @p sec of input @p input is merged: 1, with its group's block (@p data, @p size, @p align),
+ * where to record the block's place (@p base), and whether it was placed already (@p placed), which it is
+ * from then on.  Otherwise 0.
+ */
+int elf__merge_block(elf_link_plan_t *plan, size_t input, size_t sec, const uint8_t **data, size_t *size,
+                     uint64_t *align, uint64_t **base, int *placed);
+/** If section @p sec of input @p input is merged: 1, with *@p out_off where its offset @p in_off went. */
+int elf__merge_offset(const elf_link_plan_t *plan, size_t input, size_t sec, uint64_t in_off,
+                      uint64_t *out_off);
+/** Free what the merge of one link kept. */
+void elf__merge_free(elf_link_plan_t *plan);
 
 elfobj_t *elf__alloc_obj(void);
 void elf__diag_clear(elfobj_t *obj);

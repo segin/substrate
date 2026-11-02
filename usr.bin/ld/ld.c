@@ -361,6 +361,10 @@ static int phase_merge(ld_link_t *l) {
         err = elf_link_plan_add_input(plan, l->inputs.objs[pi],
                                       l->inputs.names[pi] != NULL ? l->inputs.names[pi] : "?");
     }
+    /* strings and constants are shared in a program or shared object, as GNU ld shares them; not under -r */
+    if (err == ELF_OK) {
+        err = elf_link_plan_set_merge_sections(plan, l->out_type != ET_REL);
+    }
     if (err == ELF_OK && ctx->script != NULL && ctx->script->has_sections) {
         err = elf_link_plan_set_section_name_hook(plan, script_output_name, ctx->script);
         /* in each output section, the order of the script's input descriptions */

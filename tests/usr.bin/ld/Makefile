@@ -25,5 +25,6 @@ run:
 	./test_execstack_rwx.sh
 	./test_link_order.sh
 	./test_local_symbols.sh
+	./test_merge_sections.sh
 
 clean:

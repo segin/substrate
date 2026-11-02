@@ -838,6 +838,7 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
         struct elf_section *src = input->obj->sections[j];
         struct elf_section *dst;
         struct elf_section *order_to;   /* the output section dst is ordered by, if it is */
+        uint64_t *merge_base;           /* a merged section's group: where its block is to be recorded */
         elf_link_merge_action_t action = ELF_LINK_MERGE_APPEND;
         elf_err_t err;
         uint8_t *inflated = NULL;       /* src's contents, if it is compressed */
@@ -969,6 +970,31 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
             }
         }
 
+        /* a merged section: the first of its group places the group's block, the rest are in it */
+        merge_base = NULL;
+        if (action == ELF_LINK_MERGE_APPEND) {
+            const uint8_t *blk;
+            size_t blk_size;
+            uint64_t blk_align;
+            int blk_placed;
+
+            if (elf__merge_block(plan, (size_t)(input - plan->inputs), j, &blk, &blk_size, &blk_align,
+                                 &merge_base, &blk_placed)) {
+                if (blk_placed) {
+                    sec_bases[j] = *merge_base;
+                    sec_included[j] = 1;
+                    free(inflated);
+                    return ELF_OK;
+                }
+                src_data = blk;
+                src_size = blk_size;
+                src_align = blk_align;
+                if (blk_align > dst->addralign) {
+                    dst->addralign = blk_align;
+                }
+            }
+        }
+
         if (action == ELF_LINK_MERGE_REPLACE) {
             err = replace_section_data(dst, src);
             if (err != ELF_OK) {
@@ -1012,6 +1038,9 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                 if (ext != NULL) {
                     ext->end = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
                 }
+            }
+            if (merge_base != NULL) {
+                *merge_base = sec_bases[j];
             }
         }
         free(inflated);
@@ -1119,7 +1148,8 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
                 if (dst_sec == NULL) {
                     continue;
                 }
-                if (!elf__u64_add(sym->value, sec_bases[src_sec_index], &value)) {
+                if (!elf__merge_offset(plan, (size_t)(input - plan->inputs), src_sec_index, sym->value, &value) &&
+                    !elf__u64_add(sym->value, sec_bases[src_sec_index], &value)) {
                     return ELF_ERR_BOUNDS;
                 }
                 shndx = (uint32_t)(dst_sec->index + 1);
@@ -1218,7 +1248,6 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                                    struct elf_symbol **sym_map,
                                    size_t input_index) {
     size_t i;
-    (void)plan;
 
     for (i = 0; i < input->obj->reloc_count; ++i) {
         struct elf_reloc *r = input->obj->relocs[i];
@@ -1226,6 +1255,8 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
         struct elf_symbol *dst_sym;
         uint64_t off;
         size_t src_sec_index;
+        int64_t addend;
+        int sec_rel;            /* against a merged section itself, the addend where in it */
 
         if (r == NULL || r->section == NULL || r->section->name == NULL) {
             continue;
@@ -1245,7 +1276,23 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
         if (r->symbol == NULL) {
             continue;
         }
-        if (sym_map != NULL && r->symbol->index < input->obj->symbol_count) {
+        addend = r->addend;
+        /*
+         * Against a merged section itself (its section symbol, or none), the
+         * addend says where in it, as bfd takes it: the relocation is made
+         * against where that went, with nothing added.
+         */
+        sec_rel = 0;
+        if (r->symbol->type == STT_SECTION || r->symbol->name == NULL || r->symbol->name[0] == '\0') {
+            size_t ss = 0;
+            uint64_t moved;
+
+            if (resolve_src_sec_index(input->obj, r->symbol->shndx, &ss) &&
+                elf__merge_offset(plan, input_index, ss, r->symbol->value + (uint64_t)r->addend, &moved)) {
+                sec_rel = 1;
+            }
+        }
+        if (!sec_rel && sym_map != NULL && r->symbol->index < input->obj->symbol_count) {
             dst_sym = sym_map[r->symbol->index];
             if (dst_sym != NULL) {
                 if (elf_add_relocation(dst_sec, off, dst_sym, r->type, r->addend) != ELF_OK) {
@@ -1272,7 +1319,13 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 if (dst_sym_sec == NULL) {
                     continue;
                 }
-                if (!elf__u64_add(r->symbol->value, sec_bases[sym_src_sec], &local_value)) {
+                if (sec_rel) {
+                    (void)elf__merge_offset(plan, input_index, sym_src_sec,
+                                            r->symbol->value + (uint64_t)r->addend, &local_value);
+                    addend = 0;
+                    local_type = STT_NOTYPE;
+                } else if (!elf__merge_offset(plan, input_index, sym_src_sec, r->symbol->value, &local_value) &&
+                           !elf__u64_add(r->symbol->value, sec_bases[sym_src_sec], &local_value)) {
                     return ELF_ERR_BOUNDS;
                 }
                 local_shndx = (uint32_t)(dst_sym_sec->index + 1);
@@ -1318,11 +1371,16 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 if (dst_sym_sec == NULL) {
                     continue;
                 }
-                if (!elf__u64_add(r->symbol->value, sec_bases[sym_src_sec], &anon_value)) {
+                anon_type = STT_SECTION;
+                if (sec_rel) {
+                    (void)elf__merge_offset(plan, input_index, sym_src_sec,
+                                            r->symbol->value + (uint64_t)r->addend, &anon_value);
+                    addend = 0;
+                    anon_type = STT_NOTYPE;
+                } else if (!elf__u64_add(r->symbol->value, sec_bases[sym_src_sec], &anon_value)) {
                     return ELF_ERR_BOUNDS;
                 }
                 anon_shndx = (uint32_t)(dst_sym_sec->index + 1);
-                anon_type = STT_SECTION;
             }
 
             if (snprintf(anon_name, sizeof(anon_name), "__elfobj_reloc_%zu_%zu", input_index, i) < 0) {
@@ -1342,8 +1400,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
             }
         }
         {
-            elf_err_t aerr = elf_add_relocation(dst_sec, off, dst_sym, r->type,
-                                                r->addend);
+            elf_err_t aerr = elf_add_relocation(dst_sec, off, dst_sym, r->type, addend);
 
             if (aerr != ELF_OK) {
                 /* Say which one, and keep the reason: this used to be
@@ -1388,6 +1445,7 @@ void elf_link_plan_destroy(elf_link_plan_t *plan) {
         free(plan->extents[i].output_name);
     }
     free(plan->extents);
+    elf__merge_free(plan);
     free(plan);
 }
 
@@ -1580,6 +1638,54 @@ elf_err_t elf_link_plan_set_section_name_hook(elf_link_plan_t *plan,
     return ELF_OK;
 }
 
+elf_err_t elf_link_plan_set_merge_sections(elf_link_plan_t *plan, int enable) {
+    if (plan == NULL) {
+        return ELF_ERR_STATE;
+    }
+    plan->merge_sections = enable != 0;
+    return ELF_OK;
+}
+
+/*
+ * Before anything is merged: every input section that can be merged into
+ * its group, and the groups laid out, so that the first of a group to be
+ * placed places the whole of it.
+ */
+static elf_err_t prepare_merge(elf_link_plan_t *plan) {
+    size_t i, j;
+
+    elf__merge_free(plan);
+    if (!plan->merge_sections) {
+        return ELF_OK;
+    }
+    for (i = 0; i < plan->input_count; ++i) {
+        const struct elf_link_input *in = &plan->inputs[i];
+
+        for (j = 0; in->obj != NULL && j < in->obj->section_count; ++j) {
+            const struct elf_section *src = in->obj->sections[j];
+            const char *out_name;
+            elf_err_t err;
+
+            if (src == NULL || src->name == NULL || is_internal_section_name(src->name) ||
+                !elf__merge_eligible(src)) {
+                continue;
+            }
+            if (plan->gc_hook != NULL && !plan->gc_hook(src, plan->gc_user)) {
+                continue;
+            }
+            out_name = output_section_name(plan, in, src);
+            if (out_name == NULL) {
+                continue;
+            }
+            err = elf__merge_add(plan, i, j, out_name);
+            if (err != ELF_OK) {
+                return err;
+            }
+        }
+    }
+    return elf__merge_finish(plan);
+}
+
 elf_err_t elf_link_plan_set_section_merge_hook(elf_link_plan_t *plan,
                                                elf_link_section_merge_hook_t hook,
                                                void *user) {
@@ -1674,10 +1780,20 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
 
     free_map_entries(plan);
     out->flags = plan->inputs[0].obj->flags;
+    {
+        elf_err_t err = prepare_merge(plan);
+
+        if (err != ELF_OK) {
+            elf__merge_free(plan);
+            elf_close(out);
+            return err;
+        }
+    }
 
     if (plan->rank_hook != NULL) {
         elf_err_t err = link_ranked(plan, out, &comdat_seen);
 
+        elf__merge_free(plan);
         comdat_set_free(&comdat_seen);
         if (err != ELF_OK && err != ELF_ERR_OOM && err != ELF_ERR_STATE && err != ELF_ERR_UNSUPPORTED) {
             /* the unfinished object goes back, with the account of what went wrong */
@@ -1700,16 +1816,19 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
         elf_err_t err;
 
         if (in->obj == NULL) {
+            elf__merge_free(plan);
             elf_close(out);
             return ELF_ERR_STATE;
         }
         if (in->obj->machine != out->machine || in->obj->cls != out->cls ||
             in->obj->endian != out->endian) {
+            elf__merge_free(plan);
             elf_close(out);
             return ELF_ERR_UNSUPPORTED;
         }
         err = merge_arch_metadata(out, in->obj);
         if (err != ELF_OK) {
+            elf__merge_free(plan);
             elf_close(out);
             return err;
         }
@@ -1722,6 +1841,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
             free(sec_bases);
             free(sec_included);
             free(sym_map);
+            elf__merge_free(plan);
             elf_close(out);
             return ELF_ERR_OOM;
         }
@@ -1741,6 +1861,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
              * it: it is where the account of what went wrong is kept
              * (elf_last_diagnostics), and closing it here left the caller
              * the bare error code to print. */
+            elf__merge_free(plan);
             comdat_set_free(&comdat_seen);
             (void)elf__append_diag(out, in->name != NULL ? in->name : "");
             *output = out;
@@ -1750,6 +1871,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
                                              in->name != NULL ? in->name : "");
     }
 
+    elf__merge_free(plan);
     comdat_set_free(&comdat_seen);
     *output = out;
     return ELF_OK;

@@ -830,6 +830,23 @@ was.
 A file the linker makes has the mode a new file has, less the umask, and
 is executable if it is a program.
 .Pp
+In a program or shared object the sections that are
+.Dv SHF_MERGE
+.Po
+.Pa .rodata.str1.* ,
+.Pa .rodata.cst* ,
+.Pa .comment ,
+.Pa .debug_str
+.Pc
+are merged as GNU ld merges them: those of one output section alike in
+entry size, strings or not, and alignment are laid out as one block that
+holds each string or constant once, and a string that ends another is
+found at that one's end.
+A section with relocations of its own is not merged.
+Under
+.Fl r
+nothing is merged.
+.Pp
 The symbol table of a program or shared object has no section symbols,
 as GNU ld's has none, unless
 .Fl -emit-relocs

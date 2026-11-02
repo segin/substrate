@@ -1481,6 +1481,19 @@ elf_err_t elf_link_plan_set_section_merge_hook(elf_link_plan_t *plan,
 elf_err_t elf_link_plan_set_section_name_hook(elf_link_plan_t *plan,
                                               elf_link_section_name_hook_t hook,
                                               void *user);
+/**
+ * @brief Whether the link merges SHF_MERGE sections, as GNU ld does in a program or shared object.
+ *
+ * Of the input sections going to one output section, those alike in entry size, strings or not, and
+ * alignment are laid out as one block holding each entry once, a string that ends another being found at
+ * its end; symbols in them and the relocations against them follow their entries.  A section with
+ * relocations of its own is not merged.  Off by default, as for ld -r.
+ *
+ * @param plan   the link
+ * @param enable nonzero to merge
+ * @return ELF_OK, or ELF_ERR_STATE for no plan
+ */
+elf_err_t elf_link_plan_set_merge_sections(elf_link_plan_t *plan, int enable);
 elf_err_t elf_link_plan_set_section_rank_hooks(elf_link_plan_t *plan, elf_link_section_rank_hook_t rank,
                                                elf_link_section_gap_hook_t gap, void *user);
 /* After elf_link_plan_link() with rank hooks: where the sections of a rank
