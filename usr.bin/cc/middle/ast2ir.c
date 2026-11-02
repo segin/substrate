@@ -13189,6 +13189,15 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         *out_f = 0.0;
         *out_is_float = 0;
         return eval_global_lvalue_address(tu, e, out_sym);
+    case CC_EXPR_DEREF:
+        /* so is an array element that is an array, a row: Linux's f71805f has `.attrs = attributes_optin[1]` */
+        if (e->ctype == NULL || e->ctype->unqual->kind != CC_CT_ARRAY) {
+            return -1;
+        }
+        *out_i = 0;
+        *out_f = 0.0;
+        *out_is_float = 0;
+        return eval_global_lvalue_address(tu, e, out_sym);
     case CC_EXPR_CAST:
         return eval_global_init_expr(tu, e->lhs, out_i, out_f, out_is_float, out_sym);
     case CC_EXPR_CALL:
