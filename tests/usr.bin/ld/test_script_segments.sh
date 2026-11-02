@@ -57,11 +57,13 @@ _start:	jmp _start
 EOF
 ${AS_GNU:-as} --32 -mx86-used-note=no -o a.o a.s || exit 1
 
-# segs FILE: each PT_LOAD as its flags, where it begins and ends, and its load address less its address
+# segs FILE: each PT_LOAD as its flags, where it begins and ends, its load address less its address, and
+# where in the file it is (a segment after another need only keep its place in the page there: the file
+# did not follow a gap of less than 1 MiB between segments, and was that much larger than GNU ld's)
 segs() {
     readelf -lW "$1" | awk '$1 == "LOAD" {
         v = strtonum($3); p = strtonum($4); m = strtonum($6)
-        printf "%s %#x-%#x lma-vma=%#x\n", $7 $8, v, v + m, (p - v) % 4294967296 }'
+        printf "%s %#x-%#x lma-vma=%#x off=%s\n", $7 $8, v, v + m, (p - v) % 4294967296, $2 }'
 }
 
 # same NAME SCRIPT: both linkers link a.o with SCRIPT, to the same segments

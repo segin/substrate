@@ -133,6 +133,33 @@ static uint64_t place_made_up_section(const out_sec_t *secs, size_t sec_count, s
     return high + ((off - high) & (page - 1));
 }
 
+/**
+ * @brief Whether output sections @p a and @p b (numbers in the output, the object's index + 1) are in one
+ * PT_LOAD of @p obj: -1 if the object has no PT_LOAD to say, else 1 or 0.
+ */
+static int in_one_load(const elfobj_t *obj, size_t a, size_t b) {
+    size_t s, m;
+    int any = 0;
+
+    for (s = 0; s < obj->segment_count; ++s) {
+        const struct elf_segment *seg = obj->segments[s];
+        int has_a = 0, has_b = 0;
+
+        if (seg == NULL || seg->type != PT_LOAD) {
+            continue;
+        }
+        any = 1;
+        for (m = 0; m < seg->section_count; ++m) {
+            has_a |= seg->section_indices[m] + 1 == a;
+            has_b |= seg->section_indices[m] + 1 == b;
+        }
+        if (has_a && has_b) {
+            return 1;
+        }
+    }
+    return any ? 0 : -1;
+}
+
 static int u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
     return elf__u64_add(a, b, out);
 }
@@ -817,6 +844,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     uint64_t prev_alloc_addr = 0;   /* where the last loaded section ended, */
     uint64_t prev_alloc_off = 0;    /* in memory and in the file */
     int have_prev_alloc = 0;
+    size_t prev_alloc_index = 0;    /* and which it was */
     uint64_t phoff = 0;
     uint8_t *img = NULL;
     size_t ehsize;
@@ -1448,18 +1476,23 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
              * as one piece.  Its alignment is the address's, and aligning
              * the offset as well put a section aligned to more than a
              * page somewhere its segment did not map.  Only where the
-             * address jumps a long way, which is a new segment, does the
-             * file not follow, and then the offset need only fall at the
-             * same place in its page as the address does.
+             * section begins another segment, does the file not follow,
+             * and then the offset need only fall at the same place in its
+             * page as the address does, as GNU ld places it.  (Where the
+             * object has no segments to say, a jump of a long way is
+             * taken for a new one.)
              */
+            int same = have_prev_alloc ? in_one_load(obj, prev_alloc_index, i) : 0;
+
             if (have_prev_alloc && secs[i].addr >= prev_alloc_addr &&
-                secs[i].addr - prev_alloc_addr < 0x100000u &&
+                (same == 1 || (same < 0 && secs[i].addr - prev_alloc_addr < 0x100000u)) &&
                 prev_alloc_off + (secs[i].addr - prev_alloc_addr) >= off) {
                 off = prev_alloc_off + (secs[i].addr - prev_alloc_addr);
             } else {
                 off = align_with_page_mod(off, 1, secs[i].addr, out_page_size(obj));
             }
             have_prev_alloc = 1;
+            prev_alloc_index = i;
             prev_alloc_addr = secs[i].addr + secs[i].size;
             prev_alloc_off = off + secs[i].size;
         } else {
