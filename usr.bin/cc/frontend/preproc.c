@@ -1089,6 +1089,18 @@ static int has_feature_name(const char *name, const pp_state_t *st) {
     return 0;
 }
 
+/**
+ * Whether `__has_extension(name)` is 1: a feature, or in GNU modes a GNU
+ * attribute.
+ *
+ * @param name  the operand
+ * @param st    the preprocessor state
+ * @return      1 if so, else 0
+ */
+static int has_extension_name(const char *name, const pp_state_t *st) {
+    return has_feature_name(name, st) || (st->std_is_gnu && has_gnu_attribute_name(name));
+}
+
 static int is_reserved_identifier_name(const char *name, const pp_state_t *st) {
     if (name == NULL || name[0] == '\0') {
         return 0;
@@ -5094,10 +5106,13 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                 continue;
             }
             if (strcmp(name, "__has_attribute") == 0 || strcmp(name, "__has_c_attribute") == 0 ||
-                strcmp(name, "__has_builtin") == 0) {
+                strcmp(name, "__has_builtin") == 0 || strcmp(name, "__has_feature") == 0 ||
+                strcmp(name, "__has_extension") == 0) {
                 /*
                  * outside #if too, gcc's operators have their values: Linux's trace.c tests
-                 * `IS_ENABLED(...) && __has_attribute(btf_type_tag)` in a statement
+                 * `IS_ENABLED(...) && __has_attribute(btf_type_tag)` in a statement; and #if
+                 * expands its macros after its own operators, so one a macro makes is this
+                 * one's (glibc's __glibc_has_extension)
                  */
                 size_t k = j;
                 size_t a;
@@ -5115,7 +5130,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     }
                     a = k;
                     while (is_ident_char((unsigned char)src[k]) ||
-                           (name[6] != 'b' && (src[k] == ':' || src[k] == ' ' || src[k] == '\t'))) {
+                           ((name[6] == 'a' || name[6] == 'c') && (src[k] == ':' || src[k] == ' ' || src[k] == '\t'))) {
                         k++;
                     }
                     operand = k > a ? cc_strndup(src + a, k - a) : NULL;
@@ -5123,8 +5138,10 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         k++;
                     }
                     if (operand != NULL && src[k] == ')') {
-                        has_v = name[6] == 'b' ? has_builtin_name(operand)
-                                               : attribute_has_value(operand, name[6] == 'c');
+                        has_v = name[6] == 'b'   ? has_builtin_name(operand)
+                                : name[6] == 'f' ? has_feature_name(operand, st)
+                                : name[6] == 'e' ? has_extension_name(operand, st)
+                                                 : attribute_has_value(operand, name[6] == 'c');
                         free(operand);
                         snprintf(num, sizeof(num), "%ld", has_v);
                         if (sb_append(&out, num) != 0) {
@@ -6213,7 +6230,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         sb_free(&out);
                         return -1;
                     }
-                    has_v = has_feature_name(name, st) || (st->std_is_gnu && has_gnu_attribute_name(name));
+                    has_v = has_extension_name(name, st);
                     free(name);
                     if (sb_append(&out, has_v ? "1" : "0") != 0) {
                         sb_free(&out);
