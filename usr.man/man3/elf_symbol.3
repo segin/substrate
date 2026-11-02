@@ -278,7 +278,20 @@ section
 and read back the same way.
 Its sections can be neither removed nor reordered.
 .It Fn elf_symbol_is_duplicate_global "obj" "name" "bind"
-Checks if adding the given symbol would create a global/weak conflict.
+Checks if adding the given symbol would create a global/weak conflict:
+a symbol of
+.Fa bind
+.Dv STB_GLOBAL
+or
+.Dv STB_WEAK
+conflicts with a global or weak symbol of the same name already in
+.Fa obj .
+A local symbol of the name is no conflict, nor is a local symbol being added;
+a link's output holds an input's local
+.Ql static int f
+beside the global
+.Va f
+another input defines.
 .It Fn elf_symbols_sort_deterministic "obj" "first_global_out"
 Applies deterministic symbol ordering with all local symbols first.
 .It Fn elf_symbol_lookup_sysv "obj" "name"

@@ -1285,7 +1285,7 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
             continue;
         }
 
-        existing = elf_find_symbol(out, sym->name);
+        existing = elf__find_global_symbol(out, sym->name);
         if (existing == NULL) {
             n = elf_add_symbol(out, sym->name, value, sym->size, sym->bind, sym->type);
             if (n == NULL) {
@@ -1556,7 +1556,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
             }
             dst_sym->shndx = anon_shndx;
         } else {
-            dst_sym = elf_find_symbol(out, r->symbol->name);
+            dst_sym = elf__find_global_symbol(out, r->symbol->name);
             if (dst_sym == NULL) {
                 elf__set_err(out, ELF_ERR_RELOC, "unresolved relocation symbol during link");
                 (void)elf__append_diag(out, r->symbol->name);

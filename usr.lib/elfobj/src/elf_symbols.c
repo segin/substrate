@@ -134,8 +134,10 @@ int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_
         uint32_t hash = name_hash_of(name);
         const struct elf_symbol *s = obj->name_buckets[hash & (obj->name_nbuckets - 1)];
 
+        /* (a local of the name is no conflict: an input's `static int f` and another's global f are both in a
+           link's output, as GNU ld has them) */
         while ((s = name_index_next((struct elf_symbol *)s, name, hash)) != NULL) {
-            if (s->bind == STB_GLOBAL || s->bind == STB_WEAK || bind == STB_GLOBAL) {
+            if (s->bind != STB_LOCAL) {
                 return 1;
             }
             s = s->name_next;
@@ -150,7 +152,7 @@ int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_
         if (strcmp(s->name, name) != 0) {
             continue;
         }
-        if (s->bind == STB_GLOBAL || s->bind == STB_WEAK || bind == STB_GLOBAL) {
+        if (s->bind != STB_LOCAL) {
             return 1;
         }
     }
@@ -229,6 +231,36 @@ elf_symbol_t *elf_find_symbol(elfobj_t *obj, const char *name) {
     for (i = 0; i < obj->symbol_count; ++i) {
         struct elf_symbol *sym = obj->symbols[i];
         if (sym != NULL && sym->name != NULL && strcmp(sym->name, name) == 0) {
+            return sym;
+        }
+    }
+    return NULL;
+}
+
+struct elf_symbol *elf__find_global_symbol(elfobj_t *obj, const char *name) {
+    size_t i;
+
+    if (obj == NULL || name == NULL) {
+        return NULL;
+    }
+    (void)elf__ensure_symbols_relocs(obj);
+    if (name_index_ready(obj)) {
+        uint32_t hash = name_hash_of(name);
+        struct elf_symbol *sym = obj->name_buckets[hash & (obj->name_nbuckets - 1)];
+        struct elf_symbol *first = NULL;
+
+        while ((sym = name_index_next(sym, name, hash)) != NULL) {
+            if (sym->bind != STB_LOCAL && (first == NULL || sym->index < first->index)) {
+                first = sym;
+            }
+            sym = sym->name_next;
+        }
+        return first;
+    }
+    for (i = 0; i < obj->symbol_count; ++i) {
+        struct elf_symbol *sym = obj->symbols[i];
+
+        if (sym != NULL && sym->bind != STB_LOCAL && sym->name != NULL && strcmp(sym->name, name) == 0) {
             return sym;
         }
     }

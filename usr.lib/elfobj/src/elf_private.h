@@ -304,6 +304,14 @@ struct elf_link_plan {
  */
 int elf__first_symbol_is_null(const elfobj_t *obj);
 
+/**
+ * The first global or weak symbol of @p obj named @p name, passing over local ones: a link's output has a local
+ * of each input's own, and an input's `static int f` is not the global f another input defines or refers to.
+ *
+ * @return the symbol, or NULL if there is none
+ */
+struct elf_symbol *elf__find_global_symbol(elfobj_t *obj, const char *name);
+
 /* elf_merge.c: SHF_MERGE sections merged, as GNU ld merges them */
 /** Whether input section @p src can be merged: SHF_MERGE, whole entries, no relocations of its own. */
 int elf__merge_eligible(const struct elf_section *src);

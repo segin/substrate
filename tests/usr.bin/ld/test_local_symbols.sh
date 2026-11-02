@@ -122,7 +122,8 @@ cat > m.s <<'EOF'
 	.data
 	.globl mptr
 mptr:	.quad .rodata.str1.1 + 6
-	.quad ldata
+	.quad mlocal
+mlocal:	.long 3
 EOF
 ${AS_GNU:-as} --64 -o m.o m.s || exit 1
 for r in "" -pie; do
