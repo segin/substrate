@@ -89,6 +89,23 @@ check() {
     if [ "$(code_alone gnu.out)" = alone ] && [ "$(code_alone ours.out)" != alone ]; then
         echo "FAIL: ld -m $m $*: code shares a page with what is not code"; fail=1
     fi
+    if [ "$(rw_shape gnu.out)" != "$(rw_shape ours.out)" ]; then
+        echo "FAIL: ld -m $m $*: the writable segment is [$(rw_shape ours.out)], GNU ld's [$(rw_shape gnu.out)]"
+        fail=1
+    fi
+}
+# How the writable segment of OBJ sits: whether it is at the same place in
+# the page in the file as in memory, whether it shares the file's page
+# with the segment before it, whether it begins a page of its own in
+# memory, and whether the RELRO part ends on a page.
+rw_shape() {
+    readelf -lW "$1" | awk '
+        $1 == "LOAD" { o = strtonum($2); v = strtonum($3); f = strtonum($5); m = strtonum($6)
+                       if ($7 $8 ~ /W/) { ro = o; rv = v; seen = 1 } else if (!seen) { pe = o + f; pv = v + m } }
+        $1 == "GNU_RELRO" { re = strtonum($3) + strtonum($6); hasrelro = 1 }
+        END { printf "congruent=%d shares-file-page=%d own-memory-page=%d relro-ends-on-page=%s\n",
+                  (ro % 4096) == (rv % 4096), int((pe - 1) / 4096) == int(ro / 4096),
+                  int((pv - 1) / 4096) != int(rv / 4096), hasrelro ? ((re % 4096) == 0) : "none" }'
 }
 
 for z in "" "-z separate-code" "-z noseparate-code"; do

@@ -843,9 +843,11 @@ int alloc_section_class(uint64_t flags);
 /**
  * Give each section of the output its address and file offset, from @p base_vaddr, past the headers.  A
  * section of another kind (code, read-only, writable) than the one before begins a page, except that with
- * @p separate_code 0 (-z noseparate-code) code and read-only data are one kind.
+ * @p separate_code 0 (-z noseparate-code) code and read-only data are one kind; and that the writable
+ * segment shares the file's last page and begins a page of its own in memory at the same place in it,
+ * moved on (with @p relro, -z relro) so that its RELRO part ends on a page, as GNU ld lays it out.
  */
-int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_code);
+int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_code, int relro);
 int tls_extent(const elfobj_t *obj, uint64_t *start, uint64_t *memsz, uint64_t *filesz, uint64_t *align);
 int64_t tls_tpoff(const elfobj_t *obj, uint64_t addr);
 int reorder_sections_default_policy(elfobj_t *obj);

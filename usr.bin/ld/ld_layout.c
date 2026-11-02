@@ -84,8 +84,45 @@ int64_t tls_tpoff(const elfobj_t *obj, uint64_t addr) {
     return (int64_t)(addr - start) - (int64_t)((memsz + align - 1) & ~(align - 1));
 }
 
-int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_code) {
+/**
+ * @brief Where the writable segment begins in the file, from @p off: as far on in the page as makes the
+ * RELRO run of sections beginning at section @p first end on a page, as GNU ld's DATA_SEGMENT_RELRO_END
+ * moves it, by a multiple of the strictest alignment among them so that none moves within it.
+ *
+ * @return the offset
+ */
+static uint64_t relro_start(elfobj_t *obj, size_t first, uint64_t off, uint64_t page) {
+    uint64_t end = off, max_align = 1, pad;
+    size_t j;
+    int any = 0;
+
+    for (j = first; j < elf_section_count(obj); ++j) {
+        const elf_section_t *s = elf_section_get(obj, j);
+        uint64_t f = s != NULL ? elf_section_flags(s) : 0;
+        uint64_t a;
+
+        if (s == NULL || alloc_section_class(f) != 2 || elf_section_type(s) == SHT_NOBITS ||
+            !is_relro_candidate_name(elf_section_name(s))) {
+            break;
+        }
+        a = elf_section_align(s) != 0 ? elf_section_align(s) : 1;
+        if (a > max_align) {
+            max_align = a;
+        }
+        end = ((end + a - 1) & ~(a - 1)) + elf_section_size(s);
+        any = 1;
+    }
+    if (!any || max_align >= page) {
+        return off;
+    }
+    pad = (page - (end & (page - 1))) & (page - 1);
+    pad = (pad / max_align) * max_align;     /* (what no section in the run moves for) */
+    return off + pad;
+}
+
+int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_code, int relro) {
     uint64_t off;
+    uint64_t bias = 0;      /* an address less base_vaddr less its offset: whole pages, from the writable segment */
     uint64_t tls_align = 1;
     uint64_t mem_end;
     uint64_t ehsize;
@@ -184,7 +221,26 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_co
             if (!separate_code && curr_alloc_class == 1) {
                 curr_alloc_class = 0;
             }
-            if (last_alloc_class != -1 && curr_alloc_class != last_alloc_class) {
+            if (last_alloc_class != -1 && curr_alloc_class != last_alloc_class && curr_alloc_class == 2 &&
+                align <= page_align) {
+                /*
+                 * The writable segment shares the file's last page of what is before it, and begins a
+                 * page of its own in memory at the same place in the page (GNU ld's
+                 * DATA_SEGMENT_ALIGN), moved on so that what is read-only after relocation ends on a page
+                 * (DATA_SEGMENT_RELRO_END).
+                 */
+                uint64_t start, a = align;
+
+                if (relro) {
+                    off = relro_start(obj, i, off, page_align);
+                }
+                if (!align_up_u64_checked(off, a, &start) || !align_up_u64_checked(mem_end, page_align, &mem_end)) {
+                    return -1;
+                }
+                bias = mem_end + (start & (page_align - 1)) - base_vaddr - start;
+                mem_end += start & (page_align - 1);
+                last_rw_relro = -1;
+            } else if (last_alloc_class != -1 && curr_alloc_class != last_alloc_class) {
                 if (!align_up_u64_checked(off, page_align, &off) ||
                     !align_up_u64_checked(mem_end, page_align, &mem_end)) {
                     return -1;
@@ -212,10 +268,12 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_co
             if ((flags & SHF_ALLOC) != 0) {
                 uint64_t a;
 
-                if (!add_u64_checked(base_vaddr, off, &a) || !align_up_u64_checked(a, align, &a)) {
+                /* (the address, bias and all, which wraps as it may: a section aligned to more than a
+                 * page is so in memory) */
+                if (!add_u64_checked(base_vaddr, off, &a) || !align_up_u64_checked(a + bias, align, &a)) {
                     return -1;
                 }
-                off = a - base_vaddr;
+                off = a - base_vaddr - bias;
             } else if (!align_up_u64_checked(off, align, &off)) {
                 return -1;
             }
@@ -234,6 +292,7 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_co
                 if (!add_u64_checked(base_vaddr, file_off, &addr)) {
                     return -1;
                 }
+                addr += bias;   /* (whole pages, which wrap as they may) */
                 if ((addr & 0xfffu) != (file_off & 0xfffu)) {
                     return -1;
                 }

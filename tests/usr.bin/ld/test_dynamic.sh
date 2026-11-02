@@ -132,7 +132,10 @@ start=$(readelf -lW lib4.so | awk '$1 == "GNU_RELRO" { print $3 }')
 size=$(readelf -lW lib4.so | awk '$1 == "GNU_RELRO" { print $6 }')
 data=0x$(readelf -SW lib4.so | sed -n 's/.* \.data  *PROGBITS  *\([0-9a-f]*\) .*/\1/p')
 ro=0x$(readelf -SW lib4.so | sed -n 's/.* \.data\.rel\.ro[^ ]*  *PROGBITS  *\([0-9a-f]*\) .*/\1/p' | head -1)
-is  "PT_GNU_RELRO begins and ends on a page" "$(( start % 4096 )) $(( size % 4096 )) $(( size > 0 ))" "0 0 1"
+# (it ends on a page, and begins where that puts it: in GNU ld's layout the
+# writable segment shares the file's last page, and its RELRO part is moved
+# on in the page so as to end on one)
+is  "PT_GNU_RELRO ends on a page" "$(( (start + size) % 4096 )) $(( size > 0 ))" "0 1"
 is  ".data.rel.ro is inside it"       "$(( ro >= start && ro < start + size ))" 1
 is  ".data is after it"               "$(( data >= start + size ))" 1
 # What a shared object exports is only its offer: the program's definition

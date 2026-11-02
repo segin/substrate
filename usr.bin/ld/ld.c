@@ -529,7 +529,7 @@ static uint64_t image_base(const ld_link_t *l) {
 }
 
 static int phase_assign_addresses(ld_link_t *l) {
-    return assign_section_addresses(l->out, image_base(l), l->ctx->opt.z_separate_code);
+    return assign_section_addresses(l->out, image_base(l), l->ctx->opt.z_separate_code, l->ctx->opt.z_relro);
 }
 
 static int phase_linker_symbols(ld_link_t *l) {
