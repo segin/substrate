@@ -575,6 +575,24 @@ static int asm_clobber_register(const char *name) {
 }
 
 /**
+ * Whether asm operands @p a and @p b are the same expression, so one
+ * value: the same variable, or what the same pointer variable points at
+ * (`r` and `r`, `*p` and `*p`).
+ */
+static int asm_same_operand(const cc_expr_t *a, const cc_expr_t *b) {
+    if (a == NULL || b == NULL || a->kind != b->kind) {
+        return 0;
+    }
+    if (a->kind == CC_EXPR_IDENT) {
+        return a->ident != NULL && b->ident != NULL && strcmp(a->ident, b->ident) == 0;
+    }
+    if (a->kind == CC_EXPR_DEREF) {
+        return asm_same_operand(a->lhs, b->lhs) && a->lhs != NULL && a->lhs->kind == CC_EXPR_IDENT;
+    }
+    return 0;
+}
+
+/**
  * Reject the asm statements gcc rejects for their constraints, with its
  * words.  An operand the x87's registers alone may hold (`t`, `u`, `f`)
  * that is not floating point is "inconsistent operand constraints in an
@@ -629,8 +647,16 @@ static int asm_check_operand_constraints(const cc_stmt_t *s, cc_diag_t *diag) {
         for (j = i + 1; j < n; ++j) {
             int out_j = j < s->asm_output_count;
             const char *cj = out_j ? s->asm_outputs[j].constraint : s->asm_inputs[j - s->asm_output_count].constraint;
-            /* an output and an input share the register unless the output is read too or written early */
-            int shared = out_i != out_j && strchr(ci, '+') == NULL && strchr(ci, '&') == NULL;
+            const cc_expr_t *ei = out_i ? s->asm_outputs[i].expr : s->asm_inputs[i - s->asm_output_count].expr;
+            const cc_expr_t *ej = out_j ? s->asm_outputs[j].expr : s->asm_inputs[j - s->asm_output_count].expr;
+            /*
+             * An output and an input share the register unless the output is read too or written early; and,
+             * optimizing, gcc lets two that are one value -- the same expression -- share it too, but for an
+             * early-clobber output and for two outputs (it refuses them at -O0 always)
+             */
+            int shared = (out_i != out_j && strchr(ci, '+') == NULL && strchr(ci, '&') == NULL) ||
+                         (cc_options_current()->opt_level > 0 && !out_j && strchr(ci, '&') == NULL &&
+                          asm_same_operand(ei, ej));
 
             if (asm_constraint_only_register(cj) == reg && !shared) {
                 sema_diag(diag, impossible);

@@ -81,6 +81,11 @@ or
 .Li &
 output \(em or an operand in a register the clobbers name, is
 .Dq 'asm' operand has impossible constraints or there are not enough registers .
+Optimizing, as with gcc from
+.Fl O1 ,
+two that are the same expression
+.Pq Li "\(dq+a\(dq(r) : \(dqa\(dq(r)"
+share the register, but for an early-clobber output and two outputs.
 .Pp
 .Li #pragma pack Ns Pq Ar n ,
 .Li pack() ,
