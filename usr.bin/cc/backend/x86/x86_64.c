@@ -386,14 +386,15 @@ static void emit_x86_64_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, 
         /* a long double stored to a double or float object is rounded to it */
         fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->rhs));
         fprintf(fp, "\t%s (%s)\n", mem_size == 4 ? "fstps" : "fstpl", ist->regs[rp]);
+    } else if (mem_size >= 16) {
+        /* (a long double's ten bytes through the x87, no SSE register: -mno-sse) */
+        fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->rhs));
+        fprintf(fp, "\tfstpt (%s)\n", ist->regs[rp]);
     } else {
         fprintf(fp, "\tmovsd %d(%%rbp), %s\n", slot_off(lay, in->rhs), tmp);
         if (mem_size == 4) {
             fprintf(fp, "\tcvtsd2ss %s, %s\n", tmp, tmp);
             fprintf(fp, "\tmovss %s, (%s)\n", tmp, ist->regs[rp]);
-        } else if (mem_size >= 16) {
-            fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->rhs));
-            fprintf(fp, "\tfstpt (%s)\n", ist->regs[rp]);
         } else {
             fprintf(fp, "\tmovsd %s, (%s)\n", tmp, ist->regs[rp]);
         }
@@ -1172,6 +1173,10 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         {
             int mrc;
 
+            x86_diag_at(f, NULL);
+            if (x86_check_sse_options(f, diag) != 0) {
+                return -1;
+            }
             x86_diag_at(f, NULL);
             if (x86_check_x87_options(f, 0, diag) != 0) {
                 return -1;

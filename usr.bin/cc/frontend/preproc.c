@@ -1556,17 +1556,16 @@ static void tgt_int_max(const cc_target_desc_t *tgt, cc_target_int_t t, int hex,
 
 /**
  * Which floating types are computed with SSE, as gcc decides it: on
- * x86-64 by default, on i386 only under -mfpmath=sse; never under
- * -mfpmath=387, and a type only where the extensions have it -- floats
- * with SSE, doubles with SSE2.
+ * x86-64, on i386 only under -mfpmath=sse; and a type only where the
+ * extensions have it -- floats with SSE, doubles with SSE2.  (gcc's
+ * x86-64 -mfpmath=387 is the x87's; cc's stays SSE's, and so do these.)
  *
  * @param st          the preprocessor
  * @param float_sse   set to whether floats are SSE's (__SSE_MATH__)
  * @param double_sse  set to whether doubles are SSE's (__SSE2_MATH__)
  */
 static void pp_sse_math(const pp_state_t *st, int *float_sse, int *double_sse) {
-    int sse = st->target_fpmath == 2 || st->target_fpmath == 3 ||
-              (st->target_fpmath == 0 && st->target->id == CC_TARGET_X86_64);
+    int sse = st->target_fpmath == 2 || st->target_fpmath == 3 || st->target->id == CC_TARGET_X86_64;
 
     *float_sse = sse && (st->target_isa & CC_ISA_SSE) != 0;
     *double_sse = *float_sse && (st->target_isa & CC_ISA_SSE2) != 0;
@@ -1577,7 +1576,8 @@ static void pp_sse_math(const pp_state_t *st, int *float_sse, int *double_sse) {
  * computed in its own precision -- SSE's, or soft-float's under
  * -mno-80387 -- 2 where all are the x87's long double, and -1 where
  * that depends on the type (floats SSE's and doubles the x87's, or
- * -mfpmath=sse,387).  x86-64 keeps 0.
+ * -mfpmath=sse,387): on x86-64 too, 2 under -mno-sse and -1 under
+ * -mno-sse2.
  *
  * @param st  the preprocessor
  * @return    the macro's value
@@ -1586,14 +1586,14 @@ static const char *pp_flt_eval_method(const pp_state_t *st) {
     int float_sse;
     int double_sse;
 
-    if (st->target->sse_fp || st->target_no_80387) {
+    if (st->target_no_80387) {
         return "0";
     }
     pp_sse_math(st, &float_sse, &double_sse);
     if (!float_sse) {
         return "2";
     }
-    return double_sse && st->target_fpmath != 3 ? "0" : "-1";
+    return double_sse && (st->target_fpmath != 3 || st->target->id == CC_TARGET_X86_64) ? "0" : "-1";
 }
 
 /**

@@ -1946,6 +1946,92 @@ int x86_check_x87_options(const cc_ssa_function_t *f, int legacy, cc_diag_t *dia
     return -1;
 }
 
+/** x86_for_each_use()'s finder of a float or a double among the values used (x86_check_sse_options()). */
+typedef struct {
+    const cc_ssa_function_t *f;
+    long max_size; /**< the widest that counts: 8 for floats and doubles, 4 for floats */
+    long min_size; /**< and the narrowest */
+    int found;
+} sse_use_t;
+
+static void note_sse_use(int v, void *ctx) {
+    sse_use_t *u = (sse_use_t *)ctx;
+    long size;
+
+    if (v < 0 || v >= u->f->value_count || cc_ssa_value_class(u->f, v) != CC_VAL_F64) {
+        return;
+    }
+    size = (long)cc_ssa_value_size(u->f, v);
+    if (size >= u->min_size && size <= u->max_size) {
+        u->found = 1;
+    }
+}
+
+/**
+ * Refuse what x86-64's -mno-sse (and -mno-sse2) leaves cc no way to make in function @p f, rather than make
+ * the SSE code it was told not to.  A float or a double returned -- the function's own result or a call's,
+ * which the psABI puts in %xmm0 -- is gcc's error too, "SSE register return with SSE disabled", at gcc's place
+ * (the function's name, the call).  gcc computes the other floats and doubles on the x87, which cc does not
+ * on x86-64: it refuses them, and under -mno-sse2 alone the doubles.  A long double is the x87's anyway.
+ *
+ * @param f     the function
+ * @param diag  receives the refusal
+ * @return      0, or -1 when refused
+ */
+int x86_check_sse_options(const cc_ssa_function_t *f, cc_diag_t *diag) {
+    const cc_options_t *o = cc_options_current();
+    int no_sse2 = !o->no_sse && !o->i386_sse2;
+    sse_use_t u;
+    char msg[512];
+    size_t j;
+
+    if (o->target != CC_TARGET_X86_64 || (!o->no_sse && !no_sse2)) {
+        return 0;
+    }
+    if (o->no_sse) {
+        x86_diag_at(f, NULL);
+        if (f->ret_type == CC_VAL_F64 && f->ret_abi != CC_CALL_ARG_ABI_LDOUBLE) {
+            set_diag(diag, "SSE register return with SSE disabled");
+            return -1;
+        }
+        for (j = 0; j < f->instr_count; ++j) {
+            const cc_ssa_instr_t *in = &f->instrs[j];
+
+            if ((in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) && in->dst >= 0 && !in->call_ret_x87 &&
+                cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
+                x86_diag_at(f, in);
+                set_diag(diag, "SSE register return with SSE disabled");
+                return -1;
+            }
+        }
+    }
+    u.f = f;
+    u.max_size = 8;
+    u.min_size = o->no_sse ? 1 : 5;
+    u.found = 0;
+    for (j = 0; j < f->param_count && !u.found; ++j) {
+        if (f->param_types != NULL && f->param_types[j] == CC_VAL_F64 &&
+            (f->param_abi == NULL || f->param_abi[j] != CC_CALL_ARG_ABI_LDOUBLE)) {
+            note_sse_use(f->param_values != NULL ? f->param_values[j] : -1, &u);
+        }
+    }
+    for (j = 0; j < f->instr_count && !u.found; ++j) {
+        x86_for_each_use(f, &f->instrs[j], note_sse_use, &u);
+        if (f->instrs[j].dst >= 0 && f->instrs[j].op != CC_SSA_CONST) {
+            note_sse_use(f->instrs[j].dst, &u);
+        }
+    }
+    if (!u.found) {
+        return 0;
+    }
+    x86_diag_at(f, NULL);
+    snprintf(msg, sizeof(msg), "%s: '%s' has %s, which cc makes with %s only on x86-64",
+             o->no_sse ? "-mno-sse" : "-mno-sse2", f->name, o->no_sse ? "float or double arithmetic" : "doubles",
+             o->no_sse ? "SSE" : "SSE2");
+    set_diag(diag, msg);
+    return -1;
+}
+
 /** x86_for_each_use()'s counter of the uses of one value (stack_object_escapes()). */
 typedef struct {
     int v;

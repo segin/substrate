@@ -489,6 +489,23 @@ function does not save them for
 which it otherwise does only when its caller says in
 .Li %al
 that it passed any, as gcc does.
+Nor is any float or double made in one: a float or a double returned,
+a function's own or a call's, is refused with gcc's error, \(lqSSE
+register return with SSE disabled\(rq;
+and as
+.Nm
+computes floats and doubles with SSE alone on x86-64, where gcc
+computes the others on the x87, it refuses them too, as it refuses the
+doubles under
+.Fl mno-sse2 .
+A long double is the x87's, as ever.
+.Dv __FLT_EVAL_METHOD__
+is gcc's: 2 under
+.Fl mno-sse ,
+-1 under
+.Fl mno-sse2 .
+.Fl mfpmath=387
+is the x87's in gcc on x86-64; cc's floating point stays SSE's.
 .It Fl mcmodel Ns = Ns Cm small | kernel | medium | large
 x86-64: where the code and its data are linked.
 With
