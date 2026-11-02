@@ -771,12 +771,26 @@ the location counter
 .Ql \&.
 is the address the next thing is placed at.
 It begins at 0, as in GNU ld, and may only move forwards.
-Assigned between output sections it places what follows; in a body it may
-stand before the first input section description, where it is the
-section's start, or after the last, where moving it makes the section
-longer.
-A statement between two input section descriptions is refused: where the
-pieces of an output section meet is not kept.
+Assigned between output sections it places what follows; in a body it
+places what follows it in the section, and moved past the last input
+section description it makes the section longer.
+In a body, as in GNU ld,
+.Ql \&.
+and a symbol in the section are addresses in it, and an operator between
+one of them and a plain number, or between two of them, works on their
+offsets in the section:
+.Dq ". = sym | (1 << 2);"
+sets a bit of
+.Ar sym Ns 's
+offset.
+A number, and a symbol that is absolute, are plain numbers there, and a
+plain number assigned to
+.Ql \&.
+or a symbol is an offset in the section.
+Where the location counter is moved to what the linker cannot know while
+it puts the input sections together, such as a symbol's address, the
+link is done over with the addresses the pass before came to, until they
+settle, as GNU ld sizes its sections over.
 .Pp
 The data statements
 .Ic BYTE ,

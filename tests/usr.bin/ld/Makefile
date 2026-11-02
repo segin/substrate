@@ -39,5 +39,6 @@ run:
 	./test_code_padding.sh
 	./test_local_global_same_name.sh
 	./test_script_fill.sh
+	./test_script_dot_expr.sh
 
 clean:

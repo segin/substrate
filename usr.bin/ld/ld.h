@@ -31,6 +31,9 @@
 #define LD_MAX_TRACKED_SYMBOLS 262144U
 #define LD_MAX_INPUT_OBJECTS 131072U
 #define LD_MAX_ARCHIVE_SCAN_PASSES 1024
+/* How many times the link may be done over to settle where a script's
+ * `. = expr` in an output section puts what follows it. */
+#define LD_MAX_RELAYOUT_PASSES 8
 
 typedef struct {
     char **items;
@@ -176,6 +179,23 @@ typedef struct {
     size_t cap;
 } defsymvec_t;
 
+/*
+ * What one pass of the link learned for the next.  The merge puts an
+ * output section's input sections at offsets in it before anything has
+ * an address, but a script may move the location counter between them
+ * by an address: Linux's `. = srso_alias_untrain_ret | (1 << 2) | ...`
+ * in .text.  When the walk that gives the addresses finds the merge left
+ * the wrong room, the link is done over with the addresses this pass came
+ * to, as GNU ld sizes its sections over until they settle.
+ */
+typedef struct {
+    unsigned pass;              /* 0 for the first */
+    int wanted;                 /* this pass asks for another */
+    defsymvec_t syms;           /* the addresses of the symbols the script's section bodies name */
+    strvec_t sym_sections;      /* for each of those, the output section it is in, or "" */
+    defsymvec_t sections;       /* the address of each output section */
+} ld_relayout_t;
+
 /* Where in some array the entry of a given name is: see ld_symtab.c. */
 typedef struct {
     size_t *slots;              /* an entry's number plus one, or 0 */
@@ -308,6 +328,7 @@ typedef struct {
     const elf_symbol_t **ifuncs;
     size_t ifunc_count;
     size_t ifunc_cap;
+    ld_relayout_t *relayout;    /* what the pass before this one learned; outlives the context */
 } ld_ctx_t;
 
 typedef enum {
@@ -379,6 +400,12 @@ typedef struct {
                                  * read, and nothing in it is an error */
     const defsymvec_t *section_locals; /* consulted first: values as offsets in the section the
                                         * merge is filling (script_rank_gap()), or NULL */
+    const ld_relayout_t *hints; /* in the merge, done over: the addresses the pass before came to,
+                                 * consulted last, or NULL */
+    int in_body;                /* in an output section's body: GNU ld's rules there (lds_val_offsets()) */
+    const elf_section_t *body_sec; /* ... the section "." is in, or NULL; LDS_FILL_SEC in the merge */
+    uint64_t fill_base;         /* in the merge: the address taken for the section it is filling */
+    const char *fill_name;      /* ... and that section's name */
     lds_val_kind_t vkind;       /* what the value last worked out is ... */
     const elf_section_t *vsec;  /* ... and its section, if LDS_VAL_SECTION */
     int from_dot;               /* ".", ALIGN(n) or ORIGIN() went into the expression and no
@@ -696,6 +723,12 @@ typedef struct {
     const elf_section_t *last_sec; /* the last allocated, not thread-local, section placed */
     int dot_set;                /* "." was assigned between sections since it */
     int past_end;               /* "_end" (or "end", "__end") has been set */
+    int unsettled;              /* final: the counter in a section's body is not where the merge
+                                 * put what follows it, and doing the link over may settle it */
+    int settle_off;             /* doing it over cannot: what is past its place is an error */
+    int in_body;                /* a section's body is being carried out (lw_body()) ... */
+    const elf_section_t *body_sec; /* ... of this section (NULL: nothing went in it) ... */
+    uint64_t body_start;        /* ... at this address */
 } lds_walk_t;
 
 /* ld_util.c */

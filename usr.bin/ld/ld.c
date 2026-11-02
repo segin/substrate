@@ -739,6 +739,60 @@ static const ld_phase_t link_phases[] = {
 
 #undef DID
 
+/* While a link done over is quiet (quiet_begin()): the real stderr, and
+ * the file that holds what was written instead. */
+static int quiet_saved = -1;
+static FILE *quiet_capture;
+
+/**
+ * The link done over (ld_relayout_t) says again what the pass before it
+ * said, up to where the addresses are given: until then, what it writes
+ * to stderr is kept in a temporary file instead.  Start keeping it; if
+ * that cannot be done, it is said twice.
+ */
+static void quiet_begin(void) {
+    quiet_capture = tmpfile();
+    if (quiet_capture == NULL) {
+        return;
+    }
+    fflush(stderr);
+    quiet_saved = dup(STDERR_FILENO);
+    if (quiet_saved < 0 || dup2(fileno(quiet_capture), STDERR_FILENO) < 0) {
+        if (quiet_saved >= 0) {
+            close(quiet_saved);
+        }
+        quiet_saved = -1;
+        fclose(quiet_capture);
+        quiet_capture = NULL;
+    }
+}
+
+/**
+ * Stop keeping stderr (quiet_begin()), if it is being kept.  What it held
+ * is said after all if @p replay: the link failed before the place the
+ * pass before it got to, so it has not been said.
+ */
+static void quiet_end(int replay) {
+    char buf[4096];
+    size_t n;
+
+    if (quiet_saved < 0) {
+        return;
+    }
+    fflush(stderr);
+    (void)dup2(quiet_saved, STDERR_FILENO);
+    close(quiet_saved);
+    quiet_saved = -1;
+    if (replay && fseek(quiet_capture, 0, SEEK_SET) == 0) {
+        while ((n = fread(buf, 1, sizeof(buf), quiet_capture)) > 0) {
+            fwrite(buf, 1, n, stderr);
+        }
+        fflush(stderr);
+    }
+    fclose(quiet_capture);
+    quiet_capture = NULL;
+}
+
 static int run_internal_link(ld_ctx_t *ctx) {
     ld_link_t l;
     size_t i;
@@ -760,6 +814,9 @@ static int run_internal_link(ld_ctx_t *ctx) {
         }
         if ((p->kinds & kind) == 0) {
             continue;
+        }
+        if (p->run == phase_script_addresses) {
+            quiet_end(0);
         }
         if ((l.done & p->needs) != p->needs || (l.done & p->before) != 0) {
             fprintf(stderr, "ld: internal error: link phase %s is out of order\n", p->name);
@@ -803,12 +860,24 @@ static void ctx_free(ld_ctx_t *ctx) {
     ld_version_script_free(&ctx->version_script);
 }
 
-int main(int argc, char **argv) {
+/**
+ * One pass of the link the command line asks for, from reading it to
+ * writing the output.  It is done over, with what the pass before learned
+ * in @p relayout, while @p relayout->wanted comes back set: then this
+ * pass has stopped where it gives the addresses, and written nothing.
+ *
+ * @return 0, or main()'s status
+ */
+static int link_once(int argc, char **argv, ld_relayout_t *relayout) {
     ld_ctx_t ctx;
     ld_options_t *opt;
     int rc;
 
+    if (relayout->pass > 0) {
+        quiet_begin();
+    }
     memset(&ctx, 0, sizeof(ctx));
+    ctx.relayout = relayout;
     opt = &ctx.opt;
     opt->prog = argv[0];
     opt->out_path = "a.out";
@@ -831,12 +900,6 @@ int main(int argc, char **argv) {
     opt->hash_style = LD_HASH_BOTH;
 
     ctx.dso_cache = ld_dso_cache_new();
-    /* @file, as GNU ld reads it: Linux links each module's objects so, `ld -r -o m.o @m.mod` */
-    rc = ld_expand_response_files(&argc, &argv);
-    if (rc != 0) {
-        ctx_free(&ctx);
-        return rc;
-    }
     rc = ctx.dso_cache != NULL ? ld_parse_options(&ctx, argc, argv) : 1;
     if (rc == 0 && opt->query_version && opt->inputs.count == 0) {
         printf("GNU ld (Substrate) 2.42.0\n");
@@ -870,16 +933,40 @@ int main(int argc, char **argv) {
             opt->expect_type = ET_EXEC;
         }
         if (run_internal_link(&ctx) != 0) {
-            /* as GNU ld does: an output from before is not left to pass for this link's */
-            remove_output(opt->out_path);
-            rc = 1;
+            if (!relayout->wanted) {
+                /* as GNU ld does: an output from before is not left to pass for this link's */
+                remove_output(opt->out_path);
+                rc = 1;
+            }
         } else if (validate_output(&ctx) != 0) {
             remove_output(opt->out_path);
             rc = 1;
         }
     }
+    quiet_end(rc != 0 && rc != LD_OPT_DONE);
 
     ctx_free(&ctx);
+    return rc;
+}
+
+int main(int argc, char **argv) {
+    ld_relayout_t relayout;
+    int rc;
+
+    /* @file, as GNU ld reads it: Linux links each module's objects so, `ld -r -o m.o @m.mod` */
+    rc = ld_expand_response_files(&argc, &argv);
+    if (rc != 0) {
+        return rc;
+    }
+    memset(&relayout, 0, sizeof(relayout));
+    do {
+        relayout.wanted = 0;
+        rc = link_once(argc, argv, &relayout);
+        relayout.pass++;
+    } while (rc == 0 && relayout.wanted);
+    defsymvec_free(&relayout.syms);
+    strvec_free(&relayout.sym_sections);
+    defsymvec_free(&relayout.sections);
     ld_free_args(argc, argv);
     return rc == LD_OPT_DONE ? 0 : rc;
 }

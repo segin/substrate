@@ -104,6 +104,8 @@ Name: Linker-script engine and output layout planning
 
 Description: The linker-script path tokenizes and parses scripts, evaluates builtin expressions such as `ADDR` and `SIZEOF`, and drives section ordering and PHDR placement. Default segment planning and script-driven placement converge in the same output layout stage.
 
+An output section's input sections are put together by the merge (`libelfobj`) before anything has an address; the statements between its input section descriptions -- `. = ALIGN(16)`, `. = sym | (1 << 2)` -- are worked out there (`script_rank_gap()`) as far as they can be, and the walk that gives the addresses (`script_assign_addresses()`) checks that the merge left the room it works out. Where it did not, because an expression needed an address the merge could not know, the walk stops the link and `main()` does it over (`link_once()`), carrying the addresses the pass came to (`ld_relayout_t`) and keeping quiet what the pass before already said, until they settle -- as GNU ld sizes its sections over.
+
 Technologies: C, custom lexer/parser, bounded include stack, address arithmetic with overflow checks
 
 Deployment: Internal to `ld`; no external script interpreter dependency
