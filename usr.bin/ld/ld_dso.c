@@ -1241,6 +1241,26 @@ static int build_gnu_verneed_data(const dyn_ver_plan_t *plan, elfobj_endian_t en
     return 0;
 }
 
+/**
+ * Whether the program's copy of a shared object's variable (a COPY relocation's), or another name of it, is
+ * called @p base (@p len bytes): it takes the version of the definition it copies, as GNU ld gives it.
+ */
+static int is_copied_name(const ld_ctx_t *ctx, const char *base, size_t len) {
+    size_t i;
+
+    for (i = 0; i < ctx->dyn_imports.copy_count + ctx->dyn_imports.alias_count; ++i) {
+        const elf_symbol_t *s = i < ctx->dyn_imports.copy_count
+                                    ? ctx->dyn_imports.copies[i]
+                                    : ctx->dyn_imports.copy_aliases[i - ctx->dyn_imports.copy_count];
+        const char *n = s != NULL ? elf_symbol_name(s) : NULL;
+
+        if (n != NULL && strncmp(n, base, len) == 0 && n[len] == '\0') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_buf, size_t *dynstr_len,
                                         size_t *dynstr_cap, const uint8_t *dynsym_buf, size_t dynsym_len, size_t entsz,
                                         uint8_t *versym_buf, size_t versym_len, size_t *out_verdef_count,
@@ -1296,7 +1316,8 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
         curr_base = (uint16_t)(curr_ver & (uint16_t)~VER_NDX_HIDDEN);
         curr_hidden = (curr_ver & VER_NDX_HIDDEN) != 0;
         if (ver_name == NULL || ver_name[0] == '\0') {
-            if (shndx == SHN_UNDEF && base != NULL && base_len != 0 && curr_base <= VER_NDX_GLOBAL) {
+            if ((shndx == SHN_UNDEF || (base != NULL && is_copied_name(ctx, base, base_len))) && base != NULL &&
+                base_len != 0 && curr_base <= VER_NDX_GLOBAL) {
                 const char *provider = NULL;
                 char *auto_ver_name = NULL;
                 int found = resolve_default_version_need(ctx, base, base_len, &provider, &auto_ver_name);

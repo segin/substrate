@@ -70,6 +70,10 @@ static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const 
     if (elf_symbol_name(sym) == NULL || elf_symbol_name(sym)[0] == '\0') {
         return 0;
     }
+    /* the linker's own, which GNU ld keeps out of the dynamic symbols */
+    if (strcmp(elf_symbol_name(sym), "_GLOBAL_OFFSET_TABLE_") == 0) {
+        return 0;
+    }
     bind = elf_symbol_bind(sym);
     if (bind != STB_GLOBAL && bind != STB_WEAK) {
         return 0;
@@ -79,7 +83,8 @@ static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const 
         return 0;
     }
     shndx = elf_symbol_shndx(sym);
-    if (elf_type(out) == ET_DYN) {
+    /* a shared object exports what it defines; a PIE, ET_DYN too, only what a program does */
+    if (elf_type(out) == ET_DYN && !ctx->opt.pie) {
         return 1;
     }
     if (shndx == SHN_UNDEF) {
@@ -690,6 +695,21 @@ int settle_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out) {
         }
     }
     return 0;
+}
+
+/**
+ * The section number @p sym has in the output's .dynsym: its own, except a weak reference
+ * settle_undefined_weak() made 0, which is still undefined there as GNU ld leaves it (and found nowhere
+ * at run time either).  (A weak absolute 0 an input defines, which nothing does, would go out so too.)
+ */
+static uint16_t dynsym_shndx(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym) {
+    const char *name = elf_symbol_name(sym);
+
+    if (elf_type(out) == ET_EXEC && elf_symbol_bind(sym) == STB_WEAK && elf_symbol_shndx(sym) == SHN_ABS &&
+        elf_symbol_value(sym) == 0 && name != NULL && dso_definition_type(ctx, name) < 0) {
+        return SHN_UNDEF;
+    }
+    return (uint16_t)elf_symbol_shndx(sym);
 }
 
 /*
@@ -1713,7 +1733,7 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
 
         info = (uint8_t)(((elf_symbol_bind(sym) & 0x0f) << 4) | (elf_symbol_type(sym) & 0x0f));
         other = (uint8_t)(elf_symbol_visibility(sym) & 0x03);
-        shndx = elf_symbol_shndx(sym);
+        shndx = dynsym_shndx(ctx, out, sym);
         value = elf_symbol_value(sym);
         size = elf_symbol_size(sym);
         memset(entry, 0, sizeof(entry));
@@ -2350,11 +2370,11 @@ int patch_dynsym_symbol_values(const ld_ctx_t *ctx, elfobj_t *out) {
          * section went by then. */
         off = slot * entsz;
         if (elf_class(out) == ELFOBJ_CLASS_64) {
-            write_u16_endian(buf + off + 6, elf_endian(out), elf_symbol_shndx(sym));
+            write_u16_endian(buf + off + 6, elf_endian(out), dynsym_shndx(ctx, out, sym));
             write_u64_endian(buf + off + 8, elf_endian(out), value);
         } else {
             write_u32_endian(buf + off + 4, elf_endian(out), (uint32_t)value);
-            write_u16_endian(buf + off + 14, elf_endian(out), elf_symbol_shndx(sym));
+            write_u16_endian(buf + off + 14, elf_endian(out), dynsym_shndx(ctx, out, sym));
         }
         slot++;
     }

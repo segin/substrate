@@ -27,5 +27,6 @@ run:
 	./test_local_symbols.sh
 	./test_merge_sections.sh
 	./test_gnu_property.sh
+	./test_pie_exports.sh
 
 clean:
