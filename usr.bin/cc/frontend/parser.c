@@ -8931,6 +8931,18 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (next_tok(p) != 0) {
             return NULL;
         }
+        if (p->tok.kind != TOK_LPAREN) {
+            /* of an expression unparenthesized, as sizeof's (gcc): Linux's vhost.c `__alignof__ *vq->avail` */
+            ae = parse_unary(p);
+            if (ae == NULL) {
+                return NULL;
+            }
+            align = is_gnu_alignof ? parser_ct_align(p, parser_expr_ctype(p, ae))
+                                   : parser_ct_c11_align(p, parser_expr_ctype(p, ae));
+            align = parser_object_align(p, ae, align);
+            free_expr(ae);
+            return new_int_expr(align > 0 ? align : cc_target_pointer_size());
+        }
         if (expect(p, TOK_LPAREN, "expected '(' after _Alignof/alignof") != 0) {
             return NULL;
         }
