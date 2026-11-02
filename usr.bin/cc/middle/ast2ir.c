@@ -1006,6 +1006,40 @@ static cc_ssa_data_kind_t ssa_data_kind(const cc_ctype_t *t) {
 }
 
 /**
+ * Whether an object of type @p t is volatile or holds a volatile part: an array's element, a member of a
+ * structure or union, at any depth.  A member whose type was not recorded counts as one, so that the
+ * optimizer leaves the object's loads alone.
+ *
+ * @param t      the type
+ * @param tu     the translation unit, whose structures the record types index
+ * @param depth  how deep the walk is, which ends it (as volatile) at 32
+ */
+static int ct_holds_volatile(const cc_ctype_t *t, const cc_translation_unit_t *tu, int depth) {
+    size_t k;
+
+    if (t == NULL || depth > 32 || (t->quals & CC_CQ_VOLATILE) != 0) {
+        return 1;
+    }
+    if (ct_has_kind(t, CC_CT_ARRAY)) {
+        return ct_holds_volatile(t->of, tu, depth + 1);
+    }
+    if (ct_has_kind(t, CC_CT_RECORD)) {
+        const cc_struct_def_t *sd;
+
+        if (tu == NULL || t->id < 0 || (size_t)t->id >= tu->struct_count) {
+            return 1;
+        }
+        sd = &tu->structs[t->id];
+        for (k = 0; k < sd->member_count; ++k) {
+            if (ct_holds_volatile(sd->members[k].ctype, tu, depth + 1)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/**
  * Lay out an SSA global as an object of type @p t: an array's elements,
  * or a single object, as aligned as the type needs.  A const object, or
  * an array of const elements, is read-only, as gcc has it.
@@ -1026,6 +1060,7 @@ static void ssa_global_set_layout(cc_ssa_global_t *g, const cc_ctype_t *t, const
             break;
         }
     }
+    g->is_volatile = ct_holds_volatile(t, tu, 0);
     if (ct_has_kind(t, CC_CT_ARRAY)) {
         g->is_array = 1;
         g->data_kind = ssa_data_kind(t->of);

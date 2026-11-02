@@ -270,6 +270,7 @@ typedef struct {
     long size_bytes;
     long type_align;              /**< the alignment its type needs; 0 if not known */
     int is_readonly;              /**< const (an array's elements are): .rodata, not .data */
+    int is_volatile;              /**< volatile, or holds a volatile member or element: its loads are not folded */
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;

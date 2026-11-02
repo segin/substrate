@@ -3288,6 +3288,447 @@ static long long held_as(long long c, uint32_t size, int is_unsigned) {
 }
 
 /**
+ * The bytes a load reads from a global's data: the window [off, off + n) of the object, filled in as a walk
+ * of its initializer meets them.
+ */
+typedef struct {
+    long off;               /**< the window's first byte in the object */
+    long n;                 /**< its length, 1 to 8 */
+    unsigned char b[8];     /**< the bytes */
+    unsigned char have[8];  /**< per byte: 0 not met yet, 1 known, 2 not known (an address, a floating value) */
+} data_window_t;
+
+/**
+ * Put the @p len bytes the data has at object offset @p at into window @p w, where they overlap it:
+ * @p bytes, or zeros for NULL; or, with @p unknown, bytes not known here.
+ */
+static void window_put(data_window_t *w, long at, long len, const unsigned char *bytes, int unknown) {
+    long lo = at > w->off ? at : w->off;
+    long hi = at + len < w->off + w->n ? at + len : w->off + w->n;
+    long k;
+
+    for (k = lo; k < hi; ++k) {
+        long wi = k - w->off;
+
+        if (unknown) {
+            w->have[wi] = 2;
+        } else if (w->have[wi] == 0) {
+            w->b[wi] = bytes != NULL ? bytes[k - at] : 0;
+            w->have[wi] = 1;
+        }
+    }
+}
+
+/** Put integer @p v, of @p size bytes in x86's byte order, at object offset @p at into window @p w. */
+static void window_put_int(data_window_t *w, long at, long size, long long v) {
+    unsigned char b[8];
+    long k;
+
+    for (k = 0; k < size && k < 8; ++k) {
+        b[k] = (unsigned char)((unsigned long long)v >> (8 * k));
+    }
+    window_put(w, at, size < 8 ? size : 8, b, 0);
+}
+
+/** The value of hex digit @p c, or -1. */
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+/**
+ * The bytes string literal @p lit (as lowering keeps it: quoted or not, its escapes as written) makes, as the
+ * backend's emit_literal_directive() writes them, put into window @p w from object offset @p at; a null
+ * byte after them when @p nul.
+ *
+ * @return the number of bytes, the null one included; -1 for an escape the backend reads otherwise (`\x`
+ *         without a digit), whose bytes are not known here
+ */
+static long window_put_literal(data_window_t *w, long at, const char *lit, int nul) {
+    const char *p = lit != NULL ? lit : "";
+    int quoted = *p == '"';
+    long n = 0;
+
+    p += quoted;
+    while (*p != '\0' && !(quoted && *p == '"')) {
+        unsigned char c;
+
+        if (*p != '\\') {
+            c = (unsigned char)*p++;
+        } else if (*++p == '\0') {
+            break;
+        } else if (*p == 'x') {
+            unsigned value = 0;
+
+            if (hex_digit(*++p) < 0) {
+                return -1;
+            }
+            while (hex_digit(*p) >= 0) {
+                value = (value << 4) | (unsigned)hex_digit(*p++);
+            }
+            c = (unsigned char)(value & 0xffu);
+        } else if (*p >= '0' && *p <= '7') {
+            unsigned value = 0;
+            int digits;
+
+            for (digits = 0; digits < 3 && *p >= '0' && *p <= '7'; ++digits) {
+                value = (value << 3) | (unsigned)(*p++ - '0');
+            }
+            c = (unsigned char)(value & 0xffu);
+        } else {
+            static const char from[] = "abfnrtv";
+            static const char to[] = "\a\b\f\n\r\t\v";
+            const char *e = strchr(from, *p);
+
+            c = e != NULL ? (unsigned char)to[e - from] : (unsigned char)*p;
+            p++;
+        }
+        window_put(w, at + n, 1, &c, 0);
+        n++;
+    }
+    if (nul) {
+        window_put(w, at + n, 1, NULL, 0);
+        n++;
+    }
+    return n;
+}
+
+/**
+ * The size of global @p g's object, as the backend's global_object_size_bytes() has it.
+ *
+ * @return the size in bytes, or 0 when it is not known here
+ */
+static long global_data_size(const cc_ssa_global_t *g) {
+    long elems;
+
+    if (g->size_bytes > 0) {
+        return g->size_bytes;
+    }
+    if (!g->is_array) {
+        return g->elem_size > 0 ? g->elem_size : 0;
+    }
+    elems = g->array_len > 0 ? g->array_len : (long)g->init_item_count;
+    return g->elem_size > 0 && elems > 0 ? g->elem_size * elems : 0;
+}
+
+/**
+ * Fill window @p w with the bytes of global @p g, of @p sz bytes, as the backend lays its initializer out
+ * (emit_globals_chosen()): its items in order, or its one value, and zeros after them to its end.  An
+ * address (a symbol's, a string's) or a floating value leaves its bytes not known.
+ *
+ * @return 1 when every byte of the window is known, else 0
+ */
+static int global_window(const cc_ssa_global_t *g, long sz, data_window_t *w) {
+    long at = 0;
+    size_t j;
+    long k;
+
+    if (g->init_item_count > 0 && (g->init_items[0].init_size > 0 || g->init_items[0].init_is_zero_fill)) {
+        /* a stream of items, each of its own size */
+        for (j = 0; j < g->init_item_count && at < w->off + w->n; ++j) {
+            const cc_ssa_global_init_item_t *it = &g->init_items[j];
+            long size = it->init_size > 0 ? it->init_size : 1;
+
+            if (it->init_is_zero_fill) {
+                window_put(w, at, size, NULL, 0);
+            } else if (it->init_is_string || it->init_is_symbol || it->init_is_float ||
+                       (size != 1 && size != 2 && size != 4 && size != 8)) {
+                window_put(w, at, size, NULL, 1);
+            } else {
+                window_put_int(w, at, size, it->init_i);
+            }
+            at += size;
+        }
+    } else if (g->init_item_count > 0) {
+        /* an array, an item per element; of char, a string's characters too */
+        int chars = g->elem_size == 1 && g->data_kind == CC_SSA_DATA_CHAR;
+
+        if (!g->is_array || g->elem_size <= 0) {
+            return 0;
+        }
+        for (j = 0; j < g->init_item_count && at < w->off + w->n; ++j) {
+            const cc_ssa_global_init_item_t *it = &g->init_items[j];
+
+            if (chars && it->init_is_string) {
+                long len = window_put_literal(w, at, it->init_str, 0);
+
+                if (len < 0) {
+                    return 0;
+                }
+                /* (its null too, unless the characters fill the array: `u8 m[4] = { "OTAR" }`) */
+                if (len != sz - at) {
+                    window_put(w, at + len, 1, NULL, 0);
+                    len++;
+                }
+                at += len;
+                continue;
+            }
+            if (it->init_is_string || it->init_is_symbol ||
+                (it->init_is_float && g->data_kind != CC_SSA_DATA_BOOL) ||
+                (g->elem_size != 1 && g->elem_size != 2 && g->elem_size != 4 && g->elem_size != 8)) {
+                window_put(w, at, g->elem_size, NULL, 1);
+            } else if (it->init_is_float) {
+                window_put_int(w, at, g->elem_size, it->init_f_ld != 0.0L);
+            } else {
+                window_put_int(w, at, g->elem_size, it->init_i);
+            }
+            at += g->elem_size;
+        }
+    } else if (g->init_is_string) {
+        /* an array of char holds the string; anything else, its address */
+        if (!g->is_array || g->elem_size != 1 || g->data_kind != CC_SSA_DATA_CHAR) {
+            return 0;
+        }
+        at = window_put_literal(w, 0, g->init_str, 1);
+        if (at < 0) {
+            return 0;
+        }
+    } else if (g->init_is_symbol || g->init_is_float || (sz != 1 && sz != 2 && sz != 4 && sz != 8)) {
+        return 0;
+    } else {
+        window_put_int(w, 0, sz, g->init_i);
+        at = sz;
+    }
+    /* what the initializer leaves is zeros */
+    if (at < sz) {
+        window_put(w, at, sz - at, NULL, 0);
+    }
+    for (k = 0; k < w->n; ++k) {
+        if (w->have[k] != 1) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * The global of @p m whose data a load from symbol @p sym (@p n bytes of name) reads, if the load may be
+ * folded to its initializer: of the globals of that name, the one the backend defines (the last of those
+ * it ranks highest, select_global_emit_index()), const, defined here with an initializer, in no section
+ * of its own, and not volatile, weak, an alias nor thread-local.  None of its declarations may be weak,
+ * volatile or an alias either.  gcc folds the same: a static const, or a const definition -- an exported
+ * one under -fPIC too, the value its initializer gives whatever object defines it -- never an extern
+ * declaration without the initializer, a weak definition or a volatile object.
+ *
+ * @return the global, or NULL
+ */
+static const cc_ssa_global_t *foldable_global(const cc_ssa_module_t *m, const char *sym, size_t n) {
+    const cc_ssa_global_t *best = NULL;
+    int best_rank = -1;
+    size_t i;
+
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+        int rank;
+
+        if (g->name == NULL || strncmp(g->name, sym, n) != 0 || g->name[n] != '\0') {
+            continue;
+        }
+        if ((g->attr_flags & (CC_ATTR_WEAK | CC_ATTR_ALIAS)) != 0 || g->attr_alias != NULL || g->is_volatile ||
+            (g->storage & CC_STORAGE_THREAD_LOCAL) != 0) {
+            return NULL;
+        }
+        rank = ((g->storage & CC_STORAGE_EXTERN) == 0 ? 100 : 0) + (g->has_init ? 50 : 0);
+        if (rank >= best_rank) {
+            best_rank = rank;
+            best = g;
+        }
+    }
+    if (best == NULL || !best->has_init || (best->storage & CC_STORAGE_EXTERN) != 0 || !best->is_readonly ||
+        best->attr_section != NULL) {
+        return NULL;
+    }
+    return best;
+}
+
+/**
+ * Where value @p v of @p f points, if it is a constant offset from a symbol: a GADDR (`sym+off` too), and
+ * moves, additions and subtractions of constants on one, each value defined once.
+ *
+ * @param f       the function
+ * @param def_at  per value: the instruction that defines it, its only definition, or -1
+ * @param k       the values constant on every path (single_def_consts())
+ * @param v       the value
+ * @param sym     receives the symbol reference, an offset perhaps after its name
+ * @param off     receives the offset from the symbol, that one included
+ * @param depth   how many definitions the walk is in, which ends it at 16
+ * @return 1, or 0 when it is not known so
+ */
+static int symbol_address(const cc_ssa_function_t *f, const long *def_at, const const_state_t *k, int v,
+                          const char **sym, long long *off, int depth) {
+    const cc_ssa_instr_t *in;
+
+    if (v < 0 || v >= f->value_count || def_at[v] < 0 || depth > 16) {
+        return 0;
+    }
+    in = &f->instrs[def_at[v]];
+    switch (in->op) {
+    case CC_SSA_GADDR: {
+        const char *s = in->sym;
+        size_t n;
+        long long add = 0;
+
+        if (s == NULL || s[0] == '\0') {
+            return 0;
+        }
+        n = sym_name_len(s);
+        if (s[n] == '+' || s[n] == '-') {
+            const char *p = s + n + 1;
+
+            if (*p < '0' || *p > '9') {
+                return 0;
+            }
+            while (*p >= '0' && *p <= '9' && add < (1LL << 40)) {
+                add = add * 10 + (*p++ - '0');
+            }
+            if (*p != '\0') {
+                return 0;
+            }
+            add = s[n] == '-' ? -add : add;
+        } else if (s[n] != '\0') {
+            return 0; /* @GOTOFF, @PLT, ...: not the object's address as such */
+        }
+        *sym = s;
+        *off = add;
+        return 1;
+    }
+    case CC_SSA_MOV:
+        return symbol_address(f, def_at, k, in->lhs, sym, off, depth + 1);
+    case CC_SSA_ADD:
+    case CC_SSA_SUB: {
+        int base = in->lhs;
+        long long c;
+
+        if (in->rhs >= 0 && in->rhs < f->value_count && k[in->rhs].known && k[in->rhs].type == CC_VAL_I64) {
+            c = k[in->rhs].i;
+        } else if (in->op == CC_SSA_ADD && in->lhs >= 0 && in->lhs < f->value_count && k[in->lhs].known &&
+                   k[in->lhs].type == CC_VAL_I64) {
+            c = k[in->lhs].i;
+            base = in->rhs;
+        } else {
+            return 0;
+        }
+        if (c < -(1LL << 40) || c > (1LL << 40) || !symbol_address(f, def_at, k, base, sym, off, depth + 1)) {
+            return 0;
+        }
+        *off += in->op == CC_SSA_SUB ? -c : c;
+        return 1;
+    }
+    default:
+        return 0;
+    }
+}
+
+/**
+ * Fold the loads of @p f from read-only globals of @p m at constant offsets to what their initializers
+ * put there, as gcc does once inlining has made the offsets constant: Linux's reverse_cpuid_check(),
+ * inlined with a constant leaf, has BUILD_BUG_ON(reverse_cpuid[x86_leaf].function == 0), whose call of
+ * an undefined __compiletime_assert_N must go.  Only an integer load that reads bytes the initializer
+ * gives, or zeros past it, wholly inside the object (foldable_global() says which objects); x86's byte
+ * order, extended as the load extends them.
+ *
+ * @return 1 when a load was folded, 0 when none was, or -1 when out of memory
+ */
+static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
+    long *def_at;
+    const_state_t *k;
+    size_t i;
+    int changed = 0;
+
+    if (f->value_count <= 0 || m->global_count == 0) {
+        return 0;
+    }
+    /* (a function that loads nothing has nothing to fold) */
+    i = 0;
+    while (i < f->instr_count && f->instrs[i].op != CC_SSA_LOAD) {
+        i++;
+    }
+    if (i == f->instr_count) {
+        return 0;
+    }
+    def_at = (long *)malloc((size_t)f->value_count * sizeof(*def_at));
+    k = def_at != NULL ? single_def_consts(f) : NULL;
+    if (k == NULL) {
+        free(def_at);
+        return -1;
+    }
+    for (i = 0; i < (size_t)f->value_count; ++i) {
+        def_at[i] = -1;
+    }
+    /* each value's one definition; -2 for one defined more than once, an asm's output among them */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t a;
+
+        if (in->dst >= 0 && in->dst < f->value_count) {
+            def_at[in->dst] = def_at[in->dst] == -1 ? (long)i : -2;
+        }
+        for (a = 0; in->op == CC_SSA_ASM && in->asm_out_values != NULL && a < in->asm_out_count; ++a) {
+            int v = in->asm_out_values[a];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+                v = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
+            }
+            if (v >= 0 && v < f->value_count) {
+                def_at[v] = -2;
+            }
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        const cc_ssa_global_t *g;
+        const char *sym = NULL;
+        long long off = 0;
+        data_window_t w;
+        unsigned long long v = 0;
+        long sz;
+        long b;
+
+        if (in->op != CC_SSA_LOAD || in->seg != 0 || in->dst < 0 || in->dst >= f->value_count ||
+            cc_ssa_value_class(f, in->dst) != CC_VAL_I64 || f->value_ty[in->dst].kind != CC_TY_INT ||
+            (in->imm != 1 && in->imm != 2 && in->imm != 4 && in->imm != 8) ||
+            (long long)cc_ssa_value_size(f, in->dst) < in->imm ||
+            !symbol_address(f, def_at, k, in->lhs, &sym, &off, 0)) {
+            continue;
+        }
+        g = foldable_global(m, sym, sym_name_len(sym));
+        sz = g != NULL ? global_data_size(g) : 0;
+        if (sz <= 0 || off < 0 || off + in->imm > sz) {
+            continue;
+        }
+        memset(&w, 0, sizeof(w));
+        w.off = (long)off;
+        w.n = (long)in->imm;
+        if (!global_window(g, sz, &w)) {
+            continue;
+        }
+        /* the bytes as the load reads them, then extended as it extends them */
+        for (b = w.n - 1; b >= 0; --b) {
+            v = (v << 8) | w.b[b];
+        }
+        if (w.n < 8 && !in->is_unsigned && (v & (1ULL << (w.n * 8 - 1))) != 0) {
+            v |= ~((1ULL << (w.n * 8)) - 1);
+        }
+        in->op = CC_SSA_CONST;
+        in->imm = (long long)v;
+        in->lhs = -1;
+        in->rhs = -1;
+        changed = 1;
+    }
+    free(def_at);
+    free(k);
+    return changed;
+}
+
+/**
  * Fold @p f again, after something became known: constants, copies, jumps, unreachable code, dead
  * definitions.  The folding until it changes nothing: a value it folds is known past a label only from
  * the next round on.
@@ -3561,6 +4002,16 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
             rc = cc_inline_calls(m, fi, done, once, opt_level);
             if (rc > 0) {
                 rc = optimize_function(&m->funcs[fi], opt_level);
+            }
+            /*
+             * a load from a const table at an offset the inlined constants made known, as its initializer
+             * has it, and what that folds in turn: a branch to a call that must go
+             */
+            if (rc == 0 && opt_level > 0) {
+                rc = fold_const_loads(m, &m->funcs[fi]);
+                if (rc > 0) {
+                    rc = optimize_function(&m->funcs[fi], opt_level);
+                }
             }
             if (rc > 0) {
                 rc = 0;
