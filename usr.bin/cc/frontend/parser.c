@@ -7961,6 +7961,35 @@ static cc_expr_t *new_update_ident_expr(const char *name, cc_binop_t op, int pos
     return e;
 }
 
+/**
+ * A compound literal, an lvalue (C11 6.5.2.5p4), as the object it is
+ * where one is assigned to or incremented: `(int){4}++` is `(*&(int){4})++`,
+ * which the dereference's lvalue path compiles.  Any other expression is
+ * returned as it is.
+ *
+ * @param e  the operand (owned)
+ * @return   the operand, or a dereference of its address; NULL if out of memory (@p e freed)
+ */
+static cc_expr_t *compound_literal_lvalue(cc_expr_t *e) {
+    cc_expr_t *addr;
+    cc_expr_t *deref;
+
+    if (e == NULL || e->kind != CC_EXPR_CAST || e->lhs == NULL || e->lhs->kind != CC_EXPR_INIT_LIST) {
+        return e;
+    }
+    addr = new_expr(CC_EXPR_ADDR);
+    deref = new_expr(CC_EXPR_DEREF);
+    if (addr == NULL || deref == NULL) {
+        free_expr(addr);
+        free_expr(deref);
+        free_expr(e);
+        return NULL;
+    }
+    addr->lhs = e;
+    deref->lhs = addr;
+    return deref;
+}
+
 static cc_expr_t *new_update_lvalue_expr(cc_expr_t *lhs, cc_binop_t op, int postfix) {
     cc_expr_t *e = new_expr(CC_EXPR_UPDATE);
     if (e == NULL) {
@@ -8478,6 +8507,10 @@ static cc_expr_t *parse_postfix_ops(parser_t *p, cc_expr_t *e) {
 
         if (p->tok.kind == TOK_PLUS_PLUS || p->tok.kind == TOK_MINUS_MINUS) {
             cc_expr_t *upd;
+            e = compound_literal_lvalue(e);
+            if (e == NULL) {
+                return NULL;
+            }
             if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
                 upd = new_update_ident_expr(e->ident, p->tok.kind == TOK_PLUS_PLUS ? CC_BIN_ADD : CC_BIN_SUB, 1);
                 free_expr(e);
@@ -9001,7 +9034,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (next_tok(p) != 0) {
             return NULL;
         }
-        rhs = parse_unary(p);
+        rhs = compound_literal_lvalue(parse_unary(p));
         if (rhs == NULL) {
             return NULL;
         }
@@ -9313,6 +9346,10 @@ static cc_expr_t *parse_assign(parser_t *p) {
         int lhs_is_deref = 0;
         int lhs_is_member = 0;
 
+        lhs = compound_literal_lvalue(lhs);
+        if (lhs == NULL) {
+            return NULL;
+        }
         if (lhs->kind == CC_EXPR_IDENT && lhs->ident != NULL) {
             lhs_is_ident = 1;
         } else if (lhs->kind == CC_EXPR_DEREF) {
