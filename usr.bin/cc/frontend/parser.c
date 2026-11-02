@@ -10210,6 +10210,8 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
     typedef_pop_to_depth(p, saved_depth);
     var_pop_to_depth(p, saved_depth);
     local_label_pop_to_depth(p, saved_depth);
+    /* the block's tags end with it: a sibling block may define its own (Linux's tg3.c, two `struct tg3_dev_id`) */
+    struct_hide_to_depth(p, saved_depth);
     p->scope_depth = saved_depth;
     return 0;
 }
