@@ -26,7 +26,7 @@ usr.bin/cc/
 │   │                        # form (cc_parser.h: what the two share)
 │   ├── sema.c               # Type checking and semantic validation, a check per expression kind
 │   ├── sema_call.c          # Checking a call: builtins, callee, arguments (cc_sema.h: what the two share)
-│   ├── builtin.c            # Builtin-function and intrinsic handling
+│   ├── builtin.c            # Builtin-function and intrinsic handling; what __has_builtin answers
 │   ├── consteval.c          # Integer constant expressions: the one evaluator
 │   ├── nameindex.c          # The translation unit's functions and file-scope objects by name
 │   ├── binary128.c          # _Float128 constants: binary128 encoding and folding (cc_binary128.h)

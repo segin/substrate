@@ -943,37 +943,20 @@ static int has_declspec_attribute_name(const char *name) {
     return 0;
 }
 
+/**
+ * Whether `__has_builtin(name)` is 1: @p name is a builtin the compiler
+ * implements, by the same tables sema checks calls against, so that
+ * `__builtin_memcpy`, `__builtin_popcount` or `__sync_fetch_and_add`
+ * answer as gcc answers.
+ *
+ * @param name  the operand of __has_builtin
+ * @return      1 if it is such a builtin, else 0
+ */
 static int has_builtin_name(const char *name) {
     if (name == NULL) {
         return 0;
     }
-    if (strcmp(name, "__builtin_expect") == 0 || strcmp(name, "__builtin_constant_p") == 0 ||
-        strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
-        strcmp(name, "__builtin_ctzll") == 0 || strcmp(name, "__builtin_clz") == 0 ||
-        strcmp(name, "__builtin_clzl") == 0 || strcmp(name, "__builtin_clzll") == 0 ||
-        strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_ffsl") == 0 ||
-        strcmp(name, "__builtin_ffsll") == 0 ||
-        strcmp(name, "__builtin_bswap16") == 0 ||
-        strcmp(name, "__builtin_bswap32") == 0 || strcmp(name, "__builtin_bswap64") == 0 ||
-        strcmp(name, "__builtin_add_overflow") == 0 || strcmp(name, "__builtin_sub_overflow") == 0 ||
-        strcmp(name, "__builtin_mul_overflow") == 0 || strcmp(name, "__builtin_object_size") == 0 ||
-        strcmp(name, "__builtin_counted_by_ref") == 0 ||
-        strcmp(name, "__builtin___memcpy_chk") == 0 || strcmp(name, "__builtin___memmove_chk") == 0 ||
-        strcmp(name, "__builtin___memset_chk") == 0 || strcmp(name, "__builtin_strlen") == 0 ||
-        strcmp(name, "__builtin_prefetch") == 0 ||
-        strcmp(name, "__builtin_va_start") == 0 ||
-        strcmp(name, "__builtin_c23_va_start") == 0 || strcmp(name, "__builtin_va_end") == 0 ||
-        strcmp(name, "__builtin_c23_va_end") == 0 || strcmp(name, "__builtin_va_copy") == 0 ||
-        strcmp(name, "__builtin_c23_va_copy") == 0 || strcmp(name, "__builtin_va_arg") == 0 ||
-        strcmp(name, "__builtin_c23_va_arg") == 0 || strcmp(name, "__builtin_trap") == 0 ||
-        strcmp(name, "__builtin_unreachable") == 0 || strcmp(name, "__builtin_assume") == 0 ||
-        strcmp(name, "__builtin_assume_aligned") == 0 || strcmp(name, "__builtin_unpredictable") == 0 ||
-        strcmp(name, "__builtin_choose_expr") == 0 ||
-        strcmp(name, "__builtin_types_compatible_p") == 0 || strcmp(name, "__builtin_offsetof") == 0 ||
-        cc_builtin_typed_overflow(name, NULL) != NULL) {
-        return 1;
-    }
-    return 0;
+    return cc_builtin_is_recognized(name) || cc_builtin_atomic_rmw(name, NULL);
 }
 
 static int has_feature_name(const char *name, const pp_state_t *st) {
