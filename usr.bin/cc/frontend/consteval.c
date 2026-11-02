@@ -533,7 +533,9 @@ static int const_element_address(const cc_const_env_t *env, const cc_expr_t *sum
         idx = t;
     }
     if (arr->ctype == NULL || arr->ctype->unqual->kind != CC_CT_ARRAY ||
-        (size = cc_ct_size(arr->ctype->unqual->of, NULL)) <= 0 || cc_const_eval(env, idx, &k) != 0 ||
+        (size = env != NULL && env->type_bytes != NULL ? env->type_bytes(env->ctx, arr->ctype->unqual->of)
+                                                       : cc_ct_size(arr->ctype->unqual->of, NULL)) <= 0 ||
+        cc_const_eval(env, idx, &k) != 0 ||
         const_lvalue_address(env, arr, addr) != 0) {
         return -1;
     }
@@ -555,7 +557,12 @@ static int const_lvalue_address(const cc_const_env_t *env, const cc_expr_t *m, u
     while (m != NULL && m->kind == CC_EXPR_MEMBER && m->lhs != NULL && !m->member_is_bitfield && !m->member_is_part) {
         off += (uint64_t)m->member_offset;
         if (m->member_is_arrow) {
-            if (cc_const_eval(env, m->lhs, &base) != 0) {
+            /* an array the arrow is applied to is its address (`p->arr->c`) */
+            if (m->lhs->ctype != NULL && m->lhs->ctype->unqual->kind == CC_CT_ARRAY) {
+                if (const_lvalue_address(env, m->lhs, &base.bits) != 0) {
+                    return -1;
+                }
+            } else if (cc_const_eval(env, m->lhs, &base) != 0) {
                 return -1;
             }
             *addr = base.bits + off;
@@ -710,9 +717,21 @@ static int const_eval_arith(const cc_expr_t *e, const cc_const_t *a, const cc_co
 }
 
 /**
+ * The type_bytes callback of a context that is a translation unit: the
+ * type's size by its structure table.
+ *
+ * @param ctx  the translation unit (const cc_translation_unit_t *); may be NULL
+ * @param t    the type
+ * @return     the size, or -1 if it is not known
+ */
+long cc_const_tu_type_bytes(void *ctx, const cc_ctype_t *t) {
+    return cc_ct_size(t, (const cc_translation_unit_t *)ctx);
+}
+
+/**
  * Evaluate an integer constant expression.
  *
- * @param env  the context; its callback may be NULL
+ * @param env  the context; its callbacks may be NULL
  * @param e    the expression
  * @param out  receives the value
  * @return     0, or -1 if @p e is not an integer constant expression

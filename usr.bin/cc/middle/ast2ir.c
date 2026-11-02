@@ -1068,6 +1068,7 @@ int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const cc_exp
     cc_const_env_t env;
 
     env.sizeof_bytes = NULL;
+    env.type_bytes = cc_const_tu_type_bytes;
     env.ctx = (void *)tu;
     return cc_const_eval(&env, e, out);
 }

@@ -894,15 +894,30 @@ static long parser_const_sizeof(void *ctx, const cc_expr_t *e) {
 }
 
 /**
+ * The size of a type as the parser has it laid out, for the constant
+ * evaluator.
+ *
+ * @param ctx  the parser
+ * @param t    the type
+ * @return     the size, or -1 if it is not known
+ */
+static long parser_const_type_bytes(void *ctx, const cc_ctype_t *t) {
+    long sz = parser_ct_size((parser_t *)ctx, t);
+
+    return sz >= 0 ? sz : -1;
+}
+
+/**
  * The constant evaluator's view of the parser.
  *
  * @param p  the parser
- * @return   an environment whose callback reads @p p
+ * @return   an environment whose callbacks read @p p
  */
 static cc_const_env_t parser_const_env(parser_t *p) {
     cc_const_env_t env;
 
     env.sizeof_bytes = parser_const_sizeof;
+    env.type_bytes = parser_const_type_bytes;
     env.ctx = p;
     return env;
 }

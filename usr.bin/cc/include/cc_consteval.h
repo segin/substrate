@@ -36,8 +36,21 @@ typedef struct {
      */
     long (*sizeof_bytes)(void *ctx, const cc_expr_t *e);
 
-    void *ctx; /**< passed to the callback */
+    /**
+     * The size of a type in bytes, for an element's address in an array
+     * of structures (`&((T *)0)->arr[2].m`); NULL to size only types that
+     * need no structure table.
+     *
+     * @param ctx  the caller's context
+     * @param t    the type
+     * @return     the size, or -1 if it is not known here
+     */
+    long (*type_bytes)(void *ctx, const cc_ctype_t *t);
+
+    void *ctx; /**< passed to the callbacks */
 } cc_const_env_t;
+
+long cc_const_tu_type_bytes(void *ctx, const cc_ctype_t *t);
 
 /**
  * Evaluate an integer constant expression.
