@@ -970,6 +970,21 @@ static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_i
     return -1;
 }
 
+/**
+ * How deep find_const_i64_for_value() calls are nested in each other: a
+ * load's value is the store's before it, if that is the sole store there
+ * (checked against every store in the function), the stores told apart
+ * by their addresses, whose offsets are constants found the same way.
+ * Each search has its own visiting marks, so a cycle through them --
+ * `p = *q; p[n] = 0;`, whose store's address needs p's load searched
+ * again -- nested without end, and overflowed the stack (Linux's
+ * mm/vmscan.c).
+ */
+static int const_search_nesting;
+
+/** The most deeply find_const_i64_for_value() calls nest; a value past it is no known constant. */
+#define CONST_SEARCH_NESTING_MAX 8
+
 static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, size_t max_instr_index, long *out_imm) {
     int *def_index;
     unsigned char *visiting;
@@ -977,7 +992,8 @@ static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, size_
     size_t limit;
     int rc;
 
-    if (f == NULL || value < 0 || value >= f->value_count || out_imm == NULL) {
+    if (f == NULL || value < 0 || value >= f->value_count || out_imm == NULL ||
+        const_search_nesting >= CONST_SEARCH_NESTING_MAX) {
         return -1;
     }
     def_index = (int *)malloc((size_t)f->value_count * sizeof(*def_index));
@@ -1026,7 +1042,9 @@ static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, size_
             visiting[i] = 0;
         }
     }
+    ++const_search_nesting;
     rc = eval_const_i64_for_value(f, def_index, value, visiting, out_imm);
+    --const_search_nesting;
     free(def_index);
     free(visiting);
     return rc;
