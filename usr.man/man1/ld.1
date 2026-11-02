@@ -330,8 +330,36 @@ does no more than
 the symbol table is kept.
 .It Fl q , Fl -emit-relocs
 Keep the relocation sections in an executable or shared object.
-.It Fl -build-id
-Accepted, in either form; no build ID is made.
+.It Fl -build-id Ns Op = Ns Ar style
+Make a
+.Pa .note.gnu.build-id
+note
+.Pq Dv NT_GNU_BUILD_ID , owner Li GNU
+in a program or shared object, placed as any note is (a script's
+.Li *(.note*)
+takes it), as GNU ld makes it.
+The
+.Ar style
+is
+.Cm sha1 ,
+the default, a 20-byte SHA-1 of the whole output with the ID zero while
+it is taken, so that the same output has the same ID;
+.Cm md5 ,
+16 bytes of MD5 so;
+.Cm uuid ,
+16 random bytes;
+.Cm 0x Ns Ar hex ,
+those bytes
+.Pq Ql -
+and
+.Ql \&:
+between digits are read over ;
+or
+.Cm none .
+Without the option there is no build ID.
+The digest is of this linker's output, which is not GNU ld's to the
+byte, and GNU ld takes its own over what it has in memory: the two IDs
+differ.
 .It Fl -gc-sections
 Leave out the input sections that nothing uses.
 A section is used if it holds the entry or a symbol named by

@@ -35,5 +35,6 @@ run:
 	./test_dynstr_hash.sh
 	./test_x32.sh
 	./test_version_script.sh
+	./test_build_id.sh
 
 clean:

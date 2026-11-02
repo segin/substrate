@@ -323,7 +323,11 @@ static int phase_plugin(ld_link_t *l) {
 }
 
 static int phase_load_inputs(ld_link_t *l) {
-    return load_all_inputs(l->ctx, &l->inputs);
+    if (load_all_inputs(l->ctx, &l->inputs) != 0) {
+        return -1;
+    }
+    /* --build-id's note, an input of the linker's own, for a program or shared object */
+    return l->out_type != ET_REL ? add_build_id_input(l->ctx, &l->inputs) : 0;
 }
 
 static int phase_reproduce(ld_link_t *l) {
@@ -641,6 +645,10 @@ static int phase_write(ld_link_t *l) {
 
     if (elf_write_file(l->out, path) != ELF_OK) {
         fprintf(stderr, "ld: failed to write output %s\n", path);
+        return -1;
+    }
+    if (l->out_type != ET_REL && write_build_id(l->ctx, path) != 0) {
+        fprintf(stderr, "ld: failed to write the build ID of %s\n", path);
         return -1;
     }
     if (set_output_mode(path, l->is_program) != 0 &&

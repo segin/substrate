@@ -293,6 +293,13 @@ static int opt_script(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const ch
     return 0;
 }
 
+/* --build-id[=STYLE]: sha1 (the default), md5, uuid, 0xHEX, none. */
+static int opt_build_id(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
+    (void)o;
+    (void)as;
+    return ld_build_id_option(&ctx->opt, val);
+}
+
 /* --version-script FILE: its nodes read now, after any read before. */
 static int opt_version_script(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)o;
@@ -369,7 +376,7 @@ static const ld_opt_t options[] = {
     { "--discard-all -x", OPT_FLAG, opt_int, F(discard), LD_DISCARD_ALL },
     { "--discard-locals -X", OPT_FLAG, opt_int, F(discard), LD_DISCARD_LOCALS },
     { "--discard-none", OPT_FLAG, opt_int, F(discard), LD_DISCARD_NONE },
-    { "--build-id", OPT_OPTVAL, opt_ignored, 0, 0 },    /* none is made */
+    { "--build-id", OPT_OPTVAL, opt_build_id, 0, 0 },
 
     /* the inputs, and how the ones that follow are taken */
     { "-L", OPT_JOINED, opt_strvec, F(lib_paths), 0 },

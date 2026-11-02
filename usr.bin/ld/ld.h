@@ -75,6 +75,15 @@ typedef enum {
     LD_HASH_GNU = 2
 } ld_hash_style_t;
 
+/* --build-id's styles (ld_buildid.c); none is the default, as GNU ld's. */
+enum {
+    LD_BUILD_ID_NONE = 0,
+    LD_BUILD_ID_SHA1,
+    LD_BUILD_ID_MD5,
+    LD_BUILD_ID_UUID,
+    LD_BUILD_ID_HEX
+};
+
 /* Which local symbols a link leaves out, as GNU ld's options choose. */
 enum {
     LD_DISCARD_SEC_MERGE = 0,   /* the default: temporaries (.L...) of SHF_MERGE input sections; none under -r */
@@ -213,6 +222,9 @@ typedef struct {
     int error_rwx_segments; /* --error-rwx-segments: that warning is an error */
     int z_relro; /* 0=norelro, 1=relro */
     int z_separate_code; /* -z separate-code: code on pages of its own, apart from the read-only data */
+    int build_id_style;     /* LD_BUILD_ID_*: --build-id */
+    size_t build_id_size;   /* its descriptor's bytes */
+    uint8_t build_id_hex[64];   /* --build-id=0xHEX's bytes */
     int z_now;   /* -z now: the dynamic linker binds everything at once */
     uint64_t max_page_size; /* -z max-page-size: a PT_LOAD's alignment; 0 for 4 KiB */
     ld_hash_style_t hash_style;
@@ -931,6 +943,24 @@ int place_linker_symbols(const ld_ctx_t *ctx, elfobj_t *out, uint64_t base_vaddr
  * @return 0, or -1
  */
 int discard_local_symbols(const ld_ctx_t *ctx, elfobj_t *obj);
+
+/* ld_buildid.c */
+/** --build-id[=STYLE] into @p opt: sha1 (the default, "tree" too), md5, uuid, 0xHEX, none.  0 or LD_OPT_USAGE. */
+int ld_build_id_option(ld_options_t *opt, const char *val);
+/**
+ * With --build-id, add to @p inputs an object of the linker's own holding the .note.gnu.build-id input
+ * section (NT_GNU_BUILD_ID, owner "GNU", a descriptor of zeros), for the link to place as any note.
+ *
+ * @return 0, or -1
+ */
+int add_build_id_input(ld_ctx_t *ctx, objvec_t *inputs);
+/**
+ * Fill in the build ID of the output written at @p path: sha1 or md5 of the whole file (the descriptor
+ * zero while it is taken), uuid's random bytes, or 0xHEX's.  A note a script discarded is no matter.
+ *
+ * @return 0, or -1
+ */
+int write_build_id(const ld_ctx_t *ctx, const char *path);
 
 /* ld_version.c */
 /**

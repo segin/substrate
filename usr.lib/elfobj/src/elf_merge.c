@@ -586,7 +586,9 @@ elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, si
     for (i = 0; i < plan->input_count; ++i) {
         int nin;
 
-        if (i == base || plan->inputs[i].obj == NULL) {
+        /* (an input the linker made itself, its name in <>, as --build-id's note, is none of the program's) */
+        if (i == base || plan->inputs[i].obj == NULL ||
+            (plan->inputs[i].name != NULL && plan->inputs[i].name[0] == '<')) {
             continue;
         }
         nin = read_x86_props(plan->inputs[i].obj, in);

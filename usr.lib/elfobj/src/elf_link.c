@@ -991,6 +991,11 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                     free(inflated);
                     return err;
                 }
+            } else if (dst->type != src->type && dst->size == 0 && dst->data_size == 0 && src->type != SHT_NOBITS &&
+                       strcmp(src->name, ".note.GNU-stack") != 0) {
+                /* nothing in it yet (an empty .note.GNU-stack, which *(.note*) takes first): of the type
+                 * of what has contents, as GNU ld's */
+                dst->type = src->type;
             } else if (dst->type != src->type && !(src->type == SHT_NOBITS && dst->type == SHT_PROGBITS) &&
                        strcmp(src->name, ".note.GNU-stack") != 0) {
                 elf__set_err(out, ELF_ERR_FORMAT, "section type mismatch during merge");
