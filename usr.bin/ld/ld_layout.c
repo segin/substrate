@@ -831,34 +831,6 @@ int strip_group_sections_for_final(elfobj_t *obj) {
     return 0;
 }
 
-int enforce_wx_policy(const elfobj_t *obj) {
-    size_t i;
-
-    if (obj == NULL) {
-        return -1;
-    }
-    for (i = 0; i < elf_section_count(obj); ++i) {
-        const elf_section_t *sec = elf_section_get(obj, i);
-        uint64_t flags;
-        const char *name;
-        if (sec == NULL) {
-            continue;
-        }
-        flags = elf_section_flags(sec);
-        if ((flags & SHF_ALLOC) == 0) {
-            continue;
-        }
-        if ((flags & SHF_WRITE) != 0 && (flags & SHF_EXECINSTR) != 0) {
-            name = elf_section_name(sec);
-            fprintf(stderr,
-                    "ld: W^X policy violation: section %s is both writable and executable\n",
-                    name != NULL ? name : "<unnamed>");
-            return -1;
-        }
-    }
-    return 0;
-}
-
 int check_execstack(ld_ctx_t *ctx, const objvec_t *inputs) {
     const ld_options_t *opt = &ctx->opt;
     size_t i;

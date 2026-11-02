@@ -579,10 +579,6 @@ static int phase_dynamic_tags(ld_link_t *l) {
     return patch_dynamic_tag_values(l->out);
 }
 
-static int phase_wx_policy(ld_link_t *l) {
-    return enforce_wx_policy(l->out);
-}
-
 static int phase_rwx_segments(ld_link_t *l) {
     return check_rwx_segments(l->ctx, l->out);
 }
@@ -720,7 +716,6 @@ static const ld_phase_t link_phases[] = {
     { "fill-imports", phase_fill_imports, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
     { "dynamic-tags", phase_dynamic_tags, LD_FOR_FINAL, DID(LAYOUT), 0, 0,
       "failed to finalize .dynamic tag values" },
-    { "wx-policy", phase_wx_policy, LD_FOR_FINAL, DID(LAYOUT), 0, 0, NULL },
     { "rwx-segments", phase_rwx_segments, LD_FOR_FINAL, DID(LAYOUT), 0, 0, NULL },
     { "text-relocations", phase_text_relocations, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
     { "undefined", phase_undefined, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },

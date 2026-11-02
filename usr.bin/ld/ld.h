@@ -948,7 +948,6 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx);
  */
 int split_load_segments(const ld_ctx_t *ctx, elfobj_t *obj);
 int strip_group_sections_for_final(elfobj_t *obj);
-int enforce_wx_policy(const elfobj_t *obj);
 /**
  * Warn, as GNU ld does, that the output will have an executable stack: because the first input with an
  * executable .note.GNU-stack asks for one (unless -z execstack or -z noexecstack decided it), or, under
