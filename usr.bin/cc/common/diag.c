@@ -19,7 +19,9 @@
 static void diag_store(cc_diag_t *d, const char *path, size_t line, size_t col, const char *msg) {
     if (path != NULL) {
         snprintf(d->path, sizeof(d->path), "%s", path);
-        d->includes[0] = '\0'; /* (a file named anew: how it was included is the caller's to say) */
+        /* (a file named anew: how it was included, and the function, are the caller's to say) */
+        d->includes[0] = '\0';
+        d->function[0] = '\0';
     }
     d->line = line;
     d->col = col;
@@ -171,5 +173,33 @@ void cc_diag_print_recorded(const cc_diag_t *d) {
         return;
     }
     fputs(d->includes, stderr);
+    cc_diag_context(d->path, d->function);
     cc_diag_print("error", d->path, d->line, d->col, d->message, 1);
+}
+
+/* the context gcc's last "In function" or "At top level" line named (cc_diag_context()) */
+static char g_ctx_path[512];
+static char g_ctx_function[128];
+
+void cc_diag_context(const char *path, const char *function) {
+    const char *where = path != NULL && path[0] != '\0' ? path : "cc";
+
+    if (function == NULL) {
+        function = "";
+    }
+    if (strcmp(function, g_ctx_function) == 0 && (function[0] == '\0' || strcmp(where, g_ctx_path) == 0)) {
+        return;
+    }
+    if (function[0] != '\0') {
+        fprintf(stderr, "%s: In function '%s':\n", where, function);
+    } else {
+        fprintf(stderr, "%s: At top level:\n", where);
+    }
+    snprintf(g_ctx_path, sizeof(g_ctx_path), "%s", where);
+    snprintf(g_ctx_function, sizeof(g_ctx_function), "%s", function);
+}
+
+void cc_diag_context_reset(void) {
+    g_ctx_path[0] = '\0';
+    g_ctx_function[0] = '\0';
 }

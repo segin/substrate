@@ -23,6 +23,7 @@
 static const char *g_parser_diag_file = NULL;
 static int g_parser_diag_file_id = -1;          /* its index in g_parser_files */
 static cc_src_files_t *g_parser_files = NULL; /* the unit's files, being parsed */
+static const char *g_parser_function = NULL;  /* the function whose body is being parsed; NULL outside one */
 
 /**
  * Record a parse error at a position in the file being parsed.  A later
@@ -39,6 +40,7 @@ static void set_diag(cc_diag_t *d, size_t line, size_t col, const char *msg) {
     cc_diag_replace(d, g_parser_diag_file != NULL ? g_parser_diag_file : "", line, col, msg);
     if (d != NULL) {
         cc_src_files_include_chain(g_parser_files, g_parser_diag_file_id, d->includes, sizeof(d->includes));
+        snprintf(d->function, sizeof(d->function), "%s", g_parser_function != NULL ? g_parser_function : "");
     }
 }
 
@@ -293,6 +295,7 @@ static int parser_pedantic(parser_t *p, const char *msg) {
         snprintf(last_file, sizeof(last_file), "%s", file);
         last_line = p->tok.line;
         last_col = p->tok.col;
+        cc_diag_context(file, g_parser_function);
         cc_diag_print("warning", file, p->tok.line, p->tok.col, msg, 0);
     }
     if (!o->pedantic_errors && !o->warn_error) {
@@ -11333,7 +11336,23 @@ static int parse_function_declarator(parser_t *p, cc_function_t *f, const cc_cty
     return 0;
 }
 
+static int parse_function_def(parser_t *p, cc_function_t *f);
+
+/**
+ * Parse a function definition (parse_function_def()), its body's
+ * diagnostics naming it, as gcc's "In function 'f':" does.
+ *
+ * @return 0, or -1 on error
+ */
 static int parse_function(parser_t *p, cc_function_t *f) {
+    const char *saved = g_parser_function;
+    int rc = parse_function_def(p, f);
+
+    g_parser_function = saved;
+    return rc;
+}
+
+static int parse_function_def(parser_t *p, cc_function_t *f) {
     int is_typedef = 0;
     int fn_storage = 0;
     const cc_ctype_t *base;
@@ -11509,6 +11528,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         return -1;
     }
     f->has_body = 1;
+    g_parser_function = f->name;
     p->scope_depth = saved_depth + 1;
     {
         size_t i;
@@ -11689,8 +11709,10 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         diag->error_count = 0;
         diag->message[0] = '\0';
         diag->includes[0] = '\0';
+        diag->function[0] = '\0';
     }
     g_parser_diag_file = path;
+    g_parser_function = NULL;
     g_parser_diag_file_id = -1;
     g_parser_files = NULL;
 

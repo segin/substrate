@@ -87,6 +87,7 @@ const char *arg_reg64_xmm(size_t idx) {
 /* where the backend's errors are: x86_diag_at()'s */
 static size_t g_diag_line;
 static size_t g_diag_col;
+static const char *g_diag_function; /* and the function, gcc's "In function 'f':"; NULL for none */
 
 /**
  * Say where the backend is, for set_diag(): instruction @p in's statement
@@ -97,6 +98,7 @@ static size_t g_diag_col;
  * @param in  the instruction being emitted, or NULL for the function itself
  */
 void x86_diag_at(const cc_ssa_function_t *f, const cc_ssa_instr_t *in) {
+    g_diag_function = f != NULL ? f->name : NULL;
     if (in != NULL && in->src_line != 0) {
         g_diag_line = in->src_line;
         g_diag_col = in->src_col;
@@ -118,6 +120,9 @@ void x86_diag_at(const cc_ssa_function_t *f, const cc_ssa_instr_t *in) {
  * @param msg  the message
  */
 void set_diag(cc_diag_t *d, const char *msg) {
+    if (d != NULL && d->message[0] == '\0') {
+        snprintf(d->function, sizeof(d->function), "%s", g_diag_function != NULL ? g_diag_function : "");
+    }
     cc_diag_set(d, NULL, g_diag_line, g_diag_col, msg);
 }
 
@@ -5925,6 +5930,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         /* (an error's file is the one compiled, as the front end's are) */
         snprintf(diag->path, sizeof(diag->path), "%s", src_path != NULL ? src_path : "");
         diag->includes[0] = '\0';
+        diag->function[0] = '\0';
         diag->line = 0;
         diag->col = 0;
         diag->error_count = 0;

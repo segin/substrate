@@ -12,6 +12,8 @@ typedef struct cc_diag {
     /** how path was included, gcc's lines printed before the error ("In file included from hs.c:1:\n"); "" for
      *  the file compiled itself */
     char includes[1024];
+    /** the function the error is in, for gcc's "hs.c: In function 'f':" before it; "" at file scope */
+    char function[128];
 } cc_diag_t;
 
 /* cc_expr_t.unary_form: which operand of the binary spelling is the unary operator's */

@@ -73,4 +73,18 @@ void cc_diag_report(cc_diag_t *d);
  */
 void cc_diag_print_recorded(const cc_diag_t *d);
 
+/**
+ * Before a diagnostic in function @p function of file @p path ("" at file
+ * scope), print gcc's account of where it is when that has changed since
+ * the last: "hs.c: In function 'f':", or "hs.c: At top level:" after one
+ * in a function.
+ *
+ * @param path      the file, or NULL
+ * @param function  the function, or NULL or "" for none
+ */
+void cc_diag_context(const char *path, const char *function);
+
+/** Forget the context cc_diag_context() last printed: a new translation unit. */
+void cc_diag_context_reset(void);
+
 #endif

@@ -1,5 +1,6 @@
 #include "cc_backend.h"
 #include "cc_ctype.h"
+#include "cc_diag.h"
 #include "cc_frontend.h"
 #include "cc_middle.h"
 #include "cc_pipeline.h"
@@ -92,7 +93,9 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         diag->error_count = 0;
         diag->message[0] = '\0';
         diag->includes[0] = '\0';
+        diag->function[0] = '\0';
     }
+    cc_diag_context_reset();
 
     cc_options_select(opts);
     cc_ct_reset();
@@ -130,6 +133,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         /* (sema named the file of each construct it checked: the later phases' errors are the main file's) */
         snprintf(diag->path, sizeof(diag->path), "%s", display_src != NULL ? display_src : "");
         diag->includes[0] = '\0';
+        diag->function[0] = '\0';
     }
     if (timings) {
         t_sema = now_seconds() - t0;
