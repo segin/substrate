@@ -527,7 +527,7 @@ static int phase_assign_addresses(ld_link_t *l) {
     } else {
         base_vaddr = l->ctx->mode == 64 ? 0x400000ULL : 0x08048000ULL;
     }
-    return assign_section_addresses(l->out, base_vaddr);
+    return assign_section_addresses(l->out, base_vaddr, l->ctx->opt.z_separate_code);
 }
 
 static int phase_script_addresses(ld_link_t *l) {
@@ -781,6 +781,12 @@ int main(int argc, char **argv) {
     opt->current_lib_mode = LD_LIBMODE_DYNAMIC;
 #endif
     opt->z_execstack = -1;
+    /* GNU ld's default by target: separate code on Linux (and the GNU and BSD systems), not elsewhere */
+#ifdef LD_SUBSTRATE_BUILD
+    opt->z_separate_code = 0;
+#else
+    opt->z_separate_code = 1;
+#endif
     opt->warn_execstack = LD_WARN_EXECSTACK_OBJECTS;
     opt->warn_rwx_segments = 1;
     opt->z_relro = 1;

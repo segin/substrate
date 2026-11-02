@@ -1636,11 +1636,23 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 }
 
                 if (seg->type == PT_LOAD && lo_addr == UINT64_MAX) {
-                    /* Nothing in it has any size: there is nothing to
-                     * load, and a PT_LOAD of no bytes at address 0 is
-                     * not a way to say so.  The slot is left unused. */
-                    memset(p, 0, obj->cls == ELFOBJ_CLASS_32 ? 32u : 56u);
-                    continue;
+                    uint64_t bias;
+                    uint64_t hdr_end = phoff + (uint64_t)phnum * phentsz;
+
+                    /* The first segment, where it is to take the headers (-z separate-code with nothing
+                     * read-only before the code), is the headers alone, at the image's base, as GNU ld's. */
+                    if (obj->force_load_headers && !load_seen && find_alloc_file_bias(secs, sec_count, &bias)) {
+                        lo_off = 0;
+                        hi_off = hdr_end;
+                        lo_addr = bias;
+                        hi_addr = bias + hdr_end;
+                    } else {
+                        /* Nothing in it has any size: there is nothing to
+                         * load, and a PT_LOAD of no bytes at address 0 is
+                         * not a way to say so.  The slot is left unused. */
+                        memset(p, 0, obj->cls == ELFOBJ_CLASS_32 ? 32u : 56u);
+                        continue;
+                    }
                 }
                 if (lo_off == UINT64_MAX) {
                     lo_off = 0;

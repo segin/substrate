@@ -28,5 +28,6 @@ run:
 	./test_merge_sections.sh
 	./test_gnu_property.sh
 	./test_pie_exports.sh
+	./test_separate_code.sh
 
 clean:

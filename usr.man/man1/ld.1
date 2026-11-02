@@ -398,6 +398,20 @@ is aligned to it, and its file offset falls at the same place in such a
 page as its address; it is 4 KiB by default, and
 .Li CONSTANT(MAXPAGESIZE)
 in a script.
+.Cm separate-code
+puts the code on pages of its own, as GNU ld does: with no script, a
+program or shared object is a read-only segment of the headers,
+.Pa .interp
+and the dynamic linker's tables, then one of the code, one of the
+read-only data, and the writable one.
+.Cm noseparate-code
+makes the headers, the code and the read-only data one segment that can
+be executed.
+As with GNU ld, the default is
+.Cm separate-code
+in the linker built for a Linux host, and
+.Cm noseparate-code
+in Substrate's.
 Any other keyword is a warning and is ignored.
 .It Fl X , Fl -discard-locals , Fl x , Fl -discard-all , Fl -discard-none
 Which local symbols the output leaves out, as GNU ld leaves them out.

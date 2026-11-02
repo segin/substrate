@@ -38,7 +38,7 @@ void ld_usage(const char *prog) {
             "[-o output] [-L dir] [-l name] [-Bstatic|-Bdynamic] "
             "[--start-group ... --end-group] [--whole-archive|--no-whole-archive] "
             "[-plugin path] [-plugin-opt opt] "
-            "[-e symbol] [-T script] [--allow-undefined] [-z text|notext|execstack|noexecstack|relro|norelro] "
+            "[-e symbol] [-T script] [--allow-undefined] [-z text|notext|execstack|noexecstack|relro|norelro|separate-code|noseparate-code] "
             "[--reproduce dir] "
             "[--hash-style=sysv|gnu|both] "
             "[--compat=gnu|lld] input...\n",

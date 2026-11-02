@@ -198,6 +198,7 @@ typedef struct {
     int warn_rwx_segments;  /* --warn-rwx-segments, the default: a PT_LOAD that is RWX is warned of */
     int error_rwx_segments; /* --error-rwx-segments: that warning is an error */
     int z_relro; /* 0=norelro, 1=relro */
+    int z_separate_code; /* -z separate-code: code on pages of its own, apart from the read-only data */
     int z_now;   /* -z now: the dynamic linker binds everything at once */
     uint64_t max_page_size; /* -z max-page-size: a PT_LOAD's alignment; 0 for 4 KiB */
     ld_hash_style_t hash_style;
@@ -824,7 +825,12 @@ int relax_tls_dynamic_in_program(elfobj_t *out);
 
 /* ld_layout.c */
 int alloc_section_class(uint64_t flags);
-int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr);
+/**
+ * Give each section of the output its address and file offset, from @p base_vaddr, past the headers.  A
+ * section of another kind (code, read-only, writable) than the one before begins a page, except that with
+ * @p separate_code 0 (-z noseparate-code) code and read-only data are one kind.
+ */
+int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_code);
 int tls_extent(const elfobj_t *obj, uint64_t *start, uint64_t *memsz, uint64_t *filesz, uint64_t *align);
 int64_t tls_tpoff(const elfobj_t *obj, uint64_t addr);
 int reorder_sections_default_policy(elfobj_t *obj);

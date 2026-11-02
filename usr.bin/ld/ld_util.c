@@ -387,6 +387,8 @@ int parse_z_option(ld_ctx_t *ctx, const char *val) {
         { "norelro", offsetof(ld_options_t, z_relro), 0 },
         { "now", offsetof(ld_options_t, z_now), 1 },
         { "lazy", offsetof(ld_options_t, z_now), 0 },
+        { "separate-code", offsetof(ld_options_t, z_separate_code), 1 },
+        { "noseparate-code", offsetof(ld_options_t, z_separate_code), 0 },
     };
     size_t i;
 

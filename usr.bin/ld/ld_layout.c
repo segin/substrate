@@ -84,7 +84,7 @@ int64_t tls_tpoff(const elfobj_t *obj, uint64_t addr) {
     return (int64_t)(addr - start) - (int64_t)((memsz + align - 1) & ~(align - 1));
 }
 
-int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
+int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_code) {
     uint64_t off;
     uint64_t tls_align = 1;
     uint64_t mem_end;
@@ -144,6 +144,10 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         }
     }
     (void)tls_extent(obj, NULL, NULL, NULL, &tls_align);
+    /* -z separate-code: the headers are read-only, and code after them begins a page */
+    if (separate_code) {
+        last_alloc_class = 1;
+    }
     for (i = 0; i < elf_section_count(obj); ++i) {
         elf_section_t *sec = elf_section_get(obj, i);
         uint64_t align;
@@ -176,6 +180,10 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
 
         if ((flags & SHF_ALLOC) != 0) {
             int curr_alloc_class = alloc_section_class(flags);
+            /* -z noseparate-code: code and read-only data share pages, one segment */
+            if (!separate_code && curr_alloc_class == 1) {
+                curr_alloc_class = 0;
+            }
             if (last_alloc_class != -1 && curr_alloc_class != last_alloc_class) {
                 if (!align_up_u64_checked(off, page_align, &off) ||
                     !align_up_u64_checked(mem_end, page_align, &mem_end)) {
@@ -250,6 +258,25 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
     return 0;
 }
 
+/**
+ * Whether @p name is one of the read-only sections GNU ld's default script puts before the code: the
+ * interpreter's name, the build ID, and the dynamic linker's tables.  With -z separate-code they are the
+ * first segment, with the headers.
+ */
+static int is_pre_code_name(const char *name) {
+    static const char *const names[] = { ".interp",     ".note.gnu.build-id", ".hash",          ".gnu.hash",
+                                         ".dynsym",     ".dynstr",            ".gnu.version",   ".gnu.version_d",
+                                         ".gnu.version_r" };
+    size_t i;
+
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(name, names[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int section_order_rank(const elf_section_t *sec) {
     const char *name;
     uint64_t flags;
@@ -302,9 +329,12 @@ static int section_order_rank(const elf_section_t *sec) {
     }
     if (type == SHT_REL || type == SHT_RELA) {
         if ((flags & SHF_ALLOC) != 0) {
-            return 25;
+            return 6;   /* the dynamic linker's, after its tables and before the code, as GNU ld's script has them */
         }
         return 190;
+    }
+    if (name != NULL && (flags & (SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR)) == SHF_ALLOC && is_pre_code_name(name)) {
+        return strcmp(name, ".interp") == 0 ? 4 : 5;   /* the interpreter's name first, where the kernel reads it */
     }
     if ((flags & SHF_ALLOC) != 0) {
         if ((flags & SHF_EXECINSTR) != 0) {
@@ -435,6 +465,7 @@ static int script_places_section(const ld_ctx_t *ctx, const char *name) {
 int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     elf_segment_t *load_rx = NULL;
     elf_segment_t *load_ro = NULL;
+    elf_segment_t *load_ro_pre = NULL;  /* -z separate-code: the read-only sections before the code */
     elf_segment_t *load_rw = NULL;
     elf_segment_t *tls_seg = NULL;
     elf_segment_t *relro_seg = NULL;
@@ -456,6 +487,10 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
         return applied < 0 ? -1 : 0;
     }
     script_layout = ctx->script != NULL && ctx->script->has_sections;
+    /* -z separate-code: the headers go in the first segment, which is not the code's */
+    if (!script_layout && ctx->opt.z_separate_code && elf_set_load_headers(obj, 2) != ELF_OK) {
+        return -1;
+    }
 
     /*
      * The program headers are a segment of their own for a dynamic linker
@@ -468,6 +503,13 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     }
     if (ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0') {
         if (elf_add_interp_segment(obj, ctx->opt.interp_path) == NULL) {
+            return -1;
+        }
+    }
+    /* -z separate-code: the first segment is read-only, the headers and what comes before the code */
+    if (!script_layout && ctx->opt.z_separate_code) {
+        load_ro_pre = elf_add_load_segment(obj, LD_PF_R, ld_max_page_size(ctx));
+        if (load_ro_pre == NULL) {
             return -1;
         }
     }
@@ -537,14 +579,31 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 if (elf_segment_add_section(load_rw, sec) != ELF_OK) {
                     return -1;
                 }
-            } else {
-                if (load_ro == NULL) {
-                    load_ro = elf_add_load_segment(obj, LD_PF_R, ld_max_page_size(ctx));
-                    if (load_ro == NULL) {
+            } else if (!script_layout && !ctx->opt.z_separate_code) {
+                /* -z noseparate-code: read-only data in the one segment with the code, as GNU ld makes it */
+                if (load_rx == NULL) {
+                    load_rx = elf_add_load_segment(obj, LD_PF_R | LD_PF_X, ld_max_page_size(ctx));
+                    if (load_rx == NULL) {
                         return -1;
                     }
                 }
-                if (elf_segment_add_section(load_ro, sec) != ELF_OK) {
+                if (elf_segment_add_section(load_rx, sec) != ELF_OK) {
+                    return -1;
+                }
+            } else {
+                /* -z separate-code: what goes before the code (by what it is: .interp is made after the
+                 * rest and placed later) is a segment of its own, with the headers */
+                int pre = load_ro_pre != NULL && name != NULL &&
+                          (is_pre_code_name(name) || type == SHT_REL || type == SHT_RELA);
+                elf_segment_t **ro = pre ? &load_ro_pre : &load_ro;
+
+                if (*ro == NULL) {
+                    *ro = elf_add_load_segment(obj, LD_PF_R, ld_max_page_size(ctx));
+                    if (*ro == NULL) {
+                        return -1;
+                    }
+                }
+                if (elf_segment_add_section(*ro, sec) != ELF_OK) {
                     return -1;
                 }
             }
