@@ -465,13 +465,20 @@ struct x86_prop {
     uint32_t value;
 };
 
-/* How a property of @p type is merged: 'a' AND (gone if an input lacks it), 'o' OR, 0 another kind. */
+/*
+ * How a property of @p type is merged: 'a' AND (gone if an input lacks it); 'o' OR (an input that lacks it
+ * changes nothing; gone if it comes out 0); 'm' OR_AND (ORed while every input has it, 0 or not; gone if
+ * one lacks it); 0 another kind.
+ */
 static int x86_prop_kind(uint32_t type) {
     if ((type >= 0xc0000002u && type <= 0xc0007fffu) || (type >= 0xb0000000u && type <= 0xb0007fffu)) {
         return 'a';     /* GNU_PROPERTY_X86_UINT32_AND_LO..HI, GNU_PROPERTY_UINT32_AND_LO..HI */
     }
-    if ((type >= 0xc0008000u && type <= 0xc0017fffu) || (type >= 0xb0008000u && type <= 0xb000ffffu)) {
-        return 'o';     /* the UINT32_OR and UINT32_OR_AND ranges */
+    if ((type >= 0xc0008000u && type <= 0xc000ffffu) || (type >= 0xb0008000u && type <= 0xb000ffffu)) {
+        return 'o';     /* GNU_PROPERTY_X86_UINT32_OR_LO..HI, GNU_PROPERTY_UINT32_OR_LO..HI */
+    }
+    if (type >= 0xc0010000u && type <= 0xc0017fffu) {
+        return 'm';     /* GNU_PROPERTY_X86_UINT32_OR_AND_LO..HI: the ISA and features used */
     }
     return 0;
 }
@@ -594,6 +601,11 @@ elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, si
 
             if (kind == 'a') {
                 keep = j >= 0 && (acc[k].value &= in[j].value) != 0;
+            } else if (kind == 'm') {
+                keep = j >= 0;
+                if (keep) {
+                    acc[k].value |= in[j].value;
+                }
             } else if (kind == 'o') {
                 if (j >= 0) {
                     acc[k].value |= in[j].value;

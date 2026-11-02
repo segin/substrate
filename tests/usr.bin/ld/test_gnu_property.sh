@@ -104,6 +104,12 @@ for b in 64 32; do
     check $b -r a.o b.o
     check $b -r a.o e.o
     check $b e.o                # no note at all
+    # two with only the assembler's own note (i386's ISA used is 0): an OR_AND property every
+    # input has stays, 0 or not
+    { echo '	.text'; echo '	.globl f_g'; echo 'f_g:	ret'; } > g.s
+    ${AS_GNU:-as} --$b -o g.o g.s || exit 1
+    check $b e.o g.o
+    check $b -r e.o g.o
 done
 
 if [ $fail -eq 0 ]; then
