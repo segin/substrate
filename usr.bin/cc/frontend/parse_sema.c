@@ -598,6 +598,10 @@ static const cc_ctype_t *parser_bin_ctype(parser_t *p, const cc_expr_t *e) {
         /* a value, not an object: unqualified -- <stdatomic.h>'s `__typeof__ ((void)0, *p)` drops _Atomic so */
         return b != NULL ? b->unqual : NULL;
     }
+    if ((e->op == CC_BIN_SHL || e->op == CC_BIN_SHR) && a != NULL && cc_ct_is_integer(a)) {
+        /* the promoted left operand's, whatever the count's: Linux's FIELD_PREP `(m)(v) << __bf_shf(m)` */
+        return cc_ct_promote(a);
+    }
     if (a == NULL || b == NULL) {
         return NULL;
     }
