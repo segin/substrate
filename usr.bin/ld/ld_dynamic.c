@@ -543,6 +543,7 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
             elfobj_t *dso = NULL;
             uint64_t align, off;
             dso_def_t def;
+            int own_weak;
 
             if (sym == NULL || !is_runtime_import_symbol(sym) ||
                 !reloc_is_direct_ref(machine, elf_reloc_type(rel), 1) ||
@@ -578,9 +579,21 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
                 symvec_push(&imports->copies, &imports->copy_count, &imports->copy_cap, sym) != 0) {
                 return -1;
             }
-            /* Its other names. */
+            /* Its other names: as GNU ld pairs them, a weak name and a strong one at the same place (environ
+             * and __environ); two strong names are two variables, each copied if referred to. */
             if (ld_dso_open(ctx, ctx->dso_inputs.items[def.dso], &dso) != ELF_OK) {
                 continue;
+            }
+            own_weak = 0;
+            for (k = 0; k < elf_symbol_count(dso); ++k) {
+                const elf_symbol_t *own = elf_symbol_at(dso, k);
+
+                if (own != NULL && elf_symbol_name(own) != NULL &&
+                    strcmp(elf_symbol_name(own), elf_symbol_name(sym)) == 0 &&
+                    elf_symbol_shndx(own) == def.shndx && elf_symbol_value(own) == def.value) {
+                    own_weak = elf_symbol_bind(own) == STB_WEAK;
+                    break;
+                }
             }
             for (k = 0; k < elf_symbol_count(dso); ++k) {
                 const elf_symbol_t *other = elf_symbol_at(dso, k);
@@ -590,7 +603,8 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
                 if (oname == NULL || oname[0] == '\0' || strcmp(oname, elf_symbol_name(sym)) == 0 ||
                     elf_symbol_shndx(other) != def.shndx || elf_symbol_value(other) != def.value ||
                     elf_symbol_type(other) != STT_OBJECT ||
-                    (elf_symbol_bind(other) != STB_GLOBAL && elf_symbol_bind(other) != STB_WEAK)) {
+                    (elf_symbol_bind(other) != STB_GLOBAL && elf_symbol_bind(other) != STB_WEAK) ||
+                    (elf_symbol_bind(other) == STB_WEAK) == own_weak) {
                     continue;
                 }
                 alias = elf_find_symbol(out, oname);

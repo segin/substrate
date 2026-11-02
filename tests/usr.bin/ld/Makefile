@@ -21,5 +21,6 @@ run:
 	./test_response_file.sh
 	./test_library_script.sh
 	./test_pie_copy.sh
+	./test_copy_alias.sh
 
 clean:

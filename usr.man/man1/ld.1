@@ -806,7 +806,9 @@ to a function in a shared object goes through the PLT; a function whose
 address is taken has its PLT entry for an address, the same in every
 module; and a variable of a shared object gets a copy in the executable
 .Pq Pa .dynbss , Dv R_*_COPY ,
-under every name the shared object has for it.
+under its name and, as GNU ld pairs them, a weak name and a strong one
+the shared object has for the same place; two strong names there are two
+variables, each copied by itself.
 A PIE gets such a copy of a variable it refers to pc-relatively, as gcc
 compiles a PIE for x86-64 to do; one it refers to only by absolute
 address is relocated where it is referred to instead.
