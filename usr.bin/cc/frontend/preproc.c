@@ -4586,6 +4586,20 @@ next_iter:
     i = 0;
     while (out.buf[i] != '\0') {
         if (out.buf[i] == PP_EMPTY_ARG_MARKER) {
+            size_t k = i + 1;
+
+            while (out.buf[k] == ' ' || out.buf[k] == '\t') {
+                k++;
+            }
+            if (out.buf[k] == '#' && out.buf[k + 1] == '#' &&
+                sb_append_c(&pasted, PP_EMPTY_ARG_MARKER) != 0) {
+                /* an empty left operand of `##`, kept for the paste to see: `int p##x` with p empty is `int x` */
+                free(va_args_exp);
+                free(va_args_raw);
+                sb_free(&out);
+                sb_free(&pasted);
+                return NULL;
+            }
             i++;
             continue;
         }
@@ -4611,6 +4625,17 @@ next_iter:
                 while (out.buf[i] == ' ' || out.buf[i] == '\t') {
                     i++;
                 }
+            }
+            if (left_empty && right_empty && out.buf[i] == '#' && out.buf[i + 1] == '#') {
+                /* two empty operands paste to an empty one, the next `##`'s left (`int p##q##n`, p and q empty) */
+                if (sb_append_c(&pasted, PP_EMPTY_ARG_MARKER) != 0) {
+                    free(va_args_exp);
+                    free(va_args_raw);
+                    sb_free(&out);
+                    sb_free(&pasted);
+                    return NULL;
+                }
+                continue;
             }
             if ((left_empty || right_empty) && pasted.len > 0 && out.buf[i] != '\0') {
                 if (sb_append_c(&pasted, ' ') != 0) {
