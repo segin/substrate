@@ -5735,6 +5735,47 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
     }
 }
 
+/**
+ * Expand the macros of a computed #include's operand.  A header name is
+ * spelled from the tokens themselves, so the white space expansion puts
+ * between tokens that would otherwise lex as one is not part of it: the
+ * Linux trace headers' `<trace/events/system.h>` of TRACE_SYSTEM 9p is
+ * `<trace/events/9p.h>`, though `9p` and `.h` are kept apart elsewhere.
+ *
+ * @param st    the preprocessor state
+ * @param src   the operand
+ * @param file  the file, for diagnostics
+ * @param line  the line, for diagnostics
+ * @param diag  receives an error
+ * @return      the expanded operand (owned), or NULL with @p diag set
+ */
+static char *expand_header_name(pp_state_t *st, const char *src, const char *file, int line, cc_diag_t *diag) {
+    cc_strvec_t disabled;
+    char *masked;
+    char *unmasked;
+    size_t i;
+    size_t n = 0;
+
+    memset(&disabled, 0, sizeof(disabled));
+    masked = expand_text(st, src, file, line, 0, &disabled, diag);
+    cc_strvec_free(&disabled);
+    if (masked == NULL) {
+        return NULL;
+    }
+    for (i = 0; masked[i] != '\0'; ++i) {
+        if (masked[i] != PP_PASTE_GUARD) {
+            masked[n++] = masked[i];
+        }
+    }
+    masked[n] = '\0';
+    unmasked = unmask_hidden_macro_tokens(masked);
+    free(masked);
+    if (unmasked == NULL) {
+        set_diag(diag, (size_t)line, 1, "out of memory unmasking hidden macro tokens");
+    }
+    return unmasked;
+}
+
 static int eval_condition(pp_state_t *st, const char *expr, const char *file, int line, int *out_true, cc_diag_t *diag) {
     char *rewritten = NULL;
     char *expanded;
@@ -6947,7 +6988,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     char *inc_expanded = NULL;
                     p = skip_ws(p);
                     if (*p != '"' && *p != '<') {
-                        inc_expanded = expand_text(st, p, path, cur_line, 0, NULL, diag);
+                        inc_expanded = expand_header_name(st, p, path, cur_line, diag);
                         if (inc_expanded == NULL) {
                             goto fail;
                         }
