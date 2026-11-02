@@ -3823,6 +3823,29 @@ static long parser_ct_align(const parser_t *p, const cc_ctype_t *t) {
 }
 
 /**
+ * What gcc's __alignof__ says of type @p t: its preferred alignment, which
+ * on i386 is 8 for long long, double and _Complex double (and arrays of
+ * them) where the ABI's, and _Alignof's, is 4; a structure keeps its own.
+ *
+ * @return the alignment in bytes, or -1 if not known
+ */
+static long parser_ct_gnu_align(const parser_t *p, const cc_ctype_t *t) {
+    long align = parser_ct_align(p, t);
+    const cc_options_t *o = cc_options_current();
+    const cc_ctype_t *s = t;
+
+    while (s != NULL && s->kind == CC_CT_ARRAY) {
+        s = s->of;
+    }
+    if (s != NULL && o != NULL && o->target == CC_TARGET_I386 && align > 0 && align < 8 &&
+        (s->kind == CC_CT_LLONG || s->kind == CC_CT_ULLONG || s->kind == CC_CT_DOUBLE ||
+         (s->kind == CC_CT_COMPLEX && s->of != NULL && s->of->kind == CC_CT_DOUBLE))) {
+        return 8;
+    }
+    return align;
+}
+
+/**
  * Give expression @p e the type @p t.
  */
 static void parser_set_ctype(cc_expr_t *e, const cc_ctype_t *t) {
@@ -8937,7 +8960,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             if (ae == NULL) {
                 return NULL;
             }
-            align = is_gnu_alignof ? parser_ct_align(p, parser_expr_ctype(p, ae))
+            align = is_gnu_alignof ? parser_ct_gnu_align(p, parser_expr_ctype(p, ae))
                                    : parser_ct_c11_align(p, parser_expr_ctype(p, ae));
             align = parser_object_align(p, ae, align);
             free_expr(ae);
@@ -8956,7 +8979,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 return NULL;
             }
             /* gcc: _Alignof caps a vector's natural alignment at 16, __alignof__ does not */
-            align = is_gnu_alignof ? parser_ct_align(p, act) : parser_ct_c11_align(p, act);
+            align = is_gnu_alignof ? parser_ct_gnu_align(p, act) : parser_ct_c11_align(p, act);
             if (typedef_align_for(p->last_spec_align, p->last_spec_ctype, act) > 0) {
                 /* a typedef name with its own alignment, raised or lowered (gcc) */
                 align = p->last_spec_align;
@@ -8974,7 +8997,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(ae);
                 return NULL;
             }
-            align = is_gnu_alignof ? parser_ct_align(p, parser_expr_ctype(p, ae))
+            align = is_gnu_alignof ? parser_ct_gnu_align(p, parser_expr_ctype(p, ae))
                                    : parser_ct_c11_align(p, parser_expr_ctype(p, ae));
             align = parser_object_align(p, ae, align);
             free_expr(ae);
