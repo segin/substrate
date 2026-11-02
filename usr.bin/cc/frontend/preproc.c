@@ -7156,7 +7156,8 @@ static int preprocess_file(pp_state_t *st, const char *path, const char *display
         g_pp_diag_file = old_diag_file;
         return -1;
     }
-    if (!(depth == 0 && st->main_is_stdin) && dep_add_path(st, path, 0, depth == 0) != 0) {
+    /* (the file compiled, and -include's; an #include's is recorded where it is found, as gcc names it) */
+    if (depth == 0 && !st->main_is_stdin && dep_add_path(st, display, 0, 1) != 0) {
         goto fail;
     }
     /* (gcc's flag 1: an included file begins) */
@@ -7251,11 +7252,12 @@ static int preprocess_file(pp_state_t *st, const char *path, const char *display
                             set_diag(diag, (size_t)cur_line, 1, "include file not found");
                             goto fail;
                         }
-                        if (dep_add_path(st, inc_path, is_system, 0) != 0) {
+                        pp_include_display(st, display, inc_spec, quoted, inc_path, inc_display);
+                        /* (a dependency named as gcc names it: as it was found, "hdr/s.h") */
+                        if (dep_add_path(st, inc_display, is_system, 0) != 0) {
                             free(inc_expanded);
                             goto fail;
                         }
-                        pp_include_display(st, display, inc_spec, quoted, inc_path, inc_display);
                         if (preprocess_file(st, inc_path, inc_display, out, depth + 1, macros_only, diag) != 0) {
                             fprintf(stderr, "cpp: note: in file included from %s:%d\n", display, cur_line);
                             free(inc_expanded);

@@ -332,6 +332,14 @@ they are replaced by default only in the ISO modes before C23
 Dump macro definitions.
 .It Fl M , Fl MM , Fl MD , Fl MMD
 Emit dependency rules.
+A header is named as gcc names it: as it was found, the including file's
+directory as its name has it or the
+.Fl I
+directory as written, joined to the
+.Ic #include Ns 's
+name
+.Pq Pa hdr/b.h ,
+not by an absolute path.
 .It Fl MF Ar file , Fl MT Ar target , Fl MQ Ar target
 Dependency output target controls.
 .It Fl std Ns = Ns Ar c90|c95|c99|c11|c17|c23
