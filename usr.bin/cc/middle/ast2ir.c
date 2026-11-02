@@ -3200,7 +3200,8 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
         return -1;
     }
 
-    if (e->member_bit_split) {
+    if (e->member_bit_split == 2) {
+        /* the unit reaches past the object: only the field's bytes are read */
         v = lower_bitfield_load_bytes(sf, e, ptrv, storage_size, diag);
         if (v < 0) {
             return -1;
@@ -3319,8 +3320,8 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
     }
     new_bits = rhsv;
 
-    if (e->member_bit_split) {
-        /* only the field's bytes: the others are not stored back */
+    if (e->member_bit_split == 2) {
+        /* only the field's bytes, the unit reaching past the object; the others are not stored back */
         oldv = lower_bitfield_load_bytes(sf, e, ptrv, storage_size, diag);
         if (oldv < 0) {
             return -1;

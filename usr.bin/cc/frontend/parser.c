@@ -1061,6 +1061,7 @@ static int struct_bitfield_units(parser_t *p, int sid, long size) {
         m->bit_split = 0;
         if (bitfield_unit(owned, size, pos, m->bit_width, &start, &unit) != 0) {
             /* `char a; int b : 24; char c;`: every unit holds a or c, so a store is split by byte */
+            m->bit_split = 1;
             if (bitfield_unit(NULL, size, pos, m->bit_width, &start, &unit) != 0) {
                 /*
                  * no unit fits in the object at all -- a packed one of three bytes, a field taking all 24 bits:
@@ -1072,8 +1073,8 @@ static int struct_bitfield_units(parser_t *p, int sid, long size) {
                     return -1;
                 }
                 start = pos / 8;
+                m->bit_split = 2;
             }
-            m->bit_split = 1;
         }
         m->offset = start;
         m->bit_offset = (int)(pos - start * 8);
