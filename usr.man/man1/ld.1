@@ -878,6 +878,26 @@ This is done under
 .Fl r
 as well.
 .Pp
+With no script's
+.Ic SECTIONS ,
+the link defines the symbols GNU ld's default script does:
+.Va __bss_start
+(where the zeros begin),
+.Va _edata
+(the end of what has contents) and
+.Va _end
+(the end of the image, aligned to a word) in every program, and in a
+shared object where something refers to them; and
+.Va edata ,
+.Va end ,
+.Va etext ,
+.Va _etext ,
+.Va __etext
+(the end of the code) and
+.Va __executable_start
+(the image's first address) where something refers to them and no input
+defines them.
+.Pp
 The symbol table of a program or shared object has no section symbols,
 as GNU ld's has none, unless
 .Fl -emit-relocs

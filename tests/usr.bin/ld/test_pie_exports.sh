@@ -47,12 +47,9 @@ int main(void) { return lib_call(lib_var) == 92 ? 0 : 1; }
 EOF
 ${GCC:-gcc} -O2 -fPIC -shared -Wl,--version-script=lib.map -o libt.so lib.c || exit 1
 
-# The dynamic symbols of OBJ: defined or not, binding, name with version,
-# sorted.  (Not __bss_start, _edata and _end, which GNU ld's default
-# script defines and -E exports, and this linker does not define.)
+# The dynamic symbols of OBJ: defined or not, binding, name with version, sorted.
 dynsyms() {
-    readelf --dyn-syms -W "$1" | awk 'NR > 3 && $8 != "" { print ($7 == "UND" ? "UND" : "DEF"), $5, $8 }' |
-        grep -v -E ' (__bss_start|_edata|_end)$' | sort
+    readelf --dyn-syms -W "$1" | awk 'NR > 3 && $8 != "" { print ($7 == "UND" ? "UND" : "DEF"), $5, $8 }' | sort
 }
 
 # check FLAGS...: GNU ld and this one, through gcc -B

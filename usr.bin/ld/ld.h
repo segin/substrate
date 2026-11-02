@@ -248,6 +248,7 @@ typedef struct {
     int explicit_mode;
     int mode_settled;           /* an input has said which machine */
     struct lds_script *script;  /* opt.script_path, parsed */
+    unsigned linker_sym_mask;   /* which of the default script's symbols the link defines (ld_layout.c) */
     int plugin_checked;
     int plugin_unusable;        /* one was named that cannot be run */
     struct ld_dso_cache *dso_cache;     /* the shared objects, each opened once */
@@ -864,6 +865,22 @@ int check_execstack(ld_ctx_t *ctx, const objvec_t *inputs);
  * @return 0, or -1 if the link is to fail
  */
 int check_rwx_segments(ld_ctx_t *ctx, const elfobj_t *obj);
+/**
+ * Define, in a link with no script's SECTIONS, the symbols GNU ld's default script defines that no input
+ * does: __bss_start, _edata and _end always; edata, end, etext, _etext, __etext and __executable_start
+ * where something refers to them (PROVIDE).  They are absolute 0 until place_linker_symbols().
+ *
+ * @return 0, or -1
+ */
+int declare_linker_symbols(ld_ctx_t *ctx, elfobj_t *out);
+/**
+ * Give the symbols declare_linker_symbols() defined their places, the sections having addresses: etext
+ * the end of the code, _edata and edata the end of what has contents, __bss_start there in the zeros,
+ * _end and end the end of the image, __executable_start @p base_vaddr.
+ *
+ * @return 0, or -1
+ */
+int place_linker_symbols(const ld_ctx_t *ctx, elfobj_t *out, uint64_t base_vaddr);
 /**
  * Leave out of the output's symbol table the locals GNU ld leaves out: in a program or shared object every
  * section symbol (unless --emit-relocs); and the temporaries or locals --discard-* names, by default the

@@ -517,17 +517,27 @@ static int phase_segments(ld_link_t *l) {
     return add_default_segments(l->out, l->ctx);
 }
 
-static int phase_assign_addresses(ld_link_t *l) {
-    uint64_t base_vaddr;
-
+/* Where the image begins: -Ttext-segment's, 0 for a shared object or PIE, else the target's. */
+static uint64_t image_base(const ld_link_t *l) {
     if (l->ctx->opt.have_image_base) {
-        base_vaddr = l->ctx->opt.image_base;
-    } else if (l->out_type == ET_DYN) {
-        base_vaddr = 0;
-    } else {
-        base_vaddr = l->ctx->mode == 64 ? 0x400000ULL : 0x08048000ULL;
+        return l->ctx->opt.image_base;
     }
-    return assign_section_addresses(l->out, base_vaddr, l->ctx->opt.z_separate_code);
+    if (l->out_type == ET_DYN) {
+        return 0;
+    }
+    return l->ctx->mode == 64 ? 0x400000ULL : 0x08048000ULL;
+}
+
+static int phase_assign_addresses(ld_link_t *l) {
+    return assign_section_addresses(l->out, image_base(l), l->ctx->opt.z_separate_code);
+}
+
+static int phase_linker_symbols(ld_link_t *l) {
+    return declare_linker_symbols(l->ctx, l->out);
+}
+
+static int phase_place_linker_symbols(ld_link_t *l) {
+    return place_linker_symbols(l->ctx, l->out, image_base(l));
 }
 
 static int phase_script_addresses(ld_link_t *l) {
@@ -660,6 +670,7 @@ static const ld_phase_t link_phases[] = {
       "failed to emit .note.substrate_ld metadata" },
     { "strip-groups", phase_strip_groups, LD_FOR_FINAL, DID(MERGE), DID(LAYOUT), 0,
       "failed to strip SHT_GROUP sections for final output" },
+    { "linker-symbols", phase_linker_symbols, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },
     { "relax-tls", phase_relax_tls, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },
     { "plan-imports", phase_plan_imports, LD_FOR_FINAL, DID(MERGE), DID(PLAN) | DID(LAYOUT), DID(PLAN),
       "failed to plan GOT/PLT dynamic imports" },
@@ -676,6 +687,7 @@ static const ld_phase_t link_phases[] = {
     { "assign-addresses", phase_assign_addresses, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), DID(LAYOUT),
       "failed to assign section virtual addresses" },
     { "script-addresses", phase_script_addresses, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
+    { "place-linker-symbols", phase_place_linker_symbols, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
     { "fill-imports", phase_fill_imports, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
     { "dynamic-tags", phase_dynamic_tags, LD_FOR_FINAL, DID(LAYOUT), 0, 0,
       "failed to finalize .dynamic tag values" },

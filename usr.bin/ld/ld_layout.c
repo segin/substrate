@@ -259,22 +259,26 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr, int separate_co
 }
 
 /**
- * Whether @p name is one of the read-only sections GNU ld's default script puts before the code: the
- * interpreter's name, the build ID, and the dynamic linker's tables.  With -z separate-code they are the
- * first segment, with the headers.
+ * Where @p name is among the read-only sections GNU ld's default script puts before the code (the
+ * interpreter's name, the build ID, the dynamic linker's tables), in that script's order: 1 for the first,
+ * or 0 if it is not one.  With -z separate-code they are the first segment, with the headers.
  */
-static int is_pre_code_name(const char *name) {
-    static const char *const names[] = { ".interp",     ".note.gnu.build-id", ".hash",          ".gnu.hash",
-                                         ".dynsym",     ".dynstr",            ".gnu.version",   ".gnu.version_d",
+static int pre_code_place(const char *name) {
+    static const char *const names[] = { ".interp", ".note.gnu.build-id", ".hash",        ".gnu.hash",
+                                         ".dynsym", ".dynstr",            ".gnu.version", ".gnu.version_d",
                                          ".gnu.version_r" };
     size_t i;
 
     for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
         if (strcmp(name, names[i]) == 0) {
-            return 1;
+            return (int)i + 1;
         }
     }
     return 0;
+}
+
+static int is_pre_code_name(const char *name) {
+    return pre_code_place(name) != 0;
 }
 
 static int section_order_rank(const elf_section_t *sec) {
@@ -329,12 +333,14 @@ static int section_order_rank(const elf_section_t *sec) {
     }
     if (type == SHT_REL || type == SHT_RELA) {
         if ((flags & SHF_ALLOC) != 0) {
-            return 6;   /* the dynamic linker's, after its tables and before the code, as GNU ld's script has them */
+            return 9;   /* the dynamic linker's, after its tables and before the code, as GNU ld's script has them */
         }
         return 190;
     }
+    /* before them, in GNU ld's order: .interp, the build ID, .hash, .gnu.hash, .dynsym, .dynstr, versions */
     if (name != NULL && (flags & (SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR)) == SHF_ALLOC && is_pre_code_name(name)) {
-        return strcmp(name, ".interp") == 0 ? 4 : 5;   /* the interpreter's name first, where the kernel reads it */
+        int place = pre_code_place(name);
+        return place < 8 ? place - 1 : 8;
     }
     if ((flags & SHF_ALLOC) != 0) {
         if ((flags & SHF_EXECINSTR) != 0) {
@@ -870,6 +876,143 @@ static int local_symbol_goes(const elf_symbol_t *sym, void *user) {
 
 int discard_local_symbols(const ld_ctx_t *ctx, elfobj_t *obj) {
     return elf_remove_symbols(obj, local_symbol_goes, (void *)ctx, NULL) == ELF_OK ? 0 : -1;
+}
+
+/* The symbols GNU ld's default script defines: where the code ends, the data, the zeros, the image. */
+enum { LSYM_ETEXT, LSYM_EDATA, LSYM_BSS_START, LSYM_END, LSYM_EXEC_START };
+static const struct {
+    const char *name;
+    int kind;
+    int always;         /* defined whether anything refers to it or not; else as PROVIDE */
+} linker_syms[] = {
+    { "__bss_start", LSYM_BSS_START, 1 }, { "_edata", LSYM_EDATA, 1 },   { "_end", LSYM_END, 1 },
+    { "edata", LSYM_EDATA, 0 },           { "end", LSYM_END, 0 },        { "etext", LSYM_ETEXT, 0 },
+    { "_etext", LSYM_ETEXT, 0 },          { "__etext", LSYM_ETEXT, 0 },  { "__executable_start", LSYM_EXEC_START, 0 },
+};
+
+int declare_linker_symbols(ld_ctx_t *ctx, elfobj_t *out) {
+    size_t i;
+
+    ctx->linker_sym_mask = 0;
+    if (ctx->script != NULL && ctx->script->has_sections) {
+        return 0;   /* a script says what it defines */
+    }
+    for (i = 0; i < sizeof(linker_syms) / sizeof(linker_syms[0]); ++i) {
+        elf_symbol_t *sym = elf_find_symbol(out, linker_syms[i].name);
+
+        /* an input's definition stands against a PROVIDE; the default script's own assignment wins */
+        if (sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF &&
+            (!linker_syms[i].always || (ctx->opt.expect_type == ET_DYN && !ctx->opt.pie))) {
+            continue;
+        }
+        if (sym == NULL) {
+            /* a shared object has them only where something refers to them, as GNU ld's */
+            if (!linker_syms[i].always || (ctx->opt.expect_type == ET_DYN && !ctx->opt.pie)) {
+                continue;
+            }
+            sym = elf_add_symbol(out, linker_syms[i].name, 0, 0, STB_GLOBAL, STT_NOTYPE);
+            if (sym == NULL) {
+                return -1;
+            }
+        }
+        /* defined from now on, so that nothing takes it for an import; where, once there are addresses */
+        if (elf_symbol_set_binding(sym, STB_GLOBAL) != ELF_OK || elf_symbol_set_shndx(sym, SHN_ABS) != ELF_OK ||
+            elf_symbol_set_value(sym, 0) != ELF_OK) {
+            return -1;
+        }
+        ctx->linker_sym_mask |= 1u << i;
+    }
+    return 0;
+}
+
+int place_linker_symbols(const ld_ctx_t *ctx, elfobj_t *out, uint64_t base_vaddr) {
+    size_t i;
+    size_t text = 0, data = 0, bss = 0, last = 0, first = 0;   /* section numbers (index + 1), 0 for none */
+    uint64_t text_end = 0, data_end = 0, bss_addr = UINT64_MAX, last_end = 0, first_addr = UINT64_MAX;
+    uint64_t word = ctx->mode == 64 ? 8 : 4;
+
+    if (ctx->linker_sym_mask == 0) {
+        return 0;
+    }
+    for (i = 0; i < elf_section_count(out); ++i) {
+        const elf_section_t *sec = elf_section_get(out, i);
+        uint64_t flags = sec != NULL ? elf_section_flags(sec) : 0;
+        uint64_t addr, end;
+
+        /* (an empty section is none: GNU ld leaves it out) */
+        if ((flags & SHF_ALLOC) == 0 || (flags & SHF_TLS) != 0 || elf_section_size(sec) == 0) {
+            continue;
+        }
+        addr = elf_section_addr(sec);
+        end = addr + elf_section_size(sec);
+        if (addr < first_addr) {
+            first_addr = addr;
+            first = i + 1;
+        }
+        if ((flags & SHF_EXECINSTR) != 0 && end >= text_end) {
+            text_end = end;
+            text = i + 1;
+        }
+        if (elf_section_type(sec) != SHT_NOBITS && end >= data_end) {
+            data_end = end;
+            data = i + 1;
+        }
+        if (elf_section_type(sec) == SHT_NOBITS && addr < bss_addr) {
+            bss_addr = addr;
+            bss = i + 1;
+        }
+        if (end >= last_end) {
+            last_end = end;
+            last = i + 1;
+        }
+    }
+    for (i = 0; i < sizeof(linker_syms) / sizeof(linker_syms[0]); ++i) {
+        elf_symbol_t *sym;
+        size_t shndx = 0;
+        uint64_t at = 0;
+
+        if ((ctx->linker_sym_mask & (1u << i)) == 0 ||
+            (sym = elf_find_symbol(out, linker_syms[i].name)) == NULL) {
+            continue;
+        }
+        switch (linker_syms[i].kind) {
+        case LSYM_ETEXT:
+            shndx = text;
+            at = text_end;
+            break;
+        case LSYM_EDATA:
+            shndx = data;
+            at = data_end;
+            break;
+        case LSYM_BSS_START:
+            /* where the zeros begin: the end of the data, in the first of them (GNU ld's `__bss_start = .`) */
+            shndx = bss != 0 ? bss : data;
+            at = data_end;
+            break;
+        case LSYM_END:
+            /* the end of the image, aligned to a word (the default script's ALIGN(. != 0 ? 64 / 8 : 1)) */
+            shndx = last;
+            at = (last_end + word - 1) & ~(word - 1);
+            break;
+        default:
+            /* the image's first address, in its first section */
+            shndx = first;
+            at = base_vaddr;
+            break;
+        }
+        if (shndx == 0) {
+            if (elf_symbol_set_shndx(sym, SHN_ABS) != ELF_OK || elf_symbol_set_value(sym, at) != ELF_OK) {
+                return -1;
+            }
+            continue;
+        }
+        /* a value is an offset in its section until the symbol values are finalized (below it may wrap) */
+        at -= elf_section_addr(elf_section_get(out, shndx - 1));
+        if (elf_symbol_set_shndx(sym, (uint32_t)shndx) != ELF_OK || elf_symbol_set_value(sym, at) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 int check_rwx_segments(ld_ctx_t *ctx, const elfobj_t *obj) {

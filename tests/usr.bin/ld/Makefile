@@ -29,5 +29,6 @@ run:
 	./test_gnu_property.sh
 	./test_pie_exports.sh
 	./test_separate_code.sh
+	./test_linker_symbols.sh
 
 clean:
