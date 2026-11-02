@@ -528,24 +528,42 @@ static void emit_i386_load_half(FILE *fp, const cc_ssa_function_t *f, const slot
     fprintf(fp, "\tpushl %%eax\n");
     emit_i386_call_sym(fp, "__extendhfdf2", 0);
     fprintf(fp, "\taddl $16, %%esp\n");
-    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, dst));
+    /* (into a long double's slot as one, where the value is: a half evaluated in long double) */
+    emit_i386_x87_store_f64(fp, f, lay, dst);
 }
 
 /**
- * Store double value @p v as the `_Float16` at the address in register
- * @p reg: libgcc's __truncdfhf2, which takes the double on the stack and
- * returns the half in %xmm0, as gcc calls it.
+ * The `_Float16` floating value @p v rounds to, its bits in %xmm0: libgcc's
+ * __truncdfhf2 of a double, or of a long double (a half evaluated in long
+ * double, sema_eval_type()) __truncxfhf2, rounding once, as gcc calls
+ * them, the value on the stack.  The 32 bytes the call takes are left on
+ * the stack, 16 up of them free for the caller (it pops them).
+ */
+static void emit_i386_half_bits(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int v) {
+    fprintf(fp, "\tsubl $32, %%esp\n");
+    if (i386_fp_is_ext(f, v)) {
+        fprintf(fp, "\tfldt %d(%%ebp)\n", slot_off(lay, v));
+        fprintf(fp, "\tfstpt (%%esp)\n");
+        emit_i386_call_sym(fp, "__truncxfhf2", 0);
+    } else {
+        emit_i386_x87_load_f64(fp, f, lay, v);
+        fprintf(fp, "\tfstpl (%%esp)\n");
+        emit_i386_call_sym(fp, "__truncdfhf2", 0);
+    }
+}
+
+/**
+ * Store floating value @p v as the `_Float16` at the address in register
+ * @p reg (emit_i386_half_bits()).
  */
 static void emit_i386_store_half(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                  const char *reg, int v) {
     int_regs_flush(fp, f, lay, ist);
-    fprintf(fp, "\tsubl $16, %%esp\n");
-    fprintf(fp, "\tmovl %s, 8(%%esp)\n", reg);
-    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, v));
-    fprintf(fp, "\tfstpl (%%esp)\n");
-    emit_i386_call_sym(fp, "__truncdfhf2", 0);
-    fprintf(fp, "\tmovl 8(%%esp), %%edx\n");
-    fprintf(fp, "\taddl $16, %%esp\n");
+    fprintf(fp, "\tpushl %s\n", reg);
+    fprintf(fp, "\tsubl $12, %%esp\n");
+    emit_i386_half_bits(fp, f, lay, v);
+    fprintf(fp, "\taddl $44, %%esp\n");
+    fprintf(fp, "\tpopl %%edx\n");
     fprintf(fp, "\tmovd %%xmm0, %%eax\n");
     fprintf(fp, "\tmovw %%ax, (%%edx)\n");
 }
@@ -2171,11 +2189,8 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
         *stack_bytes += 4;
     } else if (in->call_arg_abi != NULL && in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_HALF) {
         /* a _Float16: its bits, from libgcc's __truncdfhf2 (back in %xmm0), in the low half of a word, as gcc's */
-        fprintf(fp, "\tsubl $16, %%esp\n");
-        emit_i386_x87_load_f64(fp, f, lay, value);
-        fprintf(fp, "\tfstpl (%%esp)\n");
-        emit_i386_call_sym(fp, "__truncdfhf2", 0);
-        fprintf(fp, "\taddl $16, %%esp\n");
+        emit_i386_half_bits(fp, f, lay, value);
+        fprintf(fp, "\taddl $32, %%esp\n");
         fprintf(fp, "\tmovd %%xmm0, %%eax\n");
         fprintf(fp, "\tpushl %%eax\n");
         *stack_bytes += 4;
@@ -4262,11 +4277,8 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                     if (f->ret_type == CC_VAL_F64 && f->ret_abi == CC_CALL_ARG_ABI_HALF) {
                         /* a _Float16's bits in %xmm0, as gcc returns one: libgcc's __truncdfhf2 leaves them there */
                         int_regs_flush(fp, f, &lay, &ist);
-                        fprintf(fp, "\tsubl $16, %%esp\n");
-                        emit_i386_x87_load_f64(fp, f, &lay, in->lhs);
-                        fprintf(fp, "\tfstpl (%%esp)\n");
-                        emit_i386_call_sym(fp, "__truncdfhf2", 0);
-                        fprintf(fp, "\taddl $16, %%esp\n");
+                        emit_i386_half_bits(fp, f, &lay, in->lhs);
+                        fprintf(fp, "\taddl $32, %%esp\n");
                         i386_drop_cache(&ist);
                     } else if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);

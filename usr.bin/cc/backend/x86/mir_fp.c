@@ -1502,14 +1502,16 @@ static void half(xsel_t *s, int v, xop_t m, int load) {
         xs_emit(s, XI_MOV, 8, 2, &t, &x0, NULL);
         s->t->libcall(s, "__truncdfhf2", XR_BIT(XR_XMM0), XR_BIT(XR_XMM0));
     } else {
+        /* a long double (a half evaluated in it) by __truncxfhf2, rounding once, as gcc's */
+        int wide = fp_wide(s, v);
         xop_t pad = xop_imm(-16, 4);
         xop_t pop = xop_imm(16, 4);
-        xop_t at = xop_mem(XR_SP, 0, 8);
+        xop_t at = xop_mem(XR_SP, 0, wide ? 16 : 8);
 
         xs_fp_push(s, v);
         xs_emit(s, XI_ADDSP, 4, 1, &pad, NULL, NULL);
         xs_emit(s, XI_FSTP, 4, 1, &at, NULL, NULL);
-        s->t->libcall(s, "__truncdfhf2", 0, 0);
+        s->t->libcall(s, wide ? "__truncxfhf2" : "__truncdfhf2", 0, 0);
         xs_emit(s, XI_ADDSP, 4, 1, &pop, NULL, NULL);
     }
     xs_emit(s, XI_MOV, 4, 2, &x0, &g, NULL);

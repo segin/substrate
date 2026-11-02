@@ -187,6 +187,14 @@ on x86-64 an argument or parameter is its bits in an
 .Li %xmm
 register (past the eighth, an eightbyte's low bytes on the stack), and a
 result too.
+Its arithmetic is evaluated as
+.Xr gcc 1
+evaluates it: in
+.Ic float
+on x86-64, under SSE floating point and under soft-float, in
+.Ic long double
+on the i386 x87, the value rounded to a half once, where it takes the
+type.
 Its conversions are libgcc's
 .Fn __extendhfdf2
 and

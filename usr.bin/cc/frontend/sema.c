@@ -1762,15 +1762,22 @@ static int sema_eval_in_long_double(void) {
 /**
  * The type a floating operation whose result has type @p t is evaluated
  * in: long double where sema_eval_in_long_double() says so and @p t is a
- * real floating type narrower than it, else @p t.
+ * real floating type narrower than it; a _Float16's in float elsewhere,
+ * as gcc evaluates one where no instruction does half arithmetic (x86-64,
+ * SSE's floating point, soft-float: __extendhfsf2, float's operations,
+ * __truncsfhf2); else @p t.
  *
  * @param t  the result's type
  * @return   the evaluation type
  */
 static const cc_ctype_t *sema_eval_type(const cc_ctype_t *t) {
-    if (t != NULL && (t->unqual->kind == CC_CT_FLOAT || t->unqual->kind == CC_CT_DOUBLE) &&
+    if (t != NULL &&
+        (t->unqual->kind == CC_CT_FLOAT || t->unqual->kind == CC_CT_DOUBLE || t->unqual->kind == CC_CT_FLOAT16) &&
         sema_eval_in_long_double()) {
         return cc_ct_basic(CC_CT_LDOUBLE);
+    }
+    if (t != NULL && t->unqual->kind == CC_CT_FLOAT16) {
+        return cc_ct_basic(CC_CT_FLOAT);
     }
     return t;
 }
