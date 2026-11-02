@@ -515,26 +515,115 @@ static int asm_constraint_only_register(const char *c) {
 }
 
 /**
- * Reject an asm input that can only be in the register an early-clobber
- * output is fixed to: the output is written before the inputs are all
- * read, so the two cannot share it (gcc: "impossible constraints").
- *
- * @param s     the asm statement
- * @param diag  receives the error
- * @return      0, or -1 if an input conflicts
+ * Whether asm constraint @p c allows only the x87's registers: `t`
+ * (%st(0)), `u` (%st(1)) or `f` (any), with modifiers around them.
  */
-static int asm_check_early_clobber_inputs(const cc_stmt_t *s, cc_diag_t *diag) {
+static int asm_constraint_only_x87(const char *c) {
+    int any = 0;
+
+    for (; c != NULL && *c != '\0'; ++c) {
+        if ((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z')) {
+            if (*c != 't' && *c != 'u' && *c != 'f') {
+                return 0;
+            }
+            any = 1;
+        }
+    }
+    return any;
+}
+
+/**
+ * The register letter (asm_constraint_only_register()'s) clobber @p name
+ * is: "eax", "%rax", "al" ... `a`; 0 for one no such constraint names.
+ */
+static int asm_clobber_register(const char *name) {
+    static const struct {
+        char letter;
+        const char *names[6];
+    } regs[] = {
+        {'a', {"rax", "eax", "ax", "al", "ah", NULL}}, {'b', {"rbx", "ebx", "bx", "bl", "bh", NULL}},
+        {'c', {"rcx", "ecx", "cx", "cl", "ch", NULL}}, {'d', {"rdx", "edx", "dx", "dl", "dh", NULL}},
+        {'S', {"rsi", "esi", "si", "sil", NULL}},      {'D', {"rdi", "edi", "di", "dil", NULL}},
+    };
+    size_t i;
+    size_t k;
+
+    if (name == NULL) {
+        return 0;
+    }
+    if (name[0] == '%') {
+        ++name;
+    }
+    for (i = 0; i < sizeof(regs) / sizeof(regs[0]); ++i) {
+        for (k = 0; regs[i].names[k] != NULL; ++k) {
+            if (strcmp(name, regs[i].names[k]) == 0) {
+                return regs[i].letter;
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * Reject the asm statements gcc rejects for their constraints, with its
+ * words.  An operand the x87's registers alone may hold (`t`, `u`, `f`)
+ * that is not floating point is "inconsistent operand constraints in an
+ * 'asm'".  And two operands that need the one register they cannot
+ * share -- two outputs, two inputs, an input and an output that is read
+ * too (`+`) or written before the inputs are read (`&`) -- or an operand
+ * in a register the clobbers name, are "'asm' operand has impossible
+ * constraints or there are not enough registers".  (An output and an
+ * input may share it, `"=a"(r) : "a"(x)`, as may an input matched to an
+ * output by number.)
+ *
+ * @param s     the asm statement, its operands checked
+ * @param diag  receives the error
+ * @return      0, or -1 if refused
+ */
+static int asm_check_operand_constraints(const cc_stmt_t *s, cc_diag_t *diag) {
+    static const char impossible[] = "'asm' operand has impossible constraints or there are not enough registers";
+    size_t n = s->asm_output_count + s->asm_input_count;
     size_t i;
     size_t j;
-    for (i = 0; i < s->asm_output_count; ++i) {
-        const char *oc = s->asm_outputs[i].constraint;
-        int oreg = asm_constraint_only_register(oc);
-        if (oreg == 0 || oc == NULL || strchr(oc, '&') == NULL) {
+
+    for (i = 0; i < n; ++i) {
+        const cc_asm_operand_t *op = i < s->asm_output_count ? &s->asm_outputs[i]
+                                                             : &s->asm_inputs[i - s->asm_output_count];
+        const cc_ctype_t *t = op->expr != NULL && op->expr->ctype != NULL ? op->expr->ctype->unqual : NULL;
+
+        int tied = i < s->asm_output_count ? -1 : cc_asm_constraint_matched_operand(op->constraint);
+
+        if ((asm_constraint_only_x87(op->constraint) && t != NULL && t->kind != CC_CT_FLOAT &&
+             t->kind != CC_CT_DOUBLE && t->kind != CC_CT_LDOUBLE) ||
+            /* (an input matched to an output that is an input already, `+`) */
+            (tied >= 0 && (size_t)tied < s->asm_output_count && s->asm_outputs[tied].constraint != NULL &&
+             strchr(s->asm_outputs[tied].constraint, '+') != NULL)) {
+            sema_diag(diag, "inconsistent operand constraints in an 'asm'");
+            return -1;
+        }
+    }
+    for (i = 0; i < n; ++i) {
+        int out_i = i < s->asm_output_count;
+        const char *ci = out_i ? s->asm_outputs[i].constraint : s->asm_inputs[i - s->asm_output_count].constraint;
+        int reg = asm_constraint_only_register(ci);
+
+        if (reg == 0) {
             continue;
         }
-        for (j = 0; j < s->asm_input_count; ++j) {
-            if (asm_constraint_only_register(s->asm_inputs[j].constraint) == oreg) {
-                sema_diag(diag, "asm input constraint conflicts with early-clobber output register");
+        for (j = 0; j < s->asm_clobber_count; ++j) {
+            if (asm_clobber_register(s->asm_clobbers[j]) == reg) {
+                sema_diag(diag, impossible);
+                return -1;
+            }
+        }
+        for (j = i + 1; j < n; ++j) {
+            int out_j = j < s->asm_output_count;
+            const char *cj = out_j ? s->asm_outputs[j].constraint : s->asm_inputs[j - s->asm_output_count].constraint;
+            /* an output and an input share the register unless the output is read too or written early */
+            int shared = out_i != out_j && strchr(ci, '+') == NULL && strchr(ci, '&') == NULL;
+
+            if (asm_constraint_only_register(cj) == reg && !shared) {
+                sema_diag(diag, impossible);
                 return -1;
             }
         }
@@ -6324,7 +6413,7 @@ static int check_stmt_body(const cc_translation_unit_t *tu, cc_stmt_t *s, var_en
             tied_out = cc_asm_constraint_matched_operand(s->asm_inputs[i2].constraint);
             (void)tied_out;
         }
-        if (asm_check_early_clobber_inputs(s, diag) != 0) {
+        if (asm_check_operand_constraints(s, diag) != 0) {
             return -1;
         }
         for (i2 = 0; i2 < s->asm_clobber_count; ++i2) {

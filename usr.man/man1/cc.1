@@ -67,6 +67,21 @@ the address its offset there, and an inline asm memory operand of one is
 printed with the segment, as Linux's per-CPU data needs.
 Copying a structure into one is refused.
 .Pp
+An inline asm statement gcc refuses for its constraints is refused, with
+gcc's words: an operand only the x87's registers may hold
+.Pq Li t , u , f
+that is not floating point, or an input matched by number to a
+.Li +
+output, is
+.Dq inconsistent operand constraints in an 'asm' ;
+two operands that need the one register they may not share \(em two
+outputs, two inputs, or an input and a
+.Li +
+or
+.Li &
+output \(em or an operand in a register the clobbers name, is
+.Dq 'asm' operand has impossible constraints or there are not enough registers .
+.Pp
 .Li #pragma pack Ns Pq Ar n ,
 .Li pack() ,
 .Li pack(push Ns Op , Ar n Ns )
