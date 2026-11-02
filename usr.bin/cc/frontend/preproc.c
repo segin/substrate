@@ -4047,6 +4047,73 @@ static pp_num_t parse_expr_cond(expr_parser_t *p, int *ok) {
 static char *expand_text(pp_state_t *st, const char *src, const char *file, int line, int depth,
                          cc_strvec_t *disabled, cc_diag_t *diag);
 
+/**
+ * An object-like macro's body with its `##` operators applied: each one,
+ * with the white space around it, removed, so the tokens beside it are
+ * one (C11 6.10.3.3p3).  Pasting comes before the body is rescanned, so
+ * an operand that is a macro's name is not expanded: Linux's
+ * `#define uac_format_type_i_discrete_descriptor
+ * uac_format_type_i_discrete_descriptor_##UAC_MAX_RATES` names
+ * `..._UAC_MAX_RATES`.  String and character literals are left alone.
+ *
+ * @param body  the body
+ * @return      the pasted body (owned), or NULL when out of memory
+ */
+static char *object_body_paste(const char *body) {
+    sb_t out;
+    size_t i = 0;
+    char quote = '\0';
+
+    if (strstr(body, "##") == NULL) {
+        return cc_strdup(body);
+    }
+    memset(&out, 0, sizeof(out));
+    if (sb_append(&out, "") != 0) {
+        return NULL;
+    }
+    while (body[i] != '\0') {
+        char c = body[i];
+
+        if (quote != '\0') {
+            if (sb_append_c(&out, c) != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+            if (c == '\\' && body[i + 1] != '\0') {
+                if (sb_append_c(&out, body[i + 1]) != 0) {
+                    sb_free(&out);
+                    return NULL;
+                }
+                i += 2;
+                continue;
+            }
+            if (c == quote) {
+                quote = '\0';
+            }
+            i++;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            quote = c;
+        } else if (c == '#' && body[i + 1] == '#') {
+            while (out.len > 0 && (out.buf[out.len - 1] == ' ' || out.buf[out.len - 1] == '\t')) {
+                out.buf[--out.len] = '\0';
+            }
+            i += 2;
+            while (body[i] == ' ' || body[i] == '\t') {
+                i++;
+            }
+            continue;
+        }
+        if (sb_append_c(&out, c) != 0) {
+            sb_free(&out);
+            return NULL;
+        }
+        i++;
+    }
+    return out.buf;
+}
+
 static char *stringify_macro_arg(const char *arg) {
     sb_t out;
     size_t i = 0;
@@ -5020,13 +5087,18 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                 if (!m->is_function) {
                     char *exp_body;
                     char *masked_body;
+                    char *pasted_body;
                     size_t k = j;
                     if (disabled != NULL && cc_strvec_push(disabled, name) != 0) {
                         free(name);
                         sb_free(&out);
                         return NULL;
                     }
-                    exp_body = expand_text(st, m->body, file, line, depth + 1, disabled, diag);
+                    /* its `##`s paste before the result is rescanned, their operands unexpanded */
+                    pasted_body = object_body_paste(m->body);
+                    exp_body = pasted_body != NULL ? expand_text(st, pasted_body, file, line, depth + 1, disabled, diag)
+                                                   : NULL;
+                    free(pasted_body);
                     if (disabled != NULL) {
                         strvec_pop_free(disabled);
                     }
