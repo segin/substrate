@@ -40,22 +40,164 @@ static int dynbuf_append(uint8_t **buf, size_t *len, size_t *cap, const void *sr
     return 0;
 }
 
+/*
+ * The strings of the .dynstr being made and where each is, so that one is
+ * there once (GNU ld's string tables share a string, and one that ends
+ * another: dynstr_share_suffixes()).  One table at a time is made.
+ */
+static struct dynstr_slot {
+    char *s;
+    uint32_t off;
+} *dynstr_index;
+static size_t dynstr_index_cap;
+static size_t dynstr_index_count;
+
+static uint32_t dynstr_index_hash(const char *s) {
+    return elf_hash_gnu(s);
+}
+
+/** Forget the strings of the last .dynstr. */
+static void dynstr_index_reset(void) {
+    size_t i;
+
+    for (i = 0; i < dynstr_index_cap; ++i) {
+        free(dynstr_index[i].s);
+    }
+    free(dynstr_index);
+    dynstr_index = NULL;
+    dynstr_index_cap = 0;
+    dynstr_index_count = 0;
+}
+
+/* Where @p s is in the .dynstr being made: 1 with *off, else 0. */
+static int dynstr_index_find(const char *s, uint32_t *off) {
+    size_t i;
+
+    if (dynstr_index_cap == 0) {
+        return 0;
+    }
+    for (i = dynstr_index_hash(s) & (dynstr_index_cap - 1); dynstr_index[i].s != NULL;
+         i = (i + 1) & (dynstr_index_cap - 1)) {
+        if (strcmp(dynstr_index[i].s, s) == 0) {
+            *off = dynstr_index[i].off;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Note that @p s is at @p off; 0, or -1 out of memory. */
+static int dynstr_index_put(const char *s, uint32_t off) {
+    size_t i;
+
+    if (dynstr_index_count * 2 >= dynstr_index_cap) {
+        size_t cap = dynstr_index_cap == 0 ? 256 : dynstr_index_cap * 2;
+        struct dynstr_slot *next = (struct dynstr_slot *)calloc(cap, sizeof(*next));
+
+        if (next == NULL) {
+            return -1;
+        }
+        for (i = 0; i < dynstr_index_cap; ++i) {
+            if (dynstr_index[i].s != NULL) {
+                size_t j = dynstr_index_hash(dynstr_index[i].s) & (cap - 1);
+                while (next[j].s != NULL) {
+                    j = (j + 1) & (cap - 1);
+                }
+                next[j] = dynstr_index[i];
+            }
+        }
+        free(dynstr_index);
+        dynstr_index = next;
+        dynstr_index_cap = cap;
+    }
+    for (i = dynstr_index_hash(s) & (dynstr_index_cap - 1); dynstr_index[i].s != NULL;
+         i = (i + 1) & (dynstr_index_cap - 1)) {
+    }
+    dynstr_index[i].s = strdup(s);
+    if (dynstr_index[i].s == NULL) {
+        return -1;
+    }
+    dynstr_index[i].off = off;
+    dynstr_index_count++;
+    return 0;
+}
+
 int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name, uint32_t *out_off) {
     size_t n;
     size_t off;
+    uint32_t have;
 
     if (buf == NULL || len == NULL || cap == NULL || out_off == NULL || name == NULL) {
         return -1;
+    }
+    /* there once: a string the table has is used again */
+    if (dynstr_index_find(name, &have)) {
+        *out_off = have;
+        return 0;
     }
     off = *len;
     if (off > UINT32_MAX) {
         return -1;
     }
     n = strlen(name) + 1;
-    if (dynbuf_append(buf, len, cap, name, n) != 0) {
+    if (dynbuf_append(buf, len, cap, name, n) != 0 || dynstr_index_put(name, (uint32_t)off) != 0) {
         return -1;
     }
     *out_off = (uint32_t)off;
+    return 0;
+}
+
+/* qsort: strings by their bytes read from the end, one that ends another after it */
+static int dynstr_rev_cmp(const void *a, const void *b) {
+    const char *x = *(const char *const *)a;
+    const char *y = *(const char *const *)b;
+    size_t i = strlen(x);
+    size_t j = strlen(y);
+
+    while (i > 0 && j > 0) {
+        --i;
+        --j;
+        if (x[i] != y[j]) {
+            return (unsigned char)x[i] < (unsigned char)y[j] ? -1 : 1;
+        }
+    }
+    /* the longer first, so that the shorter finds it */
+    return i > 0 ? -1 : j > 0 ? 1 : 0;
+}
+
+/**
+ * @brief Put @p names into the .dynstr being made so that a string that ends another is found at that
+ * one's end and not kept again, as GNU ld's string tables share them; dynstr_append_cstr() then finds
+ * each.
+ *
+ * @param names the strings (sorted here), @p count of them
+ * @return 0, or -1 out of memory
+ */
+static int dynstr_share_suffixes(uint8_t **buf, size_t *len, size_t *cap, const char **names, size_t count) {
+    const char *last = NULL;
+    uint32_t last_off = 0;
+    size_t i;
+
+    qsort(names, count, sizeof(names[0]), dynstr_rev_cmp);
+    for (i = 0; i < count; ++i) {
+        size_t n = strlen(names[i]);
+        uint32_t off;
+
+        if (n == 0 || dynstr_index_find(names[i], &off)) {
+            continue;
+        }
+        if (last != NULL && strlen(last) >= n && strcmp(last + strlen(last) - n, names[i]) == 0) {
+            if (dynstr_index_put(names[i], last_off + (uint32_t)(strlen(last) - n)) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (dynstr_append_cstr(buf, len, cap, names[i], &off) != 0) {
+            return -1;
+        }
+        last = names[i];
+        last_off = off;
+    }
     return 0;
 }
 
@@ -199,82 +341,117 @@ static uint8_t *build_sysv_hash_section(const uint8_t *dynsym, size_t dynsym_len
     return buf;
 }
 
+/**
+ * How many buckets .gnu.hash has for @p n symbols: the largest of bfd's sizes (elf_buckets[]) that
+ * @p n reaches, as GNU ld chooses without -O.
+ */
+static uint32_t gnu_hash_bucket_count(size_t n) {
+    static const uint32_t sizes[] = { 1, 3, 17, 37, 67, 97, 131, 197, 263, 521, 1031, 2053, 4099, 8209, 16411, 32771 };
+    size_t i;
+
+    for (i = 0; i + 1 < sizeof(sizes) / sizeof(sizes[0]) && n >= sizes[i + 1]; ++i) {
+    }
+    return sizes[i];
+}
+
 static uint8_t *build_gnu_hash_section(const uint8_t *dynsym, size_t dynsym_len,
                                        const uint8_t *dynstr, size_t dynstr_len,
                                        size_t entsz, elfobj_class_t cls,
                                        elfobj_endian_t endian, size_t *out_sz) {
     size_t nsyms;
     uint32_t nbuckets;
-    uint32_t symoffset = 1;
-    uint32_t bloom_size = 1;
-    uint32_t bloom_shift = 5;
+    uint32_t symoffset;
+    uint32_t maskbitslog2;
+    uint32_t shift1;
+    uint32_t maskwords;
     size_t chain_count;
     size_t word_sz;
+    size_t bits;
     size_t i;
     uint8_t *buf = NULL;
-    size_t off;
+    uint64_t *bloom = NULL;
+    size_t buckets_off, chains_off;
 
     if (out_sz == NULL || entsz == 0 || (dynsym_len % entsz) != 0) {
         return NULL;
     }
     nsyms = dynsym_len / entsz;
-    nbuckets = (nsyms > 1) ? 1u : 1u;
-    chain_count = (nsyms > symoffset) ? (nsyms - symoffset) : 0;
+    /* what is hashed is the defined symbols, after the undefined ones (dynsym_order()) */
+    for (symoffset = 1; symoffset < nsyms; ++symoffset) {
+        uint16_t shndx = read_u16_endian(dynsym + symoffset * entsz + (cls == ELFOBJ_CLASS_64 ? 6 : 14), endian);
+        if (shndx != SHN_UNDEF) {
+            break;
+        }
+    }
+    chain_count = nsyms - symoffset;
+    nbuckets = gnu_hash_bucket_count(chain_count);
     word_sz = cls == ELFOBJ_CLASS_64 ? 8 : 4;
-    *out_sz = 16 + (bloom_size * word_sz) + ((size_t)nbuckets * 4) + (chain_count * 4);
+    bits = word_sz * 8;
+    /* the Bloom filter sized as bfd sizes it (_bfd_elf_size_dynamic_sections) */
+    maskbitslog2 = 1;
+    while (maskbitslog2 < 32 && ((size_t)1 << maskbitslog2) <= chain_count) {
+        ++maskbitslog2;     /* bfd_log2 (n) + 1, as the bits n needs */
+    }
+    if (chain_count == 0 || maskbitslog2 < 3) {
+        maskbitslog2 = 5;
+    } else if (((size_t)1 << (maskbitslog2 - 2)) & chain_count) {
+        maskbitslog2 += 3;
+    } else {
+        maskbitslog2 += 2;
+    }
+    shift1 = cls == ELFOBJ_CLASS_64 ? 6 : 5;
+    if (cls == ELFOBJ_CLASS_64 && maskbitslog2 == 5) {
+        maskbitslog2 = 6;
+    }
+    maskwords = 1u << (maskbitslog2 - shift1);
+
+    *out_sz = 16 + (maskwords * word_sz) + ((size_t)nbuckets * 4) + (chain_count * 4);
     buf = (uint8_t *)calloc(1, *out_sz);
-    if (buf == NULL) {
+    bloom = (uint64_t *)calloc(maskwords, sizeof(*bloom));
+    if (buf == NULL || bloom == NULL) {
+        free(buf);
+        free(bloom);
         return NULL;
     }
-
     write_u32_endian(buf + 0, endian, nbuckets);
-    write_u32_endian(buf + 4, endian, symoffset);
-    write_u32_endian(buf + 8, endian, bloom_size);
-    write_u32_endian(buf + 12, endian, bloom_shift);
+    write_u32_endian(buf + 4, endian, chain_count != 0 ? symoffset : (uint32_t)nsyms);
+    write_u32_endian(buf + 8, endian, maskwords);
+    write_u32_endian(buf + 12, endian, maskbitslog2);
+    buckets_off = 16 + (size_t)maskwords * word_sz;
+    chains_off = buckets_off + (size_t)nbuckets * 4;
 
-    off = 16;
-    if (chain_count > 0) {
-        uint64_t bloom = 0;
-        if (cls == ELFOBJ_CLASS_64) {
-            write_u64_endian(buf + off, endian, 0);
+    /* the symbols are in bucket order: a bucket is the first of its own, a chain ends at the last */
+    for (i = 0; i < chain_count; ++i) {
+        size_t sym_index = symoffset + i;
+        uint32_t noff = dynsym_name_off_at(dynsym, dynsym_len, entsz, endian, sym_index);
+        const char *name = (noff < dynstr_len) ? (const char *)(dynstr + noff) : "";
+        uint32_t h = elf_hash_gnu(name);
+        uint32_t b = h % nbuckets;
+        uint32_t chain = h & ~1u;
+
+        if (i + 1 == chain_count) {
+            chain |= 1u;
         } else {
-            write_u32_endian(buf + off, endian, 0);
-        }
-        off += word_sz;
-        write_u32_endian(buf + off, endian, symoffset);
-        off += 4;
-        for (i = 0; i < chain_count; ++i) {
-            size_t sym_index = symoffset + i;
-            uint32_t noff = dynsym_name_off_at(dynsym, dynsym_len, entsz, endian, sym_index);
-            const char *name = (noff < dynstr_len) ? (const char *)(dynstr + noff) : "";
-            uint32_t h = elf_hash_gnu(name);
-            uint32_t chain = h & ~1u;
-            if (i + 1 == chain_count) {
+            uint32_t nnoff = dynsym_name_off_at(dynsym, dynsym_len, entsz, endian, sym_index + 1);
+            const char *nname = (nnoff < dynstr_len) ? (const char *)(dynstr + nnoff) : "";
+            if (elf_hash_gnu(nname) % nbuckets != b) {
                 chain |= 1u;
             }
-            if (cls == ELFOBJ_CLASS_64) {
-                bloom |= (1ull << (h % 64));
-                bloom |= (1ull << ((h >> bloom_shift) % 64));
-            } else {
-                bloom |= (1u << (h % 32));
-                bloom |= (1u << ((h >> bloom_shift) % 32));
-            }
-            write_u32_endian(buf + off + (i * 4), endian, chain);
         }
-        if (cls == ELFOBJ_CLASS_64) {
-            write_u64_endian(buf + 16, endian, bloom);
-        } else {
-            write_u32_endian(buf + 16, endian, (uint32_t)bloom);
+        if (read_u32_endian(buf + buckets_off + b * 4, endian) == 0) {
+            write_u32_endian(buf + buckets_off + b * 4, endian, (uint32_t)sym_index);
         }
-    } else {
-        if (cls == ELFOBJ_CLASS_64) {
-            write_u64_endian(buf + off, endian, 0);
-        } else {
-            write_u32_endian(buf + off, endian, 0);
-        }
-        off += word_sz;
-        write_u32_endian(buf + off, endian, 0);
+        bloom[(h / bits) & (maskwords - 1)] |= (1ull << (h % bits)) | (1ull << ((h >> maskbitslog2) % bits));
+        write_u32_endian(buf + chains_off + i * 4, endian, chain);
     }
+    for (i = 0; i < maskwords; ++i) {
+        if (cls == ELFOBJ_CLASS_64) {
+            write_u64_endian(buf + 16 + i * 8, endian, bloom[i]);
+        } else {
+            write_u32_endian(buf + 16 + i * 4, endian, (uint32_t)bloom[i]);
+        }
+    }
+    free(bloom);
     return buf;
 }
 
@@ -753,6 +930,86 @@ static uint16_t dynsym_shndx(const ld_ctx_t *ctx, const elfobj_t *out, const elf
         return SHN_UNDEF;
     }
     return (uint16_t)elf_symbol_shndx(sym);
+}
+
+/* The name @p sym goes into .dynstr with: its name, less a version it carries in it. */
+static uint32_t dynsym_name_hash(const elf_symbol_t *sym) {
+    const char *name = elf_symbol_name(sym);
+    const char *at = name != NULL && elf_symbol_version(sym) > VER_NDX_GLOBAL ? strchr(name, '@') : NULL;
+    uint32_t h = 5381;      /* (the GNU hash, elf_hash_gnu(), of the name up to at) */
+    const char *p;
+
+    for (p = name != NULL ? name : ""; *p != '\0' && p != at; ++p) {
+        h = (h << 5) + h + (uint8_t)*p;
+    }
+    return h;
+}
+
+/**
+ * @brief The output's symbols in the order .dynsym has them, as GNU ld orders it: what is undefined
+ * first, then what is defined, grouped by .gnu.hash bucket, each group in the symbols' order.
+ *
+ * .gnu.hash hashes only the defined ones, which have to be together at the end and in bucket order.
+ *
+ * @param ctx   the link
+ * @param out   the output
+ * @param count receives how many
+ * @return the symbols' indexes (malloc'd), or NULL out of memory
+ */
+static size_t *dynsym_order(const ld_ctx_t *ctx, elfobj_t *out, size_t *count) {
+    size_t n = elf_symbol_count(out);
+    size_t *order = (size_t *)malloc((n + 1) * sizeof(*order));
+    uint32_t *bucket = (uint32_t *)malloc((n + 1) * sizeof(*bucket));
+    size_t *start = NULL;
+    size_t ndef = 0, k = 0, i;
+    uint32_t nb, b;
+
+    if (order == NULL || bucket == NULL) {
+        free(order);
+        free(bucket);
+        return NULL;
+    }
+    for (i = 0; i < n; ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(out, i);
+
+        if (!dynsym_should_export(ctx, out, sym)) {
+            continue;
+        }
+        if (dynsym_shndx(ctx, out, sym) == SHN_UNDEF) {
+            order[k++] = i;
+        } else {
+            ndef++;
+        }
+    }
+    nb = gnu_hash_bucket_count(ndef);
+    start = (size_t *)calloc((size_t)nb + 1, sizeof(*start));
+    if (start == NULL) {
+        free(order);
+        free(bucket);
+        return NULL;
+    }
+    for (i = 0; i < n; ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(out, i);
+
+        if (dynsym_should_export(ctx, out, sym) && dynsym_shndx(ctx, out, sym) != SHN_UNDEF) {
+            bucket[i] = dynsym_name_hash(sym) % nb;
+            start[bucket[i] + 1]++;
+        }
+    }
+    for (b = 0; b < nb; ++b) {
+        start[b + 1] += start[b];
+    }
+    for (i = 0; i < n; ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(out, i);
+
+        if (dynsym_should_export(ctx, out, sym) && dynsym_shndx(ctx, out, sym) != SHN_UNDEF) {
+            order[k + start[bucket[i]]++] = i;
+        }
+    }
+    free(start);
+    free(bucket);
+    *count = k + ndef;
+    return order;
 }
 
 /*
@@ -1466,6 +1723,60 @@ int dso_dynamic_strings(const char *path, uint64_t want, strvec_t *out) {
     return rc;
 }
 
+/**
+ * @brief Begin the .dynstr with every string it is known to need -- the libraries needed, the soname, the
+ * names of what .dynsym will hold -- shared as GNU ld shares them (dynstr_share_suffixes()).
+ *
+ * @return 0, or -1 out of memory
+ */
+static int seed_dynstr(const ld_ctx_t *ctx, elfobj_t *out, uint8_t **buf, size_t *len, size_t *cap) {
+    size_t n = elf_symbol_count(out) + ctx->dso_inputs.count + 1;
+    const char **names = (const char **)calloc(n + 1, sizeof(*names));
+    char **owned = (char **)calloc(n + 1, sizeof(*owned));
+    size_t count = 0, nowned = 0, i;
+    int rc = -1;
+
+    if (names == NULL || owned == NULL) {
+        goto done;
+    }
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        names[count++] = dso_needed_name(ctx, i);
+    }
+    if (ctx->opt.soname != NULL) {
+        names[count++] = ctx->opt.soname;
+    }
+    for (i = 0; i < elf_symbol_count(out); ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(out, i);
+        const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
+        const char *at;
+
+        if (name == NULL || !dynsym_should_export(ctx, out, sym)) {
+            continue;
+        }
+        /* as .dynsym names it: less a version the name carries */
+        at = elf_symbol_version(sym) > VER_NDX_GLOBAL ? strchr(name, '@') : NULL;
+        if (at != NULL) {
+            char *base = (char *)malloc((size_t)(at - name) + 1);
+            if (base == NULL) {
+                goto done;
+            }
+            memcpy(base, name, (size_t)(at - name));
+            base[at - name] = '\0';
+            owned[nowned++] = base;
+            name = base;
+        }
+        names[count++] = name;
+    }
+    rc = dynstr_share_suffixes(buf, len, cap, names, count);
+done:
+    for (i = 0; i < nowned; ++i) {
+        free(owned[i]);
+    }
+    free(owned);
+    free(names);
+    return rc;
+}
+
 int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     elf_section_t *dynstr;
     elf_section_t *dynsym;
@@ -1497,6 +1808,9 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     size_t verneed_count = 0;
     int emit_versym = 0;
     size_t i;
+    size_t *order = NULL;       /* the symbols in .dynsym's order (dynsym_order()) */
+    size_t order_count = 0;
+    size_t oi;
     size_t entsz;
     int need_dyn;
     int textrel;
@@ -1579,7 +1893,9 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     rela_dyn_sec = elf_find_section(out, ".rela.dyn");
     rel_dyn_sec = elf_find_section(out, ".rel.dyn");
 
-    if (dynbuf_append(&dynstr_buf, &dynstr_len, &dynstr_cap, "\0", 1) != 0) {
+    dynstr_index_reset();
+    if (dynbuf_append(&dynstr_buf, &dynstr_len, &dynstr_cap, "\0", 1) != 0 ||
+        seed_dynstr(ctx, out, &dynstr_buf, &dynstr_len, &dynstr_cap) != 0) {
         free(dynstr_buf);
         return -1;
     }
@@ -1723,8 +2039,18 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         }
     }
 
-    for (i = 0; i < elf_symbol_count(out); ++i) {
-        const elf_symbol_t *sym = elf_symbol_at(out, i);
+    order = dynsym_order(ctx, out, &order_count);
+    if (order == NULL) {
+        free(dynstr_buf);
+        free(dynsym_buf);
+        free(dynamic_buf);
+        free(versym_buf);
+        free(hash_buf);
+        free(gnu_hash_buf);
+        return -1;
+    }
+    for (oi = 0; oi < order_count; ++oi) {
+        const elf_symbol_t *sym = elf_symbol_at(out, order[oi]);
         const char *emit_name = NULL;
         char *emit_name_tmp = NULL;
         uint8_t entry[24];
@@ -1736,9 +2062,6 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         uint64_t value;
         uint64_t size;
 
-        if (!dynsym_should_export(ctx, out, sym)) {
-            continue;
-        }
         emit_name = elf_symbol_name(sym);
         if (emit_name != NULL && elf_symbol_version(sym) > VER_NDX_GLOBAL) {
             const char *base_name;
@@ -1823,6 +2146,8 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         }
     }
 
+    free(order);
+    order = NULL;
     if (plan_symbol_version_sections(ctx, out, &dynstr_buf, &dynstr_len, &dynstr_cap,
                                      dynsym_buf, dynsym_len, entsz, versym_buf, versym_len,
                                      &verdef_count, &verneed_count) != 0) {
@@ -2360,6 +2685,8 @@ int patch_dynsym_symbol_values(const ld_ctx_t *ctx, elfobj_t *out) {
     size_t nslots;
     size_t slot = 1;
     size_t i;
+    size_t *order;
+    size_t order_count = 0;
 
     if (ctx == NULL || out == NULL) {
         return -1;
@@ -2383,15 +2710,19 @@ int patch_dynsym_symbol_values(const ld_ctx_t *ctx, elfobj_t *out) {
     }
     memcpy(buf, src, dyn_sz);
 
-    for (i = 0; i < elf_symbol_count(out); ++i) {
-        const elf_symbol_t *sym = elf_symbol_at(out, i);
+    /* in the order .dynsym was made in */
+    order = dynsym_order(ctx, out, &order_count);
+    if (order == NULL) {
+        free(buf);
+        return -1;
+    }
+    for (i = 0; i < order_count; ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(out, order[i]);
         uint64_t value;
         size_t off;
 
-        if (!dynsym_should_export(ctx, out, sym)) {
-            continue;
-        }
         if (slot >= nslots) {
+            free(order);
             free(buf);
             return -1;
         }
@@ -2403,6 +2734,7 @@ int patch_dynsym_symbol_values(const ld_ctx_t *ctx, elfobj_t *out) {
             const elf_section_t *plt = elf_find_section(out, ".plt");
 
             if (imp == NULL || plt == NULL) {
+                free(order);
                 free(buf);
                 return -1;
             }
@@ -2421,6 +2753,7 @@ int patch_dynsym_symbol_values(const ld_ctx_t *ctx, elfobj_t *out) {
         }
         slot++;
     }
+    free(order);
 
     if (elf_section_set_data(dynsym, buf, dyn_sz) != ELF_OK) {
         free(buf);
