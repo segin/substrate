@@ -841,7 +841,9 @@ A symbol defined inside
 .Ic SECTIONS
 belongs to the section its address falls in, except one set with
 .Ql =
-between output sections, which is where GNU ld puts it: a symbol or
+between output sections or outside
+.Ic SECTIONS ,
+which is where GNU ld puts it: a symbol or
 .Ic ADDR
 in the expression is an address in its section, a number or
 .Ql \&.
@@ -861,7 +863,15 @@ alone, unless
 took it out, is in the section before it, or the next one if
 .Ql \&.
 was set since.
-One defined outside is absolute.
+One changed with an operator outside
+.Ic SECTIONS
+is absolute.
+A symbol set with
+.Ql =
+to an expression that names one symbol of the program, and no other,
+takes that symbol's type, as in GNU ld:
+.Dq "PROVIDE(alias = func);"
+is a function.
 Expressions have the operators of C, parentheses nested no more than 256
 deep, and the functions
 .Ic ALIGN

@@ -47,5 +47,6 @@ run:
 	./test_script_assert_relayout.sh
 	./test_script_phdr_empty.sh
 	./test_code_fill_late.sh
+	./test_script_symbol_alias.sh
 
 clean:

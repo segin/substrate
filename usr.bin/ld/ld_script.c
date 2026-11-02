@@ -474,6 +474,16 @@ static int lds_find_matching_rparen(const lds_tok_t *items, size_t begin, size_t
     return -1;
 }
 
+/**
+ * Whether builtin @p name's argument is a name, of a section, a memory
+ * region, a constant or a symbol, and not something that has a value.
+ */
+static int lds_builtin_takes_name(const char *name) {
+    return strcmp(name, "ADDR") == 0 || strcmp(name, "LOADADDR") == 0 || strcmp(name, "SIZEOF") == 0 ||
+           strcmp(name, "ALIGNOF") == 0 || strcmp(name, "CONSTANT") == 0 || strcmp(name, "ORIGIN") == 0 ||
+           strcmp(name, "LENGTH") == 0 || strcmp(name, "DEFINED") == 0 || strcmp(name, "defined") == 0;
+}
+
 static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, const lds_tok_t *items, size_t begin,
                                  size_t end, uint64_t *out) {
     const char *name;
@@ -534,9 +544,7 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
 
     /* The argument of these is a name, of a section or a symbol, and not
      * something that has a value. */
-    takes_name = strcmp(name, "ADDR") == 0 || strcmp(name, "LOADADDR") == 0 || strcmp(name, "SIZEOF") == 0 ||
-                 strcmp(name, "ALIGNOF") == 0 || strcmp(name, "CONSTANT") == 0 || strcmp(name, "ORIGIN") == 0 ||
-                 strcmp(name, "LENGTH") == 0 || strcmp(name, "DEFINED") == 0 || strcmp(name, "defined") == 0;
+    takes_name = lds_builtin_takes_name(name);
     word = takes_name && arg_count == 1 && arg_starts[0] + 1 == arg_ends[0] &&
            (items[arg_starts[0]].kind == LDS_TOK_IDENT || items[arg_starts[0]].kind == LDS_TOK_STRING)
                ? items[arg_starts[0]].text : NULL;
@@ -3692,9 +3700,46 @@ static elf_section_t *lw_dot_section(const lds_walk_t *w) {
     return NULL;
 }
 
+/**
+ * The symbol of the program that assignment @p st's expression names, if
+ * it names one and no other, as GNU ld's assign_src has it: the symbol it
+ * defines takes that one's type (Linux's `PROVIDE(sev_es_terminate =
+ * __pi_sev_es_terminate)` is a function, as is `sym = func + 1`).  NULL
+ * if it names none, or more than one.
+ */
+static const elf_symbol_t *lw_assign_src(lds_walk_t *w, const lds_stmt_t *st) {
+    const elf_symbol_t *src = NULL;
+    size_t t;
+
+    for (t = 0; t < st->expr.count; ++t) {
+        const lds_tok_t *tok = &st->expr.items[t];
+        const elf_symbol_t *s;
+
+        if (tok->kind != LDS_TOK_IDENT || tok->text == NULL || strcmp(tok->text, ".") == 0 ||
+            (t + 1 < st->expr.count && st->expr.items[t + 1].kind == LDS_TOK_LPAREN)) {
+            continue;
+        }
+        /* the argument of ADDR(), SIZEOF() and their like is a section, not a symbol */
+        if (t >= 2 && st->expr.items[t - 1].kind == LDS_TOK_LPAREN && st->expr.items[t - 2].kind == LDS_TOK_IDENT &&
+            lds_builtin_takes_name(st->expr.items[t - 2].text)) {
+            continue;
+        }
+        s = elf_find_symbol(w->out, tok->text);
+        if (s == NULL || elf_symbol_shndx(s) == SHN_UNDEF || elf_symbol_type(s) == STT_SECTION ||
+            elf_symbol_type(s) == STT_FILE) {
+            continue;
+        }
+        if (src != NULL && src != s) {
+            return NULL;
+        }
+        src = s;
+    }
+    return src;
+}
+
 /*
  * Give a symbol the script defines its value in the output.  One set
- * between output sections ("sym = expr;") is where GNU ld puts it: in the
+ * outside output sections ("sym = expr;") is where GNU ld puts it: in the
  * section of a symbol or ADDR() the expression came to; absolute for a
  * number or what mixes sections (the kernel's real-mode `real_mode_seg =
  * 0;`, which its relocs tool finds only as SHN_ABS, and `sym = other + 1;`);
@@ -3706,6 +3751,7 @@ static elf_section_t *lw_dot_section(const lds_walk_t *w) {
 static int lw_define(lds_walk_t *w, lds_stmt_t *st, uint64_t value, const lds_eval_ctx_t *ec, elf_section_t *hint,
                      uint64_t hint_end) {
     elf_symbol_t *sym = elf_find_symbol(w->out, st->at.text);
+    const elf_symbol_t *src;
     elf_section_t *home = NULL;
     size_t i;
 
@@ -3715,7 +3761,7 @@ static int lw_define(lds_walk_t *w, lds_stmt_t *st, uint64_t value, const lds_ev
             return -1;
         }
     }
-    if (st->where == LDS_IN_SECTIONS && st->op == '=' && ec != NULL) {
+    if (st->where != LDS_IN_BODY && st->op == '=' && ec != NULL) {
         if (ec->vkind == LDS_VAL_SECTION) {
             home = (elf_section_t *)ec->vsec;
         } else if (ec->vkind == LDS_VAL_ABS && ec->from_dot) {
@@ -3740,6 +3786,10 @@ static int lw_define(lds_walk_t *w, lds_stmt_t *st, uint64_t value, const lds_ev
             return -1;
         }
     } else if (elf_symbol_set_value(sym, value) != ELF_OK || elf_symbol_set_shndx(sym, SHN_ABS) != ELF_OK) {
+        return -1;
+    }
+    src = st->op == '=' ? lw_assign_src(w, st) : NULL;
+    if (src != NULL && elf_symbol_set_type(sym, elf_symbol_type(src)) != ELF_OK) {
         return -1;
     }
     if (st->hidden && elf_symbol_set_visibility(sym, STV_HIDDEN) != ELF_OK) {
