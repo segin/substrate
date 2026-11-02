@@ -3832,21 +3832,31 @@ static int eval_register_compare(const char *expr) {
     }
 }
 
-static int eval_gas_cond_expr(cond_syms_t *syms, const char *expr) {
+static int eval_gas_cond_expr(cond_syms_t *syms, const char *expr_in) {
     long long ln = 0;
     int reg;
+    int ok;
+    char *expr;
 
-    if (expr == NULL) {
+    if (expr_in == NULL) {
         return 0;
+    }
+    /* Without its comments: Linux's sha1-avx2-asm.S has `.if (i == 0) # Initialize and rotate registers` */
+    expr = text_without_comments(expr_in);
+    if (expr == NULL) {
+        return -1;
     }
     reg = eval_register_compare(expr);
     if (reg >= 0) {
+        free(expr);
         return reg;
     }
     /* An expression of numbers, and of the names that have been given
      * numbers by now, is as_expr.c's, whole: `.if 1+1 == 2`,
      * `.if (3 > 2) && 1`, `.if DEBUG`, `.if K*2 > 3`. */
-    if (as_expr_eval_string(expr, cond_sym_lookup, syms, &ln) == AS_EXPR_EVAL_OK) {
+    ok = as_expr_eval_string(expr, cond_sym_lookup, syms, &ln) == AS_EXPR_EVAL_OK;
+    free(expr);
+    if (ok) {
         return ln != 0;
     }
     /*
