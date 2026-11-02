@@ -1730,6 +1730,7 @@ static void lds_stmtvec_free(lds_stmtvec_t *v) {
         lds_stmtvec_free(&st->body);
         strvec_free(&st->phdrs);
         strvec_free(&st->patterns);
+        free(st->sorts);
         strvec_free(&st->excludes);
         free(st->fill);
         free(st->runs);
@@ -2322,15 +2323,45 @@ static int lp_include(lds_parser_t *p, lds_where_t where, lds_stmtvec_t *v) {
     return rc;
 }
 
+/**
+ * How the patterns inside SORT and its relatives, nested as @p words
+ * (@p n of them, outermost first) say, are sorted: an elf_link_sort_t.
+ * Of two nested, the outer sorts first and the inner breaks its ties, as
+ * GNU ld reads SORT_BY_NAME(SORT_BY_ALIGNMENT(...)).
+ */
+static int lds_sort_kind(const char *const *words, int n) {
+    int outer, inner;
+
+    if (n == 0) {
+        return ELF_LINK_SORT_NONE;
+    }
+    outer = strcmp(words[0], "SORT_BY_ALIGNMENT") == 0 ? ELF_LINK_SORT_ALIGN
+          : strcmp(words[0], "SORT_BY_INIT_PRIORITY") == 0 ? ELF_LINK_SORT_INIT_PRIORITY
+          : strcmp(words[0], "SORT_NONE") == 0 ? ELF_LINK_SORT_NONE : ELF_LINK_SORT_NAME;
+    if (n == 1 || (outer != ELF_LINK_SORT_ALIGN && outer != ELF_LINK_SORT_NAME)) {
+        return outer;
+    }
+    inner = lds_sort_kind(words + 1, n - 1);
+    if (outer == ELF_LINK_SORT_NAME && inner == ELF_LINK_SORT_ALIGN) {
+        return ELF_LINK_SORT_NAME_ALIGN;
+    }
+    if (outer == ELF_LINK_SORT_ALIGN && inner == ELF_LINK_SORT_NAME) {
+        return ELF_LINK_SORT_ALIGN_NAME;
+    }
+    return outer;
+}
+
 /*
  * file ( section ... ): which input sections go here.  The file pattern
- * has been read.  SORT and its relatives are accepted and change nothing,
- * the order within an output section being the order of the inputs.
+ * has been read.  SORT and its relatives say how the sections a pattern
+ * inside them takes are sorted (lds_sort_kind()); otherwise they go in
+ * in the order of the inputs.
  */
 static int lp_input(lds_parser_t *p, lds_stmtvec_t *v, const lds_tok_t *file, int keep) {
     static const char *const sorts[] = { "SORT", "SORT_BY_NAME", "SORT_BY_ALIGNMENT",
                                          "SORT_BY_INIT_PRIORITY", "SORT_NONE", NULL };
     lds_stmt_t *st = lds_stmt_new(v, LDS_ST_INPUT, LDS_IN_BODY, file);
+    const char *within[8];      /* the SORT words the next pattern is inside, outermost first */
     int nested = 0;
 
     if (st == NULL || lp_expect(p, LDS_TOK_LPAREN, "expected '(' after the file name") != 0) {
@@ -2371,7 +2402,15 @@ static int lp_input(lds_parser_t *p, lds_stmtvec_t *v, const lds_tok_t *file, in
             return -1;
         }
         if (t->kind == LDS_TOK_LPAREN && lds_word_in(word, sorts)) {
+            size_t w;
+
             lp_take(p);
+            /* the words are sorts[]'s, which last */
+            for (w = 0; strcmp(sorts[w], word) != 0; ++w) {
+            }
+            if (nested < (int)(sizeof(within) / sizeof(within[0]))) {
+                within[nested] = sorts[w];
+            }
             nested++;
         } else if (t->kind == LDS_TOK_LPAREN && strcmp(word, "EXCLUDE_FILE") == 0) {
             lp_take(p);
@@ -2393,9 +2432,16 @@ static int lp_input(lds_parser_t *p, lds_stmtvec_t *v, const lds_tok_t *file, in
                 }
                 lp_take(p);
             }
-        } else if (strvec_push(&st->patterns, word) != 0) {
-            free(word);
-            return -1;
+        } else {
+            int most = (int)(sizeof(within) / sizeof(within[0]));
+            int n = nested < most ? nested : most;
+
+            if (ld_vec_room(&st->sorts, &st->sort_cap, st->patterns.count, sizeof(st->sorts[0])) != 0 ||
+                strvec_push(&st->patterns, word) != 0) {
+                free(word);
+                return -1;
+            }
+            st->sorts[st->patterns.count - 1] = lds_sort_kind(within, n);
         }
         free(word);
     }
@@ -3151,6 +3197,41 @@ int script_input_rank(const char *section, const char *file, void *user) {
         }
     }
     return 0;
+}
+
+/**
+ * The elfobj sort hook: how an input section is sorted among the others
+ * its input description takes -- as SORT or its relatives around the
+ * first of the description's patterns that takes it say -- and, in
+ * *group, which output section's description that is.
+ */
+int script_input_sort(const char *section, const char *file, int *group, void *user) {
+    const lds_script_t *sc = ((const ld_ctx_t *)user)->script;
+    size_t i, k, n;
+
+    *group = -1;
+    for (i = 0; sc != NULL && i < sc->stmts.count; ++i) {
+        const lds_stmt_t *os = &sc->stmts.items[i];
+
+        if (os->kind != LDS_ST_OUTSEC) {
+            continue;
+        }
+        for (k = 0; k < os->body.count; ++k) {
+            const lds_stmt_t *in = &os->body.items[k];
+
+            if (in->kind != LDS_ST_INPUT || !script_input_matches(in, section, file)) {
+                continue;
+            }
+            *group = (int)i;
+            for (n = 0; in->sorts != NULL && n < in->patterns.count; ++n) {
+                if (lds_glob(in->patterns.items[n], section)) {
+                    return in->sorts[n];
+                }
+            }
+            return ELF_LINK_SORT_NONE;
+        }
+    }
+    return ELF_LINK_SORT_NONE;
 }
 
 /*

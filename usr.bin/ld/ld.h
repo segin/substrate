@@ -500,6 +500,9 @@ struct lds_stmt {
     uint64_t ext_start;
     uint64_t ext_end;
     strvec_t patterns;          /* INPUT: section name patterns */
+    int *sorts;                 /* INPUT: for each pattern, how SORT and its relatives sort what it takes
+                                 * (an elf_link_sort_t) */
+    size_t sort_cap;
     strvec_t excludes;          /* INPUT: EXCLUDE_FILE() patterns */
 };
 
@@ -822,6 +825,7 @@ int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out);
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_input_rank(const char *section, const char *file, void *user);
+int script_input_sort(const char *section, const char *file, int *group, void *user);
 int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *align, void *user);
 int script_rank_fill(const char *name, int rank, const uint8_t **pattern, size_t *len, void *user);
 void script_note_extents(ld_ctx_t *ctx, const elf_link_plan_t *plan);

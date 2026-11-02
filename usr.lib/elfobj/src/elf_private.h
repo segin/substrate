@@ -277,6 +277,8 @@ struct elf_link_plan {
     void *rank_user;
     elf_link_section_fill_hook_t fill_hook;
     void *fill_user;
+    elf_link_section_sort_hook_t sort_hook;
+    void *sort_user;
     struct elf_link_rank_extent *extents; /* with rank hooks: where each rank's sections went */
     size_t extent_count;
     size_t extent_cap;

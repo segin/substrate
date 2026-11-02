@@ -1321,7 +1321,8 @@ typedef const char *(*elf_link_section_name_hook_t)(
     const char *section_name, const char *input_name, void *user);
 /* Where an input section goes among the others of its output section: a
  * rank (a linker script's input description's place in the section's
- * body); sections go in by rank, and in input order within one. */
+ * body); sections go in by rank, and in input order within one unless the
+ * sort hook says otherwise. */
 typedef int (*elf_link_section_rank_hook_t)(const char *section_name, const char *input_name, void *user);
 /* Before the first section of a rank goes into an output section: where
  * it starts, given the offset the section has reached (*offset, which
@@ -1337,6 +1338,21 @@ typedef int (*elf_link_section_gap_hook_t)(const char *output_name, int rank, ui
  * The pattern must last the link.  0, or -1 to fail the link. */
 typedef int (*elf_link_section_fill_hook_t)(const char *output_name, int rank, const uint8_t **pattern,
                                             size_t *len, void *user);
+/* How the sections of one rank are sorted, as a linker script's SORT and its relatives say. */
+typedef enum {
+    ELF_LINK_SORT_NONE = 0,         /* in input order */
+    ELF_LINK_SORT_NAME,             /* SORT, SORT_BY_NAME: by name */
+    ELF_LINK_SORT_ALIGN,            /* SORT_BY_ALIGNMENT: the most aligned first */
+    ELF_LINK_SORT_NAME_ALIGN,       /* SORT_BY_NAME(SORT_BY_ALIGNMENT()): by name, then alignment */
+    ELF_LINK_SORT_ALIGN_NAME,       /* SORT_BY_ALIGNMENT(SORT_BY_NAME()): by alignment, then name */
+    ELF_LINK_SORT_INIT_PRIORITY     /* SORT_BY_INIT_PRIORITY: by the priority its name ends in */
+} elf_link_sort_t;
+/* How an input section is sorted among the others of its rank (an
+ * elf_link_sort_t), and *group, which tells apart the ranks of different
+ * output sections: sections are sorted only among those of their rank and
+ * group, and ties keep input order. */
+typedef int (*elf_link_section_sort_hook_t)(const char *section_name, const char *input_name, int *group,
+                                            void *user);
 typedef int (*elf_link_archive_hook_t)(const char *archive_path, const char *member_name, void *user);
 typedef int (*elf_link_gc_hook_t)(const elf_section_t *section, void *user);
 typedef void (*elf_link_incremental_hook_t)(const char *key, const char *value, void *user);
@@ -1520,6 +1536,16 @@ elf_err_t elf_link_plan_set_section_rank_hooks(elf_link_plan_t *plan, elf_link_s
  * @return ELF_OK, or ELF_ERR_STATE for no plan
  */
 elf_err_t elf_link_plan_set_section_fill_hook(elf_link_plan_t *plan, elf_link_section_fill_hook_t hook,
+                                              void *user);
+/**
+ * @brief How the sections of each rank are sorted (with the rank hooks).
+ *
+ * @param plan the link
+ * @param hook how a section is sorted among those of its rank, or NULL for input order
+ * @param user passed to @p hook
+ * @return ELF_OK, or ELF_ERR_STATE for no plan
+ */
+elf_err_t elf_link_plan_set_section_sort_hook(elf_link_plan_t *plan, elf_link_section_sort_hook_t hook,
                                               void *user);
 /**
  * @brief Fill a gap in an output section as GNU ld fills it.

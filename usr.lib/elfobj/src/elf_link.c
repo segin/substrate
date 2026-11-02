@@ -1676,13 +1676,97 @@ int elf_link_plan_rank_extent(const elf_link_plan_t *plan, const char *output_na
     return 1;
 }
 
-/* One input section to merge with rank hooks: which, its rank, and its place in input order. */
+elf_err_t elf_link_plan_set_section_sort_hook(elf_link_plan_t *plan, elf_link_section_sort_hook_t hook,
+                                              void *user) {
+    if (plan == NULL) {
+        return ELF_ERR_STATE;
+    }
+    plan->sort_hook = hook;
+    plan->sort_user = user;
+    return ELF_OK;
+}
+
+/*
+ * One input section to merge with rank hooks: which, its rank, and its
+ * place in input order; and with the sort hook, how it is sorted among
+ * those of its rank and group, by its name and alignment.
+ */
 struct ranked_piece {
     size_t input;
     size_t section;
     int rank;
+    int group;
+    int sort;
+    const char *name;
+    uint64_t align;
     size_t seq;
 };
+
+/**
+ * @brief The init priority a section's name ends in, as GNU ld's get_init_priority() reads it.
+ *
+ * `.init_array.N` and `.fini_array.N` are N; `.ctors.N` and `.dtors.N`, which run the other way, 65535 - N;
+ * any other is 0.
+ *
+ * @param name the section's name
+ * @return its priority
+ */
+static unsigned long init_priority(const char *name) {
+    static const char *const forward[] = { ".init_array.", ".fini_array.", NULL };
+    static const char *const backward[] = { ".ctors.", ".dtors.", NULL };
+    unsigned long n;
+    char *end;
+    size_t i;
+
+    for (i = 0; forward[i] != NULL; ++i) {
+        size_t len = strlen(forward[i]);
+
+        if (strncmp(name, forward[i], len) == 0) {
+            n = strtoul(name + len, &end, 10);
+            return *end == '\0' ? n : 0;
+        }
+    }
+    for (i = 0; backward[i] != NULL; ++i) {
+        size_t len = strlen(backward[i]);
+
+        if (strncmp(name, backward[i], len) == 0) {
+            n = strtoul(name + len, &end, 10);
+            return *end == '\0' && n <= 65535 ? 65535 - n : 0;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Two sections of one rank as their sort has them, as GNU ld's compare_section() does: 0 for a tie.
+ *
+ * @param sort how they are sorted (an elf_link_sort_t)
+ * @param x    the one
+ * @param y    the other
+ * @return less than, equal to or greater than 0
+ */
+static int ranked_piece_sort_cmp(int sort, const struct ranked_piece *x, const struct ranked_piece *y) {
+    int by_name = strcmp(x->name, y->name);
+    int by_align = x->align > y->align ? -1 : x->align < y->align ? 1 : 0;
+    unsigned long px, py;
+
+    switch (sort) {
+    case ELF_LINK_SORT_NAME:
+        return by_name;
+    case ELF_LINK_SORT_ALIGN:
+        return by_align;
+    case ELF_LINK_SORT_NAME_ALIGN:
+        return by_name != 0 ? by_name : by_align;
+    case ELF_LINK_SORT_ALIGN_NAME:
+        return by_align != 0 ? by_align : by_name;
+    case ELF_LINK_SORT_INIT_PRIORITY:
+        px = init_priority(x->name);
+        py = init_priority(y->name);
+        return px < py ? -1 : px > py ? 1 : by_name;
+    default:
+        return 0;
+    }
+}
 
 static int ranked_piece_cmp(const void *a, const void *b) {
     const struct ranked_piece *x = (const struct ranked_piece *)a;
@@ -1694,10 +1778,86 @@ static int ranked_piece_cmp(const void *a, const void *b) {
     return x->seq < y->seq ? -1 : x->seq > y->seq ? 1 : 0;
 }
 
+/* Sorted pieces of one rank and group: by their sort, ties in input order. */
+static int sorted_piece_cmp(const void *a, const void *b) {
+    const struct ranked_piece *x = (const struct ranked_piece *)a;
+    const struct ranked_piece *y = (const struct ranked_piece *)b;
+    int c;
+
+    if (x->sort != y->sort) {
+        return x->sort < y->sort ? -1 : 1;
+    }
+    if ((c = ranked_piece_sort_cmp(x->sort, x, y)) != 0) {
+        return c;
+    }
+    return x->seq < y->seq ? -1 : x->seq > y->seq ? 1 : 0;
+}
+
+/**
+ * @brief Sort the pieces the sort hook says are sorted, in pieces already in order of rank and input.
+ *
+ * Within each rank, those of one group that are sorted are put in their order in the places they
+ * held, so that every other piece, and the order the output sections are first met in, stays as it
+ * was.
+ *
+ * @param pieces the pieces
+ * @param count  how many
+ * @return ELF_OK, or ELF_ERR_OOM
+ */
+static elf_err_t sort_ranked_pieces(struct ranked_piece *pieces, size_t count) {
+    struct ranked_piece *tmp = NULL;
+    size_t *at = NULL;
+    uint8_t *done = NULL;
+    size_t a, b, i, j, n;
+
+    for (i = 0; i < count && pieces[i].sort == ELF_LINK_SORT_NONE; ++i) {
+    }
+    if (i == count) {
+        return ELF_OK;
+    }
+    tmp = (struct ranked_piece *)elf__calloc(count, sizeof(*tmp));
+    at = (size_t *)elf__calloc(count, sizeof(*at));
+    done = (uint8_t *)elf__calloc(count, 1);
+    if (tmp == NULL || at == NULL || done == NULL) {
+        free(tmp);
+        free(at);
+        free(done);
+        return ELF_ERR_OOM;
+    }
+    for (a = 0; a < count; a = b) {
+        for (b = a + 1; b < count && pieces[b].rank == pieces[a].rank; ++b) {
+        }
+        for (i = a; i < b; ++i) {
+            if (done[i] || pieces[i].sort == ELF_LINK_SORT_NONE) {
+                continue;
+            }
+            n = 0;
+            for (j = i; j < b; ++j) {
+                if (!done[j] && pieces[j].sort != ELF_LINK_SORT_NONE && pieces[j].group == pieces[i].group) {
+                    done[j] = 1;
+                    at[n] = j;
+                    tmp[n++] = pieces[j];
+                }
+            }
+            if (n > 1) {
+                qsort(tmp, n, sizeof(*tmp), sorted_piece_cmp);
+            }
+            for (j = 0; j < n; ++j) {
+                pieces[at[j]] = tmp[j];
+            }
+        }
+    }
+    free(tmp);
+    free(at);
+    free(done);
+    return ELF_OK;
+}
+
 /*
  * The merge with rank hooks: every input's sections go in by rank -- a
  * linker script's input descriptions, in the order its output section
- * lists them -- and in input order within a rank, and only then are the
+ * lists them -- and in input order within a rank, or as the sort hook
+ * sorts them (a script's SORT_BY_ALIGNMENT()), and only then are the
  * symbols and relocations of each input merged, against where its
  * sections went.  Merging input by input put a later description's
  * sections of one input before an earlier description's of the next.
@@ -1758,12 +1918,19 @@ static elf_err_t link_ranked(elf_link_plan_t *plan, elfobj_t *out, comdat_set_t 
             pieces[piece_count].rank = src != NULL && src->name != NULL
                                            ? plan->rank_hook(src->name, plan->inputs[i].name, plan->rank_user)
                                            : 0;
+            if (plan->sort_hook != NULL && src != NULL && src->name != NULL) {
+                pieces[piece_count].sort = plan->sort_hook(src->name, plan->inputs[i].name,
+                                                           &pieces[piece_count].group, plan->sort_user);
+                pieces[piece_count].name = src->name;
+                pieces[piece_count].align = src->addralign;
+            }
             pieces[piece_count].seq = piece_count;
             piece_count++;
         }
     }
     if (err == ELF_OK && piece_count > 1) {
         qsort(pieces, piece_count, sizeof(*pieces), ranked_piece_cmp);
+        err = sort_ranked_pieces(pieces, piece_count);
     }
     for (i = 0; err == ELF_OK && i < piece_count; ++i) {
         size_t in = pieces[i].input;

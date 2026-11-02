@@ -40,5 +40,6 @@ run:
 	./test_local_global_same_name.sh
 	./test_script_fill.sh
 	./test_script_dot_expr.sh
+	./test_script_sort.sh
 
 clean:

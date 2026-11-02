@@ -719,6 +719,21 @@ protects the section from
 and
 .Ic /DISCARD/
 leaves what it names out.
+The sections a description takes go in in the order of the inputs,
+except those a pattern inside
+.Ic SORT
+or
+.Ic SORT_BY_NAME
+takes, which go in by name,
+.Ic SORT_BY_ALIGNMENT ,
+the most aligned first, and
+.Ic SORT_BY_INIT_PRIORITY ,
+by the number their name ends in
+.Pq of Li .ctors No and Li .dtors , No the other way ;
+of two nested, the outer sorts and the inner breaks its ties, and
+otherwise ties keep the order of the inputs, as in GNU ld.
+.Ic SORT_NONE
+sorts nothing.
 An output section the script names is placed at the location counter,
 however it is protected: no page is skipped between read-only, code and
 data, as GNU ld does not skip one; a script that wants them apart says so
@@ -931,9 +946,8 @@ Read and not acted on:
 .Ic REGION_ALIAS ,
 the load address
 .Pq Ic AT ,
-.Ic SUBALIGN ,
-and the sorting of
-.Ic SORT .
+and
+.Ic SUBALIGN .
 Refused:
 .Ic BYTE ,
 .Ic SHORT ,
