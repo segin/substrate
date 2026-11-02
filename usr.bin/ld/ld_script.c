@@ -3234,16 +3234,6 @@ int script_input_sort(const char *section, const char *file, int *group, void *u
     return ELF_LINK_SORT_NONE;
 }
 
-/*
- * The elfobj gap hook: before the sections of input description `rank` of
- * output section `name`, the location counter moves as the statements
- * since the description before it say -- `. = ALIGN(16)`, `. += 8` -- and
- * the section must be aligned as much as any ALIGN there asks, since the
- * offsets are counted from its start.  An expression this cannot work
- * out here moves nothing, and the walk that gives the addresses finds the
- * room wrong and has the link done over with what it learned
- * (ld_relayout_t).
- */
 /**
  * @brief In the merge, the value of assignment @p st in the body of output
  *        section @p os, @p name, with the location counter at @p cur.
@@ -3280,6 +3270,16 @@ static int gap_eval(ld_ctx_t *ctx, lds_stmt_t *os, const char *name, const ld_re
     return 0;
 }
 
+/*
+ * The elfobj gap hook: before the sections of input description `rank` of
+ * output section `name`, the location counter moves as the statements
+ * since the description before it say -- `. = ALIGN(16)`, `. += 8`.  The
+ * output section is not made more aligned for an ALIGN there, as GNU ld
+ * does not make it: the first time the section is taken to be at 0, and
+ * if it is not, or an expression needs an address this does not have,
+ * the walk that gives the addresses finds the room wrong and has the link
+ * done over with what it learned (ld_relayout_t).
+ */
 int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *align, void *user) {
     ld_ctx_t *ctx = (ld_ctx_t *)user;
     const ld_relayout_t *hints = NULL;
@@ -3287,6 +3287,8 @@ int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *alig
     lds_stmt_t *os = NULL;
     size_t i;
     long k;
+
+    (void)align;
 
     for (i = 0; ctx->script != NULL && i < ctx->script->stmts.count; ++i) {
         lds_stmt_t *st = &ctx->script->stmts.items[i];
@@ -3343,22 +3345,7 @@ int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *alig
         if (v < cur) {
             continue;
         }
-        v -= base;
-        if (st->op == '=' && st->expr.count != 0 && st->expr.items[0].kind == LDS_TOK_IDENT &&
-            strcmp(st->expr.items[0].text, "ALIGN") == 0) {
-            lds_eval_ctx_t ec;
-            uint64_t a;
-
-            /* ALIGN(n) of 1 is n */
-            memset(&ec, 0, sizeof(ec));
-            ec.ctx = ctx;
-            ec.have_dot = 1;
-            ec.dot = 1;
-            if (lds_eval_expr_slice(&ec, st->expr.items, 0, st->expr.count, &a) == 0 && a > *align) {
-                *align = a;
-            }
-        }
-        *offset = v;
+        *offset = v - base;
     }
     return 0;
 }

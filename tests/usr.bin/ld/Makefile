@@ -42,5 +42,6 @@ run:
 	./test_script_dot_expr.sh
 	./test_script_sort.sh
 	./test_writable_code_section.sh
+	./test_script_body_align.sh
 
 clean:
