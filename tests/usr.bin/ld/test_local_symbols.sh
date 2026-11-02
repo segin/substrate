@@ -112,6 +112,27 @@ discard() {
     fi
 }
 
+# No symbol the linker makes up for its own relocations is left: a
+# relocation against a section of merged strings, one against a local, in
+# a program and a PIE.
+cat > m.s <<'EOF'
+	.section .rodata.str1.1,"aMS",@progbits,1
+	.string "first"
+	.string "second"
+	.data
+	.globl mptr
+mptr:	.quad .rodata.str1.1 + 6
+	.quad ldata
+EOF
+${AS_GNU:-as} --64 -o m.o m.s || exit 1
+for r in "" -pie; do
+    if ! ./ld -m elf_x86_64 $r -o made.out a.o m.o > said 2>&1; then
+        echo "FAIL: ld $r a.o m.o: $(head -1 said)"; fail=1
+    elif n=$(readelf -sW made.out | grep -c ' __elfobj_'); [ "$n" -ne 0 ]; then
+        echo "FAIL: ld $r: $n symbols the linker made up are left in the output"; fail=1
+    fi
+done
+
 for r in "" -pie -shared -r; do
     for d in "" -X -x --discard-locals --discard-all --discard-none "-x --discard-none"; do
         # shellcheck disable=SC2086

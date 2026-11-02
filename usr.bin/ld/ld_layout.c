@@ -793,6 +793,10 @@ static int local_symbol_goes(const elf_symbol_t *sym, void *user) {
     if (elf_symbol_type(sym) == STT_SECTION) {
         return !ctx->opt.emit_relocs && !relocatable;
     }
+    /* the ones the link plan made up for a relocation to name, which no input has */
+    if (strncmp(elf_symbol_name(sym) != NULL ? elf_symbol_name(sym) : "", "__elfobj_", 9) == 0) {
+        return 1;
+    }
     switch (ctx->opt.discard) {
     case LD_DISCARD_ALL:
         return 1;
