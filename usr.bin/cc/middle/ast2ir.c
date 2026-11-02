@@ -12986,6 +12986,46 @@ static int apply_global_ptr_addend(long base, long idx, long step, int is_sub, l
     return 0;
 }
 
+/**
+ * The value of pointer expression @p e as a constant address, a symbol
+ * plus an addend: `&x` (the lvalue's address), an array or function named
+ * (which is its address), pointer arithmetic on one of those, a cast of
+ * one.  A pointer variable's value is not a constant: Linux's
+ * `cpumask_bits(&watchdog_cpumask)` is `(&watchdog_cpumask)->bits`, but
+ * `&p->x` of a pointer p is refused, as gcc refuses it.
+ *
+ * @param tu          the translation unit
+ * @param e           the expression
+ * @param out_sym     receives the symbol (owned)
+ * @param out_addend  receives the addend
+ * @return            0, or -1 if it is no such constant
+ */
+static int eval_global_pointer_value(const cc_translation_unit_t *tu, const cc_expr_t *e, char **out_sym,
+                                     long *out_addend) {
+    const cc_ctype_t *t;
+
+    *out_sym = NULL;
+    *out_addend = 0;
+    if (e == NULL) {
+        return -1;
+    }
+    if (e->kind == CC_EXPR_CAST) {
+        return eval_global_pointer_value(tu, e->lhs, out_sym, out_addend);
+    }
+    if (e->kind == CC_EXPR_ADDR) {
+        return eval_global_addr_symbol_addend(tu, e->lhs, out_sym, out_addend);
+    }
+    t = e->ctype != NULL ? e->ctype->unqual : NULL;
+    if (t != NULL && (t->kind == CC_CT_ARRAY || t->kind == CC_CT_FUNCTION)) {
+        /* an array or a function as a value is where it is */
+        return eval_global_addr_symbol_addend(tu, e, out_sym, out_addend);
+    }
+    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB)) {
+        return eval_global_addr_symbol_addend(tu, e, out_sym, out_addend);
+    }
+    return -1;
+}
+
 static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const cc_expr_t *e, char **out_sym,
                                           long *out_addend) {
     char *lsym = NULL;
@@ -13021,7 +13061,10 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
         return 0;
     }
     if (e->kind == CC_EXPR_MEMBER && e->lhs != NULL) {
-        if (eval_global_addr_symbol_addend(tu, e->lhs, &sym, out_addend) != 0) {
+        /* `p->m` is in the object p's value points at; `s.m` in s */
+        if ((e->member_is_arrow ? eval_global_pointer_value(tu, e->lhs, &sym, out_addend)
+                                : eval_global_addr_symbol_addend(tu, e->lhs, &sym, out_addend)) != 0) {
+            free(sym);
             return -1;
         }
         if ((e->member_offset > 0 && *out_addend > LONG_MAX - e->member_offset) ||
@@ -13034,14 +13077,22 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
         return 0;
     }
     if (e->kind == CC_EXPR_DEREF && e->lhs != NULL) {
-        return eval_global_addr_symbol_addend(tu, e->lhs, out_sym, out_addend);
+        /* `*p` is where p's value points */
+        return eval_global_pointer_value(tu, e->lhs, out_sym, out_addend);
     }
     if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB)) {
-        if (eval_global_addr_symbol_addend(tu, e->lhs, &lsym, &ladd) == 0) {
+        /* the pointer operand's value, an array's address among them */
+        if (eval_global_pointer_value(tu, e->lhs, &lsym, &ladd) == 0) {
             has_l = 1;
+        } else {
+            free(lsym);
+            lsym = NULL;
         }
-        if (eval_global_addr_symbol_addend(tu, e->rhs, &rsym, &radd) == 0) {
+        if (eval_global_pointer_value(tu, e->rhs, &rsym, &radd) == 0) {
             has_r = 1;
+        } else {
+            free(rsym);
+            rsym = NULL;
         }
         if (has_l && !has_r) {
             if (eval_global_init_expr(tu, e->rhs, &iv, &fv, &isf, &rsym) != 0 || rsym != NULL || isf) {
