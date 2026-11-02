@@ -324,6 +324,10 @@ static int phase_reproduce(ld_link_t *l) {
     return write_reproduce_bundle(l->ctx, &l->inputs);
 }
 
+static int phase_execstack(ld_link_t *l) {
+    return check_execstack(l->ctx, &l->inputs);
+}
+
 static int phase_trace(ld_link_t *l) {
     emit_trace_inputs(l->ctx, &l->inputs);
     emit_trace_symbols(l->ctx, &l->inputs);
@@ -544,6 +548,10 @@ static int phase_wx_policy(ld_link_t *l) {
     return enforce_wx_policy(l->out);
 }
 
+static int phase_rwx_segments(ld_link_t *l) {
+    return check_rwx_segments(l->ctx, l->out);
+}
+
 static int phase_text_relocations(ld_link_t *l) {
     const char *textrel_sec = text_relocation_section(l->ctx, l->out);
 
@@ -627,6 +635,7 @@ static const ld_phase_t link_phases[] = {
     { "load-inputs", phase_load_inputs, LD_FOR_ANY, 0, DID(INPUTS), DID(INPUTS), NULL },
     { "reproduce", phase_reproduce, LD_FOR_ANY, DID(INPUTS), 0, 0, NULL },
     { "trace", phase_trace, LD_FOR_ANY, DID(INPUTS), 0, 0, NULL },
+    { "execstack", phase_execstack, LD_FOR_ANY, DID(INPUTS), 0, 0, NULL },
     { "symtab", phase_symtab, LD_FOR_ANY, DID(INPUTS), DID(MERGE), DID(SYMTAB), NULL },
     { "merge", phase_merge, LD_FOR_ANY, DID(SYMTAB), DID(MERGE), DID(MERGE), NULL },
     { "brand", phase_brand, LD_FOR_ANY, DID(MERGE), 0, 0, NULL },
@@ -663,6 +672,7 @@ static const ld_phase_t link_phases[] = {
     { "dynamic-tags", phase_dynamic_tags, LD_FOR_FINAL, DID(LAYOUT), 0, 0,
       "failed to finalize .dynamic tag values" },
     { "wx-policy", phase_wx_policy, LD_FOR_FINAL, DID(LAYOUT), 0, 0, NULL },
+    { "rwx-segments", phase_rwx_segments, LD_FOR_FINAL, DID(LAYOUT), 0, 0, NULL },
     { "text-relocations", phase_text_relocations, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
     { "undefined", phase_undefined, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
     { "relocate", phase_relocate, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC) | DID(SYMVALUES), DID(RELOC), NULL },
@@ -759,6 +769,8 @@ int main(int argc, char **argv) {
     opt->current_lib_mode = LD_LIBMODE_DYNAMIC;
 #endif
     opt->z_execstack = -1;
+    opt->warn_execstack = LD_WARN_EXECSTACK_OBJECTS;
+    opt->warn_rwx_segments = 1;
     opt->z_relro = 1;
     opt->hash_style = LD_HASH_BOTH;
 
@@ -795,6 +807,8 @@ int main(int argc, char **argv) {
             opt->expect_type = ET_EXEC;
         }
         if (run_internal_link(&ctx) != 0) {
+            /* as GNU ld does: an output from before is not left to pass for this link's */
+            remove_output(opt->out_path);
             rc = 1;
         } else if (validate_output(&ctx) != 0) {
             remove_output(opt->out_path);

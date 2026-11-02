@@ -33,6 +33,10 @@
 .Op Fl -trace-symbol Ns = Ns Ar symbol
 .Op Fl -warn-common
 .Op Fl -fatal-warnings
+.Op Fl -warn-execstack | Fl -warn-execstack-objects | Fl -no-warn-execstack
+.Op Fl -error-execstack | Fl -no-error-execstack
+.Op Fl -warn-rwx-segments | Fl -no-warn-rwx-segments
+.Op Fl -error-rwx-segments | Fl -no-error-rwx-segments
 .Op Fl -z Ar text|notext|execstack|noexecstack|relro|norelro|now|lazy|max-page-size=size
 .Op Fl -plugin Ar path
 .Op Fl -plugin-opt Ar option
@@ -380,6 +384,40 @@ page as its address; it is 4 KiB by default, and
 .Li CONSTANT(MAXPAGESIZE)
 in a script.
 Any other keyword is a warning and is ignored.
+.It Fl -warn-execstack-objects , Fl -warn-execstack , Fl -no-warn-execstack
+What an executable stack is warned of, as GNU ld warns of it.
+By default
+.Pq Fl -warn-execstack-objects
+it is the first input with an executable
+.Pa .note.GNU-stack ,
+named in
+.Dq Ar input : requires executable stack ,
+unless
+.Fl z Cm execstack
+or
+.Fl z Cm noexecstack
+decided the stack; this is said under
+.Fl r
+too.
+.Fl -warn-execstack
+also warns of the executable stack
+.Fl z Cm execstack
+asks for, and
+.Fl -no-warn-execstack
+of neither.
+.It Fl -error-execstack , Fl -no-error-execstack
+Whether that warning is an error instead, the link failing.
+.It Fl -warn-rwx-segments , Fl -no-warn-rwx-segments
+Whether a
+.Dv PT_LOAD
+of an executable or shared object that is readable, writable and
+executable is warned of; it is, by default.
+.It Fl -error-rwx-segments , Fl -no-error-rwx-segments
+Whether that warning, when it is given, is an error instead.
+.Pp
+For each pair the last option given counts.
+A link that fails takes away an output of that name from before, as GNU
+ld does.
 .It Fl -plugin Ar path
 Set plugin executable used for LTO materialization.
 A plugin that is a shared object, which is what GCC names on every link,

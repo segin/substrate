@@ -61,6 +61,13 @@ typedef enum {
     LD_HASH_GNU = 2
 } ld_hash_style_t;
 
+/* What an executable stack is warned of, as GNU ld's options choose. */
+enum {
+    LD_WARN_EXECSTACK_NONE = 0,     /* --no-warn-execstack */
+    LD_WARN_EXECSTACK_OBJECTS = 1,  /* --warn-execstack-objects, the default: an input that asks for one */
+    LD_WARN_EXECSTACK_ALL = 2       /* --warn-execstack: -z execstack as well */
+};
+
 typedef struct {
     ld_input_kind_t kind;
     ld_lib_mode_t lib_mode;
@@ -178,6 +185,10 @@ typedef struct {
     int icf_mode; /* 0=off, 1=safe, 2=all */
     int z_text_mode; /* 0=default, 1=text, 2=notext */
     int z_execstack; /* -1=auto, 0=noexecstack, 1=execstack */
+    int warn_execstack;     /* LD_WARN_EXECSTACK_*: what an executable stack is warned of */
+    int error_execstack;    /* --error-execstack: that warning is an error */
+    int warn_rwx_segments;  /* --warn-rwx-segments, the default: a PT_LOAD that is RWX is warned of */
+    int error_rwx_segments; /* --error-rwx-segments: that warning is an error */
     int z_relro; /* 0=norelro, 1=relro */
     int z_now;   /* -z now: the dynamic linker binds everything at once */
     uint64_t max_page_size; /* -z max-page-size: a PT_LOAD's alignment; 0 for 4 KiB */
@@ -818,6 +829,25 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx);
 int split_load_segments(const ld_ctx_t *ctx, elfobj_t *obj);
 int strip_group_sections_for_final(elfobj_t *obj);
 int enforce_wx_policy(const elfobj_t *obj);
+/**
+ * Warn, as GNU ld does, that the output will have an executable stack: because the first input with an
+ * executable .note.GNU-stack asks for one (unless -z execstack or -z noexecstack decided it), or, under
+ * --warn-execstack, because -z execstack said so.  --error-execstack makes the warning an error.
+ *
+ * @param ctx    the link
+ * @param inputs the input objects, with their names
+ * @return 0, or -1 if the link is to fail
+ */
+int check_execstack(ld_ctx_t *ctx, const objvec_t *inputs);
+/**
+ * Warn, as GNU ld does, of a PT_LOAD of the output that is readable, writable and executable, unless
+ * --no-warn-rwx-segments; --error-rwx-segments makes the warning an error.
+ *
+ * @param ctx the link
+ * @param obj the output, its segments made
+ * @return 0, or -1 if the link is to fail
+ */
+int check_rwx_segments(ld_ctx_t *ctx, const elfobj_t *obj);
 
 /* ld_gc.c */
 int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab);

@@ -732,3 +732,61 @@ int enforce_wx_policy(const elfobj_t *obj) {
     }
     return 0;
 }
+
+int check_execstack(ld_ctx_t *ctx, const objvec_t *inputs) {
+    const ld_options_t *opt = &ctx->opt;
+    size_t i;
+
+    if (opt->z_execstack == 1) {
+        /* asked for on the command line: said only under --warn-execstack */
+        if (opt->warn_execstack != LD_WARN_EXECSTACK_ALL) {
+            return 0;
+        }
+        if (opt->error_execstack) {
+            fprintf(stderr, "ld: error: creating an executable stack because of -z execstack command line option\n");
+            return -1;
+        }
+        return ld_warn(ctx, "enabling an executable stack because of -z execstack command line option");
+    }
+    if (opt->z_execstack == 0 || opt->warn_execstack == LD_WARN_EXECSTACK_NONE) {
+        return 0;
+    }
+    /* the first input that asks for one is named, as GNU ld names it */
+    for (i = 0; i < inputs->count; ++i) {
+        const char *name = inputs->names[i] != NULL ? inputs->names[i] : "<input>";
+        if (!has_execstack_note(inputs->objs[i])) {
+            continue;
+        }
+        if (opt->error_execstack) {
+            fprintf(stderr,
+                    "ld: error: %s: is triggering the generation of an executable stack "
+                    "(because it has an executable .note.GNU-stack section)\n",
+                    name);
+            return -1;
+        }
+        return ld_warn(ctx, "%s: requires executable stack (because the .note.GNU-stack section is executable)",
+                       name);
+    }
+    return 0;
+}
+
+int check_rwx_segments(ld_ctx_t *ctx, const elfobj_t *obj) {
+    const uint32_t rwx = LD_PF_R | LD_PF_W | LD_PF_X;
+    size_t i;
+
+    if (!ctx->opt.warn_rwx_segments) {
+        return 0;
+    }
+    for (i = 0; i < elf_segment_count(obj); ++i) {
+        const elf_segment_t *seg = elf_segment_get(obj, i);
+        if (seg == NULL || elf_segment_type(seg) != PT_LOAD || (elf_segment_flags(seg) & rwx) != rwx) {
+            continue;
+        }
+        if (ctx->opt.error_rwx_segments) {
+            fprintf(stderr, "ld: error: %s has a LOAD segment with RWX permissions\n", ctx->opt.out_path);
+            return -1;
+        }
+        return ld_warn(ctx, "%s has a LOAD segment with RWX permissions", ctx->opt.out_path);
+    }
+    return 0;
+}

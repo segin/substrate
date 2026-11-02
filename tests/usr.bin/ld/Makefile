@@ -22,5 +22,6 @@ run:
 	./test_library_script.sh
 	./test_pie_copy.sh
 	./test_copy_alias.sh
+	./test_execstack_rwx.sh
 
 clean:

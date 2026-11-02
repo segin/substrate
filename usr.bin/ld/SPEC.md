@@ -155,6 +155,9 @@ This section defines every major capability area needed to replace `lld`/`gold` 
 - `--emit-relocs`
 - `--strip-all`, `--strip-debug`, `-s`, `-S`
 - `--fatal-warnings`, `--warn-common`, unresolved symbol policy flags
+- `--[no-]warn-execstack`, `--warn-execstack-objects`, `--[no-]error-execstack`,
+  `--[no-]warn-rwx-segments`, `--[no-]error-rwx-segments`: GNU ld's warnings of
+  an executable stack and of an RWX `PT_LOAD`, on by default
 - `--reproduce`
 - `-v`, `--version`, `--trace`, `--trace-symbol`
 
