@@ -33,11 +33,16 @@
 #define PP_MAX_INCLUDE_DEPTH 128
 /** The name standard input goes by in line markers, __FILE__ and diagnostics. */
 #define PP_STDIN_NAME "<stdin>"
-#define PP_MAX_EXPAND_DEPTH 32
+/*
+ * gcc sets no bound on either of the next, and Linux's pack_fields() (include/linux/packing.h) needs much of
+ * both: CHECK_PACKED_FIELDS_N nests N macros deep, N up to 50, and one ice_common.c statement expands to some
+ * 1.4 million tokens
+ */
+#define PP_MAX_EXPAND_DEPTH 256
 #define PP_MAX_EXPAND_PASSES 2
 #define PP_MAX_EXPANDED_TEXT (64 * 1024 * 1024)
 #define PP_MAX_OUTPUT_SIZE (64 * 1024 * 1024)
-#define PP_MAX_EXPANDED_TOKENS (1024 * 1024)
+#define PP_MAX_EXPANDED_TOKENS (16 * 1024 * 1024)
 #define PP_EMPTY_ARG_MARKER '\x1f'
 #define PP_HIDE_MACRO_BEGIN '\x1d'
 #define PP_HIDE_MACRO_END '\x1c'
