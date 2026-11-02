@@ -6,6 +6,7 @@
  *
  * cc-std: gnu2x
  * cc-march-m32: pentium4 (gcc has _Float16 on i386 only with SSE2)
+ * cc-flags-m32: -msse2 (which cc's pentium4 does not turn on by itself)
  */
 #include <stdio.h>
 

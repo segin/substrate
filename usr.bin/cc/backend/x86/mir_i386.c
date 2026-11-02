@@ -138,9 +138,16 @@ static void sel_memcpy(xsel_t *s, const xop_t *dst, const xop_t *src, long size)
     }
 }
 
-/** Whether floating ABI byte @p abi is one this path passes: a double, a float in single precision, a long double. */
+/** Whether floating ABI byte @p abi is one this path passes: a double, a float in single precision, a long double,
+ *  a _Float16's bits in a word. */
 static int i386_fp_abi_ok(unsigned char abi) {
-    return abi == CC_CALL_ARG_ABI_DEFAULT || abi == CC_CALL_ARG_ABI_FLOAT || abi == CC_CALL_ARG_ABI_LDOUBLE;
+    return abi == CC_CALL_ARG_ABI_DEFAULT || abi == CC_CALL_ARG_ABI_FLOAT || abi == CC_CALL_ARG_ABI_LDOUBLE ||
+           abi == CC_CALL_ARG_ABI_HALF;
+}
+
+/** The bytes of memory a floating value of ABI byte @p abi is stored in, as xs_fp_to_mem() takes them. */
+static int i386_fp_abi_mem_bytes(unsigned char abi) {
+    return abi == CC_CALL_ARG_ABI_FLOAT ? 4 : abi == CC_CALL_ARG_ABI_LDOUBLE ? 16 : abi == CC_CALL_ARG_ABI_HALF ? 2 : 8;
 }
 
 /**
@@ -160,7 +167,10 @@ static int arg_words(const xsel_t *s, const cc_ssa_instr_t *in, size_t a) {
         /* a float's single word, a double's two, a long double's three */
         unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
 
-        return abi == CC_CALL_ARG_ABI_FLOAT ? 1 : abi == CC_CALL_ARG_ABI_LDOUBLE ? 3 : abi == 0 ? 2 : 0;
+        return abi == CC_CALL_ARG_ABI_FLOAT || abi == CC_CALL_ARG_ABI_HALF ? 1
+               : abi == CC_CALL_ARG_ABI_LDOUBLE                          ? 3
+               : abi == 0                                                ? 2
+                                                                         : 0;
     }
     if (in->call_arg_abi != NULL && CC_ABI_KIND(in->call_arg_abi[a]) == CC_CALL_ARG_ABI_AGG_MEM) {
         /* a structure passed by value: a copy of its words on the stack */
@@ -189,7 +199,7 @@ static long arg_bytes(const xsel_t *s, const cc_ssa_instr_t *in, size_t a) {
         return 0;
     }
     if (xs_fp_kind(s, in->args[a]) != XFP_NONE) {
-        return abi == CC_CALL_ARG_ABI_FLOAT ? 4 : abi == CC_CALL_ARG_ABI_LDOUBLE ? 12 : 8;
+        return abi == CC_CALL_ARG_ABI_FLOAT || abi == CC_CALL_ARG_ABI_HALF ? 4 : abi == CC_CALL_ARG_ABI_LDOUBLE ? 12 : 8;
     }
     if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) {
         return i386_param_slot_bytes(call_arg_size_bytes(in, a, 4));
@@ -199,13 +209,22 @@ static long arg_bytes(const xsel_t *s, const cc_ssa_instr_t *in, size_t a) {
 
 /**
  * Store argument @p a of call @p in at the top of the stack, taking @p bytes of it, pushed or (a floating one)
- * stored after the stack pointer moves; *@p pushed counts them.
+ * stored after the stack pointer moves; *@p pushed counts them.  A _Float16's bits are pushed from frame object
+ * @p half_obj, where they were made before the arguments' pushes began (they take a call of libgcc).
  */
-static void push_arg(xsel_t *s, const cc_ssa_instr_t *in, size_t a, long bytes, long *pushed) {
+static void push_arg(xsel_t *s, const cc_ssa_instr_t *in, size_t a, long bytes, long *pushed, int half_obj) {
     int v = in->args[a];
     unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
     long k;
 
+    if (half_obj >= 0) {
+        /* the word, the half in its low 16 bits, as gcc pushes it */
+        xop_t m = xop_frame(half_obj, 0, 4);
+
+        xs_emit(s, XI_PUSH, 4, 1, &m, NULL, NULL);
+        *pushed += 4;
+        return;
+    }
     if (xs_fp_kind(s, v) != XFP_NONE) {
         /* a float in single precision, a long double's 80 bits in its 12 */
         xop_t n = xop_imm(-bytes, 4);
@@ -239,6 +258,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     unsigned rp_used = 0;
     long a;
     long *offs;
+    int *hobj;
     int nx = 0;
     int nm = 0;
     xinst_t c;
@@ -255,7 +275,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     int agg_obj = agg ? s->obj[in->dst] : -1;
 
     if ((agg && !in_regs && !sret_reg && !sret && !ret_vec && !ret_x87) || (agg && agg_obj < 0) ||
-        (!agg && (in->agg_class & ~(int)CC_ABI_RET_FLOAT) != 0) ||
+        (!agg && (in->agg_class & ~(int)(CC_ABI_RET_FLOAT | CC_ABI_RET_HALF)) != 0) ||
         (in->dst >= 0 && !agg && cc_ssa_value_class(f, in->dst) != CC_VAL_F64 &&
          f->value_ty[in->dst].kind == CC_TY_AGG)) {
         XS_NOPE(s);
@@ -284,9 +304,22 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
         }
     }
     offs = (long *)malloc((in->arg_count > 0 ? in->arg_count : 1) * sizeof(long));
-    if (offs == NULL) {
+    hobj = (int *)malloc((in->arg_count > 0 ? in->arg_count : 1) * sizeof(int));
+    if (offs == NULL || hobj == NULL) {
+        free(offs);
+        free(hobj);
         s->xf.oom = 1;
         return;
+    }
+    for (a = 0; a < (long)in->arg_count; ++a) {
+        /* a _Float16's bits, made first: __truncdfhf2 is a call */
+        unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
+
+        hobj[a] = -1;
+        if (abi == CC_CALL_ARG_ABI_HALF && xs_fp_kind(s, in->args[a]) != XFP_NONE) {
+            hobj[a] = xf_new_obj(&s->xf, XF_LOCAL, 4, 4, 0);
+            xs_fp_to_mem(s, in->args[a], xop_frame(hobj[a], 0, 2), 2);
+        }
     }
     pos = sret ? 4 : 0;
     for (a = 0; a < (long)in->arg_count; ++a) {
@@ -317,7 +350,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
             pushed += cur - end;
         }
         if (a >= 0) {
-            push_arg(s, in, (size_t)a, end - start, &pushed);
+            push_arg(s, in, (size_t)a, end - start, &pushed, hobj[a]);
         } else if (sret) {
             /* the hidden pointer, the first argument; the callee pops it */
             xop_t m = xop_frame(agg_obj, 0, 4);
@@ -330,6 +363,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
         cur = start < 0 ? 0 : start;
     }
     free(offs);
+    free(hobj);
     for (a = 0; a < (long)in->arg_count; ++a) {
         unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
 
@@ -414,6 +448,8 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
         c.imp_def = XR_BIT(XR_AX) | XR_BIT(XR_DX) | (in->imm > 8 ? XR_BIT(XR_CX) : 0);
     } else if (in->dst >= 0 && !agg && xs_fp_kind(s, in->dst) == XFP_NONE) {
         c.imp_def = XR_BIT(XR_AX) | (xs_is_pair(s, in->dst) ? XR_BIT(XR_DX) : 0);
+    } else if ((in->agg_class & CC_ABI_RET_HALF) != 0) {
+        c.imp_def = XR_BIT(XR_XMM0);
     }
     xf_emit(&s->xf, &c);
     if (pushed > 0) {
@@ -467,6 +503,21 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     if (agg) {
         return; /* the callee filled the storage */
     }
+    if ((in->agg_class & CC_ABI_RET_HALF) != 0) {
+        /* a _Float16's bits, in %xmm0's low word: by a frame word to the value, through __extendhfdf2 */
+        if (in->dst >= 0 && xs_fp_kind(s, in->dst) != XFP_NONE) {
+            int o = xf_new_obj(&s->xf, XF_LOCAL, 4, 4, 0);
+            xop_t x0 = xop_reg(XR_XMM0, 8);
+            xop_t g = xs_temp(s);
+            xop_t m = xop_frame(o, 0, 4);
+
+            g.size = 4;
+            xs_emit(s, XI_MOV, 4, 2, &x0, &g, NULL);
+            xs_emit(s, XI_MOV, 4, 2, &g, &m, NULL);
+            xs_fp_from_mem(s, in->dst, xop_frame(o, 0, 2), 2);
+        }
+        return;
+    }
     if (xs_fp_kind(s, in->dst) != XFP_NONE || (in->dst < 0 && in->call_ret_x87)) {
         /* a floating result, in %st0: popped into the value, or thrown away */
         xs_fp_pop(s, in->dst);
@@ -508,11 +559,11 @@ static void i386_param(xsel_t *s, const cc_ssa_instr_t *in) {
         return;
     }
     if (xs_fp_kind(s, in->dst) != XFP_NONE) {
-        /* a floating parameter, from its words on the stack: a float's one, a double's two, a long double's three */
+        /* a floating parameter, from its words on the stack: a float's one, a double's two, a long double's three;
+         * a _Float16's bits in the low half of one */
         int o = xf_new_obj(&s->xf, XF_FIXED, 16, 4, i386_param_offset(f, pi));
 
-        xs_fp_from_mem(s, in->dst, xop_frame(o, 0, 8),
-                       abi == CC_CALL_ARG_ABI_FLOAT ? 4 : abi == CC_CALL_ARG_ABI_LDOUBLE ? 16 : 8);
+        xs_fp_from_mem(s, in->dst, xop_frame(o, 0, 8), i386_fp_abi_mem_bytes(abi));
         return;
     }
     if (kind == CC_CALL_ARG_ABI_AGG_REG) {
@@ -671,6 +722,21 @@ static void i386_ret(xsel_t *s, const cc_ssa_instr_t *in) {
         xop_t m = xs_mem_at(s, in->lhs, 0, in->imm == 4 ? 4 : 8);
 
         xs_emit(s, XI_FLD, 4, 1, &m, NULL, NULL);
+        xf_emit(&s->xf, &x);
+        return;
+    }
+    if (in->lhs >= 0 && xs_fp_kind(s, in->lhs) != XFP_NONE && f->ret_abi == CC_CALL_ARG_ABI_HALF) {
+        /* a _Float16's bits, in %xmm0's low word, as gcc returns one */
+        int o = xf_new_obj(&s->xf, XF_LOCAL, 4, 4, 0);
+        xop_t m = xop_frame(o, 0, 2);
+        xop_t g = xs_temp(s);
+        xop_t x0 = xop_reg(XR_XMM0, 8);
+
+        xs_fp_to_mem(s, in->lhs, m, 2);
+        g.size = 4;
+        xs_emit(s, XI_MOVZX, 4, 2, &m, &g, NULL);
+        xs_emit(s, XI_MOV, 4, 2, &g, &x0, NULL);
+        x.imp_use = XR_BIT(XR_XMM0);
         xf_emit(&s->xf, &x);
         return;
     }

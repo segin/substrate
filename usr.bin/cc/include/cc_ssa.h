@@ -40,7 +40,9 @@ typedef enum {
     CC_CALL_ARG_ABI_AGG_MEM = 2,
     CC_CALL_ARG_ABI_AGG_REG = 3,
     CC_CALL_ARG_ABI_ZERO = 4,
-    CC_CALL_ARG_ABI_FLOAT = 5  /**< a prototyped float: single precision across the call (the value is a double) */
+    CC_CALL_ARG_ABI_FLOAT = 5, /**< a prototyped float: single precision across the call (the value is a double) */
+    CC_CALL_ARG_ABI_HALF = 6   /**< i386: a _Float16, its 16 bits in a stack word, unpromoted, as gcc passes it
+                                    to a variadic function too (the value is a double) */
 } cc_call_arg_abi_t;
 
 /*
@@ -75,6 +77,7 @@ typedef enum {
 #define CC_ABI_RET_VEC128 0x800      /**< agg_class: a 16-byte vector, returned whole in %xmm0 */
 #define CC_ABI_RET_VEC64 0x1000      /**< agg_class (i386): an 8-byte vector, returned in %mm0 */
 #define CC_ABI_RET_SRET_REG 0x2000   /**< agg_class, CALL (i386 regparm): the hidden pointer goes in %eax, not on the stack */
+#define CC_ABI_RET_HALF 0x4000       /**< CALL (i386): the callee returns a _Float16, its bits in %xmm0 */
 
 typedef enum {
     CC_SSA_PARAM = 0,

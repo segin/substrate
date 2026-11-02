@@ -59,9 +59,15 @@ for src in codegen/*.c; do
 	name=$(basename "$src" .c)
 	# a test may name its language in a "cc-std: <std>" comment
 	std=$(sed -n 's/.*cc-std: *\([a-z0-9]*\).*/\1/p' "$src" | head -n 1)
+	# and its -m32 -march and the flags cc alone is given there (run_codegen_diff.sh's comments)
+	march32=$(sed -n 's/.*cc-march-m32: *\([a-z0-9-]*\).*/\1/p' "$src" | head -n 1)
+	ccflags32=$(sed -n 's/.*cc-flags-m32: *\([a-z0-9 =-]*\).*/\1/p' "$src" | head -n 1)
 	for m in 64 32; do
 		runs=$((runs + 1))
-		if ! "$CC_BIN" -m$m ${std:+-std=$std} -S -fdump-ir=all "$src" -o "$tmp/$name.s" 2>"$tmp/log"; then
+		extra=
+		if [ $m = 32 ]; then extra="${march32:+-march=$march32} $ccflags32"; fi
+		# shellcheck disable=SC2086
+		if ! "$CC_BIN" -m$m $extra ${std:+-std=$std} -S -fdump-ir=all "$src" -o "$tmp/$name.s" 2>"$tmp/log"; then
 			echo "FAIL $name -m$m: cc failed"
 			sed 's/^/  /' "$tmp/log"
 			fail=1

@@ -3437,6 +3437,7 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
         int arg_needs_ldouble_abi = 0;
         int arg_needs_float_abi = 0;
+        int arg_needs_half_abi;
         int arg_is_aggregate =
             (e->args[i] != NULL && lower_record_id(e->args[i]) >= 0);
         int arg_is_variadic =
@@ -3606,15 +3607,20 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
             arg_needs_float_abi = 1;
         }
         in.args[i] = av;
+        /* i386: a _Float16 goes as its bits in a stack word, to a variadic function too (unpromoted, as gcc's) */
+        arg_needs_half_abi = !arg_is_aggregate && e->args[i] != NULL && lower_has_kind(e->args[i], CC_CT_FLOAT16) &&
+                             cc_target_current()->id == CC_TARGET_I386;
         /* (an empty structure's CC_CALL_ARG_ABI_ZERO stays: it takes no register and no stack) */
         if (CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_MEM &&
             CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_REG &&
             in.call_arg_abi[i] != CC_CALL_ARG_ABI_ZERO) {
             in.call_arg_abi[i] = (unsigned char)(arg_needs_ldouble_abi ? CC_CALL_ARG_ABI_LDOUBLE
                                                  : arg_needs_float_abi ? CC_CALL_ARG_ABI_FLOAT
+                                                 : arg_needs_half_abi  ? CC_CALL_ARG_ABI_HALF
                                                                        : CC_CALL_ARG_ABI_DEFAULT);
         }
-        in.call_arg_sizes[i] = (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_needs_float_abi ? 4 : arg_size);
+        in.call_arg_sizes[i] =
+            (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_needs_float_abi || arg_needs_half_abi ? 4 : arg_size);
     }
     if (cc_target_current()->id == CC_TARGET_I386) {
         /*
@@ -3667,6 +3673,9 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
     if (lower_has_kind(e, CC_CT_FLOAT)) {
         /* a float comes back in single precision */
         in.agg_class = CC_ABI_RET_FLOAT;
+    } else if (lower_has_kind(e, CC_CT_FLOAT16) && cc_target_current()->id == CC_TARGET_I386) {
+        /* and on i386 a _Float16 as its bits in %xmm0 */
+        in.agg_class = CC_ABI_RET_HALF;
     }
     if (lower_record_id(e) >= 0) {
         long agg_size = lower_value_size(tu, e);

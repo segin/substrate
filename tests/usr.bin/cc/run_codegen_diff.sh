@@ -64,6 +64,8 @@ for src in $srcs; do
 	need=$(sed -n 's/.*cc-gcc: *\([0-9][0-9]*\).*/\1/p' "$src" | head -n 1)
 	# the -m32 -march list, up to a "(" that starts the reason
 	march32=$(sed -n 's/.*cc-march-m32: *\([a-z0-9 -]*\).*/\1/p' "$src" | head -n 1)
+	# and flags cc alone is given at -m32, up to a "(" that starts the reason
+	ccflags32=$(sed -n 's/.*cc-flags-m32: *\([a-z0-9 =-]*\).*/\1/p' "$src" | head -n 1)
 	runmodes=
 	for m in $modes; do
 		if [ $m = 32 ] && [ -n "$march32" ]; then
@@ -90,7 +92,9 @@ for src in $srcs; do
 		echo "exit $?" >>"$tmp/ref.out"
 		for o in O0 O2; do
 			runs=$((runs + 1))
-			if ! "$CC_BIN" $flags $cc_std -$o -o "$tmp/ours" "$src" >"$tmp/cc.log" 2>&1; then
+			extra=
+			if [ $m = 32 ]; then extra=$ccflags32; fi
+			if ! "$CC_BIN" $flags $extra $cc_std -$o -o "$tmp/ours" "$src" >"$tmp/cc.log" 2>&1; then
 				echo "FAIL $name $flags -$o: cc rejected it"
 				sed -n '1,5s/^/    /p' "$tmp/cc.log"
 				fail=1

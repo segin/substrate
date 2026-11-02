@@ -16644,13 +16644,16 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         sf->src_col = af->name_line != 0 ? af->name_col : af->col;
         {
             cc_ctype_kind_t rk = fn_ret_ctype(af) != NULL ? fn_ret_ctype(af)->kind : CC_CT_VOID;
+            /* i386: a _Float16 result is its bits in %xmm0, as gcc returns it */
+            int half = rk == CC_CT_FLOAT16 && cc_target_current()->id == CC_TARGET_I386;
 
             sf->ret_type = (rk == CC_CT_FLOAT || rk == CC_CT_DOUBLE || rk == CC_CT_LDOUBLE || rk == CC_CT_DECIMAL32 ||
-                            rk == CC_CT_DECIMAL64 || rk == CC_CT_DECIMAL128)
+                            rk == CC_CT_DECIMAL64 || rk == CC_CT_DECIMAL128 || half)
                                ? CC_VAL_F64
                                : CC_VAL_I64;
             sf->ret_abi = (unsigned char)(rk == CC_CT_LDOUBLE  ? CC_CALL_ARG_ABI_LDOUBLE
                                           : rk == CC_CT_FLOAT ? CC_CALL_ARG_ABI_FLOAT
+                                          : half              ? CC_CALL_ARG_ABI_HALF
                                                               : CC_CALL_ARG_ABI_DEFAULT);
         }
         if (cc_target_pointer_size() <= 4 && ct_record_id(fn_ret_ctype(af)) >= 0 &&
@@ -16787,6 +16790,9 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 sf->param_abi[j] = (unsigned char)(param_is_kind(&af->params[j], CC_CT_LDOUBLE) ? CC_CALL_ARG_ABI_LDOUBLE
                                                    : (param_is_kind(&af->params[j], CC_CT_FLOAT) && af->has_prototype)
                                                        ? CC_CALL_ARG_ABI_FLOAT
+                                                   : (param_is_kind(&af->params[j], CC_CT_FLOAT16) &&
+                                                      cc_target_current()->id == CC_TARGET_I386)
+                                                       ? CC_CALL_ARG_ABI_HALF /* its bits in a stack word, as gcc's */
                                                        : CC_CALL_ARG_ABI_DEFAULT);
             }
             if (cc_ir_push(sf, in) != 0) {

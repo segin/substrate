@@ -963,6 +963,10 @@ static void sf_rewrite_call(sf_t *z, const cc_ssa_instr_t *in0) {
         }
     }
     in.call_ret_x87 = 0;
+    if ((in.agg_class & CC_ABI_RET_HALF) != 0) {
+        sf_fail(z, "a _Float16 result soft-float (-mno-80387) does not take");
+        return;
+    }
     if (sf_is_nat(z, in.dst)) {
         /* a result the pass leaves floating, by the ABI in the general registers: through a slot into it */
         int dst = in.dst;
@@ -1262,6 +1266,10 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
         sf_rewrite_call(z, in);
         return;
     case CC_SSA_RET:
+        if (z->f->ret_abi == CC_CALL_ARG_ABI_HALF && in->lhs >= 0) {
+            sf_fail(z, "a _Float16 result soft-float (-mno-80387) does not return");
+            return;
+        }
         /* as the function returns it, whatever the value is held as */
         c.rhs = -1;
         if (sf_is_nat(z, in->lhs) &&
@@ -1327,6 +1335,11 @@ static void sf_param(sf_t *z, const cc_ssa_instr_t *in, cc_ssa_instr_t *fix, siz
     }
     if (pi < 0 || (size_t)pi >= f->param_count || f->param_abi == NULL) {
         sf_fail(z, "a floating parameter without its ABI");
+        return;
+    }
+    if (abi == CC_CALL_ARG_ABI_HALF) {
+        /* (its bits in a word, gcc's; not done here, rather than taken for a double) */
+        sf_fail(z, "a _Float16 parameter soft-float (-mno-80387) does not take");
         return;
     }
     f->param_types[pi] = CC_VAL_I64;

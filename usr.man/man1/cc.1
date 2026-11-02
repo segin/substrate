@@ -160,6 +160,30 @@ call libgcc's
 functions, so a program using them links only against a libgcc built
 with decimal floating point (a Linux host's is; substrate's is not).
 .Pp
+On i386 a
+.Vt _Float16
+crosses a call as
+.Xr gcc 1
+passes it: an argument or parameter is its bits in the low half of a
+stack word, unpromoted to a variadic function too, and a result its bits
+in
+.Li %xmm0 .
+Its conversions are libgcc's
+.Fn __extendhfdf2
+and
+.Fn __truncdfhf2 ,
+which return a half in
+.Li %xmm0 ,
+so a function with a
+.Vt _Float16
+in it needs
+.Fl msse2 ,
+which the default
+.Fl march
+of
+.Nm
+lacks.
+.Pp
 Installed host-runnable copies of
 .Nm ,
 .Xr as 1 ,

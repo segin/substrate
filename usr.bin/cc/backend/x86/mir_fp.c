@@ -757,7 +757,14 @@ void xs_fp_pop(xsel_t *s, int v) {
     }
 }
 
+static void half(xsel_t *s, int v, xop_t m, int load);
+
 void xs_fp_from_mem(xsel_t *s, int v, xop_t m, int bytes) {
+    if (bytes == 2) {
+        /* a _Float16, through libgcc */
+        half(s, v, m, 1);
+        return;
+    }
     if (xs_fp_kind(s, v) == XFP_SSE && bytes <= 8) {
         xop_t r = xs_fp_reg(s, v);
 
@@ -771,6 +778,10 @@ void xs_fp_from_mem(xsel_t *s, int v, xop_t m, int bytes) {
 }
 
 void xs_fp_to_mem(xsel_t *s, int v, xop_t m, int bytes) {
+    if (bytes == 2) {
+        half(s, v, m, 0);
+        return;
+    }
     if (xs_fp_kind(s, v) == XFP_SSE && bytes <= 8) {
         xop_t r = xs_fp_reg(s, v);
 

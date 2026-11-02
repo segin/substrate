@@ -31,6 +31,7 @@
 
 #include "cc_diag.h"
 #include "cc_middle.h"
+#include "cc_options.h"
 #include "cc_target.h"
 #include "cc_util.h"
 
@@ -861,11 +862,53 @@ static int split_one(lz_t *z, const cc_ssa_instr_t *in) {
     }
 }
 
+/**
+ * Whether function @p f has a _Float16 the backend would convert -- loaded or stored, a parameter, a result,
+ * an argument -- which it does through libgcc's __extendhfdf2 and __truncdfhf2, the half in %xmm0 as gcc
+ * calls them.  Without SSE2 there is no %xmm0, and gcc refuses a _Float16's conversions and operations too.
+ *
+ * @param f  the function
+ * @return   1 if so, else 0
+ */
+static int i386_function_converts_half(const cc_ssa_function_t *f) {
+    size_t i;
+    size_t a;
+
+    if (f->ret_abi == CC_CALL_ARG_ABI_HALF) {
+        return 1;
+    }
+    for (i = 0; i < f->param_count; ++i) {
+        if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_HALF) {
+            return 1;
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if ((in->op == CC_SSA_LOAD && in->imm == 2 && in->dst >= 0 && cc_ssa_value_class(f, in->dst) == CC_VAL_F64) ||
+            (in->op == CC_SSA_STORE && in->imm == 2 && in->rhs >= 0 && cc_ssa_value_class(f, in->rhs) == CC_VAL_F64) ||
+            ((in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) && (in->agg_class & CC_ABI_RET_HALF) != 0)) {
+            return 1;
+        }
+        for (a = 0; (in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) && in->call_arg_abi != NULL && a < in->arg_count;
+             ++a) {
+            if (in->call_arg_abi[a] == CC_CALL_ARG_ABI_HALF) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
     lz_t z;
     size_t i;
     int any = 0;
 
+    if (!cc_options_current()->i386_sse2 && i386_function_converts_half(f)) {
+        cc_diag_set(diag, "", 0, 0, "_Float16 needs SSE2 (-msse2): a half is converted by libgcc, in %xmm0");
+        return -1;
+    }
     for (i = 0; i < f->instr_count && !any; ++i) {
         cc_ssa_instr_t div;
 

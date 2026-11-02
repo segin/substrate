@@ -558,9 +558,11 @@ xop_t xs_fp_home(xsel_t *s, int v);
 void xs_fp_push(xsel_t *s, int v);
 /** Pop the x87 stack into floating value @p v, rounded to it; with @p v -1, throw the value away. */
 void xs_fp_pop(xsel_t *s, int v);
-/** Load the float (4 bytes), double (8) or long double (10, 16) at memory @p m into floating value @p v. */
+/** Load the _Float16 (2 bytes, through libgcc), float (4), double (8) or long double (10, 16) at memory @p m into
+ *  floating value @p v. */
 void xs_fp_from_mem(xsel_t *s, int v, xop_t m, int bytes);
-/** Store floating value @p v at memory @p m as a float (4 bytes), a double (8) or a long double (10, 16). */
+/** Store floating value @p v at memory @p m as a _Float16 (2 bytes), a float (4), a double (8) or a long double
+ *  (10, 16). */
 void xs_fp_to_mem(xsel_t *s, int v, xop_t m, int bytes);
 /** Select IR instruction @p j if it is a floating operation: 1 when it was (or gave up), 0 when it is not one. */
 int xs_fp_select(xsel_t *s, size_t j);

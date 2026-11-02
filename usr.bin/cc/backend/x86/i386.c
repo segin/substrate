@@ -126,8 +126,8 @@ static int i386_param_layout(const cc_ssa_function_t *f, int count, int want) {
             bytes = 0; /* regparm: it came in a register, which the prologue stored in the frame */
         } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_LDOUBLE) {
             bytes = 12;
-        } else if (abi == CC_CALL_ARG_ABI_FLOAT) {
-            bytes = 4;
+        } else if (abi == CC_CALL_ARG_ABI_FLOAT || abi == CC_CALL_ARG_ABI_HALF) {
+            bytes = 4; /* a float's word, or a _Float16's bits in one */
         } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG || abi == CC_CALL_ARG_ABI_ZERO) {
             bytes = 0; /* a vector in a register, or an empty structure: no stack */
         } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) {
@@ -2037,7 +2037,8 @@ static long i386_call_arg_bytes(const cc_ssa_function_t *f, const slot_layout_t 
     if (call_arg_is_ldouble_abi(in, arg_index)) {
         return 12;
     }
-    if (in->call_arg_abi != NULL && in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_FLOAT) {
+    if (in->call_arg_abi != NULL &&
+        (in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_FLOAT || in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_HALF)) {
         return 4;
     }
     if (call_arg_is_agg_reg_abi(in, arg_index) ||
@@ -2168,6 +2169,16 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
         emit_i386_x87_load_f64(fp, f, lay, value);
         fprintf(fp, "\tfstps (%%esp)\n");
         *stack_bytes += 4;
+    } else if (in->call_arg_abi != NULL && in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_HALF) {
+        /* a _Float16: its bits, from libgcc's __truncdfhf2 (back in %xmm0), in the low half of a word, as gcc's */
+        fprintf(fp, "\tsubl $16, %%esp\n");
+        emit_i386_x87_load_f64(fp, f, lay, value);
+        fprintf(fp, "\tfstpl (%%esp)\n");
+        emit_i386_call_sym(fp, "__truncdfhf2", 0);
+        fprintf(fp, "\taddl $16, %%esp\n");
+        fprintf(fp, "\tmovd %%xmm0, %%eax\n");
+        fprintf(fp, "\tpushl %%eax\n");
+        *stack_bytes += 4;
     } else if (call_arg_is_agg_mem_abi(in, arg_index)) {
         /* i386 psABI: a struct argument is a copy of it on the stack */
         long words = i386_param_slot_bytes(arg_size) / 4;
@@ -2274,7 +2285,16 @@ static void emit_i386_capture_call_result(FILE *fp, const cc_ssa_function_t *f, 
         }
         return;
     }
-    if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
+    if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64 && (in->agg_class & CC_ABI_RET_HALF) != 0) {
+        /* a _Float16's bits, in %xmm0: to a double by libgcc's __extendhfdf2, back in %st0 */
+        fprintf(fp, "\tmovd %%xmm0, %%eax\n");
+        fprintf(fp, "\tmovzwl %%ax, %%eax\n");
+        fprintf(fp, "\tsubl $12, %%esp\n");
+        fprintf(fp, "\tpushl %%eax\n");
+        emit_i386_call_sym(fp, "__extendhfdf2", 0);
+        fprintf(fp, "\taddl $16, %%esp\n");
+        emit_i386_x87_store_f64(fp, f, lay, in->dst);
+    } else if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
         emit_i386_x87_store_f64(fp, f, lay, in->dst);
     } else {
         long ret_bytes = in->imm > 0 ? in->imm : 4;
@@ -3611,6 +3631,18 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                     fprintf(fp, "\tfldt %d(%%ebp)\n", poff);
                     emit_i386_x87_store_f64(fp, f, &lay, in->dst);
                 } else if (f->param_abi != NULL && in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
+                           f->param_abi[in->param_index] == CC_CALL_ARG_ABI_HALF &&
+                           cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
+                    /* a _Float16's bits in the low half of its word: to a double by libgcc's __extendhfdf2 */
+                    int_regs_flush(fp, f, &lay, &ist);
+                    fprintf(fp, "\tmovzwl %d(%%ebp), %%eax\n", poff);
+                    fprintf(fp, "\tsubl $12, %%esp\n");
+                    fprintf(fp, "\tpushl %%eax\n");
+                    emit_i386_call_sym(fp, "__extendhfdf2", 0);
+                    fprintf(fp, "\taddl $16, %%esp\n");
+                    i386_drop_cache(&ist);
+                    emit_i386_x87_store_f64(fp, f, &lay, in->dst);
+                } else if (f->param_abi != NULL && in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
                            f->param_abi[in->param_index] == CC_CALL_ARG_ABI_FLOAT &&
                            cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     /* it came as 4 bytes of single precision; the function holds it as a double */
@@ -4227,7 +4259,16 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                     emit_load_ptr_value_reg(fp, &lay, in->lhs, 0, "%eax");
                     fprintf(fp, "\t%s (%%eax)\n", in->imm == 4 ? "flds" : "fldl");
                 } else if (in->lhs >= 0) {
-                    if (f->ret_type == CC_VAL_F64) {
+                    if (f->ret_type == CC_VAL_F64 && f->ret_abi == CC_CALL_ARG_ABI_HALF) {
+                        /* a _Float16's bits in %xmm0, as gcc returns one: libgcc's __truncdfhf2 leaves them there */
+                        int_regs_flush(fp, f, &lay, &ist);
+                        fprintf(fp, "\tsubl $16, %%esp\n");
+                        emit_i386_x87_load_f64(fp, f, &lay, in->lhs);
+                        fprintf(fp, "\tfstpl (%%esp)\n");
+                        emit_i386_call_sym(fp, "__truncdfhf2", 0);
+                        fprintf(fp, "\taddl $16, %%esp\n");
+                        i386_drop_cache(&ist);
+                    } else if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
                         emit_i386_x87_load_f64(fp, f, &lay, in->lhs);
                     } else if (in->imm > 4 && in->imm <= 8) {
