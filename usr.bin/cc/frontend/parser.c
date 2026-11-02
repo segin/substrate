@@ -1062,9 +1062,16 @@ static int struct_bitfield_units(parser_t *p, int sid, long size) {
         if (bitfield_unit(owned, size, pos, m->bit_width, &start, &unit) != 0) {
             /* `char a; int b : 24; char c;`: every unit holds a or c, so a store is split by byte */
             if (bitfield_unit(NULL, size, pos, m->bit_width, &start, &unit) != 0) {
-                free(owned);
-                set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
-                return -1;
+                /*
+                 * no unit fits in the object at all -- a packed one of three bytes, a field taking all 24 bits:
+                 * the smallest from its first byte, past the end; a split field is read and written by byte
+                 */
+                if (bitfield_unit(NULL, LONG_MAX, pos - (pos / 8) * 8, m->bit_width, &start, &unit) != 0) {
+                    free(owned);
+                    set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
+                    return -1;
+                }
+                start = pos / 8;
             }
             m->bit_split = 1;
         }

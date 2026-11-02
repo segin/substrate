@@ -3088,6 +3088,71 @@ static long bitfield_work_size(long storage_size) {
     return storage_size > word ? 8 : word;
 }
 
+/**
+ * Load a split bit-field's storage unit byte by byte, only the bytes the
+ * field occupies, the others zero: its unit may hold an ordinary member's
+ * bytes, or reach past the object -- a packed structure of three bytes
+ * whose field takes all 24 bits (Linux's dm-vdo `struct
+ * open_chapter_zone_slot`, a 23-bit field and a 1-bit one).
+ *
+ * @param sf            the function
+ * @param e             the bit-field member access
+ * @param ptrv          the unit's address
+ * @param storage_size  the unit's size in bytes
+ * @param diag          receives an error
+ * @return              the unit's value, or -1 on error
+ */
+static int lower_bitfield_load_bytes(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, long storage_size,
+                                     cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    long first = e->member_bit_offset / 8;
+    long last = (e->member_bit_offset + e->member_bit_width - 1) / 8;
+    long work = bitfield_work_size(storage_size);
+    int v = -1;
+    long k;
+
+    for (k = first; k <= last; ++k) {
+        int at = ptrv;
+        int byte;
+        int c;
+
+        if (k > 0) {
+            c = cc_ir_const(sf, k);
+            if (c < 0 || (at = emit_i64_binop_instr(sf, CC_SSA_ADD, ptrv, c, 0, diag)) < 0) {
+                return -1;
+            }
+        }
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_LOAD;
+        in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+        in.lhs = at;
+        in.rhs = -1;
+        in.imm = 1;
+        in.is_unsigned = 1;
+        if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+            set_diag(diag, "out of memory loading bit-field storage");
+            return -1;
+        }
+        byte = in.dst;
+        cc_ir_set_size(sf, byte, work);
+        if (k > 0) {
+            c = cc_ir_const(sf, k * 8);
+            if (c < 0 || (byte = emit_i64_binop_instr(sf, CC_SSA_SHL, byte, c, 0, diag)) < 0) {
+                return -1;
+            }
+            cc_ir_set_size(sf, byte, work);
+        }
+        if (v < 0) {
+            v = byte;
+        } else if ((v = emit_i64_binop_instr(sf, CC_SSA_OR, v, byte, 0, diag)) < 0) {
+            return -1;
+        } else {
+            cc_ir_set_size(sf, v, work);
+        }
+    }
+    return v;
+}
+
 static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     long storage_size;
@@ -3108,18 +3173,25 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
         return -1;
     }
 
-    memset(&in, 0, sizeof(in));
-    in.op = CC_SSA_LOAD;
-    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-    in.lhs = ptrv;
-    in.rhs = -1;
-    in.imm = storage_size;
-    in.is_unsigned = 1;
-    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-        set_diag(diag, "out of memory loading bit-field storage");
-        return -1;
+    if (e->member_bit_split) {
+        v = lower_bitfield_load_bytes(sf, e, ptrv, storage_size, diag);
+        if (v < 0) {
+            return -1;
+        }
+    } else {
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_LOAD;
+        in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+        in.lhs = ptrv;
+        in.rhs = -1;
+        in.imm = storage_size;
+        in.is_unsigned = 1;
+        if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+            set_diag(diag, "out of memory loading bit-field storage");
+            return -1;
+        }
+        v = in.dst;
     }
-    v = in.dst;
 
     if (e->member_bit_offset > 0) {
         c = cc_ir_const(sf, e->member_bit_offset);
@@ -3220,18 +3292,26 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
     }
     new_bits = rhsv;
 
-    memset(&in, 0, sizeof(in));
-    in.op = CC_SSA_LOAD;
-    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-    in.lhs = ptrv;
-    in.rhs = -1;
-    in.imm = storage_size;
-    in.is_unsigned = 1;
-    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-        set_diag(diag, "out of memory loading bit-field storage for write");
-        return -1;
+    if (e->member_bit_split) {
+        /* only the field's bytes: the others are not stored back */
+        oldv = lower_bitfield_load_bytes(sf, e, ptrv, storage_size, diag);
+        if (oldv < 0) {
+            return -1;
+        }
+    } else {
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_LOAD;
+        in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+        in.lhs = ptrv;
+        in.rhs = -1;
+        in.imm = storage_size;
+        in.is_unsigned = 1;
+        if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+            set_diag(diag, "out of memory loading bit-field storage for write");
+            return -1;
+        }
+        oldv = in.dst;
     }
-    oldv = in.dst;
 
     if (e->member_bit_width >= 64) {
         mask_u = ~0ULL;
@@ -13950,6 +14030,10 @@ static int store_bitfield_global_init(const cc_translation_unit_t *tu, const cc_
         return -1;
     }
     storage_size = m->bit_storage_size > 0 ? m->bit_storage_size : m->size;
+    if (m->bit_split) {
+        /* only the field's bytes: a split field's unit may reach past the object */
+        storage_size = (m->bit_offset + m->bit_width - 1) / 8 + 1;
+    }
     if (storage_size <= 0 || off < 0 || off + storage_size > buf_size) {
         set_diag(diag, "bit-field initializer exceeds object size");
         return -1;
@@ -14721,7 +14805,9 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             continue;
         }
         field_off = base + (is_nested_designator ? nested_off : m->offset);
-        if (field_off < 0 || field_off + m->size > buf_size) {
+        if (field_off < 0 ||
+            field_off + (m->bit_split ? (m->bit_offset + m->bit_width - 1) / 8 + 1 : m->size) > buf_size) {
+            /* (a split bit-field's unit may reach past the object, its bytes not) */
             set_diag(diag, "struct member offset exceeds global initializer object");
             return -1;
         }
