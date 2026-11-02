@@ -16294,6 +16294,18 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                             break;
                         }
                     }
+                    if (needs_flatten && init->arg_count == 0) {
+                        /* `{ }`: every byte zero, of an array of any bounds -- one of none, Linux's fm10k
+                         * `fm10k_prv_flags[FM10K_PRV_FLAG_LEN][ETH_GSTRING_LEN]` with the length 0, among them */
+                        out->globals[i].has_init = 0;
+                        out->globals[i].init_i = 0;
+                        out->globals[i].init_f = 0.0;
+                        out->globals[i].init_is_float = 0;
+                        out->globals[i].init_is_string = 0;
+                        out->globals[i].init_is_symbol = 0;
+                        out->globals[i].init_sym = NULL;
+                        continue;
+                    }
                     if (needs_flatten) {
                         const cc_ctype_t *scalar;
                         int nd;
@@ -16411,12 +16423,15 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     }
                 }
                 if (init->arg_count == 0) {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message), "empty initializer list for global %s",
-                                 tu->globals[i].name);
-                    }
-                    cc_ssa_module_free(out);
-                    return -1;
+                    /* `{ }`, gcc's and C23's: every byte zero (`static const int y[0] = { }` too) */
+                    out->globals[i].has_init = 0;
+                    out->globals[i].init_i = 0;
+                    out->globals[i].init_f = 0.0;
+                    out->globals[i].init_is_float = 0;
+                    out->globals[i].init_is_string = 0;
+                    out->globals[i].init_is_symbol = 0;
+                    out->globals[i].init_sym = NULL;
+                    continue;
                 }
                 out->globals[i].init_items =
                     (cc_ssa_global_init_item_t *)calloc(init->arg_count, sizeof(*out->globals[i].init_items));
