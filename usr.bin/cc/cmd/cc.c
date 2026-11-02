@@ -1818,7 +1818,8 @@ static const driver_opt_t options[] = {
     {"-fno-data-sections", OPT_FLAG, 0, opt_int, F(data_sections), 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
-    {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
+    /* (the compiler's only: gcc gives the linker no -fPIC, and GNU ld would read it as -f PIC) */
+    {"-fPIC -fpic", OPT_FLAG, FWD_C, opt_int, F(pic), 1},
     /* an executable's position-independent code: its own symbols bind within it (Linux's boot/compressed) */
     {"-fPIE -fpie", OPT_FLAG, FWD_C, opt_int, F(fpie), 1},
     {"-fno-PIE -fno-pie", OPT_FLAG, FWD_C, opt_int, F(fpie), 0},
