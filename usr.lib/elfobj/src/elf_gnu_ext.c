@@ -259,42 +259,31 @@ elf_err_t elf_add_gnu_property_x86(elfobj_t *obj, uint32_t isa_needed, uint32_t 
         (void)elf_section_set_align(sec, obj->cls == ELFOBJ_CLASS_64 ? 8 : 4);
     }
 
-    memset(data, 0, sizeof(data));
-    elf__wr32(data + off, obj->endian, 4);
-    off += 4;
-    elf__wr32(data + off, obj->endian, 36);
-    off += 4;
-    elf__wr32(data + off, obj->endian, 5);
-    off += 4;
-    memcpy(data + off, "GNU\0", 4);
-    off += 4;
+    {
+        const uint32_t isa_bits = GNU_PROPERTY_X86_ISA_1_BASELINE | GNU_PROPERTY_X86_ISA_1_V2 |
+                                  GNU_PROPERTY_X86_ISA_1_V3 | GNU_PROPERTY_X86_ISA_1_V4;
+        const uint32_t types[3] = { GNU_PROPERTY_X86_ISA_1_NEEDED, GNU_PROPERTY_X86_ISA_1_USED,
+                                    GNU_PROPERTY_X86_FEATURE_1_AND };
+        const uint32_t values[3] = { isa_needed & isa_bits, isa_used & isa_bits,
+                                     feature_1 & (GNU_PROPERTY_X86_FEATURE_1_IBT | GNU_PROPERTY_X86_FEATURE_1_SHSTK) };
+        /* each property's data is padded to the class's alignment: 8 bytes in ELF64, as GNU's notes
+         * are and as elf_gnu_property_at() reads them (they were 12 bytes, and only the first was read) */
+        size_t pad = obj->cls == ELFOBJ_CLASS_64 ? 8 : 4;
+        size_t k;
 
-    elf__wr32(data + off, obj->endian, GNU_PROPERTY_X86_ISA_1_NEEDED);
-    off += 4;
-    elf__wr32(data + off, obj->endian, 4);
-    off += 4;
-    elf__wr32(data + off, obj->endian,
-              isa_needed & (GNU_PROPERTY_X86_ISA_1_BASELINE | GNU_PROPERTY_X86_ISA_1_V2 |
-                            GNU_PROPERTY_X86_ISA_1_V3 | GNU_PROPERTY_X86_ISA_1_V4));
-    off += 4;
-
-    elf__wr32(data + off, obj->endian, GNU_PROPERTY_X86_ISA_1_USED);
-    off += 4;
-    elf__wr32(data + off, obj->endian, 4);
-    off += 4;
-    elf__wr32(data + off, obj->endian,
-              isa_used & (GNU_PROPERTY_X86_ISA_1_BASELINE | GNU_PROPERTY_X86_ISA_1_V2 |
-                          GNU_PROPERTY_X86_ISA_1_V3 | GNU_PROPERTY_X86_ISA_1_V4));
-    off += 4;
-
-    elf__wr32(data + off, obj->endian, GNU_PROPERTY_X86_FEATURE_1_AND);
-    off += 4;
-    elf__wr32(data + off, obj->endian, 4);
-    off += 4;
-    elf__wr32(data + off, obj->endian,
-              feature_1 & (GNU_PROPERTY_X86_FEATURE_1_IBT | GNU_PROPERTY_X86_FEATURE_1_SHSTK));
-    off += 4;
-
+        memset(data, 0, sizeof(data));
+        elf__wr32(data + 0, obj->endian, 4);
+        elf__wr32(data + 4, obj->endian, (uint32_t)(3 * (8 + pad)));
+        elf__wr32(data + 8, obj->endian, 5);
+        memcpy(data + 12, "GNU\0", 4);
+        off = 16;
+        for (k = 0; k < 3; ++k) {
+            elf__wr32(data + off, obj->endian, types[k]);
+            elf__wr32(data + off + 4, obj->endian, 4);
+            elf__wr32(data + off + 8, obj->endian, values[k]);
+            off += 8 + pad;
+        }
+    }
     return elf_section_set_data(sec, data, off);
 }
 
