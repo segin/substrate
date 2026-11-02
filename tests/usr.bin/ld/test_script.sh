@@ -148,6 +148,25 @@ is "FILEHDR: the headers begin the text segment" \
    "$(readelf -lW "$work/phdrs.out" | awk '$1 == "LOAD" && $2 == "0x000000" { print $3 }')" 0x00800000
 is "no PT_PHDR the script does not ask for" "$(readelf -lW "$work/phdrs.out" | grep -c '^  PHDR')" 0
 is "readelf finds nothing wrong" "$(readelf -lW "$work/phdrs.out" 2>&1 | grep -c 'Error')" 0
+# with an interpreter too: still only the headers PHDRS lists, as GNU ld's (no PT_PHDR, no PT_INTERP)
+printf '%s\n' "$std"'
+PHDRS { text PT_LOAD FILEHDR PHDRS; data PT_LOAD; }
+SECTIONS
+{
+    . = 0x00800000 + SIZEOF_HEADERS;
+    .text : { *(.text .text.*) *(.rodata*) } :text
+    . = 0x00900000;
+    .data : { *(.data*) } :data
+    .bss : { *(.bss*) }
+    /DISCARD/ : { *(.comment) *(.note*) }
+}' > "$work/interp.lds"
+if (cd "$work" && ./ld -m elf_i386 -T interp.lds -dynamic-linker /lib/ld-linux.so.2 -o interp.out t.o) \
+    > "$work/err" 2>&1; then
+    is "an interpreter adds no header PHDRS does not list" \
+       "$(readelf -lW "$work/interp.out" | grep -c -E '^  (PHDR|INTERP)')" 0
+else
+    echo "FAIL interp: $(head -1 "$work/err")"; fail=1
+fi
 
 # A 32-bit address space wraps: a call across more than half of it is in
 # range, being the same call the other way round.

@@ -1480,22 +1480,8 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     /* Once to learn each header's flags, once more to fill them. */
     for (pass = 0; pass < 2; ++pass) {
         if (pass == 1) {
-            int have_phdr = 0, have_interp = 0;
-
-            for (k = 0; k < phdrs->count; ++k) {
-                have_phdr |= phdrs->items[k].type == PT_PHDR;
-                have_interp |= phdrs->items[k].type == PT_INTERP;
-            }
-            /* a PT_PHDR the script does not ask for: for a dynamic linker, and only where the headers are
-             * loaded.  (A FILEHDR asks for no PT_PHDR: GNU ld makes no header PHDRS does not list.) */
-            if (!have_phdr && sc->phdrs_filehdr && ctx->opt.interp_path != NULL &&
-                ctx->opt.interp_path[0] != '\0' && elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
-                goto done;
-            }
-            if (!have_interp && ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0' &&
-                elf_add_interp_segment(obj, ctx->opt.interp_path) == NULL) {
-                goto done;
-            }
+            /* only the headers PHDRS lists: GNU ld makes none of its own, a PT_PHDR or a PT_INTERP not
+             * either, whatever the link (a dynamic linker's program had both added) */
             for (k = 0; k < phdrs->count; ++k) {
                 const lds_phdr_entry_t *ph = &phdrs->items[k];
 
