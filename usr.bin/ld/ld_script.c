@@ -1584,6 +1584,7 @@ void lds_script_free(lds_script_t *sc) {
     }
     lds_stmtvec_free(&sc->stmts);
     lds_phdr_vec_free(&sc->phdrs);
+    free(sc->version_text);
     for (i = 0; i < sc->region_count; ++i) {
         free(sc->regions[i].name);
         lds_tokvec_free(&sc->regions[i].origin);
@@ -1730,6 +1731,91 @@ static int lp_skip_group(lds_parser_t *p, lds_tok_kind_t open, lds_tok_kind_t cl
             depth--;
         }
         lp_take(p);
+    }
+    return 0;
+}
+
+/**
+ * @brief VERSION { ... }: its text, kept on the script (version_text) for ld_version_script_parse().
+ *
+ * The tokens are put back together as they stood, those that touched in the script touching again, so
+ * that a pattern the lexer split ("__vdso_*") is whole.
+ *
+ * @return 0, or -1 (said)
+ */
+static int lp_version(lds_parser_t *p) {
+    const lds_tok_t *prev = NULL;
+    size_t prev_len = 0;
+    char *text = NULL;
+    size_t len = 0, cap = 0;
+    int depth;
+
+    if (lp_expect(p, LDS_TOK_LBRACE, "VERSION { is not closed") != 0) {
+        return -1;
+    }
+    depth = 1;
+    for (;;) {
+        const lds_tok_t *t = lp_peek(p, 1);
+        const char *tt;
+        size_t n;
+
+        if (t == NULL) {
+            free(text);
+            return -1;
+        }
+        if (t->kind == LDS_TOK_EOF) {
+            lp_error(p, t, "VERSION { is not closed");
+            free(text);
+            return -1;
+        }
+        if (t->kind == LDS_TOK_LBRACE) {
+            depth++;
+        } else if (t->kind == LDS_TOK_RBRACE && --depth == 0) {
+            lp_take(p);
+            break;
+        }
+        /* (punctuation may come without its text: spelled from its kind) */
+        tt = t->text != NULL && t->text[0] != '\0' ? t->text
+             : t->kind == LDS_TOK_LBRACE          ? "{"
+             : t->kind == LDS_TOK_RBRACE          ? "}"
+             : t->kind == LDS_TOK_SEMI            ? ";"
+             : t->kind == LDS_TOK_COLON           ? ":"
+             : t->kind == LDS_TOK_COMMA           ? ","
+             : t->kind == LDS_TOK_EQUAL           ? "="
+                                                  : "";
+        n = strlen(tt);
+        if (len + n + 4 > cap) {
+            size_t nc = (len + n + 4) * 2;
+            char *next = (char *)realloc(text, nc);
+            if (next == NULL) {
+                free(text);
+                return -1;
+            }
+            text = next;
+            cap = nc;
+        }
+        if (prev != NULL && !(prev->line == t->line && prev->col + prev_len == t->col)) {
+            text[len++] = ' ';
+        }
+        memcpy(text + len, tt, n);
+        len += n;
+        text[len] = '\0';
+        prev = t;
+        prev_len = n;
+        lp_take(p);
+    }
+    if (text != NULL) {
+        size_t old = p->sc->version_text != NULL ? strlen(p->sc->version_text) : 0;
+        char *joined = (char *)realloc(p->sc->version_text, old + len + 2);
+
+        if (joined == NULL) {
+            free(text);
+            return -1;
+        }
+        joined[old] = old != 0 ? ' ' : '\0';
+        memcpy(joined + old + (old != 0), text, len + 1);
+        p->sc->version_text = joined;
+        free(text);
     }
     return 0;
 }
@@ -2631,7 +2717,7 @@ static int lp_top_statement(lds_parser_t *p) {
     } else if (strcmp(head.text, "INCLUDE") == 0) {
         rc = lp_include(p, LDS_IN_TOP, v);
     } else if (strcmp(head.text, "VERSION") == 0) {
-        rc = lp_skip_group(p, LDS_TOK_LBRACE, LDS_TOK_RBRACE, "VERSION { is not closed");
+        rc = lp_version(p);
     } else if (strcmp(head.text, "INSERT") == 0) {
         /* Read and not acted on: there is no default script to insert into. */
         t = lp_peek(p, 0);

@@ -637,8 +637,30 @@ if it has versions, and records that version as needed
 .Pq Pa .gnu.version_r ;
 a version that is not the default satisfies only a reference that names
 it.
-There are no version scripts
-.Pq Fl -version-script .
+.Pp
+A version script, read from
+.Fl -version-script Ar file
+or a linker script's
+.Ic VERSION { } ,
+is a list of version nodes,
+.Ql NAME { global: patterns; local: patterns; } PARENT; ,
+an anonymous one being
+.Ql { ... }; .
+A defined global or weak symbol that a node's global patterns match is
+given that node's version, the default one
+.Pq Li name@@NAME ;
+one that a local pattern matches is made local and not exported.
+An exact name is taken over a pattern
+.Pq Li * , ? , [...] ,
+and a pattern over
+.Li * ;
+names under
+.Li extern \(dqC++\(dq
+are read over.
+Every named node is a version defined in
+.Pa .gnu.version_d ,
+in the script's order, with the one it depends on, weak if it names
+nothing, and an absolute symbol of its name, as GNU ld defines them.
 .Sh LINKER SCRIPTS
 The script named by
 .Fl T

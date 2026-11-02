@@ -38,6 +38,20 @@ typedef struct {
     size_t cap;
 } strvec_t;
 
+/* A version node of a version script (ld_version.c): its name, NULL for an anonymous one; its patterns. */
+typedef struct {
+    char *name;
+    char *parent;               /* the node it depends on, after its '}', or NULL */
+    strvec_t globals;
+    strvec_t locals;
+} ld_version_node_t;
+
+/* A version script: --version-script's files and a linker script's VERSION, read in order. */
+typedef struct {
+    ld_version_node_t *nodes;
+    size_t count;
+} ld_version_script_t;
+
 typedef enum {
     LD_INPUT_FILE = 0,
     LD_INPUT_LIB = 1,
@@ -249,6 +263,7 @@ typedef struct {
     int mode_settled;           /* an input has said which machine */
     struct lds_script *script;  /* opt.script_path, parsed */
     unsigned linker_sym_mask;   /* which of the default script's symbols the link defines (ld_layout.c) */
+    ld_version_script_t version_script; /* --version-script's and the script's VERSION, read */
     int plugin_checked;
     int plugin_unusable;        /* one was named that cannot be run */
     struct ld_dso_cache *dso_cache;     /* the shared objects, each opened once */
@@ -469,6 +484,7 @@ typedef struct lds_script {
                                  * no symbol, but the script may use it */
     strvec_t files;             /* the script and what it INCLUDEs: tokens
                                  * point at these names */
+    char *version_text;         /* VERSION { }'s text, for ld_version_script_parse() */
 } lds_script_t;
 
 #define LD_MAX_SCRIPT_TOKEN_LEN (1u << 20)  /* 1 MiB per token */
@@ -915,6 +931,28 @@ int place_linker_symbols(const ld_ctx_t *ctx, elfobj_t *out, uint64_t base_vaddr
  * @return 0, or -1
  */
 int discard_local_symbols(const ld_ctx_t *ctx, elfobj_t *obj);
+
+/* ld_version.c */
+/**
+ * Read version script text into @p vs (its nodes added after any there): nodes of `global:` and `local:`
+ * patterns, an anonymous one, a node's parent, extern "C++" blocks read over.
+ *
+ * @param where the file or script it is from, for messages
+ * @return 0, or -1 (said)
+ */
+int ld_version_script_parse(ld_version_script_t *vs, const char *text, const char *where);
+/** --version-script FILE: read it into @p vs.  0, or -1 (said). */
+int ld_version_script_read(ld_version_script_t *vs, const char *path);
+/** Free what @p vs holds. */
+void ld_version_script_free(ld_version_script_t *vs);
+/**
+ * Give each defined global of the output the version a global pattern of the version script names it
+ * under (the node's, as its default), or make it local, not exported, if a local pattern matches it, as
+ * GNU ld does; an exact name first, then a pattern, then `*`.
+ *
+ * @return 0, or -1
+ */
+int apply_version_script(const ld_ctx_t *ctx, elfobj_t *out);
 
 /* ld_gc.c */
 int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab);

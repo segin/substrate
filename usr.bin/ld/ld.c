@@ -542,6 +542,10 @@ static int phase_linker_symbols(ld_link_t *l) {
     return declare_linker_symbols(l->ctx, l->out);
 }
 
+static int phase_version_script(ld_link_t *l) {
+    return apply_version_script(l->ctx, l->out);
+}
+
 static int phase_place_linker_symbols(ld_link_t *l) {
     return place_linker_symbols(l->ctx, l->out, image_base(l));
 }
@@ -680,6 +684,7 @@ static const ld_phase_t link_phases[] = {
     { "strip-groups", phase_strip_groups, LD_FOR_FINAL, DID(MERGE), DID(LAYOUT), 0,
       "failed to strip SHT_GROUP sections for final output" },
     { "linker-symbols", phase_linker_symbols, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },
+    { "version-script", phase_version_script, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },
     { "relax-tls", phase_relax_tls, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },
     { "plan-imports", phase_plan_imports, LD_FOR_FINAL, DID(MERGE), DID(PLAN) | DID(LAYOUT), DID(PLAN),
       "failed to plan GOT/PLT dynamic imports" },
@@ -784,6 +789,7 @@ static void ctx_free(ld_ctx_t *ctx) {
     free((void *)ctx->gc_dead);
     free((void *)ctx->ifuncs);
     lds_script_free(ctx->script);
+    ld_version_script_free(&ctx->version_script);
 }
 
 int main(int argc, char **argv) {
@@ -830,8 +836,15 @@ int main(int argc, char **argv) {
         ctx.script = lds_script_parse(opt->script_path, &ctx);
         if (ctx.script == NULL) {
             rc = LD_OPT_USAGE;
-        } else if (ctx.script->entry != NULL && opt->entry_symbol == NULL) {
-            opt->entry_symbol = ctx.script->entry;
+        } else {
+            if (ctx.script->entry != NULL && opt->entry_symbol == NULL) {
+                opt->entry_symbol = ctx.script->entry;
+            }
+            /* its VERSION, as --version-script's */
+            if (ctx.script->version_text != NULL &&
+                ld_version_script_parse(&ctx.version_script, ctx.script->version_text, opt->script_path) != 0) {
+                rc = LD_OPT_USAGE;
+            }
         }
     }
     if (rc == 0 && opt->inputs.count == 0) {

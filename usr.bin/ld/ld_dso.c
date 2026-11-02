@@ -1105,19 +1105,61 @@ static int dyn_ver_plan_assign_dynstr_offsets(dyn_ver_plan_t *plan, uint8_t **dy
  * is what the unversioned symbols belong to, and a reader of the section
  * takes the first entry for it whether it is or not.
  */
-static int build_gnu_verdef_data(const dyn_ver_plan_t *plan, elfobj_endian_t endian, const char *base_name,
-                                 uint32_t base_name_off, uint8_t **out_buf, size_t *out_sz) {
+/*
+ * The definition a version script says definition @p i depends on (its
+ * node's parent, after its '}'), as an index into the plan's definitions,
+ * or SIZE_MAX if none.
+ */
+static size_t verdef_parent(const ld_ctx_t *ctx, const dyn_ver_plan_t *plan, size_t i) {
+    size_t n, j;
+
+    for (n = 0; ctx != NULL && n < ctx->version_script.count; ++n) {
+        const ld_version_node_t *node = &ctx->version_script.nodes[n];
+
+        if (node->name == NULL || node->parent == NULL || strcmp(node->name, plan->defs[i].name) != 0) {
+            continue;
+        }
+        for (j = 0; j < plan->def_count; ++j) {
+            if (strcmp(plan->defs[j].name, node->parent) == 0) {
+                return j;
+            }
+        }
+    }
+    return SIZE_MAX;
+}
+
+/* Whether definition @p i is of a version script node that names nothing (`VERS { };`): a weak one. */
+static int verdef_is_weak(const ld_ctx_t *ctx, const dyn_ver_plan_t *plan, size_t i) {
+    size_t n;
+
+    for (n = 0; ctx != NULL && n < ctx->version_script.count; ++n) {
+        const ld_version_node_t *node = &ctx->version_script.nodes[n];
+
+        if (node->name != NULL && strcmp(node->name, plan->defs[i].name) == 0) {
+            return node->globals.count == 0 && node->locals.count == 0;
+        }
+    }
+    return 0;
+}
+
+static int build_gnu_verdef_data(const ld_ctx_t *ctx, const dyn_ver_plan_t *plan, elfobj_endian_t endian,
+                                 const char *base_name, uint32_t base_name_off, uint8_t **out_buf, size_t *out_sz) {
     uint8_t *buf;
     size_t i;
     size_t off;
+    size_t parents = 0;
 
     if (out_buf == NULL || out_sz == NULL || plan == NULL || plan->def_count == 0) {
         return -1;
     }
-    if (plan->def_count > SIZE_MAX / 28 - 1) {
+    if (plan->def_count > SIZE_MAX / 36 - 1) {
         return -1;
     }
-    *out_sz = (plan->def_count + 1) * 28;
+    for (i = 0; i < plan->def_count; ++i) {
+        parents += verdef_parent(ctx, plan, i) != SIZE_MAX;
+    }
+    /* each 20 bytes and an 8-byte auxiliary of its name, and another of the version it depends on */
+    *out_sz = (plan->def_count + 1) * 28 + parents * 8;
     buf = (uint8_t *)calloc(1, *out_sz);
     if (buf == NULL) {
         return -1;
@@ -1133,17 +1175,24 @@ static int build_gnu_verdef_data(const dyn_ver_plan_t *plan, elfobj_endian_t end
     write_u32_endian(buf + 24, endian, 0);
     off = 28;
     for (i = 0; i < plan->def_count; ++i) {
-        size_t next = i + 1 < plan->def_count ? 28 : 0;
+        size_t parent = verdef_parent(ctx, plan, i);
+        size_t len = parent != SIZE_MAX ? 36 : 28;
+        size_t next = i + 1 < plan->def_count ? len : 0;
+
         write_u16_endian(buf + off + 0, endian, 1);
-        write_u16_endian(buf + off + 2, endian, 0);
+        write_u16_endian(buf + off + 2, endian, verdef_is_weak(ctx, plan, i) ? 2 : 0);   /* VER_FLG_WEAK */
         write_u16_endian(buf + off + 4, endian, plan->defs[i].index);
-        write_u16_endian(buf + off + 6, endian, 1);
+        write_u16_endian(buf + off + 6, endian, parent != SIZE_MAX ? 2 : 1);   /* vd_cnt */
         write_u32_endian(buf + off + 8, endian, elf_hash_sysv(plan->defs[i].name));
         write_u32_endian(buf + off + 12, endian, 20);
         write_u32_endian(buf + off + 16, endian, (uint32_t)next);
         write_u32_endian(buf + off + 20, endian, plan->defs[i].name_off);
-        write_u32_endian(buf + off + 24, endian, 0);
-        off += 28;
+        write_u32_endian(buf + off + 24, endian, parent != SIZE_MAX ? 8 : 0);  /* vda_next */
+        if (parent != SIZE_MAX) {
+            write_u32_endian(buf + off + 28, endian, plan->defs[parent].name_off);
+            write_u32_endian(buf + off + 32, endian, 0);
+        }
+        off += len;
     }
     *out_buf = buf;
     return 0;
@@ -1314,6 +1363,16 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
     *out_verneed_count = 0;
 
     dyn_ver_plan_init(&plan);
+    /* every named node of a version script is a version defined, in the script's order, as GNU ld's */
+    for (i = 0; i < ctx->version_script.count; ++i) {
+        uint16_t idx;
+
+        if (ctx->version_script.nodes[i].name != NULL &&
+            dyn_ver_plan_get_or_add_def(&plan, ctx->version_script.nodes[i].name, &idx) != 0) {
+            dyn_ver_plan_free(&plan);
+            return -1;
+        }
+    }
     endian = elf_endian(out);
     for (i = 1; i < nsyms; ++i) {
         uint32_t noff = dynsym_name_off_at(dynsym_buf, dynsym_len, entsz, endian, i);
@@ -1327,6 +1386,7 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
         uint16_t curr_base;
         int curr_hidden;
         uint16_t assigned = VER_NDX_GLOBAL;
+        char vs_base[256];      /* (a versioned definition's name, to look it up by) */
 
         if (name == NULL || name[0] == '\0') {
             continue;
@@ -1360,8 +1420,22 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
                     }
                     free(auto_ver_name);
                 }
+                continue;
             }
-            continue;
+            /* a definition a version script gave a version (apply_version_script()): defined under it */
+            if (shndx != SHN_UNDEF && base != NULL && base_len != 0 && base_len < sizeof(vs_base)) {
+                const elf_symbol_t *vs_sym;
+                int vs_default = 0;
+
+                memcpy(vs_base, base, base_len);
+                vs_base[base_len] = '\0';
+                vs_sym = elf_find_symbol(out, vs_base);
+                ver_name = vs_sym != NULL ? elf_symbol_version_name(vs_sym, &vs_default) : NULL;
+                is_default_name = vs_default;
+            }
+            if (ver_name == NULL) {
+                continue;
+            }
         }
         if (shndx != SHN_UNDEF) {
             if (curr_base > VER_NDX_GLOBAL) {
@@ -1426,7 +1500,7 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
         uint32_t base_off = 0;
 
         if (dynstr_append_cstr(dynstr_buf, dynstr_len, dynstr_cap, base_name, &base_off) != 0 ||
-            build_gnu_verdef_data(&plan, endian, base_name, base_off, &verdef_data, &verdef_sz) != 0) {
+            build_gnu_verdef_data(ctx, &plan, endian, base_name, base_off, &verdef_data, &verdef_sz) != 0) {
             dyn_ver_plan_free(&plan);
             return -1;
         }

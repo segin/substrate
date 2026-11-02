@@ -1427,6 +1427,14 @@ int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_
  */
 int elf_symbol_in_merge_section(const elf_symbol_t *symbol);
 /**
+ * @brief The version name elf_symbol_set_version_name() gave @p symbol, or NULL if none.
+ *
+ * @param symbol     the symbol
+ * @param is_default receives whether it is the default version (name@@version), if not NULL
+ * @return the name, owned by the symbol
+ */
+const char *elf_symbol_version_name(const elf_symbol_t *symbol, int *is_default);
+/**
  * @brief Remove the symbols @p drop says to, the rest keeping their order.
  *
  * The first, null symbol stays, and so does any symbol a relocation of the object still names.  The

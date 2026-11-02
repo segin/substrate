@@ -293,6 +293,13 @@ static int opt_script(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const ch
     return 0;
 }
 
+/* --version-script FILE: its nodes read now, after any read before. */
+static int opt_version_script(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
+    (void)o;
+    (void)as;
+    return ld_version_script_read(&ctx->version_script, val) != 0 ? LD_OPT_USAGE : 0;
+}
+
 /*
  * -z KEYWORD.  A keyword this linker does nothing about is said to be so
  * and the link goes on: build systems pass -z defs, -z max-page-size=...,
@@ -348,6 +355,7 @@ static const ld_opt_t options[] = {
     { "-Ttext --Ttext -Tdata --Tdata -Tbss --Tbss -Trodata-segment --Trodata-segment "
       "-Tldata-segment --Tldata-segment", OPT_VALUE, opt_section_address, 0, 0 },
     { "--script", OPT_VALUE, opt_script, 0, 0 },
+    { "--version-script -version-script", OPT_VALUE, opt_version_script, 0, 0 },
     { "-T", OPT_JOINED, opt_script, 0, 0 },
     { "-z", OPT_JOINED, opt_z, 0, 0 },
     { "--hash-style", OPT_VALUE, opt_hash_style, 0, 0 },

@@ -3,7 +3,7 @@ DYNAMIC = 1
 include ../../Makefile.inc
 
 PROG = ld
-SRCS = ld.c ld_options.c ld_util.c ld_symtab.c ld_arch.c ld_script.c ld_plugin.c ld_input.c ld_dso.c ld_dynamic.c ld_ehframe.c ld_resolve.c ld_map.c ld_reloc.c ld_layout.c ld_gc.c
+SRCS = ld.c ld_options.c ld_util.c ld_symtab.c ld_arch.c ld_script.c ld_plugin.c ld_input.c ld_dso.c ld_dynamic.c ld_ehframe.c ld_resolve.c ld_map.c ld_reloc.c ld_layout.c ld_gc.c ld_version.c
 # By $(TOP), not ../..: Makefile.bin.inc points an -L under $(TOP) at the
 # library's obj-x86_64/ when the build is ARCH=x86_64, and $(O) is that
 # directory (empty for the 32-bit build).

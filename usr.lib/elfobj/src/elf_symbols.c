@@ -480,6 +480,16 @@ elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out
     return ELF_OK;
 }
 
+const char *elf_symbol_version_name(const elf_symbol_t *symbol, int *is_default) {
+    if (symbol == NULL || symbol->version_name == NULL || symbol->version_name[0] == '\0') {
+        return NULL;
+    }
+    if (is_default != NULL) {
+        *is_default = symbol->version_default;
+    }
+    return symbol->version_name;
+}
+
 int elf__first_symbol_is_null(const elfobj_t *obj) {
     const struct elf_symbol *s = obj->symbol_count > 0 ? obj->symbols[0] : NULL;
 
