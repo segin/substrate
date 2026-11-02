@@ -24,5 +24,6 @@ run:
 	./test_copy_alias.sh
 	./test_execstack_rwx.sh
 	./test_link_order.sh
+	./test_local_symbols.sh
 
 clean:

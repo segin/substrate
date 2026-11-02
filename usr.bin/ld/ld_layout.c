@@ -770,6 +770,25 @@ int check_execstack(ld_ctx_t *ctx, const objvec_t *inputs) {
     return 0;
 }
 
+/* elf_remove_symbols()'s question for discard_local_symbols(): whether @p sym goes. */
+static int local_symbol_goes(const elf_symbol_t *sym, void *user) {
+    const ld_ctx_t *ctx = (const ld_ctx_t *)user;
+    int relocatable = ctx->opt.expect_type == ET_REL;
+
+    if (elf_symbol_bind(sym) != STB_LOCAL) {
+        return 0;
+    }
+    /* (one a relocation still names is kept whatever is said here: elf_remove_symbols()) */
+    if (elf_symbol_type(sym) == STT_SECTION) {
+        return !ctx->opt.emit_relocs && !relocatable;
+    }
+    return 0;
+}
+
+int discard_local_symbols(const ld_ctx_t *ctx, elfobj_t *obj) {
+    return elf_remove_symbols(obj, local_symbol_goes, (void *)ctx, NULL) == ELF_OK ? 0 : -1;
+}
+
 int check_rwx_segments(ld_ctx_t *ctx, const elfobj_t *obj) {
     const uint32_t rwx = LD_PF_R | LD_PF_W | LD_PF_X;
     size_t i;

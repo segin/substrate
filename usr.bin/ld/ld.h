@@ -848,6 +848,15 @@ int check_execstack(ld_ctx_t *ctx, const objvec_t *inputs);
  * @return 0, or -1 if the link is to fail
  */
 int check_rwx_segments(ld_ctx_t *ctx, const elfobj_t *obj);
+/**
+ * Leave out of a program's or shared object's symbol table the locals GNU ld leaves out: every section
+ * symbol (unless --emit-relocs).
+ *
+ * @param ctx the link
+ * @param obj the output, its symbol values final
+ * @return 0, or -1
+ */
+int discard_local_symbols(const ld_ctx_t *ctx, elfobj_t *obj);
 
 /* ld_gc.c */
 int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab);

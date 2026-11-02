@@ -806,6 +806,13 @@ followed, and a device or a pipe receives the output and stays what it
 was.
 A file the linker makes has the mode a new file has, less the umask, and
 is executable if it is a program.
+.Pp
+The symbol table of a program or shared object has no section symbols,
+as GNU ld's has none, unless
+.Fl -emit-relocs
+keeps relocations that name them; under
+.Fl r
+they stay.
 .Sh EXIT STATUS
 .Ex -std
 .Sh DIAGNOSTICS

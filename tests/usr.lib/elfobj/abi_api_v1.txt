@@ -118,6 +118,7 @@ elf_reloc_size_for_machine
 elf_reloc_symbol
 elf_reloc_type
 elf_remove_section
+elf_remove_symbols
 elf_reorder_section
 elf_riscv_attribute_count
 elf_riscv_attribute_tag_at

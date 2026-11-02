@@ -601,6 +601,10 @@ static int phase_dynsym_values(ld_link_t *l) {
     return patch_dynsym_symbol_values(l->ctx, l->out);
 }
 
+static int phase_discard_locals(ld_link_t *l) {
+    return discard_local_symbols(l->ctx, l->out);
+}
+
 static int phase_map(ld_link_t *l) {
     return write_map_file(l->ctx, &l->inputs, &l->symtab, l->out);
 }
@@ -683,6 +687,10 @@ static const ld_phase_t link_phases[] = {
       "failed to finalize output symbol value addresses" },
     { "dynsym-values", phase_dynsym_values, LD_FOR_FINAL, DID(SYMVALUES), 0, 0,
       "failed to patch .dynsym symbol value addresses" },
+    { "discard-locals", phase_discard_locals, LD_FOR_FINAL, DID(SYMVALUES), 0, 0,
+      "failed to leave out the discarded local symbols" },
+    { "discard-locals", phase_discard_locals, LD_FOR_REL, DID(MERGE), 0, 0,
+      "failed to leave out the discarded local symbols" },
 
     { "map", phase_map, LD_FOR_ANY, DID(MERGE), 0, 0, NULL },
     { "write", phase_write, LD_FOR_ANY, DID(MERGE), 0, 0, NULL },

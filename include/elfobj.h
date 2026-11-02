@@ -1416,6 +1416,21 @@ elf_err_t elf_symbol_set_value(elf_symbol_t *symbol, uint64_t value);
 elf_err_t elf_symbol_set_size(elf_symbol_t *symbol, uint64_t size);
 elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint32_t shndx);
 int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_t bind);
+/**
+ * @brief Remove the symbols @p drop says to, the rest keeping their order.
+ *
+ * The first, null symbol stays, and so does any symbol a relocation of the object still names.  The
+ * symbols removed are freed: a pointer to one held anywhere else is left dangling, so this is for the end
+ * of a link, before the output is written.
+ *
+ * @param obj         a mutable object
+ * @param drop        called for each symbol: nonzero to remove it
+ * @param user        passed to @p drop
+ * @param removed_out receives how many were removed, if not NULL
+ * @return ELF_OK, ELF_ERR_STATE for an object that is not mutable or no @p drop, or ELF_ERR_OOM
+ */
+elf_err_t elf_remove_symbols(elfobj_t *obj, int (*drop)(const elf_symbol_t *symbol, void *user), void *user,
+                             size_t *removed_out);
 elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out);
 elf_symbol_t *elf_symbol_lookup_sysv(elfobj_t *obj, const char *name);
 elf_symbol_t *elf_symbol_lookup_gnu(elfobj_t *obj, const char *name);

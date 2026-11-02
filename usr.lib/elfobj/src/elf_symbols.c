@@ -480,6 +480,65 @@ elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out
     return ELF_OK;
 }
 
+elf_err_t elf_remove_symbols(elfobj_t *obj, int (*drop)(const elf_symbol_t *symbol, void *user), void *user,
+                             size_t *removed_out) {
+    uint8_t *named = NULL;
+    size_t i;
+    size_t kept = 0;
+
+    if (removed_out != NULL) {
+        *removed_out = 0;
+    }
+    if (obj == NULL || drop == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (!is_mutable_obj(obj)) {
+        return ELF_ERR_STATE;
+    }
+    if (obj->symbol_count == 0) {
+        return ELF_OK;
+    }
+    /* a symbol a relocation names stays, whatever is asked */
+    named = (uint8_t *)elf__calloc(obj->symbol_count, 1);
+    if (named == NULL) {
+        return ELF_ERR_OOM;
+    }
+    for (i = 0; i < obj->reloc_count; ++i) {
+        const struct elf_symbol *s = obj->relocs[i] != NULL ? obj->relocs[i]->symbol : NULL;
+        if (s != NULL && s->obj == obj && s->index < obj->symbol_count && obj->symbols[s->index] == s) {
+            named[s->index] = 1;
+        }
+    }
+    for (i = 0; i < obj->symbol_count; ++i) {
+        struct elf_symbol *sym = obj->symbols[i];
+        /* a null symbol first stays (the writer makes one up when the first is not) */
+        int is_null = i == 0 && sym != NULL && (sym->name == NULL || sym->name[0] == '\0') && sym->value == 0 &&
+                      sym->size == 0;
+
+        if (sym != NULL && !is_null && !named[i] && drop(sym, user)) {
+            free(sym->name);
+            free(sym->version_name);
+            free(sym);
+            continue;
+        }
+        obj->symbols[kept] = sym;
+        if (sym != NULL) {
+            sym->index = kept;
+        }
+        kept++;
+    }
+    free(named);
+    if (removed_out != NULL) {
+        *removed_out = obj->symbol_count - kept;
+    }
+    if (kept != obj->symbol_count) {
+        obj->symbol_count = kept;
+        elf__symbol_index_drop(obj);
+        obj->dirty = 1;
+    }
+    return ELF_OK;
+}
+
 static elf_symbol_t *lookup_hash(elfobj_t *obj, const char *name, uint32_t (*hash_fn)(const char *)) {
     uint32_t want;
     size_t i;
