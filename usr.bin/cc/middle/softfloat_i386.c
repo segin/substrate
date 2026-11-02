@@ -52,7 +52,7 @@
 enum { SF_NONE = 0, SF_D, SF_LD };
 
 /** How a floating parameter came, which the prologue turns into the value the body reads. */
-enum { SF_FIX_FLOAT = 1, SF_FIX_D, SF_FIX_LD };
+enum { SF_FIX_FLOAT = 1, SF_FIX_D, SF_FIX_LD, SF_FIX_HALF };
 
 /** The pass's state for one function. */
 typedef struct {
@@ -684,16 +684,22 @@ static void sf_half_load(sf_t *z, const cc_ssa_instr_t *in) {
  * long double), whose half comes back in %xmm0 -- taken as a vector into a slot of the frame -- and its two
  * bytes stored.
  */
-static void sf_half_store(sf_t *z, const cc_ssa_instr_t *in) {
+/**
+ * The _Float16 floating value @p v rounds to: libgcc's __truncdfhf2 (__truncxfhf2 from a long double), its half
+ * back in %xmm0 -- taken as a vector into a slot of the frame (*@p slot_out, may be NULL) -- and its two bytes
+ * loaded.
+ *
+ * @return the bits' value (2 bytes), or -1 when the pass has failed
+ */
+static int sf_half_bits(sf_t *z, int v, int *slot_out) {
     cc_ssa_instr_t call = sf_blank(CC_SSA_CALL);
     cc_ssa_instr_t ld = sf_blank(CC_SSA_LOAD);
-    cc_ssa_instr_t st = *in;
-    int ld_src = sf_kind(z, in->rhs) == SF_LD;
-    sf_arg_t a = ld_src ? sf_arg_ld(in->rhs) : sf_arg_d(in->rhs);
+    int ld_src = sf_kind(z, v) == SF_LD;
+    sf_arg_t a = ld_src ? sf_arg_ld(v) : sf_arg_d(v);
     int slot;
 
     if (!sf_half_ok(z) || sf_make_call(z, &call, ld_src ? "__truncxfhf2" : "__truncdfhf2", &a, 1) != 0) {
-        return;
+        return -1;
     }
     slot = sf_slot(z, -1);
     call.dst = slot;
@@ -707,7 +713,32 @@ static void sf_half_store(sf_t *z, const cc_ssa_instr_t *in) {
     ld.imm = 2;
     ld.is_unsigned = 1;
     sf_put(z, &ld);
-    st.rhs = ld.dst;
+    if (slot_out != NULL) {
+        *slot_out = slot;
+    }
+    return ld.dst;
+}
+
+/** The floating value @p dst is, from a _Float16's bits in the low 2 bytes of value @p bits: __extendhfdf2
+ *  (__extendhfxf2 for a long double), as a half load makes it. */
+static void sf_from_half_bits(sf_t *z, int dst, int bits) {
+    sf_arg_t a = sf_arg_i(sf_widen32(z, bits, 2, 1), 4);
+
+    if (sf_kind(z, dst) == SF_LD) {
+        sf_call(z, "__extendhfxf2", dst, 1, 12, 0, &a, 1);
+    } else {
+        sf_call(z, "__extendhfdf2", dst, 0, 8, 0, &a, 1);
+    }
+}
+
+static void sf_half_store(sf_t *z, const cc_ssa_instr_t *in) {
+    cc_ssa_instr_t st = *in;
+    int bits = sf_half_bits(z, in->rhs, NULL);
+
+    if (bits < 0) {
+        return;
+    }
+    st.rhs = bits;
     sf_put(z, &st);
 }
 
@@ -954,6 +985,16 @@ static void sf_rewrite_call(sf_t *z, const cc_ssa_instr_t *in0) {
             in.args[a] = sf_to_float(z, v);
             in.call_arg_abi[a] = (unsigned char)((abi & ~0x0f) | CC_CALL_ARG_ABI_DEFAULT);
             in.call_arg_sizes[a] = 4;
+        } else if (abi == CC_CALL_ARG_ABI_HALF) {
+            /* a _Float16's bits, in a word */
+            int bits = sf_half_bits(z, v, NULL);
+
+            if (bits < 0) {
+                return;
+            }
+            in.args[a] = sf_widen32(z, bits, 2, 1);
+            in.call_arg_abi[a] = CC_CALL_ARG_ABI_DEFAULT;
+            in.call_arg_sizes[a] = 4;
         } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT) {
             in.args[a] = sf_as_d(z, v);
             in.call_arg_sizes[a] = 8;
@@ -964,7 +1005,25 @@ static void sf_rewrite_call(sf_t *z, const cc_ssa_instr_t *in0) {
     }
     in.call_ret_x87 = 0;
     if ((in.agg_class & CC_ABI_RET_HALF) != 0) {
-        sf_fail(z, "a _Float16 result soft-float (-mno-80387) does not take");
+        /* a _Float16's bits in %xmm0: taken as a vector into a slot, its two bytes extended to the value */
+        int dst = in.dst;
+        int slot = sf_slot(z, -1);
+        cc_ssa_instr_t ld = sf_blank(CC_SSA_LOAD);
+
+        in.dst = slot;
+        in.rhs = slot;
+        in.imm = 16;
+        in.is_unsigned = 1;
+        in.agg_class = CC_ABI_RET_VEC128;
+        sf_put(z, &in);
+        if (dst >= 0 && sf_kind(z, dst) != SF_NONE) {
+            ld.dst = sf_value(z, 2, 1);
+            ld.lhs = slot;
+            ld.imm = 2;
+            ld.is_unsigned = 1;
+            sf_put(z, &ld);
+            sf_from_half_bits(z, dst, ld.dst);
+        }
         return;
     }
     if (sf_is_nat(z, in.dst)) {
@@ -1267,7 +1326,17 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
         return;
     case CC_SSA_RET:
         if (z->f->ret_abi == CC_CALL_ARG_ABI_HALF && in->lhs >= 0) {
-            sf_fail(z, "a _Float16 result soft-float (-mno-80387) does not return");
+            /* a _Float16's bits in %xmm0, as gcc returns one: the slot __truncdfhf2's %xmm0 went to, as a vector */
+            int slot = -1;
+
+            if (sf_half_bits(z, in->lhs, &slot) < 0) {
+                return;
+            }
+            c.lhs = slot;
+            c.rhs = -1;
+            c.imm = 16;
+            c.agg_class = CC_ABI_RET_VEC128;
+            sf_put(z, &c);
             return;
         }
         /* as the function returns it, whatever the value is held as */
@@ -1337,13 +1406,17 @@ static void sf_param(sf_t *z, const cc_ssa_instr_t *in, cc_ssa_instr_t *fix, siz
         sf_fail(z, "a floating parameter without its ABI");
         return;
     }
-    if (abi == CC_CALL_ARG_ABI_HALF) {
-        /* (its bits in a word, gcc's; not done here, rather than taken for a double) */
-        sf_fail(z, "a _Float16 parameter soft-float (-mno-80387) does not take");
-        return;
-    }
     f->param_types[pi] = CC_VAL_I64;
-    if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_FLOAT) {
+    if (abi == CC_CALL_ARG_ABI_HALF) {
+        /* a _Float16's bits in the low half of a word, as gcc passes one: an integer word */
+        if (!sf_half_ok(z)) {
+            return;
+        }
+        came = SF_FIX_HALF;
+        c.dst = sf_value(z, 4, 1);
+        c.imm = 4;
+        f->param_abi[pi] = CC_CALL_ARG_ABI_DEFAULT;
+    } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_FLOAT) {
         came = SF_FIX_FLOAT;
         c.dst = sf_value(z, 4, 0);
         c.imm = 4;
@@ -1396,6 +1469,8 @@ static void sf_prologue(sf_t *z, const cc_ssa_instr_t *fix, size_t nfix, int nee
 
         if (fix[i].imm == SF_FIX_FLOAT) {
             sf_from_float(z, fix[i].dst, fix[i].lhs);
+        } else if (fix[i].imm == SF_FIX_HALF) {
+            sf_from_half_bits(z, fix[i].dst, fix[i].lhs);
         } else if (fix[i].imm == SF_FIX_D) {
             a = sf_arg_d(fix[i].lhs);
             sf_call(z, "__extenddfxf2", fix[i].dst, 1, 12, 0, &a, 1);
