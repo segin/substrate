@@ -87,13 +87,24 @@ left=$(ls | grep -v '\.s$' | grep -v '^good\.o$' | tr '\n' ' ')
 # Ended by a signal, it dies of the signal and leaves nothing.  (The
 # source is a pipe nothing is written to, so that it is still reading
 # when the signal comes.  Not SIGINT: a shell has it ignored in what it
-# runs in the background, and what is ignored stays ignored.)
+# runs in the background, and what is ignored stays ignored.  For the same
+# reason it is run with the signal's default action: under nohup SIGHUP
+# is ignored, the assembler keeps it so, as it means to, and the pipe is
+# read for ever.)
 for sig in TERM HUP; do
+    if env --default-signal="$sig" true 2> /dev/null; then
+        dflt="env --default-signal=$sig"
+    elif grep -q '^SigIgn:[[:space:]]*0*$' /proc/self/status 2> /dev/null; then
+        dflt=""
+    else
+        echo "skip SIG$sig: it may be ignored here, and env cannot run with its default"
+        continue
+    fi
     cases=$((cases + 1))
     rm -f pipe sig.o
     mkfifo pipe
     exec 9<> pipe
-    "$AS" --32 -o sig.o pipe > /dev/null 2>&1 &
+    $dflt "$AS" --32 -o sig.o pipe > /dev/null 2>&1 &
     pid=$!
     # Until it has the pipe open, and so has begun.
     n=0
