@@ -847,6 +847,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     uint64_t prev_alloc_off = 0;    /* in memory and in the file */
     int have_prev_alloc = 0;
     size_t prev_alloc_index = 0;    /* and which it was */
+    size_t *file_order = NULL;      /* the sections in the order they take the file */
+    size_t n;
+    int lap;                        /* the loaded sections' turn, then the others' */
     uint64_t phoff = 0;
     uint8_t *img = NULL;
     size_t ehsize;
@@ -1460,7 +1463,30 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             goto done;
         }
     }
-    for (i = 1; i < sec_count; ++i) {
+    /*
+     * In a linked image the loaded sections take the file first and the
+     * rest follow them, as GNU ld lays its file out: Linux's .modinfo,
+     * loaded, comes after the debugging sections in the section table,
+     * and was put past them, which made the segment's file size more
+     * than its memory size.
+     */
+    file_order = (size_t *)calloc(sec_count + 1, sizeof(*file_order));
+    if (file_order == NULL) {
+        err = ELF_ERR_OOM;
+        goto done;
+    }
+    n = 0;
+    for (lap = 0; lap < 2; ++lap) {
+        for (i = 1; i < sec_count; ++i) {
+            int first = phnum == 0 || (secs[i].flags & SHF_ALLOC) != 0;
+
+            if (first == (lap == 0)) {
+                file_order[n++] = i;
+            }
+        }
+    }
+    for (n = 0; n + 1 < sec_count; ++n) {
+        i = file_order[n];
         if (secs[i].type == SHT_NOBITS) {
             secs[i].offset = 0;
             continue;
@@ -2022,6 +2048,7 @@ done:
     if (err != ELF_OK) {
         free(img);
     }
+    free(file_order);
     free(group_sig_indices);
     free(group_sig_names);
     free(obj_sec_to_out);
