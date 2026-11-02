@@ -19,6 +19,18 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag);
  */
 int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag);
 
+/**
+ * On i386 without SSE2, where libgcc's _Float16 routines (their halves in %xmm0) cannot be called: function
+ * @p f's halves, if it only copies them -- loaded, stored, passed, taken -- made their bits, integers, as gcc
+ * copies them; a conversion, an operation or a returned half refused, as gcc refuses it, with its message, at
+ * the instruction's place or the function's.  Run before soft-float.  Nothing to do elsewhere.
+ *
+ * @param f     the function, rewritten in place
+ * @param diag  receives an error
+ * @return      0, or -1 with @p diag set
+ */
+int cc_i386_half_copies(cc_ssa_function_t *f, cc_diag_t *diag);
+
 /** What softfloat_i386.c makes of i386 floating point (cc_softfloat_i386_mode()). */
 typedef enum {
     CC_SOFTFLOAT_NONE = 0, /**< nothing: the x87 and SSE as ever */

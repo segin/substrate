@@ -201,15 +201,19 @@ and
 .Fn __truncdfhf2 ,
 which return a half in
 .Li %xmm0 ,
-so a function with a
-.Vt _Float16
-in it needs
-.Fl msse2 ,
-which the default
+so, as with
+.Xr gcc 1 ,
+without
+.Fl msse2
+(which the default
 .Fl march
 of
 .Nm
-lacks.
+lacks) a half may only be copied \(em loaded, stored, passed and taken
+as its bits \(em and its conversions, its operations and a returned one
+are refused with
+.Xr gcc 1 Ns 's
+messages.
 .Pp
 Installed host-runnable copies of
 .Nm ,

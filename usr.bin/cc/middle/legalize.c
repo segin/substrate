@@ -272,7 +272,8 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag) {
          * %st0 the general registers), which legalization then splits;
          * constants folded before a target splits what it cannot compute in one operation
          */
-        if ((softfloat && cc_softfloat_i386_function(&m->funcs[i], diag) != 0) ||
+        if (cc_i386_half_copies(&m->funcs[i], diag) != 0 ||
+            (softfloat && cc_softfloat_i386_function(&m->funcs[i], diag) != 0) ||
             legalize_ext(&m->funcs[i], diag) != 0 || cc_fold_constant_values(&m->funcs[i]) != 0 ||
             (tgt->legalize != NULL && tgt->legalize(&m->funcs[i], diag) != 0) ||
             legalize_function(&m->funcs[i], diag) != 0) {

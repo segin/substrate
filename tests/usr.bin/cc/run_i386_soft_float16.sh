@@ -103,7 +103,7 @@ if "$CC_BIN" -m32 -mno-80387 -mno-sse -c -o "$CC_TMP/c.o" "$CC_TMP/n.c" 2>"$CC_T
 	echo "run_i386_soft_float16: _Float16 compiled under -mno-80387 -mno-sse, which gcc refuses"
 	exit 1
 fi
-if ! grep -q 'SSE2' "$CC_TMP/c.err"; then
+if ! grep -qi 'sse2' "$CC_TMP/c.err"; then
 	echo "run_i386_soft_float16: refused without naming SSE2: $(head -1 "$CC_TMP/c.err")"
 	exit 1
 fi

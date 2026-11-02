@@ -900,15 +900,164 @@ static int i386_function_converts_half(const cc_ssa_function_t *f) {
     return 0;
 }
 
+/** A use of a _Float16 value i386_half_copies() looks for: the use's value, and whether it is one. */
+typedef struct {
+    const unsigned char *is_half;
+    int found;
+} half_use_t;
+
+static void half_use_cb(void *ctx, int v, int role) {
+    half_use_t *u = (half_use_t *)ctx;
+
+    (void)role;
+    if (v >= 0 && u->is_half[v]) {
+        u->found = 1;
+    }
+}
+
+/** Refuse a _Float16 of function @p f without SSE2, with gcc's message @p msg, where instruction @p in is (or the
+ *  function's name). */
+static int half_refuse(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const char *msg, cc_diag_t *diag) {
+    size_t line = in != NULL && in->src_line != 0 ? in->src_line : f->src_line;
+    size_t col = in != NULL && in->src_line != 0 ? in->src_col : f->src_col;
+
+    cc_diag_set(diag, NULL, line, col, msg);
+    return -1;
+}
+
+int cc_i386_half_copies(cc_ssa_function_t *f, cc_diag_t *diag) {
+    unsigned char *is_half;
+    size_t i;
+    size_t a;
+    int changed = 1;
+    int rc = 0;
+
+    if (cc_target_current()->id != CC_TARGET_I386 || cc_options_current()->i386_sse2 ||
+        !i386_function_converts_half(f)) {
+        return 0;
+    }
+    if (f->ret_abi == CC_CALL_ARG_ABI_HALF) {
+        return half_refuse(f, NULL, "SSE register return with SSE2 disabled", diag);
+    }
+    is_half = (unsigned char *)calloc((size_t)f->value_count + 1, 1);
+    if (is_half == NULL) {
+        cc_diag_set(diag, NULL, 0, 0, "out of memory");
+        return -1;
+    }
+    /* the halves: loaded, parameters, and what a move of one makes */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if ((in->op == CC_SSA_LOAD && in->imm == 2 && in->dst >= 0 && cc_ssa_value_class(f, in->dst) == CC_VAL_F64) ||
+            (in->op == CC_SSA_PARAM && in->dst >= 0 && f->param_abi != NULL && in->param_index >= 0 &&
+             (size_t)in->param_index < f->param_count && f->param_abi[in->param_index] == CC_CALL_ARG_ABI_HALF)) {
+            is_half[in->dst] = 1;
+        }
+    }
+    while (changed) {
+        changed = 0;
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+
+            if (in->op == CC_SSA_MOV && in->lhs >= 0 && in->dst >= 0 && is_half[in->lhs] && !is_half[in->dst]) {
+                is_half[in->dst] = 1;
+                changed = 1;
+            }
+        }
+    }
+    /* what each instruction does with them: copies alone, as gcc takes them */
+    for (i = 0; i < f->instr_count && rc == 0; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int call = in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI;
+        half_use_t u;
+
+        if (call && (in->agg_class & CC_ABI_RET_HALF) != 0) {
+            rc = half_refuse(f, in, "SSE register return with SSE2 disabled", diag);
+            break;
+        }
+        if (in->op == CC_SSA_STORE && in->imm == 2 && in->rhs >= 0 && cc_ssa_value_class(f, in->rhs) == CC_VAL_F64) {
+            if (!is_half[in->rhs]) {
+                rc = half_refuse(f, in, "invalid conversion to type '_Float16' without option '-msse2'", diag);
+            }
+            continue;
+        }
+        if (in->op == CC_SSA_MOV && in->dst >= 0 && is_half[in->dst]) {
+            if (in->lhs < 0 || !is_half[in->lhs]) {
+                rc = half_refuse(f, in, "invalid conversion to type '_Float16' without option '-msse2'", diag);
+            }
+            continue;
+        }
+        if (call) {
+            for (a = 0; a < in->arg_count && rc == 0; ++a) {
+                int v = in->args[a];
+                int half_abi = in->call_arg_abi != NULL && in->call_arg_abi[a] == CC_CALL_ARG_ABI_HALF;
+
+                if (half_abi && (v < 0 || !is_half[v])) {
+                    rc = half_refuse(f, in, "invalid conversion to type '_Float16' without option '-msse2'", diag);
+                } else if (!half_abi && v >= 0 && is_half[v]) {
+                    rc = half_refuse(f, in, "invalid conversion from type '_Float16' without option '-msse2'", diag);
+                }
+            }
+            continue;
+        }
+        if (in->op == CC_SSA_PARAM || in->op == CC_SSA_LOAD) {
+            continue;
+        }
+        u.is_half = is_half;
+        u.found = 0;
+        cc_ssa_for_each_use(in, half_use_cb, &u);
+        if (u.found) {
+            /* (a compare is an operation, gcc's says, done in float) */
+            int convert = in->op == CC_SSA_F2I || in->op == CC_SSA_FROUND32 || in->op == CC_SSA_FROUND64 ||
+                          in->op == CC_SSA_STORE || in->op == CC_SSA_MOV || in->op == CC_SSA_RET;
+
+            rc = half_refuse(f, in,
+                             convert ? "invalid conversion from type '_Float16' without option '-msse2'"
+                                     : "operation not permitted on type '_Float16' without option '-msse2'",
+                             diag);
+        }
+    }
+    if (rc == 0) {
+        /* each half its bits, an integer: loaded and stored in 2 bytes, passed and taken in a word */
+        int v;
+
+        for (v = 0; v < f->value_count; ++v) {
+            if (is_half[v]) {
+                cc_ssa_value_set_class(f, v, CC_VAL_I64);
+                cc_ssa_value_set_unsigned(f, v, 1);
+            }
+        }
+        for (i = 0; i < f->instr_count; ++i) {
+            cc_ssa_instr_t *in = &f->instrs[i];
+
+            if (in->op == CC_SSA_LOAD && in->dst >= 0 && is_half[in->dst]) {
+                in->is_unsigned = 1;
+                cc_ssa_value_set_size(f, in->dst, 2);
+            } else if (in->op == CC_SSA_PARAM && in->dst >= 0 && is_half[in->dst]) {
+                f->param_types[in->param_index] = CC_VAL_I64;
+                f->param_abi[in->param_index] = CC_CALL_ARG_ABI_DEFAULT;
+                cc_ssa_value_set_size(f, in->dst, 4);
+            } else if (in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) {
+                for (a = 0; a < in->arg_count; ++a) {
+                    if (in->call_arg_abi != NULL && in->call_arg_abi[a] == CC_CALL_ARG_ABI_HALF) {
+                        in->call_arg_abi[a] = CC_CALL_ARG_ABI_DEFAULT;
+                        if (in->call_arg_sizes != NULL) {
+                            in->call_arg_sizes[a] = 4;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    free(is_half);
+    return rc;
+}
+
 int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
     lz_t z;
     size_t i;
     int any = 0;
 
-    if (!cc_options_current()->i386_sse2 && i386_function_converts_half(f)) {
-        cc_diag_set(diag, "", 0, 0, "_Float16 needs SSE2 (-msse2): a half is converted by libgcc, in %xmm0");
-        return -1;
-    }
     for (i = 0; i < f->instr_count && !any; ++i) {
         cc_ssa_instr_t div;
 
