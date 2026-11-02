@@ -9065,7 +9065,7 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
     }
 
     if (elem->kind != CC_CT_ARRAY) {
-        if (*cursor == 0 && list->arg_count == 1) {
+        if (*cursor == 0 && list->arg_count == 1 && elem_sid < 0) {
             const cc_expr_t *only = unwrap_scalar_initializer_expr(list->args[0], diag);
             if (only == NULL) {
                 return -1;
@@ -15003,9 +15003,34 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, con
     }
 
     if (ndim == 1) {
+        int sid = ct_record_id(scalar);
+
         for (i = 0; i < dims[0] && *cursor < list->arg_count; ++i) {
             const cc_expr_t *item = list->args[*cursor];
             long elem_off = base + i * scalar_size;
+
+            if (sid >= 0) {
+                /* a row of structures (Linux's `search[IP_CT_DIR_MAX][2]`): each braced, or its braces elided */
+                const cc_expr_t *sl = extract_struct_init_list_expr(item, sid);
+
+                if (sl != NULL) {
+                    size_t sub = 0;
+
+                    if (flatten_struct_init_bytes_cursor(tu, sid, sl, &sub, elem_off, buf, buf_size, relocs,
+                                                         reloc_count, diag) != 0) {
+                        return -1;
+                    }
+                    if (sub < sl->arg_count) {
+                        set_diag(diag, "too many initializers in struct array element");
+                        return -1;
+                    }
+                    (*cursor)++;
+                } else if (flatten_struct_init_bytes_cursor(tu, sid, list, cursor, elem_off, buf, buf_size, relocs,
+                                                            reloc_count, diag) != 0) {
+                    return -1;
+                }
+                continue;
+            }
             if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
                 item = unwrap_scalar_initializer_expr(item, diag);
                 if (item == NULL) {
@@ -15041,7 +15066,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, con
         for (i = 0; i < dims[0] && *cursor < list->arg_count; ++i) {
             const cc_expr_t *raw = list->args[*cursor];
             long sub_base = base + i * sub_size;
-            if (raw != NULL && raw->kind == CC_EXPR_STR && ndim == 2 && dims[1] >= 0) {
+            if (raw != NULL && raw->kind == CC_EXPR_STR && ndim == 2 && dims[1] >= 0 && ct_record_id(scalar) < 0) {
                 if (fill_fixed_char_array_from_string(raw, scalar, scalar_size, dims[1],
                                                       sub_base, buf, buf_size,
                                                       diag) != 0) {
@@ -15304,11 +15329,14 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
         rc = 1;
         goto out;
     }
-    if (nd == 0 || (!cc_ct_is_arithmetic(scalar) && !(file_scope_names && ct_is_pointer(scalar))) ||
-        ct_record_id(scalar) >= 0) {
+    if (nd == 0 ||
+        (ct_record_id(scalar) >= 0 ? !(nd >= 2 && file_scope_names)
+                                   : !cc_ct_is_arithmetic(scalar) && !(file_scope_names && ct_is_pointer(scalar)))) {
         /*
-         * aggregates keep their own initialization code; so do pointers but where every name the initializer
-         * uses is of file scope (a string table, a table of file-scope arrays), the symbol it is laid out with
+         * aggregates keep their own initialization code, but arrays of structures of more dimensions where every
+         * name the initializer uses is of file scope, laid out as file-scope ones are; so do pointers but where
+         * every name the initializer uses is of file scope (a string table, a table of file-scope arrays), the
+         * symbol it is laid out with
          */
         goto out;
     }
