@@ -4093,13 +4093,31 @@ static void sema_settle_stmts(cc_stmt_t *s, size_t n) {
 
 /**
  * Check expression @p e and give it its interned type (see
- * check_expr_kind()).
+ * check_expr_kind()).  Its checking places a diagnostic at it, and at
+ * each operand checked in turn; checked without error, the place is the
+ * enclosing one's again, so that an error the enclosing expression
+ * finds afterwards -- `v * 2` on a structure -- is placed at it (its
+ * operator, as gcc places it), not at the operand checked last.
  *
  * @return 0, or -1 with @p diag set
  */
 int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
-    return check_expr_kind(tu, e, vars, var_count, depth, diag);
+    size_t line = diag != NULL ? diag->line : 0;
+    size_t col = diag != NULL ? diag->col : 0;
+    size_t ctx_line = g_diag_ctx_line;
+    size_t ctx_col = g_diag_ctx_col;
+    int ctx_file = g_diag_ctx_file;
+    int rc = check_expr_kind(tu, e, vars, var_count, depth, diag);
+
+    if (diag != NULL && diag->message[0] == '\0') {
+        diag->line = line;
+        diag->col = col;
+        g_diag_ctx_line = ctx_line;
+        g_diag_ctx_col = ctx_col;
+        g_diag_ctx_file = ctx_file;
+    }
+    return rc;
 }
 
 /**

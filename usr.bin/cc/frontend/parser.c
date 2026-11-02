@@ -7879,6 +7879,9 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return NULL;
         }
         e->ident = name;
+        e->line = name_line; /* (its own place, gcc's for "undeclared") */
+        e->col = name_col;
+        e->src_file = name_file;
         {
             int vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
             if (vidx >= 0) {
@@ -7973,6 +7976,39 @@ static cc_expr_t *new_ident_expr(const char *name) {
     return e;
 }
 
+/** Where a token is: its line, column and file (one more than its index in the unit's files). */
+typedef struct {
+    size_t line;
+    size_t col;
+    int file;
+} expr_pos_t;
+
+/** Where the current token is. */
+static expr_pos_t tok_pos(const parser_t *p) {
+    expr_pos_t at;
+
+    at.line = p->tok.line;
+    at.col = p->tok.col;
+    at.file = p->tok.file_id + 1;
+    return at;
+}
+
+/**
+ * Place expression @p e at @p at, gcc's place for a diagnostic of it:
+ * an operator's token (`+`, `=`, `.`, `->`, unary `*`), an identifier
+ * itself.  One placed already keeps its place.
+ *
+ * @return @p e
+ */
+static cc_expr_t *expr_at(cc_expr_t *e, expr_pos_t at) {
+    if (e != NULL && e->line == 0) {
+        e->line = at.line;
+        e->col = at.col;
+        e->src_file = at.file;
+    }
+    return e;
+}
+
 static cc_expr_t *new_bin_expr(cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs) {
     cc_expr_t *e = new_expr(CC_EXPR_BIN);
     if (e == NULL) {
@@ -7984,6 +8020,11 @@ static cc_expr_t *new_bin_expr(cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs) {
     e->lhs = lhs;
     e->rhs = rhs;
     return e;
+}
+
+/** new_bin_expr(), the expression placed at its operator's token @p at (expr_at()). */
+static cc_expr_t *new_bin_expr_at(expr_pos_t at, cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs) {
+    return expr_at(new_bin_expr(op, lhs, rhs), at);
 }
 
 /**
@@ -8557,6 +8598,7 @@ static cc_expr_t *parse_postfix_ops(parser_t *p, cc_expr_t *e) {
             cc_expr_t *idx;
             cc_expr_t *add;
             cc_expr_t *deref;
+            expr_pos_t op_at = tok_pos(p); /* (a subscript's place: its '[', gcc's) */
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -8571,12 +8613,12 @@ static cc_expr_t *parse_postfix_ops(parser_t *p, cc_expr_t *e) {
                 free_expr(e);
                 return NULL;
             }
-            add = new_bin_expr(CC_BIN_ADD, e, idx);
+            add = new_bin_expr_at(op_at, CC_BIN_ADD, e, idx);
             if (add == NULL) {
                 return NULL;
             }
             add->is_subscript = 1;
-            deref = new_expr(CC_EXPR_DEREF);
+            deref = expr_at(new_expr(CC_EXPR_DEREF), op_at);
             if (deref == NULL) {
                 free_expr(add);
                 return NULL;
@@ -8588,6 +8630,7 @@ static cc_expr_t *parse_postfix_ops(parser_t *p, cc_expr_t *e) {
 
         if (p->tok.kind == TOK_DOT || p->tok.kind == TOK_ARROW) {
             int is_arrow = (p->tok.kind == TOK_ARROW);
+            expr_pos_t op_at = tok_pos(p);
             cc_expr_t *m;
             if (next_tok(p) != 0) {
                 free_expr(e);
@@ -8598,7 +8641,7 @@ static cc_expr_t *parse_postfix_ops(parser_t *p, cc_expr_t *e) {
                 free_expr(e);
                 return NULL;
             }
-            m = new_expr(CC_EXPR_MEMBER);
+            m = expr_at(new_expr(CC_EXPR_MEMBER), op_at);
             if (m == NULL) {
                 free_expr(e);
                 return NULL;
@@ -8989,7 +9032,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
     }
 
     if (p->tok.kind == TOK_AMP) {
-        cc_expr_t *e = new_expr(CC_EXPR_ADDR);
+        cc_expr_t *e = expr_at(new_expr(CC_EXPR_ADDR), tok_pos(p));
         if (e == NULL) {
             return NULL;
         }
@@ -9038,7 +9081,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
     }
 
     if (p->tok.kind == TOK_STAR) {
-        cc_expr_t *e = new_expr(CC_EXPR_DEREF);
+        cc_expr_t *e = expr_at(new_expr(CC_EXPR_DEREF), tok_pos(p));
         if (e == NULL) {
             return NULL;
         }
@@ -9188,6 +9231,7 @@ static cc_expr_t *parse_mul(parser_t *p) {
            (p->tok.kind == TOK_STAR || p->tok.kind == TOK_SLASH || p->tok.kind == TOK_PERCENT)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9198,11 +9242,11 @@ static cc_expr_t *parse_mul(parser_t *p) {
             return NULL;
         }
         if (op == TOK_STAR) {
-            lhs = new_bin_expr(CC_BIN_MUL, lhs, rhs);
+            lhs = new_bin_expr_at(op_at, CC_BIN_MUL, lhs, rhs);
         } else if (op == TOK_SLASH) {
-            lhs = new_bin_expr(CC_BIN_DIV, lhs, rhs);
+            lhs = new_bin_expr_at(op_at, CC_BIN_DIV, lhs, rhs);
         } else {
-            lhs = new_bin_expr(CC_BIN_MOD, lhs, rhs);
+            lhs = new_bin_expr_at(op_at, CC_BIN_MOD, lhs, rhs);
         }
         if (lhs == NULL) {
             return NULL;
@@ -9216,6 +9260,7 @@ static cc_expr_t *parse_add(parser_t *p) {
     while (lhs != NULL && (p->tok.kind == TOK_PLUS || p->tok.kind == TOK_MINUS)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9225,7 +9270,7 @@ static cc_expr_t *parse_add(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(op == TOK_PLUS ? CC_BIN_ADD : CC_BIN_SUB, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, op == TOK_PLUS ? CC_BIN_ADD : CC_BIN_SUB, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9238,6 +9283,7 @@ static cc_expr_t *parse_shift(parser_t *p) {
     while (lhs != NULL && (p->tok.kind == TOK_LSHIFT || p->tok.kind == TOK_RSHIFT)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9247,7 +9293,7 @@ static cc_expr_t *parse_shift(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(op == TOK_LSHIFT ? CC_BIN_SHL : CC_BIN_SHR, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, op == TOK_LSHIFT ? CC_BIN_SHL : CC_BIN_SHR, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9262,6 +9308,7 @@ static cc_expr_t *parse_rel(parser_t *p) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
         cc_binop_t bop;
+        expr_pos_t op_at = tok_pos(p);
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9280,7 +9327,7 @@ static cc_expr_t *parse_rel(parser_t *p) {
         } else {
             bop = CC_BIN_GE;
         }
-        lhs = new_bin_expr(bop, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, bop, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9293,6 +9340,7 @@ static cc_expr_t *parse_eq(parser_t *p) {
     while (lhs != NULL && (p->tok.kind == TOK_EQ || p->tok.kind == TOK_NE)) {
         cc_tok_kind_t op = p->tok.kind;
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9302,7 +9350,7 @@ static cc_expr_t *parse_eq(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(op == TOK_EQ ? CC_BIN_EQ : CC_BIN_NE, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, op == TOK_EQ ? CC_BIN_EQ : CC_BIN_NE, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9314,6 +9362,7 @@ static cc_expr_t *parse_band(parser_t *p) {
     cc_expr_t *lhs = parse_eq(p);
     while (lhs != NULL && p->tok.kind == TOK_AMP) {
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9323,7 +9372,7 @@ static cc_expr_t *parse_band(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(CC_BIN_BAND, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, CC_BIN_BAND, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9335,6 +9384,7 @@ static cc_expr_t *parse_bxor(parser_t *p) {
     cc_expr_t *lhs = parse_band(p);
     while (lhs != NULL && p->tok.kind == TOK_CARET) {
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9344,7 +9394,7 @@ static cc_expr_t *parse_bxor(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(CC_BIN_BXOR, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, CC_BIN_BXOR, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9356,6 +9406,7 @@ static cc_expr_t *parse_bor(parser_t *p) {
     cc_expr_t *lhs = parse_bxor(p);
     while (lhs != NULL && p->tok.kind == TOK_PIPE) {
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9365,7 +9416,7 @@ static cc_expr_t *parse_bor(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(CC_BIN_BOR, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, CC_BIN_BOR, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9377,6 +9428,7 @@ static cc_expr_t *parse_land(parser_t *p) {
     cc_expr_t *lhs = parse_bor(p);
     while (lhs != NULL && p->tok.kind == TOK_AND_AND) {
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9386,7 +9438,7 @@ static cc_expr_t *parse_land(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(CC_BIN_LAND, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, CC_BIN_LAND, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9398,6 +9450,7 @@ static cc_expr_t *parse_lor(parser_t *p) {
     cc_expr_t *lhs = parse_land(p);
     while (lhs != NULL && p->tok.kind == TOK_OR_OR) {
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9407,7 +9460,7 @@ static cc_expr_t *parse_lor(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(CC_BIN_LOR, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, CC_BIN_LOR, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
@@ -9468,6 +9521,7 @@ static cc_expr_t *parse_assign(parser_t *p) {
                         p->tok.kind == TOK_LSHIFT_EQ || p->tok.kind == TOK_RSHIFT_EQ || p->tok.kind == TOK_AND_EQ ||
                         p->tok.kind == TOK_XOR_EQ || p->tok.kind == TOK_OR_EQ)) {
         cc_tok_kind_t aop = p->tok.kind;
+        expr_pos_t op_at = tok_pos(p); /* (the `=`'s, gcc's place for its diagnostics) */
         cc_expr_t *rhs;
         cc_expr_t *e;
         char *name = NULL;
@@ -9581,7 +9635,7 @@ static cc_expr_t *parse_assign(parser_t *p) {
             lhs = NULL;
         }
 
-        e = new_expr(CC_EXPR_ASSIGN);
+        e = expr_at(new_expr(CC_EXPR_ASSIGN), op_at);
         if (e == NULL) {
             free(name);
             free_expr(lhs);
@@ -9604,6 +9658,7 @@ static cc_expr_t *parse_comma(parser_t *p) {
     cc_expr_t *lhs = parse_assign(p);
     while (lhs != NULL && p->tok.kind == TOK_COMMA) {
         cc_expr_t *rhs;
+        expr_pos_t op_at = tok_pos(p); /* (the operator's, gcc's place for its diagnostics) */
         if (next_tok(p) != 0) {
             free_expr(lhs);
             return NULL;
@@ -9613,7 +9668,7 @@ static cc_expr_t *parse_comma(parser_t *p) {
             free_expr(lhs);
             return NULL;
         }
-        lhs = new_bin_expr(CC_BIN_COMMA, lhs, rhs);
+        lhs = new_bin_expr_at(op_at, CC_BIN_COMMA, lhs, rhs);
         if (lhs == NULL) {
             return NULL;
         }
