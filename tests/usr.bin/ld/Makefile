@@ -19,5 +19,6 @@ run:
 	./test_page_size.sh
 	./test_nostdlib.sh
 	./test_response_file.sh
+	./test_library_script.sh
 
 clean:

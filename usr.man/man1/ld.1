@@ -90,6 +90,14 @@ libraries later does not change it.
 Both regular ELF libraries and GNU ld script wrappers
 .Pq Dv INPUT / Dv GROUP
 are supported.
+A file a wrapper names is looked for as named, then beside the wrapper,
+then in the library directories;
+.Fl l Ns Ar NAME
+in one is searched for as on the command line, and inside
+.Dv AS_NEEDED
+it is used only if it defines something the link still needs, as gcc's
+.Pa libgcc_s_asneeded.so
+asks.
 .Pp
 An input is an archive if it begins as one does, whatever it is called;
 ordinary and thin archives are read.

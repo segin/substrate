@@ -1001,14 +1001,37 @@ static int load_path_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, syms
     return load_object_input(path, ctx, objs, state, quiet);
 }
 
+static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state);
+
+/* How deep scripts may name libraries that are scripts in turn: libgcc_s.so's -lgcc, and no loop. */
+#define LD_SCRIPT_NESTING_MAX 16
+
+/**
+ * Load the inputs a library that is a linker script names, as GNU ld does: in INPUT(...) and GROUP(...),
+ * files by path (relative to the script's own directory when not absolute) and `-lNAME` searched for on the
+ * library path as a command-line `-l` is, with the mode and whole-archive state of the library that named
+ * the script; inside AS_NEEDED(...) a shared library only if it defines something still undefined.  gcc's
+ * libgcc_s_asneeded.so is `INPUT ( AS_NEEDED ( -lgcc_s ) )`.
+ *
+ * @param script_path  the library file
+ * @param ctx          the link
+ * @param objs         objects loaded so far
+ * @param state        the symbol state
+ * @param in           the library input that found the file
+ * @param handled      receives 1 if the file is such a script, else 0; may be NULL
+ * @return             0 on success (or when the file is no script), -1 on error
+ */
 static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
-                               int whole_archive, int as_needed, int *handled) {
+                               const ld_input_t *in, int *handled) {
+    static int nesting;
+    int whole_archive = in->whole_archive;
+    int as_needed = in->as_needed;
     unsigned char *buf = NULL;
     size_t sz = 0;
     char *text = NULL;
     char *dir = NULL;
     size_t i = 0;
-    int loaded_any = 0;
+    int named_any = 0;
     int paren_depth = 0;
     int as_needed_depth = 0;
     int pending_as_needed = 0;
@@ -1021,6 +1044,11 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
     }
     if (read_file(script_path, &buf, &sz) != 0) {
         return -1;
+    }
+    if ((sz >= 4 && memcmp(buf, "\177ELF", 4) == 0) ||
+        (sz >= 8 && (memcmp(buf, "!<arch>\n", 8) == 0 || memcmp(buf, "!<thin>\n", 8) == 0))) {
+        free(buf);
+        return 0;
     }
     text = (char *)malloc(sz + 1);
     if (text == NULL) {
@@ -1106,14 +1134,49 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
             pending_as_needed = 1;
             continue;
         }
+        effective_as_needed = as_needed || as_needed_depth != 0;
+        if (tok[0] == '-' && tok[1] == 'l' && tok[2] != '\0') {
+            ld_input_t lib = *in;
+            int rc;
+
+            if (nesting >= LD_SCRIPT_NESTING_MAX) {
+                fprintf(stderr, "ld: %s: libraries named by scripts nest too deeply\n", script_path);
+                free(dir);
+                free(text);
+                free(buf);
+                return -1;
+            }
+            lib.kind = LD_INPUT_LIB;
+            lib.as_needed = effective_as_needed;
+            lib.text = tok + 2;
+            nesting++;
+            rc = load_library_input(ctx, &lib, objs, state);
+            nesting--;
+            if (rc != 0) {
+                free(dir);
+                free(text);
+                free(buf);
+                return -1;
+            }
+            named_any = 1;
+            continue;
+        }
         if (tok[0] != '/' && strstr(tok, ".so") == NULL && strstr(tok, ".a") == NULL && strstr(tok, ".o") == NULL) {
             continue;
         }
-        effective_as_needed = as_needed || as_needed_depth != 0;
-        if (tok[0] == '/') {
+        named_any = 1;
+        /* GNU ld: the name as given, then on the library path; and beside the script */
+        if (tok[0] == '/' || access(tok, R_OK) == 0) {
             resolved = xstrdup(tok);
         } else {
             resolved = path_join(dir, tok);
+            if (resolved != NULL && access(resolved, R_OK) != 0) {
+                free(resolved);
+                resolved = resolve_library_path_exact(ctx, tok);
+                if (resolved == NULL) {
+                    fprintf(stderr, "ld: cannot find %s, named by %s\n", tok, script_path);
+                }
+            }
         }
         if (resolved == NULL) {
             free(dir);
@@ -1142,8 +1205,6 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
                     free(buf);
                     return -1;
                 }
-            } else {
-                loaded_any = 1;
             }
         } else {
             if (load_path_input(resolved, ctx, objs, state, whole_archive, 0) != 0) {
@@ -1153,7 +1214,6 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
                 free(buf);
                 return -1;
             }
-            loaded_any = 1;
         }
         free(resolved);
     }
@@ -1161,7 +1221,7 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
     free(dir);
     free(text);
     free(buf);
-    if (!loaded_any) {
+    if (!named_any) {
         return -1;
     }
     return 0;
@@ -1181,11 +1241,13 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
             report_library_not_found(in->text);
             return -1;
         }
-        if (has_suffix(path_exact, ".so") &&
-            load_library_script(path_exact, ctx, objs, state, in->whole_archive, in->as_needed, &handled) == 0 &&
-            handled) {
-            free(path_exact);
-            return 0;
+        if (has_suffix(path_exact, ".so")) {
+            int rc = load_library_script(path_exact, ctx, objs, state, in, &handled);
+
+            if (rc != 0 || handled) {
+                free(path_exact);
+                return rc;
+            }
         }
         if (has_suffix(path_exact, ".so") && (ctx->opt.expect_type == ET_DYN || ctx->opt.expect_type == ET_EXEC)) {
             if (in->as_needed &&
@@ -1234,11 +1296,13 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
         }
         path_so = resolve_library_path_suffix(ctx, in->text, ".so");
     }
-    if (path_so != NULL &&
-        load_library_script(path_so, ctx, objs, state, in->whole_archive, in->as_needed, &handled) == 0 &&
-        handled) {
-        free(path_so);
-        return 0;
+    if (path_so != NULL) {
+        int rc = load_library_script(path_so, ctx, objs, state, in, &handled);
+
+        if (rc != 0 || handled) {
+            free(path_so);
+            return rc;
+        }
     }
     if (path_so != NULL && (ctx->opt.expect_type == ET_DYN || ctx->opt.expect_type == ET_EXEC)) {
         if (in->as_needed) {
@@ -1271,11 +1335,12 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
 
     path_a = resolve_library_path_suffix(ctx, in->text, ".a");
     if (path_a != NULL) {
-        if (load_library_script(path_a, ctx, objs, state, in->whole_archive, in->as_needed, &handled) == 0 &&
-            handled) {
+        int rc = load_library_script(path_a, ctx, objs, state, in, &handled);
+
+        if (rc != 0 || handled) {
             free(path_so);
             free(path_a);
-            return 0;
+            return rc;
         }
         if (load_path_input(path_a, ctx, objs, state, in->whole_archive, 0) != 0) {
             free(path_so);
