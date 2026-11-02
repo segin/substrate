@@ -289,6 +289,10 @@ struct elf_link_plan {
 
     int merge_sections;                 /* SHF_MERGE sections are merged (elf_link_plan_set_merge_sections) */
     struct elf_merge_state *merge;      /* for one link: elf_merge.c */
+    int x86_note_merged;                /* an x86 link: .note.gnu.property is the inputs' merged */
+    uint8_t *x86_note;                  /* and this is it, NULL if no property is left */
+    size_t x86_note_size;
+    int x86_note_placed;
 };
 
 /* elf_merge.c: SHF_MERGE sections merged, as GNU ld merges them */
@@ -308,6 +312,11 @@ int elf__merge_block(elf_link_plan_t *plan, size_t input, size_t sec, const uint
 /** If section @p sec of input @p input is merged: 1, with *@p out_off where its offset @p in_off went. */
 int elf__merge_offset(const elf_link_plan_t *plan, size_t input, size_t sec, uint64_t in_off,
                       uint64_t *out_off);
+/**
+ * The .note.gnu.property of an x86 link: the inputs' properties merged as GNU ld merges them (an AND
+ * property gone if one input lacks it, an OR one ORed), in one note.  *@p data is NULL if none is left.
+ */
+elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, size_t *size);
 /** Free what the merge of one link kept. */
 void elf__merge_free(elf_link_plan_t *plan);
 

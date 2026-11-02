@@ -456,10 +456,200 @@ int elf__merge_offset(const elf_link_plan_t *plan, size_t input, size_t sec, uin
     return 1;
 }
 
+/* ---- x86 GNU property notes, merged as bfd's _bfd_x86_elf_merge_gnu_properties() ---------------------- */
+
+#define MERGE_MAX_PROPS 64
+
+struct x86_prop {
+    uint32_t type;
+    uint32_t value;
+};
+
+/* How a property of @p type is merged: 'a' AND (gone if an input lacks it), 'o' OR, 0 another kind. */
+static int x86_prop_kind(uint32_t type) {
+    if ((type >= 0xc0000002u && type <= 0xc0007fffu) || (type >= 0xb0000000u && type <= 0xb0007fffu)) {
+        return 'a';     /* GNU_PROPERTY_X86_UINT32_AND_LO..HI, GNU_PROPERTY_UINT32_AND_LO..HI */
+    }
+    if ((type >= 0xc0008000u && type <= 0xc0017fffu) || (type >= 0xb0008000u && type <= 0xb000ffffu)) {
+        return 'o';     /* the UINT32_OR and UINT32_OR_AND ranges */
+    }
+    return 0;
+}
+
+/*
+ * The 4-byte properties of the NT_GNU_PROPERTY_TYPE_0 notes of @p obj's
+ * .note.gnu.property: how many (into @p props), or -1 if it has none.
+ */
+static int read_x86_props(const elfobj_t *obj, struct x86_prop *props) {
+    const struct elf_section *sec = NULL;
+    size_t pad = obj->cls == ELFOBJ_CLASS_64 ? 8 : 4;
+    size_t off = 0;
+    size_t i;
+    int n = 0;
+
+    for (i = 0; i < obj->section_count; ++i) {
+        const struct elf_section *s = obj->sections[i];
+        if (s != NULL && s->type == SHT_NOTE && s->name != NULL && strcmp(s->name, ".note.gnu.property") == 0) {
+            sec = s;
+            break;
+        }
+    }
+    if (sec == NULL || sec->data == NULL) {
+        return -1;
+    }
+    while (off + 12 <= sec->data_size) {
+        uint32_t namesz = elf__rd32(sec->data + off, obj->endian);
+        uint32_t descsz = elf__rd32(sec->data + off + 4, obj->endian);
+        uint32_t ntype = elf__rd32(sec->data + off + 8, obj->endian);
+        size_t desc = off + 12 + ((namesz + 3u) & ~3u);
+        size_t p;
+
+        if (desc > sec->data_size || descsz > sec->data_size - desc) {
+            break;
+        }
+        if (ntype == 5 && namesz == 4 && memcmp(sec->data + off + 12, "GNU", 4) == 0) {
+            for (p = desc; p + 8 <= desc + descsz;) {
+                uint32_t ptype = elf__rd32(sec->data + p, obj->endian);
+                uint32_t psz = elf__rd32(sec->data + p + 4, obj->endian);
+
+                if (psz == 4 && p + 12 <= desc + descsz) {
+                    uint32_t v = elf__rd32(sec->data + p + 8, obj->endian);
+                    int k;
+
+                    /* one type twice in an object (GNU as adds a note of its own): ORed, as bfd reads it */
+                    for (k = 0; k < n && props[k].type != ptype; ++k) {
+                    }
+                    if (k < n) {
+                        props[k].value |= v;
+                    } else if (n < MERGE_MAX_PROPS) {
+                        props[n].type = ptype;
+                        props[n].value = v;
+                        n++;
+                    }
+                }
+                p += 8 + ((psz + pad - 1) & ~(pad - 1));
+            }
+        }
+        off = desc + ((descsz + pad - 1) & ~(pad - 1));
+    }
+    return n;
+}
+
+static int find_prop(const struct x86_prop *props, int n, uint32_t type) {
+    int i;
+
+    for (i = 0; i < n; ++i) {
+        if (props[i].type == type) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int prop_cmp(const void *a, const void *b) {
+    uint32_t x = ((const struct x86_prop *)a)->type;
+    uint32_t y = ((const struct x86_prop *)b)->type;
+
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
+elf_err_t elf__x86_property_note(const elf_link_plan_t *plan, uint8_t **data, size_t *size) {
+    struct x86_prop acc[MERGE_MAX_PROPS];
+    struct x86_prop in[MERGE_MAX_PROPS];
+    int nacc = -1;
+    size_t base = 0;
+    size_t i;
+    int k;
+    size_t pad, descsz, off;
+    const elfobj_t *first = NULL;
+    uint8_t *buf;
+
+    *data = NULL;
+    *size = 0;
+    /* from the first input that has a note, every other merged into it, notes or none */
+    for (i = 0; i < plan->input_count && nacc < 0; ++i) {
+        if (plan->inputs[i].obj != NULL && (nacc = read_x86_props(plan->inputs[i].obj, acc)) >= 0) {
+            base = i;
+            first = plan->inputs[i].obj;
+        }
+    }
+    if (nacc < 0) {
+        return ELF_OK;
+    }
+    for (i = 0; i < plan->input_count; ++i) {
+        int nin;
+
+        if (i == base || plan->inputs[i].obj == NULL) {
+            continue;
+        }
+        nin = read_x86_props(plan->inputs[i].obj, in);
+        if (nin < 0) {
+            nin = 0;
+        }
+        /* what the merged has: kept, combined or gone */
+        for (k = 0; k < nacc;) {
+            int j = find_prop(in, nin, acc[k].type);
+            int kind = x86_prop_kind(acc[k].type);
+            int keep = 1;
+
+            if (kind == 'a') {
+                keep = j >= 0 && (acc[k].value &= in[j].value) != 0;
+            } else if (kind == 'o') {
+                if (j >= 0) {
+                    acc[k].value |= in[j].value;
+                }
+                keep = acc[k].value != 0;
+            } else {
+                keep = j >= 0;
+            }
+            if (keep) {
+                k++;
+            } else {
+                acc[k] = acc[--nacc];
+            }
+        }
+        /* what only the input has: an OR property comes in */
+        for (k = 0; k < nin; ++k) {
+            if (x86_prop_kind(in[k].type) == 'o' && in[k].value != 0 && find_prop(acc, nacc, in[k].type) < 0 &&
+                nacc < MERGE_MAX_PROPS) {
+                acc[nacc++] = in[k];
+            }
+        }
+    }
+    if (nacc == 0) {
+        return ELF_OK;
+    }
+    qsort(acc, (size_t)nacc, sizeof(acc[0]), prop_cmp);
+    pad = first->cls == ELFOBJ_CLASS_64 ? 8 : 4;
+    descsz = (size_t)nacc * (8 + pad);
+    buf = (uint8_t *)elf__calloc(16 + descsz, 1);
+    if (buf == NULL) {
+        return ELF_ERR_OOM;
+    }
+    elf__wr32(buf, first->endian, 4);
+    elf__wr32(buf + 4, first->endian, (uint32_t)descsz);
+    elf__wr32(buf + 8, first->endian, 5);   /* NT_GNU_PROPERTY_TYPE_0 */
+    memcpy(buf + 12, "GNU", 4);
+    off = 16;
+    for (k = 0; k < nacc; ++k) {
+        elf__wr32(buf + off, first->endian, acc[k].type);
+        elf__wr32(buf + off + 4, first->endian, 4);
+        elf__wr32(buf + off + 8, first->endian, acc[k].value);
+        off += 8 + pad;
+    }
+    *data = buf;
+    *size = 16 + descsz;
+    return ELF_OK;
+}
+
 void elf__merge_free(elf_link_plan_t *plan) {
     struct elf_merge_state *st = plan->merge;
     size_t i, j;
 
+    free(plan->x86_note);
+    plan->x86_note = NULL;
+    plan->x86_note_size = 0;
+    plan->x86_note_placed = 0;
     if (st == NULL) {
         return;
     }

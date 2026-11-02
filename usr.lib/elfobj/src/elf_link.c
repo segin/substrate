@@ -802,6 +802,41 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                                    size_t j, uint64_t *sec_bases, uint8_t *sec_included,
                                    const uint8_t *sec_discard);
 
+/**
+ * @brief An input's .note.gnu.property in an x86 link: the first one met places the merged note, and the
+ * rest are in it.
+ *
+ * @param plan         the link, its note merged
+ * @param out          the output
+ * @param out_name     the output section it goes to
+ * @param j            the input section
+ * @param sec_bases    where the input's sections went
+ * @param sec_included which of them went
+ * @return ELF_OK, or the error
+ */
+static elf_err_t place_x86_note(elf_link_plan_t *plan, elfobj_t *out, const char *out_name, size_t j,
+                                uint64_t *sec_bases, uint8_t *sec_included) {
+    struct elf_section *dst;
+
+    if (plan->x86_note == NULL) {
+        return ELF_OK;  /* no property is left: no note, as GNU ld makes none */
+    }
+    if (!plan->x86_note_placed) {
+        dst = elf_add_section(out, out_name, SHT_NOTE, SHF_ALLOC);
+        if (dst == NULL) {
+            return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
+        }
+        dst->addralign = out->cls == ELFOBJ_CLASS_64 ? 8 : 4;
+        if (elf_section_set_data(dst, plan->x86_note, plan->x86_note_size) != ELF_OK) {
+            return ELF_ERR_OOM;
+        }
+        plan->x86_note_placed = 1;
+    }
+    sec_bases[j] = 0;
+    sec_included[j] = 1;
+    return ELF_OK;
+}
+
 static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                                 const struct elf_link_input *input,
                                 uint64_t *sec_bases, uint8_t *sec_included,
@@ -863,6 +898,10 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
         out_name = output_section_name(plan, input, src);
         if (out_name == NULL) {
             return ELF_OK;
+        }
+        /* x86: the inputs' property notes are one, merged before (prepare_merge) */
+        if (plan->x86_note_merged && src->type == SHT_NOTE && strcmp(src->name, ".note.gnu.property") == 0) {
+            return place_x86_note(plan, out, out_name, j, sec_bases, sec_included);
         }
         order_to = link_order_target(plan, out, input, src);
         dst = order_to != NULL ? find_ordered_output(out, out_name, order_to) : elf_find_section(out, out_name);
@@ -1655,6 +1694,14 @@ static elf_err_t prepare_merge(elf_link_plan_t *plan) {
     size_t i, j;
 
     elf__merge_free(plan);
+    plan->x86_note_merged = plan->input_count != 0 && plan->inputs[0].obj != NULL &&
+                            (plan->inputs[0].obj->machine == EM_386 || plan->inputs[0].obj->machine == EM_X86_64);
+    if (plan->x86_note_merged) {
+        elf_err_t err = elf__x86_property_note(plan, &plan->x86_note, &plan->x86_note_size);
+        if (err != ELF_OK) {
+            return err;
+        }
+    }
     if (!plan->merge_sections) {
         return ELF_OK;
     }

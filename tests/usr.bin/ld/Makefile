@@ -26,5 +26,6 @@ run:
 	./test_link_order.sh
 	./test_local_symbols.sh
 	./test_merge_sections.sh
+	./test_gnu_property.sh
 
 clean:
