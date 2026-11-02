@@ -15268,8 +15268,15 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, con
         for (i = 0; i < dims[0] && *cursor < list->arg_count; ++i) {
             const cc_expr_t *raw = list->args[*cursor];
             long sub_base = base + i * sub_size;
-            if (raw != NULL && raw->kind == CC_EXPR_STR && ndim == 2 && dims[1] >= 0 && ct_record_id(scalar) < 0) {
-                if (fill_fixed_char_array_from_string(raw, scalar, scalar_size, dims[1],
+            /* a row of characters from a string, braced or not: `{ "pq", { "rs" } }` */
+            const cc_expr_t *row_str =
+                raw != NULL && raw->kind == CC_EXPR_INIT_LIST && raw->arg_count == 1 && raw->args[0] != NULL &&
+                        raw->args[0]->kind == CC_EXPR_STR
+                    ? raw->args[0]
+                    : raw;
+            if (row_str != NULL && row_str->kind == CC_EXPR_STR && ndim == 2 && dims[1] >= 0 &&
+                ct_record_id(scalar) < 0 && !ct_is_pointer(scalar)) {
+                if (fill_fixed_char_array_from_string(row_str, scalar, scalar_size, dims[1],
                                                       sub_base, buf, buf_size,
                                                       diag) != 0) {
                     return -1;
