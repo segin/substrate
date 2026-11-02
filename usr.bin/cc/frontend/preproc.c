@@ -5084,6 +5084,73 @@ static void emit_macro_trace(const char *file, int line, const char *name) {
     fprintf(stderr, "%s:%d:1: note: while expanding macro '%s'\n", file, line, name);
 }
 
+/**
+ * Whether macro replacement @p text ends in the name of a function-like
+ * macro, which the rescan invokes with arguments from the text that follows
+ * it (C11 6.10.3.4p1): `I(F)(T)`, I expanding to F.  Those arguments are
+ * then F's, to be taken as written -- not expanded first as text of their
+ * own, which a `##` operand must not be.
+ *
+ * @return 1 if it does, else 0
+ */
+static int ends_in_function_macro(pp_state_t *st, const char *text) {
+    size_t e = strlen(text);
+    size_t s;
+    char *name;
+    const pp_macro_t *m;
+
+    while (e > 0 && (text[e - 1] == ' ' || text[e - 1] == '\t' || text[e - 1] == '\n' ||
+                     text[e - 1] == PP_PASTE_GUARD || text[e - 1] == PP_EMPTY_ARG_MARKER)) {
+        e--;
+    }
+    s = e;
+    while (s > 0 && is_ident_char((unsigned char)text[s - 1])) {
+        s--;
+    }
+    /* an identifier, not the tail of a pp-number (`0x1F`, `1.e`) */
+    if (s == e || !is_ident_start((unsigned char)text[s]) || (s > 0 && text[s - 1] == '.')) {
+        return 0;
+    }
+    name = cc_strndup(text + s, e - s);
+    if (name == NULL) {
+        return 0;
+    }
+    m = macro_find(&st->macros, name);
+    free(name);
+    return m != NULL && m->is_function;
+}
+
+/**
+ * After a macro's replacement @p repl: when it ends in a function-like
+ * macro's name (ends_in_function_macro()) and @p src at @p from goes on
+ * with `(`, the argument list as written, which this pass copies through
+ * unexpanded for the next to invoke the macro with.
+ *
+ * @param[out] call_end where the argument list ends in @p src, past its `)`
+ * @return 1 if there is one, else 0
+ */
+static int trailing_call_args(pp_state_t *st, const char *repl, const char *src, size_t from, size_t *call_end) {
+    size_t k = from;
+    char **args = NULL;
+    size_t arg_count = 0;
+    size_t ai;
+
+    while (src[k] == ' ' || src[k] == '\t' || src[k] == '\r' || src[k] == '\n') {
+        k++;
+    }
+    if (src[k] != '(' || !ends_in_function_macro(st, repl)) {
+        return 0;
+    }
+    if (parse_call_args(src, k, call_end, &args, &arg_count) != 0) {
+        return 0; /* not closed here: left as it was */
+    }
+    for (ai = 0; ai < arg_count; ++ai) {
+        free(args[ai]);
+    }
+    free(args);
+    return 1;
+}
+
 static char *expand_once(pp_state_t *st, const char *src, const char *file, int line, int depth,
                          cc_strvec_t *disabled, cc_diag_t *diag) {
     size_t i = 0;
@@ -5300,7 +5367,6 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     char *exp_body;
                     char *masked_body;
                     char *pasted_body;
-                    size_t k = j;
                     if (disabled != NULL && cc_strvec_push(disabled, name) != 0) {
                         free(name);
                         sb_free(&out);
@@ -5327,60 +5393,22 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         return NULL;
                     }
                     exp_body = masked_body;
-                    while (src[k] == ' ' || src[k] == '\t' || src[k] == '\r' || src[k] == '\n') {
-                        k++;
-                    }
-                    if (src[k] == '(') {
-                        const char *alias_start = skip_ws(exp_body);
-                        const char *alias_end = alias_start;
-                        while (is_ident_char((unsigned char)*alias_end)) {
-                            alias_end++;
-                        }
-                        if (alias_end > alias_start && skip_ws(alias_end)[0] == '\0') {
-                            char *alias_name = cc_strndup(alias_start, (size_t)(alias_end - alias_start));
-                            if (alias_name == NULL) {
+                    {
+                        /* `G(T)`, G expanding to `F` or `x F`: F's arguments as written, for the next pass */
+                        size_t args_end = j;
+
+                        if (trailing_call_args(st, exp_body, src, j, &args_end) == 1) {
+                            if (pp_avoid_paste(&out, exp_body) != 0 || sb_append(&out, exp_body) != 0 ||
+                                sb_append_n(&out, src + j, args_end - j) != 0) {
                                 free(exp_body);
                                 free(name);
                                 sb_free(&out);
                                 return NULL;
                             }
-                            {
-                                pp_macro_t *alias_m = macro_find(&st->macros, alias_name);
-                                if (alias_m != NULL && alias_m->is_function) {
-                                    size_t call_end = 0;
-                                    char **alias_args = NULL;
-                                    size_t alias_arg_count = 0;
-                                    size_t ai;
-                                    if (parse_call_args(src, k, &call_end, &alias_args, &alias_arg_count) != 0) {
-                                        set_diag(diag, (size_t)line, k + 1, "malformed function-like macro invocation");
-                                        emit_macro_trace(file, line, alias_name);
-                                        free(alias_name);
-                                        free(exp_body);
-                                        free(name);
-                                        sb_free(&out);
-                                        return NULL;
-                                    }
-                                    for (ai = 0; ai < alias_arg_count; ++ai) {
-                                        free(alias_args[ai]);
-                                    }
-                                    free(alias_args);
-                                    if (pp_avoid_paste(&out, exp_body) != 0 || sb_append(&out, exp_body) != 0 ||
-                                        pp_avoid_paste(&out, src + j) != 0 ||
-                                        sb_append_n(&out, src + j, call_end - j) != 0) {
-                                        free(alias_name);
-                                        free(exp_body);
-                                        free(name);
-                                        sb_free(&out);
-                                        return NULL;
-                                    }
-                                    free(alias_name);
-                                    free(exp_body);
-                                    free(name);
-                                    i = call_end;
-                                    continue;
-                                }
-                            }
-                            free(alias_name);
+                            free(exp_body);
+                            free(name);
+                            i = args_end;
+                            continue;
                         }
                     }
                     if (pp_avoid_paste(&out, exp_body) != 0 || sb_append(&out, exp_body) != 0 ||
@@ -5559,6 +5587,38 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         return NULL;
                     }
                     exp_subst = masked_subst;
+                    {
+                        /* `I(F)(T)`: F's arguments as written, for the next pass to invoke it with */
+                        size_t args_end = call_end;
+
+                        if (trailing_call_args(st, exp_subst, src, call_end, &args_end) == 1) {
+                            if (pp_avoid_paste(&out, exp_subst) != 0 || sb_append(&out, exp_subst) != 0 ||
+                                sb_append_n(&out, src + call_end, args_end - call_end) != 0) {
+                                free(exp_subst);
+                                free(subst);
+                                free(name);
+                                for (ai = 0; ai < arg_count; ++ai) {
+                                    free(args[ai]);
+                                    free(exp_args[ai]);
+                                }
+                                free(args);
+                                free(exp_args);
+                                sb_free(&out);
+                                return NULL;
+                            }
+                            free(exp_subst);
+                            free(subst);
+                            for (ai = 0; ai < arg_count; ++ai) {
+                                free(args[ai]);
+                                free(exp_args[ai]);
+                            }
+                            free(args);
+                            free(exp_args);
+                            free(name);
+                            i = args_end;
+                            continue;
+                        }
+                    }
                     if (pp_avoid_paste(&out, exp_subst) != 0 || sb_append(&out, exp_subst) != 0 ||
                         pp_avoid_paste(&out, src + call_end) != 0) {
                         free(exp_subst);
