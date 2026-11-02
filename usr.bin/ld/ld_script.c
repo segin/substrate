@@ -1615,6 +1615,7 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     elf_segment_t **segs = NULL;
     uint32_t *flags = NULL;
     uint64_t *aligns = NULL;    /* the strictest alignment of a section in each header */
+    size_t last_si;             /* the script's statements before this were looked at */
     size_t i, k;
     int pass;
     int rc = -1;
@@ -1670,16 +1671,36 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
             }
         }
         current = NULL;
+        last_si = 0;
         for (i = 0; i < elf_section_count(obj); ++i) {
             elf_section_t *sec = elf_section_get(obj, i);
             const char *name = sec != NULL ? elf_section_name(sec) : NULL;
             const lds_stmt_t *os;
             uint64_t sflags;
+            size_t si = 0, s;
 
             if (name == NULL || ((sflags = elf_section_flags(sec)) & SHF_ALLOC) == 0) {
                 continue;
             }
-            os = script_find_outsec(sc, name, NULL);
+            os = script_find_outsec(sc, name, &si);
+            /*
+             * An output section nothing went into, which is not made, still
+             * says where those after it go, as in GNU ld: Linux's empty
+             * `__restore_ph : { *(.__restore_ph) } :text` after
+             * `.notes : { ... } :text :note` keeps what follows out of the
+             * PT_NOTE.
+             */
+            for (s = last_si; os != NULL && s < si; ++s) {
+                const lds_stmt_t *gone = &sc->stmts.items[s];
+
+                if (gone->kind == LDS_ST_OUTSEC && !gone->discard && gone->phdrs.count != 0 &&
+                    elf_find_section(obj, gone->at.text) == NULL) {
+                    current = &gone->phdrs;
+                }
+            }
+            if (os != NULL && si >= last_si) {
+                last_si = si + 1;
+            }
             if (os != NULL && os->phdrs.count != 0) {
                 current = &os->phdrs;
             }

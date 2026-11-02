@@ -745,7 +745,8 @@ on a page of its own when it is protected unlike the section before it.
 .It Ic PHDRS
 The program headers of the output.
 A section goes in the headers named after its output section, and one
-that names none goes where the one before it went.
+that names none goes where the one before it went, counting an output
+section the script names that nothing went into, as GNU ld does.
 A
 .Dv PT_LOAD
 without
