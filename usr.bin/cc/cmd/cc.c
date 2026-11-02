@@ -2160,8 +2160,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
   size_t pp_count = o->cpp_flags.count;
   const char **pp_flags = (const char **)pp_flags_base;
   const char *target_flag = target_gcc_flag(o->target);
-  const char *as_def1 = "-D__ASSEMBLY__";
-  const char *as_def2 = "-D__ASSEMBLER__";
+  const char *as_def = "-D__ASSEMBLER__";
   const char **pp_flags_aug = NULL;
   const char *pp_in = in;
   int use_stdin_tmp = 0;
@@ -2219,8 +2218,8 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
       /* (the last of -mno-80387 and -m80387: _SOFT_FLOAT, __FLT_EVAL_METHOD__ 0) */
       extra += 1;
     }
-    if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
-      extra += 2;
+    if (as_cpp_mode) {
+      extra += 1;
     }
     if (use_stdin_tmp) {
       extra += 1;
@@ -2248,9 +2247,9 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     if (o->no_80387) {
       pp_flags_aug[pp_count++] = "-mno-80387";
     }
-    if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
-      pp_flags_aug[pp_count++] = as_def1;
-      pp_flags_aug[pp_count++] = as_def2;
+    if (as_cpp_mode) {
+      /* gcc's one macro for preprocessed assembly, wherever the output goes; __ASSEMBLY__ is Linux's own -D */
+      pp_flags_aug[pp_count++] = as_def;
     }
     if (use_stdin_tmp) {
       /* The input is a copy of standard input: the preprocessor names it
