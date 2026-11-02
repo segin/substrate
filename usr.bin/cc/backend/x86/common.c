@@ -445,9 +445,25 @@ static int find_named_goto_index(const char *name, char **names, size_t count) {
 static int x86_gpr_index(const char *name);
 static const char *asm_operand_with_modifier(char mod, const char *text, char *buf, size_t bufsz, int is_64bit);
 
+/**
+ * The instruction suffix gcc's `%z` modifier prints for an operand of
+ * @p size bytes: b, w, l or q (Linux's rxrpc `shr%z1 %1` of a byte in
+ * memory is `shrb`); none for another size.
+ */
+static const char *asm_size_suffix(int size) {
+    switch (size) {
+    case 1: return "b";
+    case 2: return "w";
+    case 4: return "l";
+    case 8: return "q";
+    default: return "";
+    }
+}
+
 static char *render_inline_asm_template(const char *tmpl, char **operand_texts, char **operand_names, size_t op_count,
                                         size_t label_base, const int *goto_labels, char **goto_names,
-                                        size_t goto_count, const char *fn_name, int is_64bit, cc_diag_t *diag) {
+                                        size_t goto_count, const char *fn_name, int is_64bit, const int *op_sizes,
+                                        cc_diag_t *diag) {
     size_t i = 0;
     size_t len = 0;
     size_t cap = 0;
@@ -499,7 +515,8 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 free(out);
                 return NULL;
             }
-            op_text = asm_operand_with_modifier(mod, operand_texts[n], mbuf, sizeof(mbuf), is_64bit);
+            op_text = mod == 'z' ? asm_size_suffix(op_sizes != NULL ? op_sizes[n] : 0)
+                                 : asm_operand_with_modifier(mod, operand_texts[n], mbuf, sizeof(mbuf), is_64bit);
             op_len = strlen(op_text);
             if (strip_dollar && op_len > 0 && op_text[0] == '$') {
                 op_text++;
@@ -604,7 +621,8 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 free(out);
                 return NULL;
             }
-            op_text = asm_operand_with_modifier(mod, operand_texts[idx], mbuf, sizeof(mbuf), is_64bit);
+            op_text = mod == 'z' ? asm_size_suffix(op_sizes != NULL ? op_sizes[idx] : 0)
+                                 : asm_operand_with_modifier(mod, operand_texts[idx], mbuf, sizeof(mbuf), is_64bit);
             op_len = strlen(op_text);
             if (strip_dollar && op_len > 0 && op_text[0] == '$') {
                 op_text++;
@@ -4509,6 +4527,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     size_t i;
     char **op_text = NULL;
     char **op_names = NULL;
+    int *op_sizes = NULL;
     const char **out_regs = NULL;
     int *out_write_back = NULL;
     int *out_tied_read = NULL;
@@ -4950,12 +4969,24 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 stub_ids[k] = (int)k;
             }
         }
+        op_sizes = (int *)calloc(total > 0 ? total : 1, sizeof(*op_sizes));
+        if (op_sizes == NULL) {
+            goto oom;
+        }
+        for (i = 0; i < total; ++i) {
+            /* each operand's size, for %z */
+            op_sizes[i] = i < out_n ? asm_operand_size(in->asm_out_sizes, out_n, i, is_64bit ? 8 : 4)
+                                    : asm_operand_size(in->asm_in_sizes, in->asm_in_count, i - out_n,
+                                                       is_64bit ? 8 : 4);
+        }
         rendered = in->asm_is_basic
                        ? dup_cstr(in->sym != NULL ? in->sym : "") /* basic asm: the text as written */
                        : render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total,
                                                     label_base, stub_ids != NULL ? stub_ids : in->asm_goto_labels,
                                                     in->asm_goto_names, in->asm_goto_count,
-                                                    stub_ids != NULL ? stub_fn : f->name, is_64bit, diag);
+                                                    stub_ids != NULL ? stub_fn : f->name, is_64bit, op_sizes, diag);
+        free(op_sizes);
+        op_sizes = NULL;
     }
     if (rendered == NULL) {
         if (diag != NULL && diag->message[0] == '\0') {
@@ -5092,6 +5123,7 @@ fail:
     }
     free(op_text);
     free(op_names);
+    free(op_sizes);
     free(out_regs);
     free(out_write_back);
     free(out_tied_read);
