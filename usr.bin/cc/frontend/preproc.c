@@ -4954,6 +4954,47 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                 i = j;
                 continue;
             }
+            if (strcmp(name, "__has_attribute") == 0 || strcmp(name, "__has_builtin") == 0) {
+                /*
+                 * outside #if too, gcc's operators are 1 or 0: Linux's trace.c tests
+                 * `IS_ENABLED(...) && __has_attribute(btf_type_tag)` in a statement
+                 */
+                size_t k = j;
+                size_t a;
+                char *operand;
+                int has_v;
+
+                while (src[k] == ' ' || src[k] == '\t' || src[k] == '\r' || src[k] == '\n') {
+                    k++;
+                }
+                if (src[k] == '(') {
+                    k++;
+                    while (src[k] == ' ' || src[k] == '\t') {
+                        k++;
+                    }
+                    a = k;
+                    while (is_ident_char((unsigned char)src[k])) {
+                        k++;
+                    }
+                    operand = k > a ? cc_strndup(src + a, k - a) : NULL;
+                    while (src[k] == ' ' || src[k] == '\t') {
+                        k++;
+                    }
+                    if (operand != NULL && src[k] == ')') {
+                        has_v = name[6] == 'a' ? has_gnu_attribute_name(operand) : has_builtin_name(operand);
+                        free(operand);
+                        if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                            free(name);
+                            sb_free(&out);
+                            return NULL;
+                        }
+                        free(name);
+                        i = k + 1;
+                        continue;
+                    }
+                    free(operand);
+                }
+            }
             {
                 pp_macro_t *m = macro_find(&st->macros, name);
                 if (m == NULL) {
