@@ -1469,6 +1469,13 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 static int g_stmt_loop_depth;
 static int g_stmt_switch_depth;
 
+/*
+ * And the function they are in, for a `return` in a statement expression,
+ * which returns from it: its return type and attributes (NULL outside one).
+ */
+static const cc_ctype_t *g_stmt_fn_ret;
+static cc_attr_flags_t g_stmt_fn_attr_flags;
+
 /**
  * The element type of complex type @p t (float, double or long double),
  * which has its hidden structure `{ T __re, __im; }`.
@@ -4680,7 +4687,8 @@ static int sema_check_stmt_expr(const cc_translation_unit_t *tu, cc_expr_t *e, v
         return -1;
     }
     for (j = 0; j < e->stmt_expr_count; ++j) {
-        if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, cc_ct_basic(CC_CT_INT), 0,
+        if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1,
+                       g_stmt_fn_ret != NULL ? g_stmt_fn_ret : cc_ct_basic(CC_CT_INT), g_stmt_fn_attr_flags,
                        g_stmt_loop_depth, g_stmt_switch_depth, &saw_return, diag) != 0) {
             vars_free(lvars, lcount);
             return -1;
@@ -5927,14 +5935,20 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                       int *saw_return, cc_diag_t *diag) {
     int saved_loop = g_stmt_loop_depth;
     int saved_switch = g_stmt_switch_depth;
+    const cc_ctype_t *saved_ret = g_stmt_fn_ret;
+    cc_attr_flags_t saved_attr = g_stmt_fn_attr_flags;
     int rc;
 
     g_stmt_loop_depth = loop_depth;
     g_stmt_switch_depth = switch_depth;
+    g_stmt_fn_ret = fn_ret;
+    g_stmt_fn_attr_flags = fn_attr_flags;
     rc = check_stmt_body(tu, s, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth, switch_depth, saw_return,
                          diag);
     g_stmt_loop_depth = saved_loop;
     g_stmt_switch_depth = saved_switch;
+    g_stmt_fn_ret = saved_ret;
+    g_stmt_fn_attr_flags = saved_attr;
     return rc;
 }
 
