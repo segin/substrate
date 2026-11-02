@@ -997,6 +997,7 @@ static cc_ssa_data_kind_t ssa_data_kind(const cc_ctype_t *t) {
     case CC_CT_BOOL:
         return CC_SSA_DATA_BOOL;
     case CC_CT_CHAR:
+    case CC_CT_SCHAR:
     case CC_CT_UCHAR:
         return CC_SSA_DATA_CHAR;
     default:

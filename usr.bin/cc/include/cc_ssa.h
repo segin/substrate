@@ -246,7 +246,8 @@ typedef enum {
     CC_SSA_DATA_OTHER = 0, /**< a structure or anything else laid out as bytes */
     CC_SSA_DATA_INT,       /**< an integer other than those below */
     CC_SSA_DATA_BOOL,      /**< _Bool: a floating initializer is true when non-zero */
-    CC_SSA_DATA_CHAR,      /**< char or unsigned char: a string may initialize an array of them */
+    CC_SSA_DATA_CHAR,      /**< a character type, char, signed char or unsigned char: a string may initialize
+                                an array of them */
     CC_SSA_DATA_FLOAT,     /**< float, double or long double */
     CC_SSA_DATA_POINTER    /**< a pointer */
 } cc_ssa_data_kind_t;
