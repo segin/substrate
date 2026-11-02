@@ -2021,6 +2021,12 @@ static char *alt_macro_arg(const gas_macro_vec_t *v, const char *raw) {
         return NULL;
     }
     n = strlen(arg);
+    if (n >= 2 && arg[0] == '\'' && arg[n - 1] == '\'') {
+        /* (single quotes delimit a string here, as they did before for both modes) */
+        memmove(arg, arg + 1, n - 2);
+        arg[n - 2] = '\0';
+        n -= 2;
+    }
     if (arg[0] == '%') {
         long long value;
         char *text = text_without_comments(arg + 1);
@@ -2460,7 +2466,9 @@ static char *macro_arg_value_copy(const char *raw) {
     }
     s = trim_in_place(tmp);
     n = strlen(s);
-    if (n >= 2 && ((s[0] == '"' && s[n - 1] == '"') || (s[0] == '\'' && s[n - 1] == '\''))) {
+    /* GAS takes a double-quoted argument's quotes off; a single-quoted one is a character constant, `'E'`,
+     * and keeps them (Linux's print_reg 'E', 'x', 'c', ':') */
+    if (n >= 2 && s[0] == '"' && s[n - 1] == '"') {
         s[n - 1] = '\0';
         s++;
     }
