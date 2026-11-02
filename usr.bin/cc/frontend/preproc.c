@@ -6348,7 +6348,8 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
                     cc_strvec_free(&parsed_params);
                     return -1;
                 }
-                if (p[0] == '.' && p[1] == '.' && p[2] == '.') {
+                if (skip_ws(p)[0] == '.' && skip_ws(p)[1] == '.' && skip_ws(p)[2] == '.') {
+                    /* GNU's named variadic parameter, `args...` or, as Linux spells it, `args ...` */
                     is_variadic = 1;
                     vararg_name = cc_strndup(a, (size_t)(p - a));
                     free(param);
@@ -6358,7 +6359,7 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
                     }
                     free(parsed_params.items[parsed_params.count - 1]);
                     parsed_params.count--;
-                    p += 3;
+                    p = skip_ws(p) + 3;
                     p = skip_ws(p);
                     break;
                 }
