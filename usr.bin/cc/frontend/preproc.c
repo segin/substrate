@@ -4218,47 +4218,85 @@ static char *object_body_paste(const char *body) {
     return out.buf;
 }
 
+/**
+ * The string literal `#` makes of a macro argument (C11 6.10.3.2p2): its
+ * spelling, each run of white space between tokens one space and none at
+ * either end, and a `\` or `"` escaped only where it is in a string
+ * literal or character constant -- `#(p\q)` is "p\q", `#("a\n")` is
+ * "\"a\\n\"".  A `'` with no `'` after it is a character of its own, as
+ * it can be in assembly.
+ *
+ * @param arg  the argument as written; may be NULL
+ * @return     the literal (owned), or NULL if out of memory
+ */
 static char *stringify_macro_arg(const char *arg) {
     sb_t out;
     size_t i = 0;
+    char quote = '\0';
+    int pending_space = 0;
+
     memset(&out, 0, sizeof(out));
     if (sb_append_c(&out, '"') != 0) {
         return NULL;
     }
     while (arg != NULL && arg[i] != '\0') {
         unsigned char c = (unsigned char)arg[i];
+        int rc = 0;
+
         if (c == (unsigned char)PP_PASTE_GUARD) {
             /* a token break, no character of the spelling */
             i++;
             continue;
         }
-        if (c == '\\' || c == '"') {
-            if (sb_append_c(&out, '\\') != 0 || sb_append_c(&out, (char)c) != 0) {
-                sb_free(&out);
-                return NULL;
+        if (quote == '\0') {
+            if (isspace(c)) {
+                pending_space = out.len > 1;
+                i++;
+                continue;
             }
-        } else if (c == '\n') {
-            if (sb_append(&out, "\\n") != 0) {
-                sb_free(&out);
-                return NULL;
+            if (pending_space) {
+                rc = sb_append_c(&out, ' ');
+                pending_space = 0;
             }
-        } else if (c == '\r') {
-            if (sb_append(&out, "\\r") != 0) {
-                sb_free(&out);
-                return NULL;
+            if ((c == '"' || (c == '\'' && strchr(arg + i + 1, '\'') != NULL)) && rc == 0) {
+                quote = (char)c;
+                rc = c == '"' ? sb_append(&out, "\\\"") : sb_append_c(&out, '\'');
+            } else if (rc == 0) {
+                rc = sb_append_c(&out, (char)c);
             }
-        } else if (c == '\t') {
-            if (sb_append(&out, "\\t") != 0) {
-                sb_free(&out);
-                return NULL;
+        } else if (c == '\\' && arg[i + 1] != '\0') {
+            /* an escape in the literal: both characters, each escaped as the literal's own */
+            unsigned char n = (unsigned char)arg[i + 1];
+
+            rc = sb_append(&out, "\\\\");
+            if (rc == 0) {
+                rc = n == '"' || n == '\\' ? (sb_append_c(&out, '\\') != 0 || sb_append_c(&out, (char)n) != 0)
+                                           : sb_append_c(&out, (char)n);
             }
+            i++;
         } else {
-            if (sb_append_c(&out, (char)c) != 0) {
-                sb_free(&out);
-                return NULL;
+            rc = c == '"' || c == '\\' ? (sb_append_c(&out, '\\') != 0 || sb_append_c(&out, (char)c) != 0)
+                                       : sb_append_c(&out, (char)c);
+            if (c == (unsigned char)quote) {
+                quote = '\0';
             }
         }
+        if (rc != 0) {
+            sb_free(&out);
+            return NULL;
+        }
         i++;
+    }
+    if (quote == '\0' && out.len > 1 && out.buf[out.len - 1] == '\\') {
+        /* a final backslash would escape the closing quote: gcc leaves it out ("ignoring final '\'") */
+        size_t n = 0;
+
+        while (n < out.len - 1 && out.buf[out.len - 1 - n] == '\\') {
+            n++;
+        }
+        if (n % 2 == 1) {
+            out.buf[--out.len] = '\0';
+        }
     }
     if (sb_append_c(&out, '"') != 0) {
         sb_free(&out);
