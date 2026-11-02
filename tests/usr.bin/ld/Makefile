@@ -44,5 +44,6 @@ run:
 	./test_writable_code_section.sh
 	./test_script_body_align.sh
 	./test_loaded_after_debug.sh
+	./test_script_assert_relayout.sh
 
 clean:

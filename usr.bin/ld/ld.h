@@ -729,6 +729,8 @@ typedef struct {
     int unsettled;              /* final: the counter in a section's body is not where the merge
                                  * put what follows it, and doing the link over may settle it */
     int settle_off;             /* doing it over cannot: what is past its place is an error */
+    const struct lds_stmt *assert_failed; /* final: the first ASSERT that failed, said only if the
+                                 * layout has settled (it may be why) */
     int in_body;                /* a section's body is being carried out (lw_body()) ... */
     const elf_section_t *body_sec; /* ... of this section (NULL: nothing went in it) ... */
     uint64_t body_start;        /* ... at this address */

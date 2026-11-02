@@ -3819,6 +3819,12 @@ static int lw_assign(lds_walk_t *w, lds_stmt_t *st, int have_dot, uint64_t *dot,
     return w->final ? lw_define(w, st, v, &vec, hint, hint_end) : 0;
 }
 
+/** Say that ASSERT @p st failed, with its message. */
+static void lw_assert_report(const lds_stmt_t *st) {
+    fprintf(stderr, "ld: %s:%zu: %s\n", st->at.path != NULL ? st->at.path : "<script>", st->at.line,
+            st->message != NULL ? st->message : "ASSERT failed");
+}
+
 static int lw_assert(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t dot) {
     uint64_t v = 0;
 
@@ -3829,8 +3835,14 @@ static int lw_assert(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t
         return -1;
     }
     if (v == 0) {
-        fprintf(stderr, "ld: %s:%zu: %s\n", st->at.path != NULL ? st->at.path : "<script>", st->at.line,
-                st->message != NULL ? st->message : "ASSERT failed");
+        if (!w->settle_off && w->ctx->relayout != NULL && w->ctx->relayout->pass + 1 < LD_MAX_RELAYOUT_PASSES) {
+            /* what the merge got wrong may be why: said once the layout is known to have settled */
+            if (w->assert_failed == NULL) {
+                w->assert_failed = st;
+            }
+            return 0;
+        }
+        lw_assert_report(st);
         return -1;
     }
     return 0;
@@ -4451,6 +4463,7 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
         if (w.final) {
             sc->data_count = 0; /* the final pass collects the data statements' values */
             w.unsettled = 0;
+            w.assert_failed = NULL;
         }
         /*
          * the location counter begins at 0, as GNU ld's does, not where the default layout put the first
@@ -4495,6 +4508,9 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
             }
             w.settle_off = 1;
             pass = -1;
+        } else if (w.final && pass == 2 && w.assert_failed != NULL) {
+            lw_assert_report(w.assert_failed);
+            return -1;
         }
     }
     /* What "." set between sections goes to its section once every section
