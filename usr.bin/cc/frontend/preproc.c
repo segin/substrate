@@ -4260,34 +4260,6 @@ static int parse_va_opt_body(const char *body, size_t start, size_t *end_out, ch
     return -1;
 }
 
-static char *replace_va_args_in_text(const char *text, const char *va_args) {
-    sb_t out;
-    size_t i = 0;
-    const size_t key_len = strlen("__VA_ARGS__");
-    memset(&out, 0, sizeof(out));
-    while (text[i] != '\0') {
-        if (strncmp(text + i, "__VA_ARGS__", key_len) == 0 &&
-            (i == 0 || !is_ident_char((unsigned char)text[i - 1])) &&
-            !is_ident_char((unsigned char)text[i + key_len])) {
-            if (sb_append(&out, va_args != NULL ? va_args : "") != 0) {
-                sb_free(&out);
-                return NULL;
-            }
-            i += key_len;
-            continue;
-        }
-        if (sb_append_c(&out, text[i]) != 0) {
-            sb_free(&out);
-            return NULL;
-        }
-        i++;
-    }
-    if (out.buf == NULL) {
-        return cc_strdup("");
-    }
-    return out.buf;
-}
-
 static int token_matches(const char *s, size_t n, const char *tok) {
     return strlen(tok) == n && strncmp(s, tok, n) == 0;
 }
@@ -4492,7 +4464,15 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
                 return NULL;
             }
             if (has_va_args) {
-                char *va_opt_subst = replace_va_args_in_text(va_opt_text != NULL ? va_opt_text : "", va_args_exp);
+                /*
+                 * its content is replaced as the body is, the macro's parameters, `#` and `##` in it included:
+                 * Linux's xe_args.h has `#define IF_ARGS(then, else, ...) FIRST_ARG(__VA_OPT__(then,) else)`
+                 */
+                pp_macro_t inner = *m;
+                char *va_opt_subst;
+
+                inner.body = va_opt_text != NULL ? va_opt_text : "";
+                va_opt_subst = replace_params(&inner, raw_args, exp_args, arg_count, allow_va_opt, allow_gnu_ext);
                 if (va_opt_subst == NULL || sb_append(&out, va_opt_subst) != 0) {
                     free(va_opt_subst);
                     free(va_opt_text);
