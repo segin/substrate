@@ -587,6 +587,39 @@ static const cc_ctype_t *parser_usual_arith(const cc_ctype_t *a, const cc_ctype_
     return cc_ct_common_int(a->unqual, b->unqual);
 }
 
+/**
+ * The type a call of builtin @p name gives, for those the parser can tell
+ * without its arguments: the bit counts' int (__builtin_clz, ctz, ffs,
+ * popcount, parity and clrsb, with their l and ll forms),
+ * __builtin_constant_p's int and __builtin_expect's long.
+ *
+ * @return the type, or NULL for another name
+ */
+static const cc_ctype_t *parser_builtin_call_ctype(const char *name) {
+    static const char *const bitops[] = {"clz", "ctz", "ffs", "popcount", "parity", "clrsb"};
+    size_t i;
+
+    if (strncmp(name, "__builtin_", 10) != 0) {
+        return NULL;
+    }
+    name += 10;
+    if (strcmp(name, "constant_p") == 0) {
+        return cc_ct_basic(CC_CT_INT);
+    }
+    if (strcmp(name, "expect") == 0) {
+        return cc_ct_basic(CC_CT_LONG);
+    }
+    for (i = 0; i < sizeof(bitops) / sizeof(bitops[0]); ++i) {
+        size_t n = strlen(bitops[i]);
+
+        if (strncmp(name, bitops[i], n) == 0 &&
+            (name[n] == '\0' || strcmp(name + n, "l") == 0 || strcmp(name + n, "ll") == 0)) {
+            return cc_ct_basic(CC_CT_INT);
+        }
+    }
+    return NULL;
+}
+
 /** The type of binary operator @p e as the parser can tell it (parser_expr_ctype()), or NULL. */
 static const cc_ctype_t *parser_bin_ctype(parser_t *p, const cc_expr_t *e) {
     const cc_ctype_t *a = cc_ct_decay(parser_expr_ctype(p, e->lhs));
@@ -704,6 +737,9 @@ const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
 
             if (f != NULL) {
                 return f->ret_ctype;
+            }
+            if (parser_builtin_call_ctype(e->ident) != NULL) {
+                return parser_builtin_call_ctype(e->ident);
             }
         }
         a = parser_expr_ctype(p, e->ident != NULL ? NULL : e->lhs);
