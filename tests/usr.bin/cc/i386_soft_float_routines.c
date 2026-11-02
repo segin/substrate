@@ -4,13 +4,15 @@
  * ships none of them, as it has the x87.  Compiled by gcc with the x87 and
  * without SSE, each takes and returns the bits as integers -- a float's in
  * %eax, a double's in %edx:%eax -- and for a long double result a thunk
- * returns its 12 bytes in %eax:%edx:%ecx.
+ * returns its 12 bytes in %eax:%edx:%ecx, for a _Float16 one its bits in
+ * %xmm0.
  */
 #include <string.h>
 
 typedef struct { unsigned w[3]; } xf;
 typedef unsigned sf;
 typedef unsigned long long df;
+typedef unsigned hf; /* a _Float16 argument: its bits in the low half of the word */
 
 static float F(sf a) { float x; memcpy(&x, &a, 4); return x; }
 static double D(df a) { double x; memcpy(&x, &a, 8); return x; }
@@ -86,3 +88,76 @@ XF(__floatdixf, xf_floatdi)
 XF(__floatundixf, xf_floatundi)
 XF(__extendsfxf2, xf_extendsf)
 XF(__extenddfxf2, xf_extenddf)
+
+/* _Float16: its bits in the low half of a word on the stack, and back in %xmm0 */
+static sf h2f(unsigned h)
+{
+	unsigned s = (h >> 15) & 1, e = (h >> 10) & 0x1f, m = h & 0x3ff;
+
+	if (e == 31)
+		return s << 31 | 0x7f800000u | m << 13;
+	if (e == 0) {
+		if (m == 0)
+			return s << 31;
+		e = 1;
+		while (!(m & 0x400)) {
+			m <<= 1;
+			e--;
+		}
+		m &= 0x3ff;
+		return s << 31 | (e + 112) << 23 | m << 13;
+	}
+	return s << 31 | (e + 112) << 23 | m << 13;
+}
+
+/* a double rounded to the nearest _Float16, ties to even */
+static unsigned d2h(df a)
+{
+	unsigned s = (unsigned)(a >> 63) << 15;
+	int e = (int)((a >> 52) & 0x7ff);
+	df m = a & ((1ULL << 52) - 1);
+	int E = e - 1023 + 15;
+	int shift;
+	df r, rem, half;
+	unsigned bits;
+
+	if (e == 0x7ff)
+		return s | 0x7c00 | (m ? 0x200 : 0);
+	if (e == 0 || E < -12)
+		return s;
+	if (E >= 31)
+		return s | 0x7c00;
+	m |= 1ULL << 52;
+	shift = E <= 0 ? 43 - E : 42;
+	r = m >> shift;
+	rem = m & ((1ULL << shift) - 1);
+	half = 1ULL << (shift - 1);
+	if (rem > half || (rem == half && (r & 1)))
+		r++;
+	bits = E <= 0 ? (unsigned)r : (unsigned)(((df)E << 10) + r - 0x400);
+	return s | (bits >= 0x7c00 ? 0x7c00 : bits);
+}
+
+#define H(a) ((double)F(h2f((a) & 0xffff)))
+CMPN(eq, hf, H, 1) CMPN(ne, hf, H, 1) CMPN(lt, hf, H, 1) CMPN(le, hf, H, 1) CMPN(gt, hf, H, -1) CMPN(ge, hf, H, -1)
+int __unordhf2(unsigned a, unsigned b) { return H(a) != H(a) || H(b) != H(b); }
+int __fixhfsi(unsigned a) { return (int)H(a); }
+unsigned __fixunshfsi(unsigned a) { return (unsigned)H(a); }
+long long __fixhfdi(unsigned a) { return (long long)H(a); }
+unsigned long long __fixunshfdi(unsigned a) { return (unsigned long long)H(a); }
+unsigned hf_floatsi(int i) { return d2h(d_((double)i)); }
+unsigned hf_floatunsi(unsigned i) { return d2h(d_((double)i)); }
+/* a _Float16 result of a one-word argument, in %xmm0 */
+#define HF1(name, impl) \
+	__asm__(".text\n.globl " #name "\n.type " #name ", @function\n" #name ":\n" \
+		"\tpushl 4(%esp)\n\tcall " #impl "\n\taddl $4, %esp\n\tmovd %eax, %xmm0\n\tret\n");
+HF1(__floatsihf, hf_floatsi)
+HF1(__floatunsihf, hf_floatunsi)
+
+sf __extendhfsf2(unsigned h) { return h2f(h & 0xffff); }
+df __extendhfdf2(unsigned h) { return d_((double)F(h2f(h & 0xffff))); }
+unsigned hf_truncsf(sf a) { return d2h(d_((double)F(a))); }
+unsigned hf_truncdf(df a) { return d2h(a); }
+HF1(__truncsfhf2, hf_truncsf)
+__asm__(".text\n.globl __truncdfhf2\n.type __truncdfhf2, @function\n__truncdfhf2:\n"
+	"\tpushl 8(%esp)\n\tpushl 8(%esp)\n\tcall hf_truncdf\n\taddl $8, %esp\n\tmovd %eax, %xmm0\n\tret\n");

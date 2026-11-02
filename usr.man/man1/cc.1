@@ -839,11 +839,21 @@ or an
 .Ic unsigned int
 .Pq Fn __floatdidf , Fn __fixdfdi , Fn __floatunsidf No and the like ,
 and their results are returned in the general registers all the same.
+A
+.Ic _Float16
+is converted by libgcc's
+.Fn __extendhfdf2
+and
+.Fn __truncdfhf2 ,
+its bits on the stack and back in
+.Li %xmm0 ,
+so, as with
+.Xr gcc 1 ,
+it needs
+.Fl msse2 .
 A floating operand of an
 .Ic asm
-statement, and
-.Ic _Float16 ,
-are refused under it.
+statement is refused under it.
 On i386,
 .Fl mno-fp-ret-in-387
 alone returns a floating result in those general registers too, as

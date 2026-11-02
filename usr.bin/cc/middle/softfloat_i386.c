@@ -24,7 +24,9 @@
  * twice a float's precision); only conversions that would round twice -- a 64-bit integer or a long double
  * to float -- call the routine that goes straight there.  Negation needs no call: lowering already flips
  * the sign bit in memory.  An asm operand of floating type, which would be the x87's or a register's
- * reinterpretation, and _Float16 (which libgcc passes in SSE registers) are refused.
+ * reinterpretation, is refused.  A _Float16 in memory is loaded and stored through __extendhfdf2 and
+ * __truncdfhf2, as the backends convert one, its bits on the stack and back in %xmm0 -- which needs SSE2, as
+ * gcc says, and without it is refused.
  *
  * All of it applies where the x87 would otherwise do the doubles.  Where SSE does them (-mfpmath=sse, or SSE2
  * without -mfpmath=387; CC_SOFTFLOAT_LDOUBLE) only long double is soft-float, as gcc has it: floats and doubles
@@ -393,6 +395,40 @@ static void sf_nat_from_bits(sf_t *z, int dst, int bits, long size) {
 }
 
 /**
+ * Make @p in, a CALL of nothing yet, a call of libgcc's routine @p name with the @p n arguments @p args; its
+ * result is the caller's to give it.
+ *
+ * @return 0, or -1 (the pass failed)
+ */
+static int sf_make_call(sf_t *z, cc_ssa_instr_t *in, const char *name, const sf_arg_t *args, size_t n) {
+    size_t i;
+
+    if (z->failed) {
+        return -1;
+    }
+    in->sym = cc_strdup(name);
+    in->args = (int *)calloc(n, sizeof(*in->args));
+    in->call_arg_abi = (unsigned char *)calloc(n, sizeof(*in->call_arg_abi));
+    in->call_arg_sizes = (uint32_t *)calloc(n, sizeof(*in->call_arg_sizes));
+    if (in->sym == NULL || in->args == NULL || in->call_arg_abi == NULL || in->call_arg_sizes == NULL) {
+        free(in->sym);
+        free(in->args);
+        free(in->call_arg_abi);
+        free(in->call_arg_sizes);
+        sf_fail(z, "out of memory in soft-float rewriting");
+        return -1;
+    }
+    for (i = 0; i < n; ++i) {
+        in->args[i] = args[i].v;
+        in->call_arg_abi[i] = args[i].abi;
+        in->call_arg_sizes[i] = args[i].size;
+    }
+    in->arg_count = n;
+    in->call_fixed_count = (int)n;
+    return 0;
+}
+
+/**
  * Call libgcc's routine @p name with @p n arguments.  A long double result (@p ret_ld) comes back in
  * %eax:%edx:%ecx into a slot of its own, copied into the slot at @p dst; any other result is @p dst itself,
  * of @p ret_size bytes (a 1- or 2-byte one taken from %al or %ax, extended as @p ret_unsigned says).
@@ -400,31 +436,11 @@ static void sf_nat_from_bits(sf_t *z, int dst, int bits, long size) {
 static void sf_call(sf_t *z, const char *name, int dst, int ret_ld, long ret_size, int ret_unsigned,
                     const sf_arg_t *args, size_t n) {
     cc_ssa_instr_t in = sf_blank(CC_SSA_CALL);
-    size_t i;
     int tmp = -1;
 
-    if (z->failed) {
+    if (sf_make_call(z, &in, name, args, n) != 0) {
         return;
     }
-    in.sym = cc_strdup(name);
-    in.args = (int *)calloc(n, sizeof(*in.args));
-    in.call_arg_abi = (unsigned char *)calloc(n, sizeof(*in.call_arg_abi));
-    in.call_arg_sizes = (uint32_t *)calloc(n, sizeof(*in.call_arg_sizes));
-    if (in.sym == NULL || in.args == NULL || in.call_arg_abi == NULL || in.call_arg_sizes == NULL) {
-        free(in.sym);
-        free(in.args);
-        free(in.call_arg_abi);
-        free(in.call_arg_sizes);
-        sf_fail(z, "out of memory in soft-float rewriting");
-        return;
-    }
-    for (i = 0; i < n; ++i) {
-        in.args[i] = args[i].v;
-        in.call_arg_abi[i] = args[i].abi;
-        in.call_arg_sizes[i] = args[i].size;
-    }
-    in.arg_count = n;
-    in.call_fixed_count = (int)n;
     if (ret_ld) {
         /* into a slot of its own, defined by its STACKALLOC and the call alone, as a structure's result */
         tmp = sf_slot(z, -1);
@@ -629,6 +645,72 @@ static int sf_as_d(sf_t *z, int v) {
     return t;
 }
 
+/**
+ * Whether a _Float16 can be had here: its routines return it in %xmm0, as gcc calls them, which needs SSE2 --
+ * gcc refuses it without, as the pass does.
+ */
+static int sf_half_ok(sf_t *z) {
+    if (!cc_options_current()->i386_sse2) {
+        sf_fail(z, "_Float16 needs SSE2 (-msse2), and the x87 is turned off (-mno-80387)");
+        return 0;
+    }
+    return 1;
+}
+
+/**
+ * LOAD @p in of a _Float16 (2 bytes) into floating value in->dst: its bits, zero-extended to a word, passed to
+ * libgcc's __extendhfdf2 (__extendhfxf2 for a long double), as the backends convert one (mir_fp.c half()).
+ */
+static void sf_half_load(sf_t *z, const cc_ssa_instr_t *in) {
+    cc_ssa_instr_t ld = *in;
+    sf_arg_t a;
+
+    if (!sf_half_ok(z)) {
+        return;
+    }
+    ld.dst = sf_value(z, 2, 1);
+    ld.is_unsigned = 1;
+    sf_put(z, &ld);
+    a = sf_arg_i(sf_widen32(z, ld.dst, 2, 1), 4);
+    if (sf_kind(z, in->dst) == SF_LD) {
+        sf_call(z, "__extendhfxf2", in->dst, 1, 12, 0, &a, 1);
+    } else {
+        sf_call(z, "__extendhfdf2", in->dst, 0, 8, 0, &a, 1);
+    }
+}
+
+/**
+ * STORE @p in of floating value in->rhs as a _Float16 (2 bytes): libgcc's __truncdfhf2 (__truncxfhf2 from a
+ * long double), whose half comes back in %xmm0 -- taken as a vector into a slot of the frame -- and its two
+ * bytes stored.
+ */
+static void sf_half_store(sf_t *z, const cc_ssa_instr_t *in) {
+    cc_ssa_instr_t call = sf_blank(CC_SSA_CALL);
+    cc_ssa_instr_t ld = sf_blank(CC_SSA_LOAD);
+    cc_ssa_instr_t st = *in;
+    int ld_src = sf_kind(z, in->rhs) == SF_LD;
+    sf_arg_t a = ld_src ? sf_arg_ld(in->rhs) : sf_arg_d(in->rhs);
+    int slot;
+
+    if (!sf_half_ok(z) || sf_make_call(z, &call, ld_src ? "__truncxfhf2" : "__truncdfhf2", &a, 1) != 0) {
+        return;
+    }
+    slot = sf_slot(z, -1);
+    call.dst = slot;
+    call.rhs = slot;
+    call.imm = 16;
+    call.is_unsigned = 1;
+    call.agg_class = CC_ABI_RET_VEC128;
+    sf_put(z, &call);
+    ld.dst = sf_value(z, 2, 1);
+    ld.lhs = slot;
+    ld.imm = 2;
+    ld.is_unsigned = 1;
+    sf_put(z, &ld);
+    st.rhs = ld.dst;
+    sf_put(z, &st);
+}
+
 /** A compare (CMP) of two floating values: libgcc's, then its int against 0, as the routine's contract is. */
 static void sf_cmp(sf_t *z, const cc_ssa_instr_t *in) {
     static const char *const names[] = {"eq", "ne", "lt", "le", "gt", "ge"};
@@ -706,13 +788,13 @@ static int sf_touches_float(sf_t *z, const cc_ssa_instr_t *in) {
     }
     if (z->mode == CC_SOFTFLOAT_LDOUBLE) {
         /* where SSE does the doubles: what the x87 would do of theirs -- a long double's bytes in memory, the
-         * conversions from and to a 64-bit integer and an unsigned int (the backend's mir_fp.c takes the rest)
-         * -- and a double passed as a long double */
+         * conversions from and to a 64-bit integer and an unsigned int (the backend's mir_fp.c takes the rest),
+         * a _Float16's, whose double the backend takes from %st0 -- and a double passed as a long double */
         long lb = in->lhs >= 0 && in->lhs < z->f->value_count ? cc_ssa_value_size(z->f, in->lhs) : 0;
         long db = in->dst >= 0 && in->dst < z->f->value_count ? cc_ssa_value_size(z->f, in->dst) : 0;
 
-        if ((in->op == CC_SSA_LOAD && in->imm >= 10 && sf_is_nat(z, in->dst)) ||
-            (in->op == CC_SSA_STORE && in->imm >= 10 && sf_is_nat(z, in->rhs)) ||
+        if ((in->op == CC_SSA_LOAD && (in->imm >= 10 || in->imm == 2) && sf_is_nat(z, in->dst)) ||
+            (in->op == CC_SSA_STORE && (in->imm >= 10 || in->imm == 2) && sf_is_nat(z, in->rhs)) ||
             (in->op == CC_SSA_I2F && sf_is_nat(z, in->dst) && (lb >= 8 || (lb == 4 && in->is_unsigned))) ||
             (in->op == CC_SSA_F2I && sf_is_nat(z, in->lhs) &&
              (db >= 8 || in->is_unsigned || (db == 4 && in->f2i_to != CC_SSA_F2I_TO_SIGNED)))) {
@@ -1068,8 +1150,11 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
             sf_from_float(z, in->dst, t);
             return;
         }
-        sf_fail(z, "_Float16 needs SSE, and the x87 is turned off (-mno-80387)");
-        return;
+        if (in->imm == 2) {
+            sf_half_load(z, in);
+            return;
+        }
+        break;
     case CC_SSA_STORE:
         /* by the size written, the value rounded (or widened) to it */
         if (in->imm >= 10) {
@@ -1086,8 +1171,11 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
             sf_put(z, &c);
             return;
         }
-        sf_fail(z, "_Float16 needs SSE, and the x87 is turned off (-mno-80387)");
-        return;
+        if (in->imm == 2) {
+            sf_half_store(z, in);
+            return;
+        }
+        break;
     case CC_SSA_CALL:
     case CC_SSA_CALLI:
         sf_rewrite_call(z, in);
