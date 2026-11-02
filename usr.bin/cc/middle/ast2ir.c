@@ -10728,7 +10728,9 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                     }
                     handled_string_init = 1;
                 }
-                if (!handled_string_init && s->expr->arg_count == 1) {
+                if (!handled_string_init && s->expr->arg_count == 1 && ct_record_id(elem_ct) < 0 &&
+                    !ct_is_pointer(elem_ct)) {
+                    /* `char s[4] = {"abc"}`; not one structure's members, `routes[] = {{"BCLK", NULL, "FSYNC"}}` */
                     const cc_expr_t *item_expr = unwrap_scalar_initializer_expr(s->expr->args[0], diag);
                     if (item_expr == NULL) {
                         return -1;
