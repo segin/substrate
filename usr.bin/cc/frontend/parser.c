@@ -8580,6 +8580,13 @@ static int hoist_file_literal(parser_t *p, cc_expr_t *e) {
     char name[48];
     cc_global_t g;
 
+    if (p->is_probe) {
+        /*
+         * a probe's parse is thrown away and its counter with it, but a global pushed would stay: the real
+         * parse then pushed one of the same name (Linux's peb2466.c, an array bound of ARRAY_SIZE((T[]){...}))
+         */
+        return 0;
+    }
     snprintf(name, sizeof(name), "__cc_literal_%zu", p->file_literal_count++);
     memset(&g, 0, sizeof(g));
     g.name = cc_strdup(name);
