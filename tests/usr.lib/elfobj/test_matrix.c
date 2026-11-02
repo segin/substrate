@@ -28,7 +28,8 @@ static void build_and_check(uint16_t type, uint16_t machine, elfobj_class_t cls,
     if (sym == NULL) fail("add symbol");
     if (elf_symbol_define(sym, text, 0) != ELF_OK) fail("define symbol");
     if (type == ET_REL && elf_add_relocation(text, 0, sym,
-            cls == ELFOBJ_CLASS_64 ? R_X86_64_PC32 : R_386_PC32, -4) != ELF_OK) {
+            machine == EM_MIPS ? 2u /* R_MIPS_32 */ : cls == ELFOBJ_CLASS_64 ? R_X86_64_PC32 : R_386_PC32,
+            -4) != ELF_OK) {
         fail("add relocation");
     }
     if (type == ET_EXEC || type == ET_DYN) {
@@ -115,9 +116,11 @@ static void test_abi_conformance(void) {
 int main(void) {
     /* ELF32/64 and little/big-endian coverage */
     build_and_check(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE, "tmp_matrix_rel32le.o");
-    build_and_check(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_BE, "tmp_matrix_rel32be.o");
     build_and_check(ET_REL, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE, "tmp_matrix_rel64le.o");
-    build_and_check(ET_REL, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_BE, "tmp_matrix_rel64be.o");
+    /* big-endian on a machine that is: x86 is little-endian only, and the validator rightly refuses an
+     * EM_386 or EM_X86_64 object that says otherwise */
+    build_and_check(ET_REL, EM_MIPS, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_BE, "tmp_matrix_rel32be.o");
+    build_and_check(ET_REL, EM_MIPS, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_BE, "tmp_matrix_rel64be.o");
 
     /* ET_EXEC and ET_DYN read/write coverage */
     build_and_check(ET_EXEC, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE, "tmp_matrix_exec32.elf");
