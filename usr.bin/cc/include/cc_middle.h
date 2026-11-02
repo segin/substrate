@@ -20,6 +20,27 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag);
 int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag);
 
 /**
+ * Whether i386 floating point is soft-float (softfloat_i386.c): -mno-80387
+ * (-msoft-float, -mgeneral-regs-only) where the x87, not SSE, would do the
+ * doubles.
+ *
+ * @return 1 or 0
+ */
+int cc_softfloat_i386_wanted(void);
+
+/**
+ * i386 soft-float of one function (softfloat_i386.c), before legalization:
+ * every floating operation a call of libgcc's soft-float routines, and
+ * floating values the bits of a double (8 bytes) or the address of a
+ * long double's slot, passed and returned by gcc's -mno-80387 ABI.
+ *
+ * @param f     the function, rewritten in place
+ * @param diag  receives an error
+ * @return      0, or -1 (an operation it does not do, or out of memory)
+ */
+int cc_softfloat_i386_function(cc_ssa_function_t *f, cc_diag_t *diag);
+
+/**
  * Fold the constant values of @p f (passes/opt.c), its branches left as
  * they are: legalization runs it at every -O level before a target splits
  * operations, so i386 computes `KTIME_MAX / NSEC_PER_SEC` at compile time,

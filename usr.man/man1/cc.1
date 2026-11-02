@@ -774,13 +774,56 @@ that one, as
 does; a declaration of something defined elsewhere keeps the default.
 .It Fl mno-80387 , Fl msoft-float , Fl m80387 , Fl mhard-float , Fl mno-fp-ret-in-387 , Fl mfp-ret-in-387
 Make no x87 instruction, or no result in
-.Li %st0 ;
-a function that would need one \(em a
-.Ic long double ,
-or on i386 any floating point \(em is refused.
+.Li %st0 .
+On x86-64 a function that would need one \(em a
+.Ic long double \(em
+is refused, as
 .Xr gcc 1
-refuses the same on x86-64, as Linux builds; on i386 it calls a library
-for floating point instead, which cc does not.
+refuses it (Linux builds so).
+On i386,
+.Fl mno-80387
+makes floating point soft-float, as
+.Xr gcc 1
+does: each operation a call of libgcc's routines
+.Po
+.Fn __adddf3 ,
+.Fn __ltdf2 ,
+.Fn __fixdfsi ,
+.Fn __extendsfdf2
+and the like
+.Pc ,
+evaluated in its own type
+.Po
+.Dv __FLT_EVAL_METHOD__
+0, and
+.Dv _SOFT_FLOAT
+defined, on either target
+.Pc ,
+a
+.Ic float
+returned in
+.Li %eax ,
+a
+.Ic double
+in
+.Li %edx:%eax ,
+a
+.Ic long double
+in
+.Li %eax:%edx:%ecx .
+This applies where the x87 would do the doubles; where SSE does them
+.Pq Fl mfpmath=sse , or Fl msse2 without Fl mfpmath=387
+a
+.Ic long double
+is still refused.
+A floating operand of an
+.Ic asm
+statement, and
+.Ic _Float16 ,
+are refused under it.
+.Fl mno-fp-ret-in-387
+alone still refuses a function that would return in
+.Li %st0 .
 .It Fl ffunction-sections , Fl fno-function-sections , Fl fdata-sections , Fl fno-data-sections
 Put each function, or each object, in a section of its own, as
 .Xr gcc 1
@@ -820,7 +863,8 @@ Use no register but the general ones, as
 .Dv __SSE2__
 and
 .Dv __MMX__
-are not defined, and floating point is refused, as with
+are not defined, and floating point is refused on x86-64 and soft-float
+on i386, as with
 .Xr gcc 1 .
 .It Fl fno-optimize-sibling-calls , Fl foptimize-sibling-calls
 Whether a call in tail position may be a jump to the callee (the

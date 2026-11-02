@@ -5,9 +5,11 @@
 # A program with no floating point compiles under both, -m64 and -m32,
 # through the MIR path and the legacy emitters, as gcc compiles it --
 # one whose only floating point is a constant folded to an integer too,
-# at -O0 as well, and with -mno-sse besides; one that would compute
-# or return in the x87 -- a long double on x86-64, a double on i386 --
-# is refused, as gcc refuses it; and with neither option it compiles.
+# at -O0 as well, and with -mno-sse besides.  One that would compute or
+# return in the x87 -- a long double on x86-64 -- is refused where gcc
+# refuses it; on i386 under -mno-80387 gcc compiles floating point as
+# soft-float calls, and so does cc (run_i386_soft_float.sh); with
+# neither option it compiles.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -64,7 +66,7 @@ for path in mir legacy; do
 			done
 		done
 	done
-	for case in "64 ld64.c" "64 ldcall.c" "32 d32.c"; do
+	for case in "64 ld64.c" "64 ldcall.c" "32 d32.c" "32 ld64.c" "32 ldcall.c"; do
 		m=${case% *}
 		src=${case#* }
 		for f in -mno-80387 -mno-fp-ret-in-387; do
@@ -74,6 +76,10 @@ for path in mir legacy; do
 			$run "$CC_BIN" -m$m -O2 $f -c -o "$CC_TMP/o.o" "$CC_TMP/$src" 2>"$CC_TMP/c.err" && cc_ok=1 || cc_ok=0
 			if [ $gcc_ok = 0 ] && [ $cc_ok = 1 ]; then
 				echo "run_no_80387: -m$m $path [$f] $src: compiled, which gcc refuses"
+				exit 1
+			fi
+			if [ $m = 32 ] && [ "$f" = -mno-80387 ] && [ $gcc_ok = 1 ] && [ $cc_ok = 0 ]; then
+				echo "run_no_80387: -m$m $path [$f] $src: refused, which gcc compiles as soft-float: $(head -1 "$CC_TMP/c.err")"
 				exit 1
 			fi
 			if [ $cc_ok = 0 ] && ! grep -q -- "$f" "$CC_TMP/c.err"; then

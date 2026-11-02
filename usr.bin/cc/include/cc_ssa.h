@@ -54,7 +54,9 @@ typedef enum {
 #define CC_ABI_SSE1 0x20             /**< the second eightbyte is SSE */
 #define CC_ABI_RET_X87 0x40          /**< returned in %st0: `struct { long double; }` */
 #define CC_ABI_RET_X87_COMPLEX 0x80  /**< returned in %st0 (real) and %st1 (imaginary): long double _Complex */
-#define CC_ABI_RET_EAX_EDX 0x100     /**< i386: returned in %eax:%edx, not by hidden pointer: float _Complex */
+/** i386: returned in %eax:%edx, not by hidden pointer: float _Complex; of 12 bytes, in %eax:%edx:%ecx -- a
+ *  soft-float long double (softfloat_i386.c), whose RET's lhs is the address of the bytes, not a word */
+#define CC_ABI_RET_EAX_EDX 0x100
 #define CC_ABI_RET_MEMORY 0x200      /**< x86-64: returned by hidden pointer although it is 16 bytes or fewer */
 #define CC_ABI_RET_FLOAT 0x400       /**< CALL: the callee returns a float, in single precision */
 #define CC_ABI_VEC128 0x40           /**< with AGG_REG: a 16-byte vector, whole in one xmm register */

@@ -2638,6 +2638,10 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
         if (in->imm > 4) {
             fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", off + 4);
         }
+        if (in->imm > 8) {
+            /* a soft-float long double's 12 bytes: %eax:%edx:%ecx (softfloat_i386.c) */
+            fprintf(fp, "\tmovl %%ecx, %d(%%ebp)\n", off + 8);
+        }
     } else if (ret_x87) {
         /* -freg-struct-return: a structure of one float or double came back in %st0 */
         fprintf(fp, "\t%s %d(%%ebp)\n", in->imm == 4 ? "fstps" : "fstpl", stackalloc_off(lay, in->dst));
@@ -4197,6 +4201,12 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                     } else {
                         fprintf(fp, "\tmovq (%%eax), %%mm0\n");
                     }
+                } else if (in->lhs >= 0 && in->agg_class == CC_ABI_RET_EAX_EDX && in->imm > 8) {
+                    /* a soft-float long double, from the slot lhs points at: %eax:%edx:%ecx */
+                    int_regs_flush(fp, f, &lay, &ist);
+                    emit_load_ptr_value_reg(fp, &lay, in->lhs, 0, "%eax");
+                    fprintf(fp, "\tmovl 8(%%eax), %%ecx\n\tmovl 4(%%eax), %%edx\n\tmovl (%%eax), %%eax\n");
+                    i386_drop_cache(&ist);
                 } else if (in->lhs >= 0 && (in->agg_class & CC_ABI_RET_X87) != 0) {
                     /* -freg-struct-return: a structure of one float or double, as that value in %st0 */
                     int_regs_flush(fp, f, &lay, &ist);

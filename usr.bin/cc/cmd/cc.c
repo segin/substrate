@@ -1298,7 +1298,8 @@ static int opt_arch(cc_opts_t *o, const driver_opt_t *d, const char *as, const c
 /**
  * -mgeneral-regs-only: no register but the general ones -- no SSE, MMX or x87 -- as gcc has it, so
  * -mno-sse -mno-sse2 -mno-mmx -mno-80387, the preprocessor told too (no __SSE__, __SSE2__, __MMX__).
- * Floating point is then refused, as gcc refuses it.  Substrate's x86-64 kernel builds with it.
+ * Floating point is then refused on x86-64 and soft-float on i386, as gcc has it.  Substrate's x86-64 kernel
+ * builds with it.
  *
  * @return 0, or -1 when out of memory
  */
@@ -2214,6 +2215,10 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     size_t opt_def_count = optimize_predefines(o, opt_defs);
 
     extra += opt_def_count;
+    if (o->no_80387) {
+      /* (the last of -mno-80387 and -m80387: _SOFT_FLOAT, __FLT_EVAL_METHOD__ 0) */
+      extra += 1;
+    }
     if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
       extra += 2;
     }
@@ -2239,6 +2244,9 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     pp_count += first;
     if (target_flag != NULL && target_flag[0] != '\0') {
       pp_flags_aug[pp_count++] = target_flag;
+    }
+    if (o->no_80387) {
+      pp_flags_aug[pp_count++] = "-mno-80387";
     }
     if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
       pp_flags_aug[pp_count++] = as_def1;

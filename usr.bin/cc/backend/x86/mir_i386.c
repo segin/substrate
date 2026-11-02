@@ -410,7 +410,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     c.clobber = I386_CALLER_SAVED;
     c.aux = (int)callee_pops; /* (what the stack pointer moves by at the call itself) */
     if (in_regs) {
-        c.imp_def = XR_BIT(XR_AX) | XR_BIT(XR_DX);
+        c.imp_def = XR_BIT(XR_AX) | XR_BIT(XR_DX) | (in->imm > 8 ? XR_BIT(XR_CX) : 0);
     } else if (in->dst >= 0 && !agg && xs_fp_kind(s, in->dst) == XFP_NONE) {
         c.imp_def = XR_BIT(XR_AX) | (xs_is_pair(s, in->dst) ? XR_BIT(XR_DX) : 0);
     }
@@ -453,6 +453,13 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
             xop_t m1 = xop_frame(agg_obj, 4, 4);
 
             xs_emit(s, XI_MOV, 4, 2, &edx, &m1, NULL);
+        }
+        if (in->imm > 8) {
+            /* a soft-float long double's 12 bytes: %eax:%edx:%ecx (softfloat_i386.c) */
+            xop_t ecx = xop_reg(XR_CX, 4);
+            xop_t m2 = xop_frame(agg_obj, 8, 4);
+
+            xs_emit(s, XI_MOV, 4, 2, &ecx, &m2, NULL);
         }
         return;
     }
@@ -639,6 +646,21 @@ static void i386_ret(xsel_t *s, const cc_ssa_instr_t *in) {
             xinst_t mm = xi_make(XI_MMLOAD, 4, 1, &m, NULL, NULL);
 
             xf_emit(&s->xf, &mm);
+        }
+        xf_emit(&s->xf, &x);
+        return;
+    }
+    if (in->lhs >= 0 && in->agg_class == CC_ABI_RET_EAX_EDX && in->imm > 8) {
+        /* a soft-float long double, from the slot lhs points at: its 12 bytes in %eax:%edx:%ecx */
+        static const int regs[3] = {XR_AX, XR_DX, XR_CX};
+        int k;
+
+        for (k = 0; k < 3; ++k) {
+            xop_t m = xs_mem_at(s, in->lhs, 4 * k, 4);
+            xop_t r = xop_reg(regs[k], 4);
+
+            xs_emit(s, XI_MOV, 4, 2, &m, &r, NULL);
+            x.imp_use |= XR_BIT(regs[k]);
         }
         xf_emit(&s->xf, &x);
         return;

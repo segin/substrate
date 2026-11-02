@@ -259,14 +259,20 @@ static int legalize_function(cc_ssa_function_t *f, cc_diag_t *diag) {
 int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag) {
     size_t i;
 
+    int softfloat = cc_softfloat_i386_wanted();
+
     if (m == NULL) {
         return(0);
     }
     for (i = 0; i < m->func_count; ++i) {
         const cc_target_desc_t *tgt = cc_target_current();
 
-        /* constants folded before a target splits what it cannot compute in one operation */
-        if (legalize_ext(&m->funcs[i], diag) != 0 || cc_fold_constant_values(&m->funcs[i]) != 0 ||
+        /*
+         * floating point without the x87 made calls and integers first, which legalization then splits;
+         * constants folded before a target splits what it cannot compute in one operation
+         */
+        if ((softfloat && cc_softfloat_i386_function(&m->funcs[i], diag) != 0) ||
+            legalize_ext(&m->funcs[i], diag) != 0 || cc_fold_constant_values(&m->funcs[i]) != 0 ||
             (tgt->legalize != NULL && tgt->legalize(&m->funcs[i], diag) != 0) ||
             legalize_function(&m->funcs[i], diag) != 0) {
             return(-1);

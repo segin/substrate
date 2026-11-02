@@ -123,6 +123,8 @@ typedef struct {
                               target's floating point is SSE's */
     int target_off_sse2; /**< -mno-sse2, likewise */
     int target_off_mmx;  /**< -mno-mmx, likewise */
+    int target_no_80387; /**< -mno-80387 (-msoft-float), the last of it and -m80387: _SOFT_FLOAT, and each
+                              floating operation evaluated in its type (__FLT_EVAL_METHOD__ 0), as gcc has it */
     int unsigned_char; /**< -funsigned-char: __CHAR_UNSIGNED__ */
     int short_wchar;   /**< -fshort-wchar: wchar_t's macros those of unsigned short */
     int freestanding;  /**< -ffreestanding: __STDC_HOSTED__ 0 */
@@ -1487,7 +1489,7 @@ static int add_builtin_macros(pp_state_t *st) {
     const char *uint_fast32_type = uint_fast16_type;
     const char *int_fast64_type = int64_type;
     const char *uint_fast64_type = uint64_type;
-    const char *flt_eval_method = (tgt->sse_fp || st->target_has_sse2) ? "0" : "2";
+    const char *flt_eval_method = (tgt->sse_fp || st->target_has_sse2 || st->target_no_80387) ? "0" : "2";
     char ptr_size[16];
     char long_size[16];
     char long_max[32];
@@ -1552,6 +1554,9 @@ static int add_builtin_macros(pp_state_t *st) {
         return -1;
     }
     if (macro_set(&st->macros, "__FLT_EVAL_METHOD_TS_18661_3__", 0, 0, NULL, 0, flt_eval_method) != 0) {
+        return -1;
+    }
+    if (st->target_no_80387 && macro_set(&st->macros, "_SOFT_FLOAT", 0, 0, NULL, 0, "1") != 0) {
         return -1;
     }
     {
@@ -2397,6 +2402,10 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
         } else if (strcmp(f, "-mno-mmx") == 0) {
             st->target_has_mmx = 0;
             st->target_off_mmx = 1;
+        } else if (strcmp(f, "-mno-80387") == 0 || strcmp(f, "-msoft-float") == 0) {
+            st->target_no_80387 = 1;
+        } else if (strcmp(f, "-m80387") == 0 || strcmp(f, "-mhard-float") == 0) {
+            st->target_no_80387 = 0;
         } else if (strcmp(f, "-mavx") == 0) {
             /* any x86-64 -march may add AVX by flag, as with gcc */
             if (st->target_supports_avx || st->target->id == CC_TARGET_X86_64) {
