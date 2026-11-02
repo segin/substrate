@@ -5905,6 +5905,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
     if (diag != NULL) {
         /* (an error's file is the one compiled, as the front end's are) */
         snprintf(diag->path, sizeof(diag->path), "%s", src_path != NULL ? src_path : "");
+        diag->includes[0] = '\0';
         diag->line = 0;
         diag->col = 0;
         diag->error_count = 0;

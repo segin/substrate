@@ -14,8 +14,9 @@ grep -q "int var = 10;" $CC_TMP/cc_pp_s3.i
 grep -q 'const char \*s = "hello";' $CC_TMP/cc_pp_s3.i
 grep -q "int forced_visible = 7;" $CC_TMP/cc_pp_s3.i
 grep -q "int imports = 1 + 2 + 7 + 5;" $CC_TMP/cc_pp_s3.i
-grep -q '^#line ' $CC_TMP/cc_pp_s3.i
-grep -q '#line 77 "virt.c"' $CC_TMP/cc_pp_s3.i
+# (line markers as gcc writes them: `# 77 "virt.c"`)
+grep -q '^# [0-9]' $CC_TMP/cc_pp_s3.i
+grep -q '^# 77 "virt.c"' $CC_TMP/cc_pp_s3.i
 ! grep -q "should_not_appear_from_imacros" $CC_TMP/cc_pp_s3.i
 
 "$CC_BIN" -E -P -I. -isystem . -iquote . -include pp_s3_force.h -imacros pp_s3_imacros.h pp_s3_main.c -o $CC_TMP/cc_pp_s3_p.i
@@ -46,7 +47,7 @@ grep -q '\$\$dep\\\\:target' $CC_TMP/cc_pp_s3_md.d
 # gone by the time fixdep looked for it.
 printf '#include "pp_s3_quote.h"\nconst char *f = __FILE__;\n' |
 	"$CC_BIN" -E -x c - -I. -Wp,-MD,$CC_TMP/cc_pp_stdin.d -o $CC_TMP/cc_pp_stdin.i
-grep -q '^#line 1 "<stdin>"' $CC_TMP/cc_pp_stdin.i
+grep -q '^# 1 "<stdin>"' $CC_TMP/cc_pp_stdin.i
 grep -q 'const char \*f = "<stdin>";' $CC_TMP/cc_pp_stdin.i
 ! grep -q 'ccstdin' $CC_TMP/cc_pp_stdin.i $CC_TMP/cc_pp_stdin.d
 grep -q '^-:' $CC_TMP/cc_pp_stdin.d

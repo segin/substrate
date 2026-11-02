@@ -19,6 +19,7 @@
 static void diag_store(cc_diag_t *d, const char *path, size_t line, size_t col, const char *msg) {
     if (path != NULL) {
         snprintf(d->path, sizeof(d->path), "%s", path);
+        d->includes[0] = '\0'; /* (a file named anew: how it was included is the caller's to say) */
     }
     d->line = line;
     d->col = col;
@@ -154,7 +155,21 @@ void cc_diag_report(cc_diag_t *d) {
     if (d == NULL || d->message[0] == '\0') {
         return;
     }
-    cc_diag_print("error", d->path, d->line, d->col, d->message, 1);
+    cc_diag_print_recorded(d);
     d->error_count++;
     cc_diag_clear(d);
+}
+
+/**
+ * Print the recorded error as gcc does: how its file was #included, then
+ * the error, then its source line.
+ *
+ * @param d  the diagnostic; NULL is ignored
+ */
+void cc_diag_print_recorded(const cc_diag_t *d) {
+    if (d == NULL) {
+        return;
+    }
+    fputs(d->includes, stderr);
+    cc_diag_print("error", d->path, d->line, d->col, d->message, 1);
 }

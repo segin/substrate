@@ -20,6 +20,25 @@ enum {
     CC_LEX_VIS_PUSHED_DEFAULT /**< push(default): default, which -fvisibility does not change */
 };
 
+/**
+ * A file the source came from, as the preprocessor's line markers say: its
+ * name (gcc's: as it was included), and the file that included it and the
+ * line of that #include, which diagnostics name as gcc's do ("In file
+ * included from hs.c:1:").
+ */
+typedef struct {
+    char *name;         /**< owned */
+    int parent;         /**< the including file's index; -1 for none */
+    size_t included_at; /**< the line of the #include in it */
+} cc_src_file_t;
+
+/** The files of a translation unit, as the lexer met them (append-only: an index is never invalidated). */
+typedef struct cc_src_files {
+    cc_src_file_t *items;
+    size_t count;
+    size_t cap;
+} cc_src_files_t;
+
 typedef struct {
     const char *src;
     size_t len;
@@ -27,6 +46,9 @@ typedef struct {
     size_t line;
     size_t col;
     char *logical_file;
+    /** the files met so far, shared by the copies of the lexer the parser's lookahead makes; NULL for none */
+    cc_src_files_t *files;
+    int file_id; /**< the file the lexer is in, an index in files; -1 for none */
     /** the default visibility `#pragma GCC visibility push(...)`/`pop` have set, innermost last; copied by value
      *  with the lexer, as the parser's lookahead copies it */
     unsigned char vis_stack[CC_LEX_VIS_DEPTH];
@@ -149,6 +171,7 @@ typedef struct {
     int int_is_longlong;
     char char_prefix; /**< a character constant's prefix, 'L', 'u' or 'U', which gives its type; else 0 */
     const char *file;
+    int file_id; /**< the file it is in, an index in the lexer's files; -1 for none */
     size_t line;
     size_t col;
     unsigned char default_vis; /**< the default visibility where the token is (CC_LEX_VIS_*) */
@@ -182,5 +205,34 @@ void cc_lexer_deinit(cc_lexer_t *lx);
  *             (an unterminated literal, a stray character, ...)
  */
 int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out);
+
+/**
+ * Have the lexer record the files the line markers name in @p files, the
+ * file it is in now the first.
+ *
+ * @param lx     the lexer
+ * @param files  the table, owned by the caller; NULL for none
+ * @return       0, or -1 when out of memory
+ */
+int cc_lexer_track_files(cc_lexer_t *lx, cc_src_files_t *files);
+
+/**
+ * Free a file table's entries (not the table itself).
+ *
+ * @param files  the table; NULL is ignored
+ */
+void cc_src_files_free(cc_src_files_t *files);
+
+/**
+ * Write gcc's account of how file @p id of @p files was included, a line
+ * each, outermost last: "In file included from a.h:3,\n                 from
+ * hs.c:1:\n"; nothing for a file not included.
+ *
+ * @param files  the table, or NULL
+ * @param id     the file, or -1
+ * @param out    receives the text, NUL-terminated (truncated to fit)
+ * @param cap    its size
+ */
+void cc_src_files_include_chain(const cc_src_files_t *files, int id, char *out, size_t cap);
 
 #endif

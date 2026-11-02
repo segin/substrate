@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_lexer.h"
 #include "cc_asm.h"
 #include "cc_binary128.h"
 #include "cc_consteval.h"
@@ -19,6 +20,10 @@
 
 static size_t g_diag_ctx_line = 0;
 static size_t g_diag_ctx_col = 0;
+static int g_diag_ctx_file = 0;                    /* its file: one more than its index in g_sema_files */
+static const cc_src_files_t *g_sema_files = NULL; /* the unit's files (cc_lexer.h) */
+
+static void sema_place_file(cc_diag_t *d);
 
 typedef struct {
     char **items;
@@ -37,6 +42,7 @@ void sema_diag(cc_diag_t *d, const char *msg) {
     if (d == NULL || d->message[0] != '\0') {
         return;
     }
+    sema_place_file(d);
     if (d->line == 0 && d->col == 0) {
         cc_diag_set(d, NULL, g_diag_ctx_line, g_diag_ctx_col, msg);
     } else {
@@ -58,15 +64,46 @@ static void sema_diag_report_and_clear(cc_diag_t *d) {
         d->line = g_diag_ctx_line;
         d->col = g_diag_ctx_col;
     }
+    if (g_sema_files != NULL && g_diag_ctx_file > 0 && (size_t)g_diag_ctx_file <= g_sema_files->count) {
+        /* (its file: the construct's, sema_place_file()'s) */
+        snprintf(d->path, sizeof(d->path), "%s", g_sema_files->items[g_diag_ctx_file - 1].name);
+        cc_src_files_include_chain(g_sema_files, g_diag_ctx_file - 1, d->includes, sizeof(d->includes));
+    }
     cc_diag_report(d);
 }
 
-static void set_diag_context(size_t line, size_t col) {
+/**
+ * Note the construct being checked: its line and column, and its file
+ * (one more than its index in the unit's files; 0 for the one noted
+ * before).
+ */
+static void set_diag_context(size_t line, size_t col, int file) {
     if (line == 0 && col == 0) {
         return;
     }
     g_diag_ctx_line = line;
     g_diag_ctx_col = col;
+    if (file > 0) {
+        g_diag_ctx_file = file;
+    }
+}
+
+/**
+ * Give @p d, while it records no error yet, the file of the construct
+ * being checked and how that was #included, as gcc names them: an error
+ * in a header is the header's, "In file included from hs.c:1:" before it.
+ *
+ * @param d  the diagnostic; NULL is ignored
+ */
+static void sema_place_file(cc_diag_t *d) {
+    const cc_src_files_t *files = g_sema_files;
+
+    if (d == NULL || d->message[0] != '\0' || files == NULL || g_diag_ctx_file <= 0 ||
+        (size_t)g_diag_ctx_file > files->count) {
+        return;
+    }
+    snprintf(d->path, sizeof(d->path), "%s", files->items[g_diag_ctx_file - 1].name);
+    cc_src_files_include_chain(files, g_diag_ctx_file - 1, d->includes, sizeof(d->includes));
 }
 
 /**
@@ -5290,8 +5327,9 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     size_t i;
 
     if (e != NULL) {
-        set_diag_context(e->line, e->col);
+        set_diag_context(e->line, e->col, e->src_file);
     }
+    sema_place_file(diag);
     if (diag != NULL && diag->message[0] == '\0') {
         if (e != NULL && (e->line != 0 || e->col != 0)) {
             diag->line = e->line;
@@ -5961,8 +5999,9 @@ static int check_stmt_body(const cc_translation_unit_t *tu, cc_stmt_t *s, var_en
     size_t i;
 
     if (s != NULL) {
-        set_diag_context(s->line, s->col);
+        set_diag_context(s->line, s->col, s->src_file);
     }
+    sema_place_file(diag);
     if (diag != NULL && diag->message[0] == '\0') {
         if (s != NULL && (s->line != 0 || s->col != 0)) {
             diag->line = s->line;
@@ -6694,7 +6733,10 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         diag->col = 0;
         diag->error_count = 0;
         diag->message[0] = '\0';
+        diag->includes[0] = '\0';
     }
+    g_sema_files = tu != NULL ? tu->files : NULL;
+    g_diag_ctx_file = 0;
 
     if (tu == NULL) {
         sema_diag(diag, "invalid translation unit");
@@ -6708,7 +6750,8 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         cc_global_t *g = &tu->globals[i];
         int sc_count = storage_class_count(g->storage);
         long j;
-        set_diag_context(g->line, g->col);
+        set_diag_context(g->line, g->col, g->src_file);
+        sema_place_file(diag);
         if (diag != NULL && diag->message[0] == '\0' && (g->line != 0 || g->col != 0)) {
             diag->line = g->line;
             diag->col = g->col;
@@ -6980,7 +7023,7 @@ fail_global_item:
         cc_function_t *f = &tu->funcs[i];
         int f_sc_count = storage_class_count(f->storage);
         long j;
-        set_diag_context(f->line, f->col);
+        set_diag_context(f->line, f->col, f->src_file);
         if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
             diag->line = f->line;
             diag->col = f->col;
@@ -7245,7 +7288,7 @@ fail_decl:
             continue;
         }
 
-        set_diag_context(f->line, f->col);
+        set_diag_context(f->line, f->col, f->src_file);
         if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
             diag->line = f->line;
             diag->col = f->col;

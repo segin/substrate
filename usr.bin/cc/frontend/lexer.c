@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -191,12 +192,15 @@ static void lx_set_logical_file(cc_lexer_t *lx, const char *path) {
     lx->logical_file = dup;
 }
 
-static int lx_parse_line_marker(const cc_lexer_t *lx, size_t start, size_t end, size_t *out_line, char **out_file) {
+static int lx_parse_line_marker(const cc_lexer_t *lx, size_t start, size_t end, size_t *out_line, char **out_file,
+                                int *out_flag) {
     const char *p = lx->src + start;
     const char *ep = lx->src + end;
     unsigned long line_no = 0;
     int saw_digit = 0;
     char *file = NULL;
+
+    *out_flag = 0;
 
     while (p < ep && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v'))
         p++;
@@ -240,6 +244,16 @@ static int lx_parse_line_marker(const cc_lexer_t *lx, size_t start, size_t end, 
             file[w++] = *q++;
         }
         file[w] = '\0';
+        /* gcc's flag after the name: 1, an included file begins; 2, back in the one that included it */
+        if (q < ep) {
+            q++;
+        }
+        while (q < ep && (*q == ' ' || *q == '\t')) {
+            q++;
+        }
+        if (q < ep && (*q == '1' || *q == '2') && (q + 1 == ep || !isdigit((unsigned char)q[1]))) {
+            *out_flag = *q - '0';
+        }
     }
 
     if (out_line != NULL) {
@@ -410,18 +424,81 @@ static unsigned char lx_default_vis(const cc_lexer_t *lx) {
     return lx->vis_stack[(lx->vis_depth <= CC_LEX_VIS_DEPTH ? lx->vis_depth : CC_LEX_VIS_DEPTH) - 1];
 }
 
+/**
+ * Add file @p name to the lexer's table: included from the file the
+ * lexer is in, at its line @p at, or with no includer.
+ *
+ * @return its index, or -1 when out of memory
+ */
+static int lx_add_file(cc_lexer_t *lx, const char *name, int parent, size_t at) {
+    cc_src_files_t *t = lx->files;
+    char *dup;
+
+    if (t->count == t->cap) {
+        size_t ncap = t->cap == 0 ? 16 : t->cap * 2;
+        cc_src_file_t *next = (cc_src_file_t *)realloc(t->items, ncap * sizeof(*next));
+
+        if (next == NULL) {
+            return -1;
+        }
+        t->items = next;
+        t->cap = ncap;
+    }
+    dup = cc_strdup(name);
+    if (dup == NULL) {
+        return -1;
+    }
+    t->items[t->count].name = dup;
+    t->items[t->count].parent = parent;
+    t->items[t->count].included_at = at;
+    return (int)t->count++;
+}
+
+/**
+ * Follow a line marker naming @p name with gcc's @p flag: 1 enters a file
+ * the current one includes at the marker's line, 2 goes back out to the
+ * file of that name that included this one, and none renames the current
+ * file (a #line), its includer kept.
+ */
+static void lx_note_file(cc_lexer_t *lx, const char *name, int flag) {
+    const cc_src_file_t *cur;
+    int id;
+
+    if (lx->files == NULL) {
+        return;
+    }
+    cur = lx->file_id >= 0 ? &lx->files->items[lx->file_id] : NULL;
+    if (flag == 1) {
+        id = lx_add_file(lx, name, lx->file_id, lx->line);
+    } else if (cur != NULL && strcmp(cur->name, name) == 0) {
+        return;
+    } else {
+        for (id = cur != NULL ? cur->parent : -1; flag == 2 && id >= 0; id = lx->files->items[id].parent) {
+            if (strcmp(lx->files->items[id].name, name) == 0) {
+                lx->file_id = id;
+                return;
+            }
+        }
+        id = lx_add_file(lx, name, cur != NULL ? cur->parent : -1, cur != NULL ? cur->included_at : 0);
+    }
+    if (id >= 0) {
+        lx->file_id = id;
+    }
+}
+
 static void lx_skip_directive_line(cc_lexer_t *lx) {
     size_t start = lx->pos;
     size_t end = start;
     size_t marker_line = 0;
     char *marker_file = NULL;
+    int marker_flag = 0;
     int has_marker;
     int has_newline;
 
     while (end < lx->len && lx->src[end] != '\n')
         end++;
     has_newline = end < lx->len && lx->src[end] == '\n';
-    has_marker = lx_parse_line_marker(lx, start, end, &marker_line, &marker_file);
+    has_marker = lx_parse_line_marker(lx, start, end, &marker_line, &marker_file, &marker_flag);
     if (!has_marker) {
         lx_note_visibility_pragma(lx, start, end);
         lx_note_pack_pragma(lx, start, end);
@@ -435,6 +512,7 @@ static void lx_skip_directive_line(cc_lexer_t *lx) {
     if (has_marker) {
         if (marker_file != NULL) {
             lx_set_logical_file(lx, marker_file);
+            lx_note_file(lx, marker_file, marker_flag);
         }
         lx->line = marker_line;
         lx->col = 1;
@@ -491,7 +569,61 @@ int cc_lexer_init(cc_lexer_t *lx, const char *src, size_t len, const char *path)
     lx->line = 1;
     lx->col = 1;
     lx->logical_file = cc_strdup(path != NULL ? path : "");
+    lx->file_id = -1;
     return 0;
+}
+
+int cc_lexer_track_files(cc_lexer_t *lx, cc_src_files_t *files) {
+    lx->files = files;
+    lx->file_id = -1;
+    if (files != NULL) {
+        lx->file_id = lx_add_file(lx, lx->logical_file != NULL ? lx->logical_file : "", -1, 0);
+        if (lx->file_id < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+void cc_src_files_free(cc_src_files_t *files) {
+    size_t i;
+
+    if (files == NULL) {
+        return;
+    }
+    for (i = 0; i < files->count; ++i) {
+        free(files->items[i].name);
+    }
+    free(files->items);
+    files->items = NULL;
+    files->count = 0;
+    files->cap = 0;
+}
+
+void cc_src_files_include_chain(const cc_src_files_t *files, int id, char *out, size_t cap) {
+    size_t n = 0;
+    int first = 1;
+    int p;
+
+    if (cap == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (files == NULL || id < 0 || (size_t)id >= files->count) {
+        return;
+    }
+    for (p = files->items[id].parent; p >= 0 && n < cap; p = files->items[p].parent) {
+        int last = files->items[p].parent < 0;
+        int w = snprintf(out + n, cap - n, "%s %s:%zu%s\n", first ? "In file included from" : "                 from",
+                         files->items[p].name, files->items[id].included_at, last ? ":" : ",");
+
+        if (w < 0) {
+            break;
+        }
+        n += (size_t)w < cap - n ? (size_t)w : cap - n - 1;
+        first = 0;
+        id = p;
+    }
 }
 
 void cc_lexer_deinit(cc_lexer_t *lx) {
@@ -1131,6 +1263,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->int_is_longlong = 0;
     out->char_prefix = 0;
     out->file = lx->logical_file;
+    out->file_id = lx->file_id;
     out->line = lx->line;
     out->col = lx->col;
     out->default_vis = lx_default_vis(lx);

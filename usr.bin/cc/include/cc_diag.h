@@ -64,4 +64,13 @@ void cc_diag_print(const char *kind, const char *path, size_t line, size_t col, 
  */
 void cc_diag_report(cc_diag_t *d);
 
+/**
+ * Print the recorded error as gcc does: d->includes (how its file was
+ * #included, "In file included from hs.c:1:"), then the error and its
+ * source line.  Nothing is counted or cleared.
+ *
+ * @param d  the diagnostic; NULL is ignored
+ */
+void cc_diag_print_recorded(const cc_diag_t *d);
+
 #endif

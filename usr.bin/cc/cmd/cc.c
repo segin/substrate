@@ -2834,8 +2834,7 @@ int cc_main(int argc, char **argv) {
                       diag.error_count);
             }
           } else if (diag.message[0] != '\0') {
-            cc_diag_print("error", diag.path, diag.line, diag.col,
-                          diag.message, 1);
+            cc_diag_print_recorded(&diag);
           } else {
             fprintf(stderr, "cc: error: native C pipeline failed\n");
           }

@@ -234,6 +234,14 @@ and those of how diagnostics read
 .Bl -tag -width "-pedantic-errors"
 .It Fl E
 Preprocess only.
+Line markers are gcc's,
+.Li "# 1 \(dqhdr/s.h\(dq 1" ,
+a file named as it was included (the directory as written, not an
+absolute path), with flag 1 where an included file begins and 2 where
+the including one resumes.
+A diagnostic in an included file names that file, after gcc's account of
+the includes that led to it
+.Pq Dq In file included from hs.c:1: .
 .It Fl S
 Compile to assembly.
 .It Fl c

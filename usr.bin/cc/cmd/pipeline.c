@@ -91,6 +91,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         diag->col = 0;
         diag->error_count = 0;
         diag->message[0] = '\0';
+        diag->includes[0] = '\0';
     }
 
     cc_options_select(opts);
@@ -107,6 +108,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     }
     if (diag != NULL && display_src != NULL && display_src[0] != '\0') {
         snprintf(diag->path, sizeof(diag->path), "%s", display_src);
+        diag->includes[0] = '\0';
     }
     if (debug_counts) {
         fprintf(stderr, "cc: debug: parsed funcs=%zu globals=%zu structs=%zu from %s\n", tu.func_count, tu.global_count,
@@ -123,6 +125,11 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         }
         cc_tu_free(&tu);
         return -1;
+    }
+    if (diag != NULL) {
+        /* (sema named the file of each construct it checked: the later phases' errors are the main file's) */
+        snprintf(diag->path, sizeof(diag->path), "%s", display_src != NULL ? display_src : "");
+        diag->includes[0] = '\0';
     }
     if (timings) {
         t_sema = now_seconds() - t0;

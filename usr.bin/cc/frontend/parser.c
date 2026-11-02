@@ -21,11 +21,14 @@
 #define CC_MAX_PARSE_DEPTH 256
 
 static const char *g_parser_diag_file = NULL;
+static int g_parser_diag_file_id = -1;          /* its index in g_parser_files */
+static cc_src_files_t *g_parser_files = NULL; /* the unit's files, being parsed */
 
 /**
  * Record a parse error at a position in the file being parsed.  A later
  * error replaces an earlier one: the parser reports the error it stops
- * at.
+ * at.  It names the file the position is in, and how that was
+ * #included, as gcc does.
  *
  * @param d     the diagnostic
  * @param line  the line
@@ -34,6 +37,9 @@ static const char *g_parser_diag_file = NULL;
  */
 static void set_diag(cc_diag_t *d, size_t line, size_t col, const char *msg) {
     cc_diag_replace(d, g_parser_diag_file != NULL ? g_parser_diag_file : "", line, col, msg);
+    if (d != NULL) {
+        cc_src_files_include_chain(g_parser_files, g_parser_diag_file_id, d->includes, sizeof(d->includes));
+    }
 }
 
 void parser_error(parser_t *p, const char *msg) {
@@ -365,10 +371,12 @@ static int next_tok(parser_t *p) {
 
     if (cc_lexer_next(&p->lx, &p->tok) != 0) {
         g_parser_diag_file = p->lx.logical_file;
+        g_parser_diag_file_id = p->lx.file_id;
         set_diag(p->diag, p->lx.line, p->lx.col, "invalid token");
         return -1;
     }
     g_parser_diag_file = p->tok.file;
+    g_parser_diag_file_id = p->tok.file_id;
     if (p->tok.kind == TOK_IDENT && ident_invalid_ucn(&p->tok, ucn, sizeof(ucn))) {
         char msg[96];
         snprintf(msg, sizeof(msg), "universal character %s is not valid in an identifier", ucn);
@@ -7416,6 +7424,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
         char *name = cc_strndup(p->tok.start, p->tok.len);
         size_t name_line = p->tok.line;
         size_t name_col = p->tok.col;
+        int name_file = p->tok.file_id + 1;
         if (name == NULL) {
             return NULL;
         }
@@ -7433,6 +7442,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
             e->ident = name;
             e->line = name_line; /* (the call's place: its callee's name, as gcc gives it) */
             e->col = name_col;
+            e->src_file = name_file;
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -8443,6 +8453,7 @@ static cc_expr_t *parse_postfix_ops(parser_t *p, cc_expr_t *e) {
             /* (its place: the callee's where that has one, else the parenthesis) */
             call->line = e->line != 0 ? e->line : p->tok.line;
             call->col = e->line != 0 ? e->col : p->tok.col;
+            call->src_file = e->line != 0 ? e->src_file : p->tok.file_id + 1;
             if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
                 call->ident = e->ident;
                 e->ident = NULL;
@@ -9800,6 +9811,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         memset(&s, 0, sizeof(s));
         s.line = p->tok.line;
         s.col = p->tok.col;
+        s.src_file = p->tok.file_id + 1;
         s.kind = CC_STMT_DECL;
         s.storage = decl_storage;
         decl_attrs_reset(&suffix_attrs);
@@ -9905,6 +9917,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
 
             memset(&fn_decl, 0, sizeof(fn_decl));
             fn_decl.line = s.line;
+            fn_decl.src_file = s.src_file;
             fn_decl.col = s.col;
             fn_decl.ret_ctype = s.ctype; /* the declarator ended at the name: the specifiers' type */
             fn_decl.storage = s.storage;
@@ -9962,6 +9975,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
 
             memset(&fn_decl, 0, sizeof(fn_decl));
             fn_decl.line = s.line;
+            fn_decl.src_file = s.src_file;
             fn_decl.col = s.col;
             fn_decl.ret_ctype = s.ctype->of;
             fn_decl.storage = s.storage;
@@ -10218,6 +10232,7 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
     memset(s, 0, sizeof(*s));
     s->line = p->tok.line;
     s->col = p->tok.col;
+    s->src_file = p->tok.file_id + 1;
     s->kind = CC_STMT_BLOCK;
     if (expect(p, TOK_LBRACE, "expected '{'") != 0) {
         return -1;
@@ -10346,6 +10361,7 @@ static int parse_switch_body_stmt(parser_t *p, cc_stmt_t *s) {
     memset(s, 0, sizeof(*s));
     s->line = p->tok.line;
     s->col = p->tok.col;
+    s->src_file = p->tok.file_id + 1;
     s->kind = CC_STMT_BLOCK;
     if (p->tok.kind == TOK_LBRACE) {
         return parse_block_stmt(p, s);
@@ -10395,6 +10411,7 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
     memset(s, 0, sizeof(*s));
     s->line = p->tok.line;
     s->col = p->tok.col;
+    s->src_file = p->tok.file_id + 1;
     while (p->tok.kind == TOK_KW_EXTENSION) {
         if (next_tok(p) != 0) {
             return -1;
@@ -10787,6 +10804,7 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
         size_t decl_count = 0;
         size_t stmt_line = p->tok.line;
         size_t stmt_col = p->tok.col;
+        int stmt_file = p->tok.file_id + 1;
         if (parse_decl_stmt_list(p, &decls, &decl_count, 1) != 0) {
             free(decls);
             return -1;
@@ -10799,6 +10817,7 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
         memset(s, 0, sizeof(*s));
         s->line = stmt_line;
         s->col = stmt_col;
+        s->src_file = stmt_file;
         s->kind = CC_STMT_BLOCK;
         s->is_synthetic_block = 1;
         s->block_stmts = decls;
@@ -10850,6 +10869,12 @@ void cc_tu_free(cc_translation_unit_t *tu) {
     if (tu == NULL) {
         return;
     }
+    if (g_parser_files == tu->files) {
+        g_parser_files = NULL;
+    }
+    cc_src_files_free(tu->files);
+    free(tu->files);
+    tu->files = NULL;
     for (i = 0; i < tu->func_count; ++i) {
         free_func(&tu->funcs[i]);
     }
@@ -11208,6 +11233,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     memset(f, 0, sizeof(*f));
     f->line = p->tok.line;
     f->col = p->tok.col;
+    f->src_file = p->tok.file_id + 1;
     f->has_body = 0;
     f->has_prototype = 0;
     f->has_oldstyle_param_decls = 0;
@@ -11547,8 +11573,11 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         diag->col = 0;
         diag->error_count = 0;
         diag->message[0] = '\0';
+        diag->includes[0] = '\0';
     }
     g_parser_diag_file = path;
+    g_parser_diag_file_id = -1;
+    g_parser_files = NULL;
 
     fp = fopen(path, "r");
     if (fp == NULL) {
@@ -11601,6 +11630,15 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     p.tu = out;
     p.scope_depth = 0;
     cc_lexer_init(&p.lx, buf, sz, path);
+    /* the files the line markers name, for the diagnostics' file and its #includes (gcc's) */
+    out->files = (cc_src_files_t *)calloc(1, sizeof(*out->files));
+    g_parser_files = out->files;
+    if (out->files == NULL || cc_lexer_track_files(&p.lx, out->files) != 0) {
+        cc_lexer_deinit(&p.lx);
+        free(buf);
+        cc_tu_free(out);
+        return -1;
+    }
     if (next_tok(&p) != 0) {
         cc_lexer_deinit(&p.lx);
         parser_free_hoisted_funcs(&p);
@@ -11797,6 +11835,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 decls[di].decl_name = NULL;
                 g.line = decls[di].line;
                 g.col = decls[di].col;
+                g.src_file = decls[di].src_file;
                 g.storage = decls[di].storage;
                 g.attr_flags = decls[di].attr_flags;
                 g.attr_align = decls[di].attr_align;

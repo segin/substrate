@@ -3288,6 +3288,63 @@ static int resolve_include(pp_state_t *st, const char *cur_file, const char *spe
     return -1;
 }
 
+/**
+ * The name gcc gives the file an #include of @p spec found, @p key (its
+ * resolve_include() key), in line markers and diagnostics: the directory
+ * it was found in as that is written -- the including file's, as its own
+ * name has it (none for a name without a `/`), or an -I or system
+ * directory's -- joined to @p spec: "hdr/s.h", not "/x/hdr/s.h".
+ *
+ * @param st           the preprocessor
+ * @param cur_display  the including file's own such name
+ * @param spec         the name in the #include
+ * @param quoted       1 for "...", 0 for <...>
+ * @param key          the file found
+ * @param out          receives the name; @p key where no candidate is it
+ */
+static void pp_include_display(pp_state_t *st, const char *cur_display, const char *spec, int quoted,
+                               const char *key, char out[PATH_MAX]) {
+    const cc_strvec_t *lists[3];
+    char cand[PATH_MAX];
+    char cand_key[PATH_MAX];
+    size_t l;
+    size_t i;
+
+    snprintf(out, PATH_MAX, "%s", key);
+    if (spec[0] == '/') {
+        snprintf(out, PATH_MAX, "%s", spec);
+        return;
+    }
+    if (quoted && cur_display != NULL) {
+        const char *slash = strrchr(cur_display, '/');
+
+        int w = slash == NULL ? snprintf(cand, sizeof(cand), "%s", spec)
+                              : snprintf(cand, sizeof(cand), "%.*s/%s", (int)(slash - cur_display), cur_display, spec);
+
+        path_make_key(cand, cand_key);
+        if (w >= 0 && (size_t)w < sizeof(cand) && path_exists(cand) && strcmp(cand_key, key) == 0) {
+            snprintf(out, PATH_MAX, "%s", cand);
+            return;
+        }
+    }
+    lists[0] = quoted ? &st->quote_paths : NULL;
+    lists[1] = &st->user_include_paths;
+    lists[2] = &st->system_include_paths;
+    for (l = 0; l < 3; ++l) {
+        for (i = 0; lists[l] != NULL && i < lists[l]->count; ++i) {
+            if (snprintf(cand, sizeof(cand), "%s/%s", lists[l]->items[i], spec) >= (int)sizeof(cand) ||
+                !path_exists(cand)) {
+                continue;
+            }
+            path_make_key(cand, cand_key);
+            if (strcmp(cand_key, key) == 0) {
+                snprintf(out, PATH_MAX, "%s", cand);
+                return;
+            }
+        }
+    }
+}
+
 static int resolve_include_next(pp_state_t *st, const char *cur_file, const char *spec, int quoted, char out[PATH_MAX],
                                 int *out_is_system) {
     size_t i;
@@ -6843,7 +6900,7 @@ static int pp_emit_keeping_lines(pp_state_t *st, FILE *out, const char *expanded
     return 0;
 }
 
-static int pp_emit_line_marker(pp_state_t *st, FILE *out, int line_no, const char *file_path);
+static int pp_emit_line_marker(pp_state_t *st, FILE *out, int line_no, const char *file_path, const char *flags);
 
 /** How many newlines @p s holds. */
 static long pp_count_newlines(const char *s) {
@@ -6883,7 +6940,7 @@ static int pp_sync_line(pp_state_t *st, FILE *out, int *out_next, int line, cons
         return 0;
     }
     *out_next = line;
-    return pp_emit_line_marker(st, out, line, path);
+    return pp_emit_line_marker(st, out, line, path, "");
 }
 
 /**
@@ -6913,12 +6970,17 @@ static int pp_emit_code(pp_state_t *st, FILE *out, int *out_next, int line, cons
     return 0;
 }
 
-static int pp_emit_line_marker(pp_state_t *st, FILE *out, int line_no, const char *file_path) {
+/*
+ * A line marker as gcc writes one, `# 12 "hdr/s.h" 1`: @p flags is "" or gcc's " 1" (an included file begins)
+ * or " 2" (back in the file that included it), from which the compiler knows the chain of #includes its
+ * diagnostics name.
+ */
+static int pp_emit_line_marker(pp_state_t *st, FILE *out, int line_no, const char *file_path, const char *flags) {
     char buf[PATH_MAX + 64];
     if (st->suppress_output || !st->emit_line_markers) {
         return 0;
     }
-    if (snprintf(buf, sizeof(buf), "#line %d \"%s\"\n", line_no, file_path) >= (int)sizeof(buf)) {
+    if (snprintf(buf, sizeof(buf), "# %d \"%s\"%s\n", line_no, file_path, flags) >= (int)sizeof(buf)) {
         return -1;
     }
     return pp_emit_text(st, out, buf);
@@ -6961,7 +7023,12 @@ static int pp_emit_embed_file(pp_state_t *st, FILE *out, const char *path) {
     return 0;
 }
 
-static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int depth, int macros_only, cc_diag_t *diag) {
+/*
+ * (@p display is the name line markers and diagnostics give the file, gcc's: as it was included, "hdr/s.h",
+ * pp_include_display(); NULL for @p path itself)
+ */
+static int preprocess_file(pp_state_t *st, const char *path, const char *display, FILE *out, int depth,
+                           int macros_only, cc_diag_t *diag) {
     /* Standard input is read from the driver's copy but named "<stdin>"
      * everywhere else; its quoted includes are then looked up from ".",
      * as GCC does. */
@@ -6988,9 +7055,13 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
 
     if (depth == 0 && st->main_is_stdin) {
         path = PP_STDIN_NAME;
+        display = NULL;
     }
-    snprintf(mark_file, sizeof(mark_file), "%s", path);
-    g_pp_diag_file = path;
+    if (display == NULL) {
+        display = path;
+    }
+    snprintf(mark_file, sizeof(mark_file), "%s", display);
+    g_pp_diag_file = display;
 
     if (depth > (int)st->max_include_depth) {
         set_diag(diag, 0, 0, "include depth exceeded");
@@ -7014,7 +7085,8 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     if (!(depth == 0 && st->main_is_stdin) && dep_add_path(st, path, 0, depth == 0) != 0) {
         goto fail;
     }
-    if (pp_emit_line_marker(st, out, 1, path) != 0) {
+    /* (gcc's flag 1: an included file begins) */
+    if (pp_emit_line_marker(st, out, 1, display, depth > 0 ? " 1" : "") != 0) {
         goto fail;
     }
 
@@ -7067,6 +7139,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 if (active) {
                     char inc_spec[PATH_MAX];
                     char inc_path[PATH_MAX];
+                    char inc_display[PATH_MAX]; /* its name as included (pp_include_display()) */
                     int quoted = 0;
                     int is_system = 0;
                     int include_next = ((size_t)(p - kw) == 12);
@@ -7108,12 +7181,14 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                             free(inc_expanded);
                             goto fail;
                         }
-                        if (preprocess_file(st, inc_path, out, depth + 1, macros_only, diag) != 0) {
-                            fprintf(stderr, "cpp: note: in file included from %s:%d\n", path, cur_line);
+                        pp_include_display(st, display, inc_spec, quoted, inc_path, inc_display);
+                        if (preprocess_file(st, inc_path, inc_display, out, depth + 1, macros_only, diag) != 0) {
+                            fprintf(stderr, "cpp: note: in file included from %s:%d\n", display, cur_line);
                             free(inc_expanded);
                             goto fail;
                         }
-                        if (pp_emit_line_marker(st, out, line_no, mark_file) != 0) {
+                        /* (gcc's flag 2: back in the file that included it) */
+                        if (pp_emit_line_marker(st, out, line_no, mark_file, " 2") != 0) {
                             free(inc_expanded);
                             goto fail;
                         }
@@ -7440,7 +7515,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         }
                         line_target = line_file;
                     }
-                    if (pp_emit_line_marker(st, out, (int)v, line_target) != 0) {
+                    if (pp_emit_line_marker(st, out, (int)v, line_target, "") != 0) {
                         free(line_expanded);
                         goto fail;
                     }
@@ -7718,7 +7793,7 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
         if (dep_add_path(&st, inc_path, is_system, 0) != 0) {
             goto out;
         }
-        if (preprocess_file(&st, inc_path, out, 0, 1, diag) != 0) {
+        if (preprocess_file(&st, inc_path, NULL, out, 0, 1, diag) != 0) {
             goto out;
         }
     }
@@ -7732,11 +7807,11 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
         if (dep_add_path(&st, inc_path, is_system, 0) != 0) {
             goto out;
         }
-        if (preprocess_file(&st, inc_path, out, 0, 0, diag) != 0) {
+        if (preprocess_file(&st, inc_path, NULL, out, 0, 0, diag) != 0) {
             goto out;
         }
     }
-    if (preprocess_file(&st, in_path, out, 0, 0, diag) != 0) {
+    if (preprocess_file(&st, in_path, NULL, out, 0, 0, diag) != 0) {
         goto out;
     }
     if (emit_macro_dump(&st, out) != 0) {

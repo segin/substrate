@@ -9,6 +9,9 @@ typedef struct cc_diag {
     size_t col;
     size_t error_count;
     char message[256];
+    /** how path was included, gcc's lines printed before the error ("In file included from hs.c:1:\n"); "" for
+     *  the file compiled itself */
+    char includes[1024];
 } cc_diag_t;
 
 /* cc_expr_t.unary_form: which operand of the binary spelling is the unary operator's */
@@ -138,6 +141,7 @@ struct cc_expr {
     cc_expr_kind_t kind;
     size_t line;
     size_t col;
+    int src_file; /**< a call's: one more than its file's index in the unit's files (cc_src_files_t); 0 unknown */
     unsigned char paren_wrapped;
     unsigned char is_subscript; /**< a CC_BIN_ADD that is the `a + i` of a subscript `a[i]` */
     /**
@@ -239,6 +243,7 @@ struct cc_ctype;
 struct cc_stmt {
     size_t line;
     size_t col;
+    int src_file; /**< one more than its file's index in the unit's files (cc_src_files_t); 0 unknown */
     const struct cc_ctype *ctype; /**< a declaration's type (cc_ctype.h) */
     int storage;
     cc_attr_flags_t attr_flags;
@@ -396,6 +401,7 @@ typedef struct {
     size_t col;
     size_t name_line; /**< a definition's: where its name is (gcc's place for errors about the function) */
     size_t name_col;
+    int src_file; /**< one more than its file's index in the unit's files (cc_src_files_t); 0 unknown */
     const struct cc_ctype *ret_ctype; /**< the return type */
     int storage;
     cc_attr_flags_t attr_flags;
@@ -423,6 +429,7 @@ typedef struct {
     char *name;
     size_t line;
     size_t col;
+    int src_file; /**< one more than its file's index in the unit's files (cc_src_files_t); 0 unknown */
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;
@@ -447,6 +454,7 @@ typedef struct cc_translation_unit {
     struct cc_name_index *fn_index;     /**< funcs by name, built as they are looked up (frontend/nameindex.c;
                                              owned) */
     struct cc_name_index *global_index; /**< globals by name, likewise (owned) */
+    struct cc_src_files *files; /**< the files its source came from, which diagnostics name (cc_lexer.h; owned) */
 } cc_translation_unit_t;
 
 /** A variable of the function a GNU nested function is defined in, visible where it is defined. */
