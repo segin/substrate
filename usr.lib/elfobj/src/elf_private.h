@@ -117,6 +117,7 @@ struct elf_section {
     uint8_t comdat;
     char *group_signature;
     struct elf_section *link_order; /* SHF_LINK_ORDER: the section it is ordered by, made sh_link when written */
+    struct elf_symbol *section_symbol;  /* a link's: its STT_SECTION symbol, once a relocation names it */
     uint32_t note_type;
     char *note_name;
     uint8_t *data;
@@ -295,6 +296,12 @@ struct elf_link_plan {
     size_t x86_note_size;
     int x86_note_placed;
 };
+
+/**
+ * Whether the first of @p obj's symbols is the null symbol (nameless, local, of no type, value, size or
+ * section), which the symbol table's entry 0 is; the writer makes one up when it is not.
+ */
+int elf__first_symbol_is_null(const elfobj_t *obj);
 
 /* elf_merge.c: SHF_MERGE sections merged, as GNU ld merges them */
 /** Whether input section @p src can be merged: SHF_MERGE, whole entries, no relocations of its own. */

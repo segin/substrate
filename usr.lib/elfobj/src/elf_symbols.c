@@ -480,6 +480,14 @@ elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out
     return ELF_OK;
 }
 
+int elf__first_symbol_is_null(const elfobj_t *obj) {
+    const struct elf_symbol *s = obj->symbol_count > 0 ? obj->symbols[0] : NULL;
+
+    /* (a section's symbol, nameless and at 0 too, is not: a link's first local may be one) */
+    return s != NULL && (s->name == NULL || s->name[0] == '\0') && s->value == 0 && s->size == 0 &&
+           s->type == STT_NOTYPE && s->bind == STB_LOCAL && s->shndx == SHN_UNDEF;
+}
+
 int elf_symbol_in_merge_section(const elf_symbol_t *symbol) {
     return symbol != NULL && symbol->in_merge_section;
 }
@@ -516,10 +524,17 @@ elf_err_t elf_remove_symbols(elfobj_t *obj, int (*drop)(const elf_symbol_t *symb
     for (i = 0; i < obj->symbol_count; ++i) {
         struct elf_symbol *sym = obj->symbols[i];
         /* a null symbol first stays (the writer makes one up when the first is not) */
-        int is_null = i == 0 && sym != NULL && (sym->name == NULL || sym->name[0] == '\0') && sym->value == 0 &&
-                      sym->size == 0;
+        int is_null = i == 0 && elf__first_symbol_is_null(obj);
 
         if (sym != NULL && !is_null && !named[i] && drop(sym, user)) {
+            if (sym->type == STT_SECTION) {
+                size_t k;
+                for (k = 0; k < obj->section_count; ++k) {
+                    if (obj->sections[k]->section_symbol == sym) {
+                        obj->sections[k]->section_symbol = NULL;
+                    }
+                }
+            }
             free(sym->name);
             free(sym->version_name);
             free(sym);

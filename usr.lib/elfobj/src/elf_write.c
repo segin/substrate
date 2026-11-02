@@ -338,10 +338,7 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
                              size_t *extra_indices, size_t *out_size, size_t *out_entsize,
                              uint8_t **xindex_out) {
     size_t entsz = (cls == ELFOBJ_CLASS_64) ? 24 : 16;
-    int has_null = (obj->symbol_count > 0 && obj->symbols[0] != NULL &&
-                    (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
-                    obj->symbols[0]->value == 0 &&
-                    obj->symbols[0]->size == 0);
+    int has_null = elf__first_symbol_is_null(obj);
     size_t n;
     size_t base_count = obj->symbol_count + (has_null ? 0 : 1);
     uint8_t *buf = NULL;
@@ -385,8 +382,9 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
             st_shndx = SHN_XINDEX;
         }
         p = buf + (idx * entsz);
-        if (!(has_null && i == 0)) {
-            st_name = elf__strtab_add(strtab, sym->name ? sym->name : "");
+        /* a name that is empty is 0, the string table's first byte (a section's symbol is read so) */
+        if (!(has_null && i == 0) && sym->name != NULL && sym->name[0] != '\0') {
+            st_name = elf__strtab_add(strtab, sym->name);
             if (st_name == UINT32_MAX) {
                 free(buf);
                 return NULL;
@@ -508,10 +506,7 @@ static elf_err_t collect_version_names(const elfobj_t *obj, ver_name_t **out_nam
 
 static uint8_t *build_gnu_versym(const elfobj_t *obj, elfobj_endian_t e, const ver_name_t *names,
                                  size_t name_count, size_t extra_count, size_t *out_size) {
-    int has_null = (obj->symbol_count > 0 && obj->symbols[0] != NULL &&
-                    (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
-                    obj->symbols[0]->value == 0 &&
-                    obj->symbols[0]->size == 0);
+    int has_null = elf__first_symbol_is_null(obj);
     size_t nsyms = obj->symbol_count + (has_null ? 0 : 1) + extra_count;
     uint8_t *buf;
     size_t i;
@@ -707,9 +702,7 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
          * made every relocation of an object read and written back name
          * the symbol after the one it meant. */
         if (r->symbol != NULL) {
-            int has_null = obj->symbol_count > 0 && obj->symbols[0] != NULL &&
-                           (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
-                           obj->symbols[0]->value == 0 && obj->symbols[0]->size == 0;
+            int has_null = elf__first_symbol_is_null(obj);
 
             sym_index = r->symbol->index + (has_null ? 0 : 1);
         }
@@ -1206,10 +1199,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
 
     secs[symtab_index].link = (uint32_t)strtab_index;
     {
-        int has_null = (obj->symbol_count > 0 && obj->symbols[0] != NULL &&
-                        (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
-                        obj->symbols[0]->value == 0 &&
-                        obj->symbols[0]->size == 0);
+        int has_null = elf__first_symbol_is_null(obj);
         size_t first_global = obj->symbol_count + (has_null ? 0 : 1);
         for (i = 0; i < obj->symbol_count; ++i) {
             if (obj->symbols[i]->bind != STB_LOCAL) {

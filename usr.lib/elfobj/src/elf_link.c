@@ -1281,6 +1281,48 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
     return ELF_OK;
 }
 
+/* The STT_SECTION symbol of output section @p sec, made the first time; NULL out of memory. */
+static struct elf_symbol *output_section_symbol(elfobj_t *out, struct elf_section *sec) {
+    struct elf_symbol *s = sec->section_symbol;
+
+    if (s == NULL) {
+        s = elf_add_symbol(out, "", 0, 0, STB_LOCAL, STT_SECTION);
+        if (s == NULL) {
+            return NULL;
+        }
+        s->shndx = (uint32_t)(sec->index + 1);
+        sec->section_symbol = s;
+    }
+    return s;
+}
+
+/**
+ * @brief Add @p delta to the addend a REL relocation keeps in its place, the @p width bytes at @p off of
+ * @p sec, as bfd adjusts one under -r.
+ *
+ * @return 1 if done, 0 if it cannot be (a width other than 1, 2, 4 or 8, or not within the section)
+ */
+static int add_to_implicit_addend(struct elf_section *sec, uint64_t off, int width, uint64_t delta,
+                                  elfobj_endian_t endian) {
+    uint64_t v = 0;
+    int k;
+
+    if ((width != 1 && width != 2 && width != 4 && width != 8) || sec->data == NULL || off > sec->data_size ||
+        sec->data_size - off < (uint64_t)width) {
+        return 0;
+    }
+    for (k = 0; k < width; ++k) {
+        int b = endian == ELFOBJ_ENDIAN_LE ? k : width - 1 - k;
+        v |= (uint64_t)sec->data[off + (uint64_t)k] << (8 * b);
+    }
+    v += delta;
+    for (k = 0; k < width; ++k) {
+        int b = endian == ELFOBJ_ENDIAN_LE ? k : width - 1 - k;
+        sec->data[off + (uint64_t)k] = (uint8_t)(v >> (8 * b));
+    }
+    return 1;
+}
+
 static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                                    const struct elf_link_input *input,
                                    const uint64_t *sec_bases, const uint8_t *sec_included,
@@ -1368,6 +1410,31 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                     return ELF_ERR_BOUNDS;
                 }
                 local_shndx = (uint32_t)(dst_sym_sec->index + 1);
+                /*
+                 * Against an input section's own symbol: against the output section's, the input's place
+                 * in it added to the addend (in the relocation's place, for REL), as GNU ld writes it.
+                 */
+                if (!sec_rel && local_type == STT_SECTION) {
+                    struct elf_symbol *ss = output_section_symbol(out, dst_sym_sec);
+                    int done = 0;
+
+                    if (ss == NULL) {
+                        return ELF_ERR_OOM;
+                    }
+                    if (out->cls == ELFOBJ_CLASS_64) {
+                        addend += (int64_t)local_value;
+                        done = 1;
+                    } else {
+                        done = add_to_implicit_addend(dst_sec, off, elf_reloc_size_for_machine(out->machine, r->type),
+                                                      local_value, out->endian);
+                    }
+                    if (done) {
+                        if (elf_add_relocation(dst_sec, off, ss, r->type, addend) != ELF_OK) {
+                            return ELF_ERR_RELOC;
+                        }
+                        continue;
+                    }
+                }
             }
 
             /*
