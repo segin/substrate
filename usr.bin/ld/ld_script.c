@@ -1466,6 +1466,12 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
         return -1;
     }
     phdrs = &sc->phdrs;
+    /* FILEHDR on the first PT_LOAD: it takes the headers, beginning below its first section, as GNU ld's does */
+    for (k = 0; k < phdrs->count && phdrs->items[k].type != PT_LOAD; ++k) {
+    }
+    if (k < phdrs->count && phdrs->items[k].filehdr && elf_set_load_headers(obj, 2) != ELF_OK) {
+        return -1;
+    }
     segs = (elf_segment_t **)calloc(phdrs->count, sizeof(*segs));
     flags = (uint32_t *)calloc(phdrs->count, sizeof(*flags));
     if (segs == NULL || flags == NULL) {
@@ -1480,10 +1486,10 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 have_phdr |= phdrs->items[k].type == PT_PHDR;
                 have_interp |= phdrs->items[k].type == PT_INTERP;
             }
-            /* a PT_PHDR the script does not ask for: for a dynamic linker, and only where the headers are loaded */
-            if (!have_phdr &&
-                (sc->phdrs_filehdr || (ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0')) &&
-                elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
+            /* a PT_PHDR the script does not ask for: for a dynamic linker, and only where the headers are
+             * loaded.  (A FILEHDR asks for no PT_PHDR: GNU ld makes no header PHDRS does not list.) */
+            if (!have_phdr && sc->phdrs_filehdr && ctx->opt.interp_path != NULL &&
+                ctx->opt.interp_path[0] != '\0' && elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
                 goto done;
             }
             if (!have_interp && ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0' &&
@@ -2386,6 +2392,7 @@ static int lp_phdrs(lds_parser_t *p) {
         uint32_t type = 0;
         uint32_t flags = 0;
         int has_flags = 0;
+        int filehdr = 0;
 
         if (t == NULL) {
             return -1;
@@ -2438,6 +2445,7 @@ static int lp_phdrs(lds_parser_t *p) {
             if (lds_tok_is(t, LDS_TOK_IDENT, "FILEHDR") || lds_tok_is(t, LDS_TOK_IDENT, "PHDRS")) {
                 if (lds_tok_is(t, LDS_TOK_IDENT, "FILEHDR")) {
                     p->sc->phdrs_filehdr = 1;
+                    filehdr = 1;
                 }
                 lp_take(p);
             } else if (lds_tok_is(t, LDS_TOK_IDENT, "AT")) {
@@ -2480,6 +2488,7 @@ static int lp_phdrs(lds_parser_t *p) {
             return -1;
         }
         p->sc->phdrs.items[p->sc->phdrs.count - 1].has_flags = has_flags;
+        p->sc->phdrs.items[p->sc->phdrs.count - 1].filehdr = filehdr;
         free(name);
     }
 }

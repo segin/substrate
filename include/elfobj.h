@@ -1565,7 +1565,9 @@ elf_err_t elf_set_flags(elfobj_t *obj, uint32_t flags);
 elf_err_t elf_set_entry(elfobj_t *obj, uint64_t entry);
 /* Whether the first executable PT_LOAD takes in the ELF and program
  * headers where they fit below it (1, the default); a linker script's
- * PHDRS without FILEHDR says not. */
+ * PHDRS without FILEHDR says not (0).  2: the first PT_LOAD takes them,
+ * whatever its flags, starting as far below its first section as they
+ * are in the file, as a PHDRS entry with FILEHDR asks. */
 elf_err_t elf_set_load_headers(elfobj_t *obj, int load);
 /* The largest page the output may be loaded in, a power of two (GNU ld's
  * -z max-page-size): what a PT_LOAD the writer makes is aligned to, and

@@ -141,6 +141,13 @@ is "text is R E" "$(readelf -lW "$work/phdrs.out" | awk '$1 == "LOAD" && $3 ~ /0
 is "data is RW"  "$(readelf -lW "$work/phdrs.out" | awk '$1 == "LOAD" && $3 == "0x00900000" { print $7 }')" RW
 is "bss follows data into its header" \
    "$(readelf -lW "$work/phdrs.out" | sed -n '/Section to Segment/,$p' | grep -c '\.data \.bss')" 1
+# FILEHDR PHDRS: the text segment takes the headers, from a page below
+# .text, as GNU ld's does; and there is no PT_PHDR, which PHDRS does not
+# list (it was made, and no PT_LOAD covered it)
+is "FILEHDR: the headers begin the text segment" \
+   "$(readelf -lW "$work/phdrs.out" | awk '$1 == "LOAD" && $2 == "0x000000" { print $3 }')" 0x00800000
+is "no PT_PHDR the script does not ask for" "$(readelf -lW "$work/phdrs.out" | grep -c '^  PHDR')" 0
+is "readelf finds nothing wrong" "$(readelf -lW "$work/phdrs.out" 2>&1 | grep -c 'Error')" 0
 
 # A 32-bit address space wraps: a call across more than half of it is in
 # range, being the same call the other way round.

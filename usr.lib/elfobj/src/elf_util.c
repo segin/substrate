@@ -944,6 +944,7 @@ elf_err_t elf_set_load_headers(elfobj_t *obj, int load) {
         return ELF_ERR_STATE;
     }
     obj->no_load_headers = load ? 0 : 1;
+    obj->force_load_headers = load == 2;
     obj->dirty = 1;
     return ELF_OK;
 }

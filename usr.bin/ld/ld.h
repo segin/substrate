@@ -363,6 +363,7 @@ typedef struct {
     uint32_t flags;
     uint64_t align;
     int has_flags;              /* FLAGS(...) given, else from the sections */
+    int filehdr;                /* FILEHDR: the ELF header is loaded in it */
 } lds_phdr_entry_t;
 
 typedef struct {

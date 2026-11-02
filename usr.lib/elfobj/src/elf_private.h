@@ -172,6 +172,7 @@ struct elfobj {
     uint8_t readonly;
     uint8_t finalized;
     uint8_t no_load_headers;   /* the ELF and program headers are in no PT_LOAD (elf_set_load_headers) */
+    uint8_t force_load_headers; /* the first PT_LOAD takes them, from a page lower if need be (2 there) */
     uint64_t max_page_size;    /* a PT_LOAD's alignment, and its offset's modulus (elf_set_max_page_size); 0: 4 KiB */
     uint8_t dirty;
     uint8_t lazy_parse;
