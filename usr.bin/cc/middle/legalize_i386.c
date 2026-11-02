@@ -900,19 +900,44 @@ static int i386_function_converts_half(const cc_ssa_function_t *f) {
     return 0;
 }
 
-/** A use of a _Float16 value i386_half_copies() looks for: the use's value, and whether it is one. */
-typedef struct {
-    const unsigned char *is_half;
-    int found;
-} half_use_t;
+/** Whether instruction @p in reads a value @p is_half marks: an operand, an argument or an asm input. */
+static int reads_half(const cc_ssa_instr_t *in, const unsigned char *is_half) {
+    size_t k;
 
-static void half_use_cb(void *ctx, int v, int role) {
-    half_use_t *u = (half_use_t *)ctx;
-
-    (void)role;
-    if (v >= 0 && u->is_half[v]) {
-        u->found = 1;
+    switch (in->op) {
+    case CC_SSA_PARAM:
+    case CC_SSA_CONST:
+    case CC_SSA_STR:
+    case CC_SSA_GADDR:
+    case CC_SSA_LADDR:
+    case CC_SSA_STACKALLOC:
+    case CC_SSA_CHAIN:
+    case CC_SSA_FRAMEADDR:
+    case CC_SSA_REGREAD:
+    case CC_SSA_LABEL:
+    case CC_SSA_BR:
+    case CC_SSA_VA_START:
+    case CC_SSA_TRAP:
+        return 0; /* (no value operands: their lhs and rhs say other things) */
+    default:
+        break;
     }
+    if ((in->lhs >= 0 && is_half[in->lhs]) || (in->rhs >= 0 && is_half[in->rhs])) {
+        return 1;
+    }
+    for (k = 0; in->args != NULL && k < in->arg_count; ++k) {
+        if (in->args[k] >= 0 && is_half[in->args[k]]) {
+            return 1;
+        }
+    }
+    for (k = 0; in->asm_in_values != NULL && k < in->asm_in_count; ++k) {
+        int v = in->asm_in_values[k];
+
+        if (v >= 0 && is_half[v]) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /** Refuse a _Float16 of function @p f without SSE2, with gcc's message @p msg, where instruction @p in is (or the
@@ -969,7 +994,6 @@ int cc_i386_half_copies(cc_ssa_function_t *f, cc_diag_t *diag) {
     for (i = 0; i < f->instr_count && rc == 0; ++i) {
         const cc_ssa_instr_t *in = &f->instrs[i];
         int call = in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI;
-        half_use_t u;
 
         if (call && (in->agg_class & CC_ABI_RET_HALF) != 0) {
             rc = half_refuse(f, in, "SSE register return with SSE2 disabled", diag);
@@ -1003,10 +1027,7 @@ int cc_i386_half_copies(cc_ssa_function_t *f, cc_diag_t *diag) {
         if (in->op == CC_SSA_PARAM || in->op == CC_SSA_LOAD) {
             continue;
         }
-        u.is_half = is_half;
-        u.found = 0;
-        cc_ssa_for_each_use(in, half_use_cb, &u);
-        if (u.found) {
+        if (reads_half(in, is_half)) {
             /* (a compare is an operation, gcc's says, done in float) */
             int convert = in->op == CC_SSA_F2I || in->op == CC_SSA_FROUND32 || in->op == CC_SSA_FROUND64 ||
                           in->op == CC_SSA_STORE || in->op == CC_SSA_MOV || in->op == CC_SSA_RET;
