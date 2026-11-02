@@ -6639,6 +6639,16 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
     p = skip_ws(p);
     name = cc_strndup(name_start, (size_t)(name_end - name_start));
     body = cc_strdup(p);
+    if (body != NULL) {
+        /* white space ending the replacement list is no part of it (C11 6.10.3p7): Linux's
+         * `#define EXC_EXCEPTION 0x28` followed by a comment leaves none in `EXC_EXCEPTION(%rsp)`,
+         * where an assembler macro's arguments, parted by spaces, would see two */
+        size_t n = strlen(body);
+
+        while (n > 0 && isspace((unsigned char)body[n - 1])) {
+            body[--n] = '\0';
+        }
+    }
     if (name == NULL || body == NULL) {
         free(name);
         free(body);
