@@ -4867,8 +4867,6 @@ next_iter:
 static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, char ***out_args, size_t *out_count) {
     size_t i = open_pos + 1;
     int paren_level = 1;
-    int brace_level = 0;
-    int bracket_level = 0;
     sb_t cur;
     cc_strvec_t args;
     memset(&cur, 0, sizeof(cur));
@@ -4906,48 +4904,13 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
             i++;
             continue;
         }
-        if (c == '{') {
-            brace_level++;
-            if (sb_append_c(&cur, c) != 0) {
-                goto fail;
-            }
-            i++;
-            continue;
-        }
-        if (c == '}') {
-            if (brace_level > 0) {
-                brace_level--;
-            }
-            if (sb_append_c(&cur, c) != 0) {
-                goto fail;
-            }
-            i++;
-            continue;
-        }
-        if (c == '[') {
-            bracket_level++;
-            if (sb_append_c(&cur, c) != 0) {
-                goto fail;
-            }
-            i++;
-            continue;
-        }
-        if (c == ']') {
-            if (bracket_level > 0) {
-                bracket_level--;
-            }
-            if (sb_append_c(&cur, c) != 0) {
-                goto fail;
-            }
-            i++;
-            continue;
-        }
+        /* only parentheses group: a comma in braces or brackets parts arguments, as gcc has it (C11 6.10.3p11) */
         if (c == ')') {
             paren_level--;
             if (paren_level < 0) {
                 goto fail;
             }
-            if (paren_level == 0 && brace_level == 0 && bracket_level == 0) {
+            if (paren_level == 0) {
                 char *arg = trim_dup(cur.buf != NULL ? cur.buf : "");
                 if (arg == NULL) {
                     goto fail;
@@ -4969,7 +4932,7 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
             i++;
             continue;
         }
-        if (c == ',' && paren_level == 1 && brace_level == 0 && bracket_level == 0) {
+        if (c == ',' && paren_level == 1) {
             char *arg = trim_dup(cur.buf != NULL ? cur.buf : "");
             if (arg == NULL) {
                 goto fail;
