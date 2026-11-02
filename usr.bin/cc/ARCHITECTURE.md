@@ -166,7 +166,7 @@ Name: AST, semantic state, SSA modules/functions/blocks, verifier metadata
 
 Type: Process-local compiler data structures
 
-Purpose: Carry the program through parsing, semantic validation, optimization, and backend lowering.
+Purpose: Carry the program through parsing, semantic validation, optimization, and backend lowering. The IR names functions and objects as the source does; an asm label, `int f(void) asm("g")`, is kept beside it (`cc_ssa_module_t.asm_labels`) and given to the symbol only after the middle passes (`cc_ssa_module_apply_asm_labels()`), so that to them a function and the one another's label names stay two (Linux's fortified `sized_strscpy` calls `__real_strscpy`, labelled `sized_strscpy`).
 
 ### 4.3. Intermediate Assembly
 

@@ -6459,6 +6459,7 @@ static void free_stmt(cc_stmt_t *s) {
     free(s->attr_section);
     free(s->attr_alias);
     free(s->asm_register);
+    free(s->asm_label);
     free(s->attr_cleanup);
     cc_bounds_free(&s->array_bounds);
     free_expr(s->expr);
@@ -6563,6 +6564,8 @@ static void free_global_decl(cc_global_t *g) {
     g->attr_alias = NULL;
     free(g->asm_register);
     g->asm_register = NULL;
+    free(g->asm_label);
+    g->asm_label = NULL;
     free_expr(g->init);
     g->init = NULL;
 }
@@ -6643,6 +6646,11 @@ static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
         if (cur->asm_register == NULL && g.asm_register != NULL) {
             cur->asm_register = g.asm_register;
             g.asm_register = NULL;
+        }
+        if (cur->asm_label == NULL && g.asm_label != NULL) {
+            /* `extern int x; extern int x asm("y");`: a later declaration's label names it too (gcc) */
+            cur->asm_label = g.asm_label;
+            g.asm_label = NULL;
         }
         free_global_decl(&g);
         return 0;
@@ -8210,6 +8218,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     dst->attr_section = NULL;
     dst->attr_alias = NULL;
     dst->asm_register = NULL;
+    dst->asm_label = NULL;
     dst->attr_cleanup = NULL;
     dst->expr = NULL;
     dst->init_stmt = NULL;
@@ -8259,6 +8268,13 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     if (src->asm_register != NULL) {
         dst->asm_register = cc_strndup(src->asm_register, strlen(src->asm_register));
         if (dst->asm_register == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->asm_label != NULL) {
+        dst->asm_label = cc_strndup(src->asm_label, strlen(src->asm_label));
+        if (dst->asm_label == NULL) {
             free_stmt(dst);
             return -1;
         }
@@ -10061,6 +10077,13 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             }
+        } else if (merged_attrs.asm_label != NULL) {
+            /* `extern int x asm("y")`: the name its symbol has */
+            s.asm_label = cc_strndup(merged_attrs.asm_label, strlen(merged_attrs.asm_label));
+            if (s.asm_label == NULL) {
+                free_stmt(&s);
+                return -1;
+            }
         }
         decl_attrs_clear(&suffix_attrs);
         decl_attrs_clear(&merged_attrs);
@@ -10108,10 +10131,25 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             s.attr_section = NULL;
             fn_decl.attr_alias = s.attr_alias;
             s.attr_alias = NULL;
-            if (skip_decl_gnu_suffix(p, NULL) != 0) {
-                free_func(&fn_decl);
-                free_stmt(&s);
-                return -1;
+            fn_decl.asm_label = s.asm_label;
+            s.asm_label = NULL;
+            {
+                /* `int f(void) asm("g")`: the label follows the parameters */
+                decl_attrs_t fn_suffix;
+
+                decl_attrs_reset(&fn_suffix);
+                if (skip_decl_gnu_suffix(p, &fn_suffix) != 0) {
+                    decl_attrs_clear(&fn_suffix);
+                    free_func(&fn_decl);
+                    free_stmt(&s);
+                    return -1;
+                }
+                if (fn_suffix.asm_label != NULL) {
+                    free(fn_decl.asm_label);
+                    fn_decl.asm_label = fn_suffix.asm_label;
+                    fn_suffix.asm_label = NULL;
+                }
+                decl_attrs_clear(&fn_suffix);
             }
             if (parser_push_hoisted_func(p, &fn_decl) != 0) {
                 free_func(&fn_decl);
@@ -10160,6 +10198,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             s.attr_section = NULL;
             fn_decl.attr_alias = s.attr_alias;
             s.attr_alias = NULL;
+            fn_decl.asm_label = s.asm_label;
+            s.asm_label = NULL;
             if (parser_push_hoisted_func(p, &fn_decl) != 0) {
                 free_func(&fn_decl);
                 free_stmt(&s);
@@ -11006,6 +11046,7 @@ static void free_func(cc_function_t *f) {
     free(f->nest_parent);
     free(f->attr_section);
     free(f->attr_alias);
+    free(f->asm_label);
     for (i = 0; i < f->param_count; ++i) {
         free(f->params[i].name);
         cc_bounds_free(&f->params[i].vla_bounds);
@@ -11040,6 +11081,7 @@ void cc_tu_free(cc_translation_unit_t *tu) {
         free(tu->globals[i].attr_section);
         free(tu->globals[i].attr_alias);
         free(tu->globals[i].asm_register);
+        free(tu->globals[i].asm_label);
         free_expr(tu->globals[i].init);
     }
     free(tu->globals);
@@ -11477,6 +11519,16 @@ static int parse_function_def(parser_t *p, cc_function_t *f) {
     if (merged_attrs.alias != NULL) {
         f->attr_alias = cc_strndup(merged_attrs.alias, strlen(merged_attrs.alias));
         if (f->attr_alias == NULL) {
+            decl_attrs_clear(&spec_attrs);
+            decl_attrs_clear(&suffix_attrs);
+            decl_attrs_clear(&merged_attrs);
+            return -1;
+        }
+    }
+    if (merged_attrs.asm_label != NULL) {
+        /* `int f(void) asm("g")`: the name of its symbol, used when the module is emitted */
+        f->asm_label = cc_strndup(merged_attrs.asm_label, strlen(merged_attrs.asm_label));
+        if (f->asm_label == NULL) {
             decl_attrs_clear(&spec_attrs);
             decl_attrs_clear(&suffix_attrs);
             decl_attrs_clear(&merged_attrs);
@@ -12017,6 +12069,8 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 decls[di].attr_alias = NULL;
                 g.asm_register = decls[di].asm_register;
                 decls[di].asm_register = NULL;
+                g.asm_label = decls[di].asm_label;
+                decls[di].asm_label = NULL;
                 g.init = decls[di].expr;
                 decls[di].expr = NULL;
                 g.ctype = decls[di].ctype;

@@ -187,6 +187,15 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         cc_tu_free(&tu);
         return -1;
     }
+    /* only now the symbols asm labels name: to the passes a label is not the function it names */
+    if (cc_ssa_module_apply_asm_labels(&ssa) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "out of memory applying asm labels");
+        }
+        cc_ssa_module_free(&ssa);
+        cc_tu_free(&tu);
+        return -1;
+    }
     if (dump_ir_after(&ssa, opts, "opt", 1, display_src, diag) != 0) {
         cc_ssa_module_free(&ssa);
         cc_tu_free(&tu);

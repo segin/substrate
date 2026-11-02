@@ -253,6 +253,7 @@ struct cc_stmt {
     char *attr_section;
     char *attr_alias;
     char *asm_register; /**< a `register ... asm("reg")` declaration: the register, without % (owned) */
+    char *asm_label;    /**< any other declaration's `asm("name")`: its symbol's name, as written (owned) */
     char *attr_cleanup; /**< a declaration's `cleanup(fn)`: fn, called with the variable's address as the
                              variable goes out of scope (owned); NULL for none */
     cc_stmt_kind_t kind;
@@ -417,6 +418,7 @@ typedef struct {
     int attr_patchable_before; /**< its m */
     char *attr_section;
     char *attr_alias;
+    char *asm_label; /**< `int f(void) asm("g")`: the symbol's name, as written, for this declaration (owned) */
     int has_body;
     int has_prototype;
     int has_oldstyle_param_decls;
@@ -441,6 +443,7 @@ typedef struct {
     char *attr_alias;
     char *asm_register; /**< a global register variable, `register T x asm("esp")`: its register, without %;
                              it has no storage and reading it reads the register (owned) */
+    char *asm_label;    /**< `int x asm("y")`: the symbol's name, as written, from any declaration (owned) */
     cc_expr_t *init;
     const struct cc_ctype *ctype; /**< its type (cc_ctype.h): as declared, completed by a later declaration or,
                                        by sema, from its initializer */

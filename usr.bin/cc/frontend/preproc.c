@@ -2051,6 +2051,10 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__CHAR_BIT__", 0, 0, NULL, 0, "8") != 0) {
         return -1;
     }
+    /* empty on x86 ELF, as gcc's: glibc's asm labels are __ASMNAME("__isoc23_strtol"), the prefix stringified */
+    if (macro_set(&st->macros, "__USER_LABEL_PREFIX__", 0, 0, NULL, 0, "") != 0) {
+        return -1;
+    }
     if (macro_set(&st->macros, "__SCHAR_MAX__", 0, 0, NULL, 0, "127") != 0) {
         return -1;
     }

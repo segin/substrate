@@ -15911,6 +15911,25 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
     }
 
+    /* the names asm labels give symbols: the IR keeps the source's until the module is emitted */
+    for (i = 0; i < tu->func_count; ++i) {
+        if (tu->funcs[i].name != NULL && tu->funcs[i].asm_label != NULL &&
+            cc_ssa_module_add_asm_label(out, tu->funcs[i].name, tu->funcs[i].asm_label) != 0) {
+            set_diag(diag, "out of memory noting asm labels");
+            cc_ssa_module_free(out);
+            return -1;
+        }
+    }
+    for (i = 0; i < tu->global_count; ++i) {
+        if (tu->globals[i].name != NULL && tu->globals[i].asm_label != NULL &&
+            tu->globals[i].asm_register == NULL &&
+            cc_ssa_module_add_asm_label(out, tu->globals[i].name, tu->globals[i].asm_label) != 0) {
+            set_diag(diag, "out of memory noting asm labels");
+            cc_ssa_module_free(out);
+            return -1;
+        }
+    }
+
     if (tu->toplevel_asm_count > 0) {
         out->toplevel_asm = (char **)calloc(tu->toplevel_asm_count, sizeof(*out->toplevel_asm));
         if (out->toplevel_asm == NULL) {

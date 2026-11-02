@@ -342,6 +342,11 @@ typedef struct {
      *  internal by an attribute or a visibility pragma -- for position-independent code to reach directly (owned) */
     char **local_decls;
     size_t local_decl_count;
+    /** the file-scope functions and objects an asm label names, `int f(void) asm("g")`: their names in the
+     *  source, which the IR keeps until cc_ssa_module_apply_asm_labels() gives each its label (owned) */
+    char **asm_label_names;
+    char **asm_labels;          /**< each one's label, as written (owned) */
+    size_t asm_label_count;     /**< the number of them */
 } cc_ssa_module_t;
 
 /** The register class value @p v lives in: CC_VAL_F64 for a floating value, else CC_VAL_I64. */
@@ -391,6 +396,23 @@ void cc_ssa_function_free(cc_ssa_function_t *f);
 
 /** Free what global @p g owns, and clear it. */
 void cc_ssa_global_free(cc_ssa_global_t *g);
+
+/**
+ * Note that the file-scope function or object @p name has asm label @p label, unless it has one already.
+ *
+ * @return 0, or -1 when out of memory
+ */
+int cc_ssa_module_add_asm_label(cc_ssa_module_t *m, const char *name, const char *label);
+
+/**
+ * Give each function and object an asm label names its label for its symbol: its definition's name and every
+ * reference's, in calls, addresses and initializers.  It runs after the middle passes, so that to them a
+ * function and the one whose name another's label is (Linux's fortified `__real_strscpy` labelled
+ * `sized_strscpy`, and the inline-only `sized_strscpy` calling it) stay two.
+ *
+ * @return 0, or -1 when out of memory
+ */
+int cc_ssa_module_apply_asm_labels(cc_ssa_module_t *m);
 
 /**
  * Add a value to a function: signed, and a word (the pointer size), or a
