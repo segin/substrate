@@ -4322,6 +4322,19 @@ static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag)
                 }
             }
         }
+        /*
+         * a const table's load at an offset only the promoted values made constant: Linux's
+         * reverse_cpuid_check() is passed what __feature_translate()'s switch returns, a variable of two
+         * definitions until its dead arms went
+         */
+        if (!oom) {
+            int rl = fold_const_loads(m, &m->funcs[i]);
+
+            if (rl > 0) {
+                rl = settle_function(&m->funcs[i]) < 0 ? -1 : 1;
+            }
+            oom = rl < 0 || (rl > 0 && dce_function(&m->funcs[i]) < 0);
+        }
     }
     /* what every call of a static function passes it */
     if (!oom && opt_level > 0) {

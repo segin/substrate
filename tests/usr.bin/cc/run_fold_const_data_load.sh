@@ -4,7 +4,9 @@
 # folds it.  Linux's reverse_cpuid_check(), always_inline with a
 # constant leaf, has BUILD_BUG_ON(reverse_cpuid[x86_leaf].function == 0):
 # left unfolded, its call of an undefined __compiletime_assert_N stayed in
-# kvm.o, hundreds of them, and modpost refused the kernel.  The loads of
+# kvm.o, hundreds of them, and modpost refused the kernel; and where the
+# leaf comes through __feature_translate()'s switch, it is constant only
+# once slots are promoted and the dead arms gone.  The loads of
 # every width and signedness, members, a 2-D array, a string's bytes and
 # the zeros past an initializer fold as gcc folds them -- no reference to
 # a function only an unfolded load would call, -O1 and -O2, -m64 and -m32,
@@ -44,6 +46,17 @@ static inline __attribute__((always_inline)) unsigned bit(int f) { check(f / 32)
 unsigned caps[4];
 void init(void) { caps[0] |= bit(5); caps[3] |= bit(97); caps[1] |= bit(40); }
 int direct(void) { return reverse_cpuid[3].function; }
+/* the index a switch returns, a variable of several definitions until the dead arms go: __feature_translate() */
+static inline __attribute__((always_inline)) unsigned translate(unsigned f)
+{
+	switch (f) {
+	case 100: return 33;
+	case 101: return 34;
+	default: return f;
+	}
+}
+static inline __attribute__((always_inline)) unsigned tbit(int f) { f = translate(f); check(f / 32); return 1u << (f & 31); }
+void tinit(void) { caps[0] |= tbit(5); caps[3] |= tbit(97); caps[1] |= tbit(100); }
 
 static const signed char sc[] = { -1, 2, -128, 127 };
 static const unsigned char uc[] = { 255, 1, 128 };
