@@ -829,9 +829,16 @@ or a
 and the rest.
 This applies where the x87 would do the doubles; where SSE does them
 .Pq Fl mfpmath=sse , or Fl msse2 without Fl mfpmath=387
-a
+only a
 .Ic long double
-is still refused.
+is soft-float, as
+.Xr gcc 1
+has it: SSE computes the floats and doubles, but for a conversion from or to a
+.Ic long long
+or an
+.Ic unsigned int
+.Pq Fn __floatdidf , Fn __fixdfdi , Fn __floatunsidf No and the like ,
+and their results are returned in the general registers all the same.
 A floating operand of an
 .Ic asm
 statement, and

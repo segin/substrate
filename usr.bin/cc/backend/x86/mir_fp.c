@@ -1175,7 +1175,9 @@ static void jump_to(xsel_t *s, int label, xcc_t cc) {
 /**
  * Integer to floating.  SSE: cvtsi2sd of the value extended to a word, an unsigned 64-bit one of half of it,
  * rounding kept in the low bit, doubled when its top bit is set.  x87: fild of it in memory, extended to 64 bits
- * (an unsigned one with 2^64 added when its top bit is set).
+ * (an unsigned one with 2^64 added when its top bit is set) -- on i386 for SSE's doubles too, but under
+ * -mno-80387, where a value an int holds is cvtsi2sdl's, as gcc converts it there (soft-float has made the
+ * others calls: softfloat_i386.c).
  */
 static void sel_i2f(xsel_t *s, const cc_ssa_instr_t *in) {
     int w = s->word;
@@ -1184,6 +1186,30 @@ static void sel_i2f(xsel_t *s, const cc_ssa_instr_t *in) {
 
     if (bytes > 8) {
         bytes = 8;
+    }
+    if (xs_fp_kind(s, in->dst) == XFP_SSE && w == 4 && cc_options_current()->no_80387 && bytes <= 4 &&
+        !(uns && bytes == 4)) {
+        xop_t r = xs_reg_word(s, in->lhs, 0);
+        xop_t d = xs_fp_reg(s, in->dst);
+        xop_t e = xs_temp(s);
+
+        if (bytes < 4) {
+            xop_t a = r;
+
+            if (bytes == 1) {
+                /* from a byte register: a copy in one */
+                xop_t c = xs_temp(s);
+
+                xs_emit(s, XI_MOV, 4, 2, &r, &c, NULL);
+                a = c;
+            }
+            a.size = (unsigned char)bytes;
+            xs_emit(s, uns ? XI_MOVZX : XI_MOVSX, 4, 2, &a, &e, NULL);
+        } else {
+            xs_emit(s, XI_MOV, 4, 2, &r, &e, NULL);
+        }
+        xs_emit(s, XI_CVTSI2SD, 8, 2, &e, &d, NULL);
+        return;
     }
     if (xs_fp_kind(s, in->dst) == XFP_SSE && w == 8) {
         xop_t r = xs_reg_word(s, in->lhs, 0);
@@ -1309,12 +1335,23 @@ static void sel_i2f(xsel_t *s, const cc_ssa_instr_t *in) {
 /**
  * Floating to integer, truncated.  SSE: cvttsd2si to 64 bits, which an unsigned 32-bit result's low word is; an
  * unsigned 64-bit one from 2^63 up converted less 2^63, its top bit set back.  x87: fistp of 64 bits under a
- * truncating control word (XI_FTOI), as i386.c does.
+ * truncating control word (XI_FTOI), as i386.c does -- on i386 for SSE's doubles too, but under -mno-80387,
+ * where a result narrower than an int, or an int's lowering says is signed (cc_ssa_instr_t.f2i_to), is
+ * cvttsd2sil's, as gcc converts it there (soft-float has made the others calls: softfloat_i386.c).
  */
 static void sel_f2i(xsel_t *s, const cc_ssa_instr_t *in) {
     int w = s->word;
     long db = xs_is_pair(s, in->dst) ? 8 : value_size_bytes(s->f, in->dst, w);
     int uns = in->is_unsigned || cc_ssa_value_is_unsigned(s->f, in->dst);
+
+    if (xs_fp_kind(s, in->lhs) == XFP_SSE && w == 4 && cc_options_current()->no_80387 && !in->is_unsigned &&
+        (db < 4 || (db == 4 && in->f2i_to == CC_SSA_F2I_TO_SIGNED))) {
+        xop_t x = xs_fp_reg(s, in->lhs);
+        xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), 4);
+
+        xs_emit(s, XI_CVTTSD2SI, 4, 2, &x, &d, NULL);
+        return;
+    }
 
     if (xs_fp_kind(s, in->lhs) == XFP_SSE && w == 8) {
         xop_t x = xs_fp_reg(s, in->lhs);

@@ -23,15 +23,17 @@ int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag);
 typedef enum {
     CC_SOFTFLOAT_NONE = 0, /**< nothing: the x87 and SSE as ever */
     CC_SOFTFLOAT_ALL,      /**< -mno-80387 where the x87 would do the doubles: every operation soft-float */
-    CC_SOFTFLOAT_RETURNS   /**< -mno-fp-ret-in-387 alone: the x87 computes, results come back in %eax, %edx and
+    CC_SOFTFLOAT_RETURNS,  /**< -mno-fp-ret-in-387 alone: the x87 computes, results come back in %eax, %edx and
                                 %ecx */
+    CC_SOFTFLOAT_LDOUBLE   /**< -mno-80387 where SSE does the doubles: long double soft-float, results in the
+                                general registers, and SSE the rest */
 } cc_softfloat_mode_t;
 
 /**
  * What i386 floating point is made of by softfloat_i386.c: soft-float
  * under -mno-80387 (-msoft-float, -mgeneral-regs-only) where the x87, not
- * SSE, would do the doubles; under -mno-fp-ret-in-387 alone, results in
- * the general registers.
+ * SSE, would do the doubles, and only for long double where SSE does them;
+ * under -mno-fp-ret-in-387 alone, results in the general registers.
  *
  * @return the mode, CC_SOFTFLOAT_NONE on another target
  */

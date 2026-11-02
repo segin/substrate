@@ -26,8 +26,10 @@
  * the sign bit in memory.  An asm operand of floating type, which would be the x87's or a register's
  * reinterpretation, and _Float16 (which libgcc passes in SSE registers) are refused.
  *
- * It applies only where the x87 would otherwise do the work: not when SSE does the doubles
- * (-mfpmath=sse, or SSE2 without -mfpmath=387), whose long doubles the backend still refuses.
+ * All of it applies where the x87 would otherwise do the doubles.  Where SSE does them (-mfpmath=sse, or SSE2
+ * without -mfpmath=387; CC_SOFTFLOAT_LDOUBLE) only long double is soft-float, as gcc has it: floats and doubles
+ * stay SSE's, but for what the x87 would do of theirs -- a conversion from or to a 64-bit integer, by
+ * __floatdidf, __fixdfdi and the like -- and a float's or a double's result crosses in the general registers.
  *
  * Under -mno-fp-ret-in-387 alone (CC_SOFTFLOAT_RETURNS) the x87 computes, and only the results move, as gcc
  * returns them there: a function's floating result, and a call's, cross in the general registers by the same
@@ -67,6 +69,8 @@ typedef struct {
     int failed;
 } sf_t;
 
+static int sf_defines(cc_ssa_opcode_t op);
+
 /** An argument of a call the pass writes: its value, ABI byte and size in bytes. */
 typedef struct {
     int v;
@@ -76,8 +80,8 @@ typedef struct {
 
 /**
  * What functions are compiled with: on i386 under -mno-80387, soft-float when the x87, not SSE, would do the
- * doubles (the backend's rule, i386.c); under -mno-fp-ret-in-387 with the x87, its results in the general
- * registers.
+ * doubles (the backend's rule, i386.c), and for long double alone when SSE does; under -mno-fp-ret-in-387 with
+ * the x87, its results in the general registers.
  */
 cc_softfloat_mode_t cc_softfloat_i386_mode(void) {
     const cc_options_t *o = cc_options_current();
@@ -89,8 +93,9 @@ cc_softfloat_mode_t cc_softfloat_i386_mode(void) {
     if (!o->no_80387) {
         return o->no_fp_ret_in_387 ? CC_SOFTFLOAT_RETURNS : CC_SOFTFLOAT_NONE;
     }
-    return (o->i386_fpmath == CC_FPMATH_SSE || (o->i386_fpmath != CC_FPMATH_387 && o->i386_sse2)) ? CC_SOFTFLOAT_NONE
-                                                                                                 : CC_SOFTFLOAT_ALL;
+    return (o->i386_fpmath == CC_FPMATH_SSE || (o->i386_fpmath != CC_FPMATH_387 && o->i386_sse2))
+               ? CC_SOFTFLOAT_LDOUBLE
+               : CC_SOFTFLOAT_ALL;
 }
 
 /** Fail with message @p msg, naming the function; the first failure's message is kept. */
@@ -294,6 +299,50 @@ static int sf_is_nat(const sf_t *z, int v) {
     return v >= 0 && v < z->nvals && z->nat[v];
 }
 
+/** Whether @p v is a floating value at all: one the pass rewrites, or one it leaves floating. */
+static int sf_fp(const sf_t *z, int v) {
+    return sf_kind(z, v) != SF_NONE || sf_is_nat(z, v);
+}
+
+/**
+ * Whether @p v, a value the pass leaves floating, holds a float: its only definition rounds to one, loads one,
+ * takes a float parameter or a call's float result.
+ */
+static int sf_nat_is_float(const sf_t *z, int v) {
+    const cc_ssa_function_t *f = z->f;
+    const cc_ssa_instr_t *def = NULL;
+    size_t i;
+
+    if (!sf_is_nat(z, v)) {
+        return 0;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        if (f->instrs[i].dst == v && sf_defines(f->instrs[i].op)) {
+            if (def != NULL) {
+                return 0;
+            }
+            def = &f->instrs[i];
+        }
+    }
+    if (def == NULL) {
+        return 0;
+    }
+    switch (def->op) {
+    case CC_SSA_FROUND32:
+        return 1;
+    case CC_SSA_LOAD:
+        return def->imm == 4;
+    case CC_SSA_PARAM:
+        return f->param_abi != NULL && def->param_index >= 0 && (size_t)def->param_index < f->param_count &&
+               CC_ABI_KIND(f->param_abi[def->param_index]) == CC_CALL_ARG_ABI_FLOAT;
+    case CC_SSA_CALL:
+    case CC_SSA_CALLI:
+        return (def->agg_class & CC_ABI_RET_FLOAT) != 0;
+    default:
+        return 0;
+    }
+}
+
 /**
  * The bits of floating value @p v left floating, as @p size bytes (a float's 4, a double's 8; 12, a long
  * double's in a frame slot): stored into a slot of the frame, rounded to that size as a store rounds it.
@@ -385,13 +434,16 @@ static void sf_call(sf_t *z, const char *name, int dst, int ret_ld, long ret_siz
         in.is_unsigned = 1;
         in.agg_class = CC_ABI_RET_EAX_EDX;
     } else {
-        in.dst = dst;
+        /* (a floating value the pass leaves floating takes the bits through a slot) */
+        in.dst = sf_is_nat(z, dst) ? sf_value(z, (uint32_t)ret_size, 0) : dst;
         in.imm = ret_size;
         in.is_unsigned = ret_unsigned;
     }
     sf_put(z, &in);
     if (ret_ld) {
         sf_copy_ld(z, dst, 0, tmp, 0, 12);
+    } else if (in.dst != dst) {
+        sf_nat_from_bits(z, dst, in.dst, ret_size);
     }
 }
 
@@ -449,10 +501,14 @@ static void sf_note_fbits(sf_t *z, int v, int t) {
     }
 }
 
-/** The bits of float @p t (4 bytes) as a double, into @p dst. */
+/** The bits of float @p t (4 bytes) as a double, into @p dst (loaded as a float, where SSE holds it). */
 static void sf_from_float(sf_t *z, int dst, int t) {
     sf_arg_t a = sf_arg_i(t, 4);
 
+    if (sf_is_nat(z, dst)) {
+        sf_nat_from_bits(z, dst, t, 4);
+        return;
+    }
     sf_call(z, sf_kind(z, dst) == SF_LD ? "__extendsfxf2" : "__extendsfdf2", dst, sf_kind(z, dst) == SF_LD, 8, 0,
             &a, 1);
     sf_note_fbits(z, dst, t);
@@ -529,6 +585,10 @@ static void sf_f2i(sf_t *z, const cc_ssa_instr_t *in) {
     }
     if (sf_kind(z, lhs) == SF_D && lhs < z->nvals && z->fbits[lhs] >= 0) {
         a = sf_arg_i(z->fbits[lhs], 4);
+        mode = "sf";
+    } else if (sf_nat_is_float(z, lhs)) {
+        /* (a float SSE holds, to a 64-bit integer) */
+        a = sf_arg_i(sf_nat_bits(z, lhs, 4), 4);
         mode = "sf";
     }
     snprintf(name, sizeof(name), "__fix%s%s%s", uns ? "uns" : "", mode, wide ? "di" : "si");
@@ -644,6 +704,28 @@ static int sf_touches_float(sf_t *z, const cc_ssa_instr_t *in) {
     if (in->op == CC_SSA_RET && sf_is_nat(z, in->lhs)) {
         return 1;
     }
+    if (z->mode == CC_SOFTFLOAT_LDOUBLE) {
+        /* where SSE does the doubles: what the x87 would do of theirs -- a long double's bytes in memory, the
+         * conversions from and to a 64-bit integer and an unsigned int (the backend's mir_fp.c takes the rest)
+         * -- and a double passed as a long double */
+        long lb = in->lhs >= 0 && in->lhs < z->f->value_count ? cc_ssa_value_size(z->f, in->lhs) : 0;
+        long db = in->dst >= 0 && in->dst < z->f->value_count ? cc_ssa_value_size(z->f, in->dst) : 0;
+
+        if ((in->op == CC_SSA_LOAD && in->imm >= 10 && sf_is_nat(z, in->dst)) ||
+            (in->op == CC_SSA_STORE && in->imm >= 10 && sf_is_nat(z, in->rhs)) ||
+            (in->op == CC_SSA_I2F && sf_is_nat(z, in->dst) && (lb >= 8 || (lb == 4 && in->is_unsigned))) ||
+            (in->op == CC_SSA_F2I && sf_is_nat(z, in->lhs) &&
+             (db >= 8 || in->is_unsigned || (db == 4 && in->f2i_to != CC_SSA_F2I_TO_SIGNED)))) {
+            return 1;
+        }
+        for (i = 0; (in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) && in->call_arg_abi != NULL &&
+                    i < in->arg_count;
+             ++i) {
+            if (sf_is_nat(z, in->args[i]) && CC_ABI_KIND(in->call_arg_abi[i]) == CC_CALL_ARG_ABI_LDOUBLE) {
+                return 1;
+            }
+        }
+    }
     w.z = z;
     w.found = 0;
     cc_ssa_for_each_use(in, sf_note_float_use, &w);
@@ -672,7 +754,7 @@ static void sf_count_uses(sf_t *z) {
  */
 static int sf_rounds_twice(const sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *next) {
     if (next == NULL || next->op != CC_SSA_FROUND32 || next->lhs != in->dst || in->dst < 0 ||
-        in->dst >= z->nvals || z->uses[in->dst] != 1 || sf_kind(z, next->dst) != SF_D) {
+        in->dst >= z->nvals || z->uses[in->dst] != 1 || (sf_kind(z, next->dst) != SF_D && !sf_is_nat(z, next->dst))) {
         return 0;
     }
     if (in->op == CC_SSA_I2F) {
@@ -690,7 +772,9 @@ static void sf_rewrite_call(sf_t *z, const cc_ssa_instr_t *in0) {
         int v = in.args[a];
         unsigned char abi = in.call_arg_abi != NULL ? in.call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
 
-        if (sf_kind(z, v) == SF_NONE) {
+        if (sf_kind(z, v) == SF_NONE && !(z->mode == CC_SOFTFLOAT_LDOUBLE && sf_is_nat(z, v) &&
+                                          CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_LDOUBLE)) {
+            /* (a value the pass leaves floating is passed as ever, but for a double SSE holds as a long double) */
             continue;
         }
         if (in.call_arg_abi == NULL || in.call_arg_sizes == NULL) {
@@ -820,8 +904,7 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
 
         int ld;
 
-        if (in->rhs < 0 || sf_kind(z, in->dst) == SF_NONE || sf_kind(z, in->lhs) == SF_NONE ||
-            sf_kind(z, in->rhs) == SF_NONE) {
+        if (in->rhs < 0 || !sf_fp(z, in->dst) || !sf_fp(z, in->lhs) || !sf_fp(z, in->rhs)) {
             break;
         }
         ld = sf_kind(z, in->dst) == SF_LD || sf_kind(z, in->lhs) == SF_LD || sf_kind(z, in->rhs) == SF_LD;
@@ -849,7 +932,7 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
         return;
     }
     case CC_SSA_CMP:
-        if (sf_kind(z, in->lhs) == SF_NONE || sf_kind(z, in->rhs) == SF_NONE) {
+        if (!sf_fp(z, in->lhs) || !sf_fp(z, in->rhs)) {
             break;
         }
         sf_cmp(z, in);
@@ -867,7 +950,7 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
         return;
     }
     case CC_SSA_I2F:
-        if (sf_kind(z, in->dst) == SF_NONE || sf_kind(z, in->lhs) != SF_NONE) {
+        if (!sf_fp(z, in->dst) || sf_fp(z, in->lhs)) {
             break;
         }
         if (sf_rounds_twice(z, in, next)) {
@@ -879,12 +962,17 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
         sf_i2f(z, in->dst, in->lhs, in->is_unsigned, 0);
         return;
     case CC_SSA_F2I:
-        if (sf_kind(z, in->lhs) == SF_NONE || sf_kind(z, in->dst) != SF_NONE) {
+        if (!sf_fp(z, in->lhs) || sf_fp(z, in->dst)) {
             break;
         }
         sf_f2i(z, in);
         return;
     case CC_SSA_FROUND32:
+        if (sf_is_nat(z, in->dst) && sf_kind(z, in->lhs) == SF_LD) {
+            /* a long double to a float SSE holds: straight there */
+            sf_from_float(z, in->dst, sf_to_float(z, in->lhs));
+            return;
+        }
         if (sf_kind(z, in->dst) != SF_D || sf_kind(z, in->lhs) == SF_NONE) {
             break;
         }
@@ -900,7 +988,7 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
         sf_from_float(z, in->dst, sf_to_float(z, in->lhs));
         return;
     case CC_SSA_FROUND64:
-        if (sf_kind(z, in->dst) != SF_D || sf_kind(z, in->lhs) == SF_NONE) {
+        if ((sf_kind(z, in->dst) != SF_D && !sf_is_nat(z, in->dst)) || sf_kind(z, in->lhs) == SF_NONE) {
             break;
         }
         if (sf_kind(z, in->lhs) == SF_D) {
@@ -928,12 +1016,12 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
             sf_copy_ld(z, in->dst, 0, in->lhs, 0, 12);
             return;
         }
-        if (kd == SF_LD && ks == SF_D) {
+        if (kd == SF_LD && (ks == SF_D || sf_is_nat(z, in->lhs))) {
             a[0] = sf_arg_d(in->lhs);
             sf_call(z, "__extenddfxf2", in->dst, 1, 12, 0, a, 1);
             return;
         }
-        if (kd == SF_D && ks == SF_LD) {
+        if ((kd == SF_D || sf_is_nat(z, in->dst)) && ks == SF_LD) {
             a[0] = sf_arg_ld(in->lhs);
             sf_call(z, "__truncxfdf2", in->dst, 0, 8, 0, a, 1);
             return;
@@ -1007,8 +1095,10 @@ static void sf_rewrite(sf_t *z, const cc_ssa_instr_t *in, const cc_ssa_instr_t *
     case CC_SSA_RET:
         /* as the function returns it, whatever the value is held as */
         c.rhs = -1;
-        if (sf_is_nat(z, in->lhs)) {
-            /* a value the pass leaves floating: its bits through a slot, rounded to what is returned */
+        if (sf_is_nat(z, in->lhs) &&
+            !(z->mode == CC_SOFTFLOAT_LDOUBLE && z->f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE)) {
+            /* a value the pass leaves floating: its bits through a slot, rounded to what is returned (a double
+             * returned as a long double where SSE has it is widened by the routine, below) */
             long size = z->f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE ? 12 : z->f->ret_abi == CC_CALL_ARG_ABI_FLOAT ? 4 : 8;
 
             c.lhs = sf_nat_bits(z, in->lhs, size);
@@ -1188,6 +1278,8 @@ int cc_softfloat_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
         }
         if (z.mode == CC_SOFTFLOAT_ALL) {
             z.kind[v] = cc_ssa_value_size(f, v) >= 10 ? SF_LD : SF_D;
+        } else if (z.mode == CC_SOFTFLOAT_LDOUBLE && cc_ssa_value_size(f, v) >= 10) {
+            z.kind[v] = SF_LD;
         } else {
             z.nat[v] = 1;
         }
