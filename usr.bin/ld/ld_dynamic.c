@@ -273,6 +273,8 @@ uint32_t dynsym_name_off_at(const uint8_t *dynsym, size_t dynsym_len, size_t ent
     return read_u32_endian(dynsym + off, endian);
 }
 
+static uint32_t gnu_hash_bucket_count(size_t n);
+
 static uint8_t *build_sysv_hash_section(const uint8_t *dynsym, size_t dynsym_len,
                                         const uint8_t *dynstr, size_t dynstr_len,
                                         size_t entsz, elfobj_endian_t endian, size_t *out_sz) {
@@ -292,7 +294,8 @@ static uint8_t *build_sysv_hash_section(const uint8_t *dynsym, size_t dynsym_len
     if (nsyms > SIZE_MAX / 8 - 1) {
         return NULL;
     }
-    nbucket = nsyms > 1 ? nsyms - 1 : 1;
+    /* as many buckets as GNU ld gives the symbols there are (but the null one): bfd's table */
+    nbucket = gnu_hash_bucket_count(nsyms > 1 ? nsyms - 1 : 0);
     nchain = nsyms;
     buckets = (uint32_t *)calloc(nbucket, sizeof(*buckets));
     chains = (uint32_t *)calloc(nchain, sizeof(*chains));

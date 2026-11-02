@@ -65,7 +65,7 @@ gnu_hash_header() {
     objcopy --dump-section .gnu.hash=gh.bin "$1" scratch.o 2>/dev/null && od -An -tu4 -N16 gh.bin | tr -s ' '
 }
 compare() {     # WHAT GNU OURS
-    for sec in .dynstr .gnu.hash; do
+    for sec in .dynstr .gnu.hash .hash; do
         if [ "$(size_of "$2" $sec)" != "$(size_of "$3" $sec)" ]; then
             echo "FAIL: $1: $sec is $(size_of "$3" $sec) bytes, GNU ld's $(size_of "$2" $sec)"; fail=1
         fi
@@ -76,8 +76,9 @@ compare() {     # WHAT GNU OURS
 }
 
 ${GCC:-gcc} -O2 -fPIC -c -o lib.o lib.c || exit 1
-${GCC:-gcc} -shared -o libgnu.so lib.o || exit 1
-if ! ${GCC:-gcc} -B"$work/bin/" -shared -o libours.so lib.o > said 2>&1; then
+# (both hash tables: the SysV one's buckets are bfd's number too)
+${GCC:-gcc} -shared -Wl,--hash-style=both -o libgnu.so lib.o || exit 1
+if ! ${GCC:-gcc} -B"$work/bin/" -shared -Wl,--hash-style=both -o libours.so lib.o > said 2>&1; then
     echo "FAIL: ld -shared: $(head -1 said)"; exit 1
 fi
 compare "a shared object" libgnu.so libours.so
