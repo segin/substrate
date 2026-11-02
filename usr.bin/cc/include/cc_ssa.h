@@ -303,6 +303,9 @@ typedef struct cc_ssa_function {
     char *attr_section;
     char *attr_alias;
     int is_variadic;
+    /** a body for inlining only, never emitted: a gnu_inline `extern inline` function or C99's inline definition;
+     *  a call left of it, and its address, are the external function's (gcc) */
+    unsigned char inline_only;
 
     size_t param_count;
     int *param_values;

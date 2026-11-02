@@ -16699,17 +16699,31 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         if ((eff_attr_flags & CC_ATTR_GNU_INLINE) != 0 && (sf->storage & CC_STORAGE_INLINE) != 0) {
             /*
              * gnu_inline, the GNU89 meaning: an `extern inline` function
-             * defines nothing outside the file -- gcc inlines it, and with
-             * no inliner it is a copy of the file's own (Linux's
-             * native_save_fl was defined by every file using it) -- and a
+             * defines nothing -- it is for inlining only, below -- and a
              * plain `inline` one is an ordinary definition.
              */
             if ((sf->storage & CC_STORAGE_EXTERN) != 0) {
-                sf->storage = (sf->storage & ~CC_STORAGE_EXTERN) | CC_STORAGE_STATIC;
+                sf->storage &= ~CC_STORAGE_EXTERN;
             } else if ((sf->storage & CC_STORAGE_STATIC) == 0) {
                 /* (a static inline one is as it was: Linux's `inline` carries gnu_inline on all of them) */
                 sf->storage &= ~CC_STORAGE_INLINE;
             }
+        }
+        if ((sf->storage & CC_STORAGE_INLINE) != 0 &&
+            (sf->storage & (CC_STORAGE_EXTERN | CC_STORAGE_STATIC)) == 0) {
+            /*
+             * An inline definition (C11 6.7.4p7), gnu_inline's `extern
+             * inline` and GNU89's alike: gcc inlines its calls where it
+             * would a static inline function's and never emits it, so a
+             * call it leaves and its address are the external
+             * function's.  Linux's fortified memcmp is one; a local copy
+             * named memcmp in each file using it made modpost refuse
+             * vmlinux ("local symbol 'memcmp' was exported").  Static
+             * while the optimizer considers it, then dropped
+             * (remove_unused_static_functions()).
+             */
+            sf->inline_only = 1;
+            sf->storage |= CC_STORAGE_STATIC;
         }
         sf->attr_flags = eff_attr_flags;
         sf->attr_align = eff_attr_align;

@@ -1982,7 +1982,9 @@ static void keep_named(const cc_ssa_module_t *m, const char *sym, unsigned char 
     for (i = 0; i < m->func_count; ++i) {
         const char *name = m->funcs[i].name;
 
-        if (!keep[i] && name != NULL && strlen(name) == n && strncmp(name, sym, n) == 0) {
+        /* (an inline-only body is never kept: what names it names the external function) */
+        if (!keep[i] && !m->funcs[i].inline_only && name != NULL && strlen(name) == n &&
+            strncmp(name, sym, n) == 0) {
             keep[i] = 1;
             stack[(*top)++] = i;
         }
@@ -2120,8 +2122,9 @@ static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
     }
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *f = &m->funcs[i];
-        int removable = (f->storage & CC_STORAGE_STATIC) != 0 && (opt_level > 0 || (f->storage & CC_STORAGE_INLINE) != 0) &&
-                        (f->attr_flags & pinned) == 0;
+        int removable = f->inline_only ||
+                        ((f->storage & CC_STORAGE_STATIC) != 0 &&
+                         (opt_level > 0 || (f->storage & CC_STORAGE_INLINE) != 0) && (f->attr_flags & pinned) == 0);
 
         if (!removable) {
             keep[i] = 1;
@@ -3452,8 +3455,8 @@ static int constant_args(cc_ssa_module_t *m) {
         for (i = 0; i < n; ++i) {
             cc_ssa_function_t *g = &m->funcs[i];
 
-            if ((g->storage & CC_STORAGE_STATIC) == 0 || (g->attr_flags & barred) != 0 || g->attr_alias != NULL ||
-                g->is_variadic || named[i] || g->param_count == 0) {
+            if ((g->storage & CC_STORAGE_STATIC) == 0 || g->inline_only || (g->attr_flags & barred) != 0 ||
+                g->attr_alias != NULL || g->is_variadic || named[i] || g->param_count == 0) {
                 continue;
             }
             for (k = 0; k < g->instr_count; ++k) {
