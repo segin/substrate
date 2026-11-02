@@ -54,6 +54,10 @@
  * is a file name with `//` in it.
  */
 #define PP_PASTE_GUARD '\x1e'
+/** A macro argument had white space before it, after the `(` or `,` (parse_call_args()). */
+#define PP_ARG_WS_BEFORE 1u
+/** A macro argument had white space after it, before the `,` or `)`. */
+#define PP_ARG_WS_AFTER 2u
 
 typedef struct {
     char *name;
@@ -4425,7 +4429,15 @@ static char *stringify_macro_arg(const char *arg) {
     return out.buf;
 }
 
-static char *build_va_args_value(const pp_macro_t *m, char **args, size_t arg_count) {
+/**
+ * The variable arguments of a call of macro @p m, @p args from its param_count on, as one text: each comma
+ * between them with white space before or after it as the call had it (@p arg_ws, from parse_call_args()),
+ * as gcc spells them -- `#__VA_ARGS__` of `kvm-amd,kvm-intel` is "kvm-amd,kvm-intel" (Linux's module
+ * namespaces), of `p,q , r` "p,q , r".  With no @p arg_ws, `, ` between them.
+ *
+ * @return the text (owned), or NULL when out of memory
+ */
+static char *build_va_args_value(const pp_macro_t *m, char **args, size_t arg_count, const unsigned char *arg_ws) {
     sb_t out;
     size_t i;
     memset(&out, 0, sizeof(out));
@@ -4434,7 +4446,15 @@ static char *build_va_args_value(const pp_macro_t *m, char **args, size_t arg_co
     }
     for (i = m->param_count; i < arg_count; ++i) {
         if (i > m->param_count) {
-            if (sb_append(&out, ", ") != 0) {
+            const char *sep = ", ";
+
+            if (arg_ws != NULL) {
+                static const char *const seps[] = {",", ", ", " ,", " , "};
+
+                sep = seps[((arg_ws[i - 1] & PP_ARG_WS_AFTER) != 0 ? 2 : 0) |
+                           ((arg_ws[i] & PP_ARG_WS_BEFORE) != 0 ? 1 : 0)];
+            }
+            if (sb_append(&out, sep) != 0) {
                 sb_free(&out);
                 return NULL;
             }
@@ -4643,8 +4663,8 @@ static int pp_avoid_paste(sb_t *out, const char *next) {
     return pp_would_paste(out, *next) ? sb_append_c(out, PP_PASTE_GUARD) : 0;
 }
 
-static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_args, size_t arg_count, int allow_va_opt,
-                           int allow_gnu_ext) {
+static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_args, size_t arg_count,
+                           const unsigned char *arg_ws, int allow_va_opt, int allow_gnu_ext) {
     sb_t out;
     sb_t pasted;
     size_t i = 0;
@@ -4653,8 +4673,8 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
     int has_va_args = 0;
     memset(&out, 0, sizeof(out));
     memset(&pasted, 0, sizeof(pasted));
-    va_args_exp = build_va_args_value(m, exp_args, arg_count);
-    va_args_raw = build_va_args_value(m, raw_args, arg_count);
+    va_args_exp = build_va_args_value(m, exp_args, arg_count, arg_ws);
+    va_args_raw = build_va_args_value(m, raw_args, arg_count, arg_ws);
     if (va_args_exp == NULL || va_args_raw == NULL) {
         free(va_args_exp);
         free(va_args_raw);
@@ -4731,7 +4751,8 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
                 char *va_opt_subst;
 
                 inner.body = va_opt_text != NULL ? va_opt_text : "";
-                va_opt_subst = replace_params(&inner, raw_args, exp_args, arg_count, allow_va_opt, allow_gnu_ext);
+                va_opt_subst =
+                    replace_params(&inner, raw_args, exp_args, arg_count, arg_ws, allow_va_opt, allow_gnu_ext);
                 if (va_opt_subst == NULL || sb_append(&out, va_opt_subst) != 0) {
                     free(va_opt_subst);
                     free(va_opt_text);
@@ -4981,12 +5002,56 @@ next_iter:
     return pasted.buf;
 }
 
+/** Whether @p c is white space between the tokens of a macro argument. */
+static int is_arg_ws(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+/**
+ * Add argument @p raw, as written between its `(` or `,` and its `,` or `)`, to @p args trimmed, and whether
+ * white space stood before and after it (PP_ARG_WS_BEFORE, PP_ARG_WS_AFTER) to @p ws.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int push_call_arg(cc_strvec_t *args, sb_t *ws, const char *raw) {
+    size_t n = strlen(raw);
+    unsigned char flags = 0;
+    char *arg;
+
+    if (n > 0 && is_arg_ws(raw[0])) {
+        flags |= PP_ARG_WS_BEFORE;
+    }
+    if (n > 0 && is_arg_ws(raw[n - 1])) {
+        flags |= PP_ARG_WS_AFTER;
+    }
+    arg = trim_dup(raw);
+    if (arg == NULL || cc_strvec_push(args, arg) != 0) {
+        free(arg);
+        return -1;
+    }
+    free(arg);
+    return sb_append_c(ws, (char)flags);
+}
+
+/**
+ * The arguments of a function-like macro's call, its `(` at @p open_pos of @p src: each trimmed of white
+ * space, a comma inside parentheses (only those) part of one.
+ *
+ * The array of them (@p out_args) is one allocation with, after its @p out_count pointers, a byte for each
+ * argument saying whether white space stood before and after it (PP_ARG_WS_BEFORE, PP_ARG_WS_AFTER): free()
+ * of the array frees both, and call_arg_ws() finds the bytes.
+ *
+ * @param[out] end_pos  just past the call's `)`
+ * @return 0, or -1 when the call is not closed or out of memory
+ */
 static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, char ***out_args, size_t *out_count) {
     size_t i = open_pos + 1;
     int paren_level = 1;
     sb_t cur;
+    sb_t ws;
     cc_strvec_t args;
     memset(&cur, 0, sizeof(cur));
+    memset(&ws, 0, sizeof(ws));
     memset(&args, 0, sizeof(args));
     while (src[i] != '\0') {
         char c = src[i];
@@ -5028,19 +5093,22 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
                 goto fail;
             }
             if (paren_level == 0) {
-                char *arg = trim_dup(cur.buf != NULL ? cur.buf : "");
-                if (arg == NULL) {
+                char **all;
+
+                if (push_call_arg(&args, &ws, cur.buf != NULL ? cur.buf : "") != 0) {
                     goto fail;
                 }
-                if (cc_strvec_push(&args, arg) != 0) {
-                    free(arg);
+                /* the white space bytes after the pointers, in the one allocation */
+                all = (char **)realloc(args.items, args.count * sizeof(*all) + args.count);
+                if (all == NULL) {
                     goto fail;
                 }
-                free(arg);
+                memcpy(all + args.count, ws.buf, args.count);
                 *end_pos = i + 1;
-                *out_args = args.items;
+                *out_args = all;
                 *out_count = args.count;
                 sb_free(&cur);
+                sb_free(&ws);
                 return 0;
             }
             if (sb_append_c(&cur, c) != 0) {
@@ -5050,15 +5118,9 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
             continue;
         }
         if (c == ',' && paren_level == 1) {
-            char *arg = trim_dup(cur.buf != NULL ? cur.buf : "");
-            if (arg == NULL) {
+            if (push_call_arg(&args, &ws, cur.buf != NULL ? cur.buf : "") != 0) {
                 goto fail;
             }
-            if (cc_strvec_push(&args, arg) != 0) {
-                free(arg);
-                goto fail;
-            }
-            free(arg);
             cur.len = 0;
             if (cur.buf != NULL) {
                 cur.buf[0] = '\0';
@@ -5073,8 +5135,14 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
     }
 fail:
     sb_free(&cur);
+    sb_free(&ws);
     cc_strvec_free(&args);
     return -1;
+}
+
+/** The white space flags parse_call_args() keeps after its @p arg_count argument pointers @p args. */
+static const unsigned char *call_arg_ws(char **args, size_t arg_count) {
+    return args != NULL && arg_count > 0 ? (const unsigned char *)(args + arg_count) : NULL;
 }
 
 static void emit_macro_trace(const char *file, int line, const char *name) {
@@ -5523,8 +5591,8 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         sb_free(&out);
                         return NULL;
                     }
-                    subst = replace_params(m, args, exp_args, arg_count, st->std_is_c23 || st->std_is_gnu,
-                                           st->std_is_gnu);
+                    subst = replace_params(m, args, exp_args, arg_count, call_arg_ws(args, arg_count),
+                                           st->std_is_c23 || st->std_is_gnu, st->std_is_gnu);
                     if (subst == NULL) {
                         if (diag != NULL && diag->message[0] == '\0') {
                             char msg[160];
