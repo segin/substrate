@@ -1417,6 +1417,16 @@ elf_err_t elf_symbol_set_size(elf_symbol_t *symbol, uint64_t size);
 elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint32_t shndx);
 int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_t bind);
 /**
+ * @brief Whether a link took @p symbol from an input section that was SHF_MERGE.
+ *
+ * Its output section may no longer say so (merged with plain data); GNU ld's default discards a link's
+ * temporary locals of such sections, and this is what tells them.
+ *
+ * @param symbol a symbol of an elf_link_plan_link() output
+ * @return 1 if it was, else 0
+ */
+int elf_symbol_in_merge_section(const elf_symbol_t *symbol);
+/**
  * @brief Remove the symbols @p drop says to, the rest keeping their order.
  *
  * The first, null symbol stays, and so does any symbol a relocation of the object still names.  The

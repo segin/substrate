@@ -480,6 +480,10 @@ elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out
     return ELF_OK;
 }
 
+int elf_symbol_in_merge_section(const elf_symbol_t *symbol) {
+    return symbol != NULL && symbol->in_merge_section;
+}
+
 elf_err_t elf_remove_symbols(elfobj_t *obj, int (*drop)(const elf_symbol_t *symbol, void *user), void *user,
                              size_t *removed_out) {
     uint8_t *named = NULL;

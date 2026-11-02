@@ -1086,6 +1086,7 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
         struct elf_symbol *n;
         uint64_t value = 0;
         uint32_t shndx = SHN_UNDEF;
+        int in_merge = 0;       /* it is defined in an SHF_MERGE section */
         const char *sec_name = "";
 
         if (sym == NULL) {
@@ -1113,6 +1114,7 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
                 if (!sec_included[src_sec_index]) {
                     continue;
                 }
+                in_merge = (src_sec->flags & SHF_MERGE) != 0;
                 dst_sec = output_section_of(plan, out, input, src_sec);
                 if (dst_sec == NULL) {
                     continue;
@@ -1146,6 +1148,7 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
             n->other = sym->other;
             n->shndx = shndx;
             n->ver_index = sym->ver_index;
+            n->in_merge_section = (uint8_t)in_merge;
             if (sym_map != NULL && i < input->obj->symbol_count) {
                 sym_map[i] = n;
             }

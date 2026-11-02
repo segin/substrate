@@ -357,6 +357,10 @@ static const ld_opt_t options[] = {
      * table out as well, which is not done. */
     { "--strip-all -s --strip-debug -S", OPT_FLAG, opt_int, F(strip_debug), 1 },
     { "--emit-relocs -q", OPT_FLAG, opt_int, F(emit_relocs), 1 },
+    /* which locals the output leaves out */
+    { "--discard-all -x", OPT_FLAG, opt_int, F(discard), LD_DISCARD_ALL },
+    { "--discard-locals -X", OPT_FLAG, opt_int, F(discard), LD_DISCARD_LOCALS },
+    { "--discard-none", OPT_FLAG, opt_int, F(discard), LD_DISCARD_NONE },
     { "--build-id", OPT_OPTVAL, opt_ignored, 0, 0 },    /* none is made */
 
     /* the inputs, and how the ones that follow are taken */

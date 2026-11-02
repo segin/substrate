@@ -158,6 +158,7 @@ struct elf_symbol {
     uint16_t ver_index;
     char *version_name;
     uint8_t version_default;
+    uint8_t in_merge_section;   /* a link took it from an SHF_MERGE input section */
     size_t index;
     struct elf_symbol *name_next;       /* the next in its bucket of the name index */
     uint32_t name_hash;

@@ -6,8 +6,15 @@
 # program or shared object (only under --emit-relocs, whose relocations
 # may name them), and keeps them under -r.
 #
+# It also kept every temporary local (.LC0 and the like, 3998 of them in
+# cc) and knew neither -x, -X nor --discard-*.  GNU ld leaves out by
+# default the temporaries of SHF_MERGE input sections (none under -r);
+# -X / --discard-locals every temporary, -x / --discard-all every local,
+# both keeping under -r what a relocation needs; --discard-none none.
+#
 # GNU ld is the judge: for each command line, the section symbols of the
-# output are there or not as in GNU ld's, and the output still runs.
+# output are there or not as in GNU ld's, the named locals are GNU ld's,
+# and the output still runs.
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -83,6 +90,35 @@ check() {
 check
 check -pie
 check -shared
+
+# The named locals of OBJ (not its section and file symbols, nor the
+# linker's own _DYNAMIC), sorted.
+locals() {
+    readelf -sW "$1" | awk '$5 == "LOCAL" && $8 != "" && $4 != "SECTION" && $4 != "FILE" && $8 != "_DYNAMIC" {
+        print $8 }' | sort
+}
+
+# discard ARGS...: GNU ld and this one leave the same locals
+discard() {
+    "${GNU_LD:-ld}" "$@" -o gnu.out a.o 2>/dev/null || { echo "skip: GNU ld $*"; return; }
+    if ! ./ld -m elf_x86_64 "$@" -o ours.out a.o > said 2>&1; then
+        echo "FAIL: ld $*: $(head -1 said)"; fail=1; return
+    fi
+    locals gnu.out > want
+    locals ours.out > have
+    if ! cmp -s want have; then
+        echo "FAIL: ld $*: the locals are $(tr '\n' ' ' < have), GNU ld's $(tr '\n' ' ' < want)"
+        fail=1
+    fi
+}
+
+for r in "" -pie -shared -r; do
+    for d in "" -X -x --discard-locals --discard-all --discard-none "-x --discard-none"; do
+        # shellcheck disable=SC2086
+        discard $r $d
+    done
+done
+discard --emit-relocs
 
 # Under --emit-relocs a relocation against a section keeps the symbol it
 # names: none of the output's relocations is left naming nothing.

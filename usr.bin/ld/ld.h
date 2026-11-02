@@ -61,6 +61,14 @@ typedef enum {
     LD_HASH_GNU = 2
 } ld_hash_style_t;
 
+/* Which local symbols a link leaves out, as GNU ld's options choose. */
+enum {
+    LD_DISCARD_SEC_MERGE = 0,   /* the default: temporaries (.L...) of SHF_MERGE input sections; none under -r */
+    LD_DISCARD_NONE = 1,        /* --discard-none */
+    LD_DISCARD_LOCALS = 2,      /* -X, --discard-locals: every temporary */
+    LD_DISCARD_ALL = 3          /* -x, --discard-all: every local */
+};
+
 /* What an executable stack is warned of, as GNU ld's options choose. */
 enum {
     LD_WARN_EXECSTACK_NONE = 0,     /* --no-warn-execstack */
@@ -209,6 +217,7 @@ typedef struct {
     int pie;                    /* -pie: ET_DYN, and a program */
     int strip_debug;            /* -S, -s: no debugging information */
     int emit_relocs;            /* -q: the output keeps its relocations */
+    int discard;                /* LD_DISCARD_*: which locals the output leaves out */
     strvec_t rpaths;            /* -rpath: the output's DT_RUNPATH */
     const char *map_path;
     const char *reproduce_path;
@@ -849,8 +858,10 @@ int check_execstack(ld_ctx_t *ctx, const objvec_t *inputs);
  */
 int check_rwx_segments(ld_ctx_t *ctx, const elfobj_t *obj);
 /**
- * Leave out of a program's or shared object's symbol table the locals GNU ld leaves out: every section
- * symbol (unless --emit-relocs).
+ * Leave out of the output's symbol table the locals GNU ld leaves out: in a program or shared object every
+ * section symbol (unless --emit-relocs); and the temporaries or locals --discard-* names, by default the
+ * temporaries of SHF_MERGE input sections (gcc's .LC0 and the like), none of them under -r.  A symbol a
+ * relocation of the output still names stays.
  *
  * @param ctx the link
  * @param obj the output, its symbol values final

@@ -770,6 +770,17 @@ int check_execstack(ld_ctx_t *ctx, const objvec_t *inputs) {
     return 0;
 }
 
+/**
+ * Whether @p name is a temporary, an assembler's local label: what GNU ld's -X and its default discard
+ * (bfd's _bfd_elf_is_local_label_name: ".L", "..", "_.L_").
+ */
+static int is_temporary_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    return (name[0] == '.' && (name[1] == 'L' || name[1] == '.')) || strncmp(name, "_.L_", 4) == 0;
+}
+
 /* elf_remove_symbols()'s question for discard_local_symbols(): whether @p sym goes. */
 static int local_symbol_goes(const elf_symbol_t *sym, void *user) {
     const ld_ctx_t *ctx = (const ld_ctx_t *)user;
@@ -782,7 +793,16 @@ static int local_symbol_goes(const elf_symbol_t *sym, void *user) {
     if (elf_symbol_type(sym) == STT_SECTION) {
         return !ctx->opt.emit_relocs && !relocatable;
     }
-    return 0;
+    switch (ctx->opt.discard) {
+    case LD_DISCARD_ALL:
+        return 1;
+    case LD_DISCARD_LOCALS:
+        return is_temporary_name(elf_symbol_name(sym));
+    case LD_DISCARD_NONE:
+        return 0;
+    default:
+        return !relocatable && is_temporary_name(elf_symbol_name(sym)) && elf_symbol_in_merge_section(sym);
+    }
 }
 
 int discard_local_symbols(const ld_ctx_t *ctx, elfobj_t *obj) {

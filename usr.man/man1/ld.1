@@ -33,6 +33,7 @@
 .Op Fl -trace-symbol Ns = Ns Ar symbol
 .Op Fl -warn-common
 .Op Fl -fatal-warnings
+.Op Fl x | Fl X | Fl -discard-all | Fl -discard-locals | Fl -discard-none
 .Op Fl -warn-execstack | Fl -warn-execstack-objects | Fl -no-warn-execstack
 .Op Fl -error-execstack | Fl -no-error-execstack
 .Op Fl -warn-rwx-segments | Fl -no-warn-rwx-segments
@@ -393,6 +394,28 @@ page as its address; it is 4 KiB by default, and
 .Li CONSTANT(MAXPAGESIZE)
 in a script.
 Any other keyword is a warning and is ignored.
+.It Fl X , Fl -discard-locals , Fl x , Fl -discard-all , Fl -discard-none
+Which local symbols the output leaves out, as GNU ld leaves them out.
+By default these are the temporaries (names beginning
+.Ql .L ,
+.Ql ..
+or
+.Ql _.L_ ,
+such as gcc's
+.Li .LC0 )
+of input sections that are
+.Dv SHF_MERGE ,
+and none under
+.Fl r .
+.Fl X
+leaves out every temporary,
+.Fl x
+every local, and
+.Fl -discard-none
+none; under
+.Fl r
+a symbol a relocation names stays.
+The last of them given counts.
 .It Fl -warn-execstack-objects , Fl -warn-execstack , Fl -no-warn-execstack
 What an executable stack is warned of, as GNU ld warns of it.
 By default
