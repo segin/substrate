@@ -12,8 +12,10 @@
     } while (0)
 
 int main(void) {
+    /* 'A'; a section of 19 bytes, its length counting itself (4), "aeabi\0" (6) and the subsection (9);
+     * the file subsection, tag 1, of 9 bytes: the tag, its size (4), and Tag_CPU_name (4) "A7" */
     static const unsigned char arm_attrs[] = {
-        'A', 18, 0, 0, 0, 'a', 'e', 'a', 'b', 'i', 0, 1, 8, 0, 0, 0, 4, 'A', '7', 0
+        'A', 19, 0, 0, 0, 'a', 'e', 'a', 'b', 'i', 0, 1, 9, 0, 0, 0, 4, 'A', '7', 0
     };
     elfobj_t *arm = NULL;
     elfobj_t *x64 = NULL;
@@ -203,8 +205,11 @@ int main(void) {
         elfobj_t *reopen = NULL;
         elfobj_t *bad = NULL;
         size_t i;
+        static const uint8_t code[0x24];   /* room for the symbol at 0x20 and the 4 bytes R_68K_32 stores */
         CHECK(text != NULL);
         CHECK(sym != NULL);
+        /* (a relocation in a section of no bytes is refused when the object is read back) */
+        CHECK(elf_section_set_data(text, code, sizeof(code)) == ELF_OK);
         CHECK(elf_symbol_define(sym, text, 0x20) == ELF_OK);
         CHECK(elf_add_relocation(text, 0x0, sym, R_68K_32, 1) == ELF_OK);
         CHECK(elf_write_file(m68k, "tmp_m68k_be.o") == ELF_OK);
@@ -284,8 +289,11 @@ int main(void) {
         elfobj_t *reopen = NULL;
         elfobj_t *bad = NULL;
         size_t i;
+        static const uint8_t code[0x1c];   /* room for the symbol at 0x18 and the 4 bytes R_VAX_32 stores */
         CHECK(text != NULL);
         CHECK(sym != NULL);
+        /* (a relocation in a section of no bytes is refused when the object is read back) */
+        CHECK(elf_section_set_data(text, code, sizeof(code)) == ELF_OK);
         CHECK(elf_symbol_define(sym, text, 0x18) == ELF_OK);
         CHECK(elf_add_relocation(text, 0x0, sym, R_VAX_32, 2) == ELF_OK);
         CHECK(elf_write_file(vax, "tmp_vax_le.o") == ELF_OK);
@@ -344,8 +352,11 @@ int main(void) {
         elf_section_t *text = elf_find_section(ppc32, ".text");
         elf_symbol_t *sym = elf_add_symbol(ppc32, "ppc32_sym", 0, 0, STB_GLOBAL, STT_OBJECT);
         elfobj_t *reopen = NULL;
+        static const uint8_t code[0x34];   /* room for the symbol at 0x30 and the relocation's 4 bytes */
         CHECK(text != NULL);
         CHECK(sym != NULL);
+        /* (a relocation in a section of no bytes is refused when the object is read back) */
+        CHECK(elf_section_set_data(text, code, sizeof(code)) == ELF_OK);
         CHECK(elf_symbol_define(sym, text, 0x30) == ELF_OK);
         CHECK(elf_add_relocation(text, 0x0, sym, R_PPC_REL32, 0) == ELF_OK);
         CHECK(elf_write_file(ppc32, "tmp_ppc32_be.o") == ELF_OK);
@@ -452,8 +463,11 @@ int main(void) {
         elfobj_t *reopen = NULL;
         elfobj_t *bad = NULL;
         size_t i;
+        static const uint8_t code[0x44];   /* room for the symbol at 0x40 and the relocation's 4 bytes */
         CHECK(text != NULL);
         CHECK(sym != NULL);
+        /* (a relocation in a section of no bytes is refused when the object is read back) */
+        CHECK(elf_section_set_data(text, code, sizeof(code)) == ELF_OK);
         CHECK(elf_symbol_define(sym, text, 0x40) == ELF_OK);
         CHECK(elf_add_relocation(text, 0x0, sym, R_ALPHA_SREL32, 0) == ELF_OK);
         CHECK(elf_write_file(alpha, "tmp_alpha64_le.o") == ELF_OK);
@@ -525,8 +539,11 @@ int main(void) {
         elfobj_t *reopen = NULL;
         elfobj_t *bad = NULL;
         size_t i;
+        static const uint8_t code[0x68];   /* room for the symbol at 0x60 and the relocation's 8 bytes */
         CHECK(text != NULL);
         CHECK(sym != NULL);
+        /* (a relocation in a section of no bytes is refused when the object is read back) */
+        CHECK(elf_section_set_data(text, code, sizeof(code)) == ELF_OK);
         CHECK(elf_symbol_define(sym, text, 0x60) == ELF_OK);
         CHECK(elf_add_relocation(text, 0x0, sym, R_IA64_DIR64LSB, 0) == ELF_OK);
         CHECK(elf_write_file(ia64, "tmp_ia64_le.o") == ELF_OK);
