@@ -6451,10 +6451,12 @@ static int push_cond(pp_cond_frame_t **stack, size_t *count, size_t *cap, pp_con
 
 /**
  * Whether code text @p s ends, but for white space, in the name of a
- * function-like macro: its arguments may start on a later line, as in
- * ACPICA's `return_ACPI_STATUS\n    (status);`, and the lines are expanded
- * together (C11 6.10.3p10: the `(` is the next preprocessing token, new
- * lines between counting as white space).
+ * function-like macro, or of an object-like one that is another's name
+ * (`#define cpu_to_le32 __cpu_to_le32`): its arguments may start on a
+ * later line, as in ACPICA's `return_ACPI_STATUS\n    (status);` and
+ * Linux's `cpu_to_le32\n    (x)`, and the lines are expanded together
+ * (C11 6.10.3p10: the `(` is the next preprocessing token, new lines
+ * between counting as white space).
  *
  * @param st  the preprocessor state, its macros
  * @param s   the code accumulated so far
@@ -6465,6 +6467,7 @@ static int ends_with_fn_macro_name(pp_state_t *st, const char *s) {
     size_t start;
     char name[256];
     const pp_macro_t *m;
+    int hops;
 
     if (s == NULL) {
         return 0;
@@ -6483,6 +6486,21 @@ static int ends_with_fn_macro_name(pp_state_t *st, const char *s) {
     memcpy(name, s + start, end - start);
     name[end - start] = '\0';
     m = macro_find(&st->macros, name);
+    for (hops = 0; m != NULL && !m->is_function && m->body != NULL && hops < 16; ++hops) {
+        /* an object-like macro that is one name: the name it stands for */
+        const char *b = skip_ws(m->body);
+        const char *e = b;
+
+        while (is_ident_char((unsigned char)*e)) {
+            e++;
+        }
+        if (e == b || isdigit((unsigned char)*b) || skip_ws(e)[0] != '\0' || (size_t)(e - b) >= sizeof(name)) {
+            return 0;
+        }
+        memcpy(name, b, (size_t)(e - b));
+        name[e - b] = '\0';
+        m = macro_find(&st->macros, name);
+    }
     return m != NULL && m->is_function;
 }
 
