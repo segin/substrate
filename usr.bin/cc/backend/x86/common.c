@@ -368,11 +368,34 @@ static const char *asm_constraint_fixed_reg32(const char *c) {
 }
 
 /**
- * Whether an i386 asm operand of @p size bytes and constraint @p c is held in the pair %edx:%eax ("A" of a
- * 64-bit value: Linux's do_div() hands its dividend in and its quotient out so).
+ * Whether an i386 asm operand of @p size bytes and constraint @p c, put in a general register, is held in a
+ * pair of them, as gcc holds a 64-bit value: %edx:%eax for "A" (Linux's do_div() hands its dividend in and its
+ * quotient out so), and for "r", "q", "g" and a register's own letter the register the operand is named by and
+ * the next in gcc's order (asm_pair_high()).
  */
 static int asm_pair_operand(const char *c, int is_64bit, int size) {
-    return !is_64bit && size == 8 && c != NULL && cc_asm_constraint_has(c, 'A');
+    return !is_64bit && size == 8 && c != NULL && (cc_asm_constraint_has(c, 'A') || cc_asm_constraint_allows_gpr(c));
+}
+
+/**
+ * The register holding a pair's high word, its low word in @p low: gcc's next register, in its order %eax,
+ * %edx, %ecx, %ebx, %esi, %edi.
+ *
+ * @param low  the low word's register (32-bit name)
+ * @return     the high word's, or NULL if @p low starts no pair
+ */
+static const char *asm_pair_high(const char *low) {
+    static const char *const pairs[][2] = {
+        {"%eax", "%edx"}, {"%edx", "%ecx"}, {"%ecx", "%ebx"}, {"%ebx", "%esi"}, {"%esi", "%edi"},
+    };
+    size_t i;
+
+    for (i = 0; low != NULL && i < sizeof(pairs) / sizeof(pairs[0]); ++i) {
+        if (strcmp(low, pairs[i][0]) == 0) {
+            return pairs[i][1];
+        }
+    }
+    return NULL;
 }
 
 static int append_text(char **dst, size_t *len, size_t *cap, const char *text, size_t n) {
@@ -3966,6 +3989,28 @@ static unsigned x86_gpr_bit(const char *name) {
     return i >= 0 ? 1u << i : 0;
 }
 
+/**
+ * A register pair for an i386 asm operand of 64 bits (asm_pair_operand()), as gcc picks one: the first of
+ * %eax:%edx, %edx:%ecx, %ecx:%ebx, %ebx:%esi, %esi:%edi whose registers are both free -- for "q" only those whose
+ * registers have bytes.
+ *
+ * @param c      the constraint
+ * @param avoid  registers that may not be used, by hardware number
+ * @return       the low word's register (asm_pair_high() gives the other), or NULL if none is free
+ */
+static const char *asm_pick_pair(const char *c, unsigned avoid) {
+    static const char *const lows[] = {"%eax", "%edx", "%ecx", "%ebx", "%esi"};
+    size_t n = cc_asm_constraint_has(c, 'q') ? 3 : sizeof(lows) / sizeof(lows[0]);
+    size_t i;
+
+    for (i = 0; i < n; ++i) {
+        if ((avoid & (x86_gpr_bit(lows[i]) | x86_gpr_bit(asm_pair_high(lows[i])))) == 0) {
+            return lows[i];
+        }
+    }
+    return NULL;
+}
+
 /* in 32-bit code only %eax..%ebx have byte registers */
 const char *reg32_to8(const char *r) {
     int i = x86_gpr_index(r);
@@ -4553,7 +4598,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     x86_diag_at(f, in); /* (its errors at the asm statement, as gcc's) */
     op_text = (char **)calloc(total, sizeof(*op_text));
     op_names = (char **)calloc(total, sizeof(*op_names));
-    out_regs = (const char **)calloc(out_n, sizeof(*out_regs));
+    /* (and after them each output's high word's register, of a pair: out_regs[out_n + i]) */
+    out_regs = (const char **)calloc(2 * out_n, sizeof(*out_regs));
     out_write_back = (int *)calloc(out_n, sizeof(*out_write_back));
     out_tied_read = (int *)calloc(out_n, sizeof(*out_tied_read));
     loads = (asm_load_t *)calloc(2 * total + 1, sizeof(*loads)); /* (a pair operand loads two registers) */
@@ -4578,7 +4624,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         } else if (tied < 0 && !cc_asm_constraint_is_memory_only(c)) {
             fixed_mask |= x86_gpr_bit(is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
             if (asm_pair_operand(c, is_64bit, asm_operand_size(in->asm_in_sizes, in_n, i, 4))) {
-                fixed_mask |= x86_gpr_bit("%edx");
+                /* a fixed register's pair: its high word's register too */
+                fixed_mask |= x86_gpr_bit(asm_pair_high(asm_constraint_fixed_reg32(c)));
             }
         }
     }
@@ -4587,7 +4634,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         if (!cc_asm_constraint_is_memory_only(c)) {
             fixed_mask |= x86_gpr_bit(is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
             if (asm_pair_operand(c, is_64bit, asm_operand_size(in->asm_out_sizes, out_n, i, 4))) {
-                fixed_mask |= x86_gpr_bit("%edx");
+                fixed_mask |= x86_gpr_bit(asm_pair_high(asm_constraint_fixed_reg32(c)));
             }
         }
     }
@@ -4660,24 +4707,28 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             }
         } else {
             /* never another output's register, another operand's fixed one, or a clobbered one */
+            int pair = bound == NULL && asm_pair_operand(c, is_64bit, osz);
             const char *reg = bound != NULL ? x86_gpr_name(bound->reg[i], is_64bit)
                               : fixed != NULL ? fixed
+                              : pair          ? asm_pick_pair(c, fixed_mask | clobber_mask | out_mask)
                                               : asm_pick_reg(is_64bit, c, osz, fixed_mask | clobber_mask | out_mask);
+            const char *high = pair ? asm_pair_high(reg) : NULL;
             const char *render_reg;
             int read = (c != NULL && strchr(c, '+') != NULL) || out_tied_read[i];
 
-            if (reg == NULL) {
+            if (reg == NULL || (pair && high == NULL)) {
                 goto impossible;
             }
             render_reg = reg_alias_for_size(reg, is_64bit, osz);
             out_regs[i] = reg;
+            out_regs[out_n + i] = high;
             out_write_back[i] = 1;
             out_mask |= x86_gpr_bit(reg);
-            if (asm_pair_operand(c, is_64bit, osz)) {
-                /* its high word in %edx, written by the asm too */
-                out_mask |= x86_gpr_bit("%edx");
-                if (read) {
-                    out_live_mask |= x86_gpr_bit("%edx");
+            if (pair) {
+                /* its high word in the pair's other register, written by the asm too */
+                out_mask |= x86_gpr_bit(high);
+                if (read || (c != NULL && strchr(c, '&') != NULL)) {
+                    out_live_mask |= x86_gpr_bit(high);
                 }
             }
             if (read || (c != NULL && strchr(c, '&') != NULL)) {
@@ -4696,8 +4747,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 /* a matching input's value ("0"(id)), not the output's: that is only written after */
                 loads[load_count].off = from >= 0 && !CC_SSA_ASM_MEM_INDIRECT_P(from) ? slot_off(lay, from) : off;
                 load_count++;
-                if (asm_pair_operand(c, is_64bit, osz)) {
-                    loads[load_count].reg = "%edx";
+                if (pair) {
+                    loads[load_count].reg = high;
                     loads[load_count].off = loads[load_count - 1].off + 4;
                     load_count++;
                 }
@@ -4828,6 +4879,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
             const char *reg = NULL;
             int isz = asm_operand_size(in->asm_in_sizes, in_n, i, is_64bit ? 8 : 4);
+            int pair = bound == NULL && asm_pair_operand(c, is_64bit, isz);
+            const char *high = NULL;
             const char *render_reg = NULL;
             if (bound == NULL && is_stack_pointer(fixed)) {
                 /* the stack pointer, as it is (Linux's ASM_CALL_CONSTRAINT): never loaded */
@@ -4855,13 +4908,16 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                  */
                 unsigned avoid = fixed_mask | clobber_mask | out_live_mask | in_mask;
 
-                reg = asm_pick_reg(is_64bit, c, isz, avoid | out_mask);
+                reg = pair ? asm_pick_pair(c, avoid | out_mask) : asm_pick_reg(is_64bit, c, isz, avoid | out_mask);
                 if (reg == NULL) {
-                    reg = asm_pick_reg(is_64bit, c, isz, avoid);
+                    reg = pair ? asm_pick_pair(c, avoid) : asm_pick_reg(is_64bit, c, isz, avoid);
                 }
                 if (reg == NULL) {
                     goto impossible;
                 }
+            }
+            if (pair && (high = asm_pair_high(reg)) == NULL) {
+                goto impossible;
             }
             in_mask |= x86_gpr_bit(reg);
             render_reg = reg_alias_for_size(reg, is_64bit, isz);
@@ -4873,10 +4929,10 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             loads[load_count].reg = reg;
             loads[load_count].off = off;
             load_count++;
-            if (asm_pair_operand(c, is_64bit, isz)) {
-                /* and its high word in %edx */
-                in_mask |= x86_gpr_bit("%edx");
-                loads[load_count].reg = "%edx";
+            if (pair) {
+                /* and its high word in the pair's other register */
+                in_mask |= x86_gpr_bit(high);
+                loads[load_count].reg = high;
                 loads[load_count].off = off + 4;
                 load_count++;
             }
@@ -5055,8 +5111,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 long off = slot_off(lay, in->asm_out_values[i]);
                 emit_zero_extend_reg(fp, out_regs[i], is_64bit, osz);
                 emit_frame_store_reg(fp, is_64bit, out_regs[i], off);
-                if (asm_pair_operand(in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL, is_64bit, osz)) {
-                    emit_frame_store_reg(fp, is_64bit, "%edx", off + 4);
+                if (out_regs[out_n + i] != NULL) {
+                    emit_frame_store_reg(fp, is_64bit, out_regs[out_n + i], off + 4);
                 }
             }
         }
