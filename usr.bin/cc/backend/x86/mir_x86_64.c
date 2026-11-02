@@ -121,14 +121,30 @@ static int agg_in_regs(unsigned char abi) {
     return CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG;
 }
 
-/** Whether floating ABI byte @p abi is one this path passes: a double, a float in single precision, a long double. */
+/** Whether floating ABI byte @p abi is one this path passes: a double, a float in single precision, a long double,
+ *  a _Float16's bits. */
 static int fp_abi_ok(unsigned char abi) {
-    return abi == CC_CALL_ARG_ABI_DEFAULT || abi == CC_CALL_ARG_ABI_FLOAT || abi == CC_CALL_ARG_ABI_LDOUBLE;
+    return abi == CC_CALL_ARG_ABI_DEFAULT || abi == CC_CALL_ARG_ABI_FLOAT || abi == CC_CALL_ARG_ABI_LDOUBLE ||
+           abi == CC_CALL_ARG_ABI_HALF;
 }
 
-/** The bytes floating ABI byte @p abi passes in memory: 16 for a long double, 4 for a float, else 8. */
+/** The bytes floating ABI byte @p abi passes in memory: 16 for a long double, 4 for a float, 2 for a _Float16 (as
+ *  xs_fp_to_mem() takes them), else 8. */
 static int fp_abi_bytes(unsigned char abi) {
-    return abi == CC_CALL_ARG_ABI_LDOUBLE ? 16 : abi == CC_CALL_ARG_ABI_FLOAT ? 4 : 8;
+    return abi == CC_CALL_ARG_ABI_LDOUBLE ? 16 : abi == CC_CALL_ARG_ABI_FLOAT ? 4 : abi == CC_CALL_ARG_ABI_HALF ? 2 : 8;
+}
+
+/**
+ * Convert between a double in vector register @p from and a _Float16's bits in vector register @p to (@p to_half),
+ * or back: libgcc's __truncdfhf2 or __extendhfdf2, each taking its operand in %xmm0 and returning in %xmm0, as gcc
+ * calls them.  A call: the caller-saved registers do not survive it.
+ */
+static void x64_half_convert(xsel_t *s, xop_t from, xop_t to, int to_half) {
+    xop_t x0 = xop_reg(XR_XMM0, 8);
+
+    xs_emit(s, XI_MOV, 8, 2, &from, &x0, NULL);
+    s->t->libcall(s, to_half ? "__truncdfhf2" : "__extendhfdf2", XR_BIT(XR_XMM0), XR_BIT(XR_XMM0));
+    xs_emit(s, XI_MOV, 8, 2, &x0, &to, NULL);
 }
 
 /** Vector argument register @p k, %xmm0 .. %xmm7. */
@@ -237,6 +253,7 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     int agg_x87 = agg && (in->agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX)) != 0;
     int fp_dst = !agg && xs_fp_kind(s, in->dst) != XFP_NONE;
     abi_loc_t *locs = NULL;
+    xop_t *half_bits = NULL; /* per argument, a _Float16's bits in a vector register (XO_NONE for another) */
     size_t stack_bytes = 0;
     size_t xmm = 0;
     long total;
@@ -247,7 +264,7 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     int indirect = 0;
 
     if ((agg && agg_obj < 0) || (agg && !sret && (in->agg_class & ~(int)X64_RET_CLASSES) != 0) ||
-        (!agg && !empty && (in->agg_class & ~(int)CC_ABI_RET_FLOAT) != 0) ||
+        (!agg && !empty && (in->agg_class & ~(int)(CC_ABI_RET_FLOAT | CC_ABI_RET_HALF)) != 0) ||
         (in->dst >= 0 && !agg && !fp_dst && f->value_ty[in->dst].kind == CC_TY_AGG &&
          f->value_ty[in->dst].size > 8)) {
         XS_NOPE(s);
@@ -286,6 +303,24 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
             XS_NOPE(s);
         }
     }
+    if (in->arg_count > 0) {
+        /* a _Float16's bits, made first: __truncdfhf2 is a call, which the argument registers would not survive */
+        half_bits = (xop_t *)calloc(in->arg_count, sizeof(*half_bits));
+        if (half_bits == NULL) {
+            free(locs);
+            s->xf.oom = 1;
+            return;
+        }
+        for (a = 0; a < in->arg_count; ++a) {
+            unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
+
+            half_bits[a].kind = XO_NONE;
+            if (abi == CC_CALL_ARG_ABI_HALF && locs[a].kind != ABI_LOC_NONE && xs_fp_kind(s, in->args[a]) != XFP_NONE) {
+                half_bits[a] = xop_reg(xf_new_xvreg(&s->xf), 8);
+                x64_half_convert(s, xs_fp_reg(s, in->args[a]), half_bits[a], 1);
+            }
+        }
+    }
     total = (long)align_up_size(stack_bytes, (size_t)s->t->stack_boundary);
     if (total > 0) {
         xop_t k = xop_imm(-total, 8);
@@ -301,7 +336,15 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
             continue;
         }
         at = xop_mem(XR_SP, (long long)locs[a].index, 8);
-        if (xs_fp_kind(s, v) != XFP_NONE) {
+        if (half_bits[a].kind != XO_NONE) {
+            /* a _Float16's bits, in the eightbyte's low bytes */
+            xop_t g = xs_temp(s);
+
+            g.size = 4;
+            xs_emit(s, XI_MOV, 4, 2, &half_bits[a], &g, NULL);
+            at.size = 4;
+            xs_emit(s, XI_MOV, 4, 2, &g, &at, NULL);
+        } else if (xs_fp_kind(s, v) != XFP_NONE) {
             xs_fp_to_mem(s, v, at, fp_abi_bytes(abi));
             if (abi == CC_CALL_ARG_ABI_LDOUBLE) {
                 /* the two bytes past the 80, deterministic, as x86_64.c leaves them */
@@ -336,8 +379,8 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         xop_t d;
 
         if (locs[a].kind == ABI_LOC_XMM) {
-            /* a double in its register; a float in single precision */
-            xop_t r = xs_fp_reg(s, in->args[a]);
+            /* a double in its register; a float in single precision; a _Float16's bits, made above */
+            xop_t r = half_bits[a].kind != XO_NONE ? half_bits[a] : xs_fp_reg(s, in->args[a]);
 
             d = xop_reg(xmm_arg(locs[a].index), 8);
             xs_emit(s, abi == CC_CALL_ARG_ABI_FLOAT ? XI_CVTSD2SS : XI_MOV, 8, 2, &r, &d, NULL);
@@ -357,6 +400,7 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         used |= XR_BIT(x64_arg_regs[locs[a].index]);
     }
     free(locs);
+    free(half_bits);
     if (sret) {
         xop_t m = xop_frame(agg_obj, 0, 8);
         xop_t rdi = xop_reg(XR_DI, 8);
@@ -460,6 +504,9 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     if (fp_dst || (in->dst < 0 && in->call_ret_x87)) {
         if (in->call_ret_x87) {
             xs_fp_pop(s, in->dst); /* (thrown away when nothing takes it) */
+        } else if (in->dst >= 0 && (in->agg_class & CC_ABI_RET_HALF) != 0) {
+            /* a _Float16's bits in %xmm0, to the double the value is */
+            x64_half_convert(s, xop_reg(XR_XMM0, 8), xs_fp_reg(s, in->dst), 0);
         } else if (in->dst >= 0) {
             xop_t x0 = xop_reg(XR_XMM0, 8);
             xop_t d = xs_fp_reg(s, in->dst);
@@ -505,7 +552,11 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
                 XS_NOPE(s);
             }
             d = xs_fp_reg(s, in->dst);
-            xs_emit(s, abi == CC_CALL_ARG_ABI_FLOAT ? XI_CVTSS2SD : XI_MOV, 8, 2, &r, &d, NULL);
+            if (abi == CC_CALL_ARG_ABI_HALF) {
+                x64_half_convert(s, r, d, 0);
+            } else {
+                xs_emit(s, abi == CC_CALL_ARG_ABI_FLOAT ? XI_CVTSS2SD : XI_MOV, 8, 2, &r, &d, NULL);
+            }
         } else if (loc.kind == ABI_LOC_STACK) {
             int o = xf_new_obj(&s->xf, XF_FIXED, 16, 8, 16 + (long)loc.index);
 
@@ -690,7 +741,11 @@ static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
             xop_t r = xs_fp_reg(s, in->lhs);
             xop_t x0 = xop_reg(XR_XMM0, 8);
 
-            xs_emit(s, f->ret_abi == CC_CALL_ARG_ABI_FLOAT ? XI_CVTSD2SS : XI_MOV, 8, 2, &r, &x0, NULL);
+            if (f->ret_abi == CC_CALL_ARG_ABI_HALF) {
+                x64_half_convert(s, r, x0, 1); /* its bits, which __truncdfhf2 leaves in %xmm0 */
+            } else {
+                xs_emit(s, f->ret_abi == CC_CALL_ARG_ABI_FLOAT ? XI_CVTSD2SS : XI_MOV, 8, 2, &r, &x0, NULL);
+            }
             x.imp_use = XR_BIT(XR_XMM0);
         }
         xf_emit(&s->xf, &x);
@@ -890,7 +945,8 @@ static int x64_begin(xsel_t *s) {
         unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
         abi_loc_t loc;
 
-        if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && abi != CC_CALL_ARG_ABI_FLOAT && !agg_in_regs(abi)) {
+        if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && abi != CC_CALL_ARG_ABI_FLOAT &&
+            abi != CC_CALL_ARG_ABI_HALF && !agg_in_regs(abi)) {
             continue;
         }
         loc = abi64_param_loc(f, (int)i, gpr_bias(s));

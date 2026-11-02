@@ -33,7 +33,7 @@ typedef struct cc_abi_va_type {
     long size;                  /**< its size in bytes */
     cc_value_type_t value_kind; /**< the register class of its value */
     int is_aggregate;           /**< a structure or union: the value is its address */
-    int is_fp;                  /**< float or double */
+    int is_fp;                  /**< float, double or _Float16 */
     int is_ldouble;             /**< long double */
     int is_unsigned;            /**< read zero-extended */
 } cc_abi_va_type_t;

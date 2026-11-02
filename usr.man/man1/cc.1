@@ -182,7 +182,11 @@ crosses a call as
 passes it: an argument or parameter is its bits in the low half of a
 stack word, unpromoted to a variadic function too, and a result its bits
 in
-.Li %xmm0 .
+.Li %xmm0 ;
+on x86-64 an argument or parameter is its bits in an
+.Li %xmm
+register (past the eighth, an eightbyte's low bytes on the stack), and a
+result too.
 Its conversions are libgcc's
 .Fn __extendhfdf2
 and

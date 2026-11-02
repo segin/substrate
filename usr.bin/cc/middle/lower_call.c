@@ -1872,7 +1872,9 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         va_type.size = mem_size;
         va_type.value_kind = lower_value_kind(e);
         va_type.is_aggregate = lower_record_id(e) >= 0;
-        va_type.is_fp = lower_has_kind(e, CC_CT_DOUBLE) || lower_has_kind(e, CC_CT_FLOAT);
+        /* (a _Float16 came in an %xmm register on x86-64, its 2 bytes read as one) */
+        va_type.is_fp = lower_has_kind(e, CC_CT_DOUBLE) || lower_has_kind(e, CC_CT_FLOAT) ||
+                        lower_has_kind(e, CC_CT_FLOAT16);
         va_type.is_ldouble = lower_has_kind(e, CC_CT_LDOUBLE);
         va_type.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
 
@@ -3607,9 +3609,9 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
             arg_needs_float_abi = 1;
         }
         in.args[i] = av;
-        /* i386: a _Float16 goes as its bits in a stack word, to a variadic function too (unpromoted, as gcc's) */
-        arg_needs_half_abi = !arg_is_aggregate && e->args[i] != NULL && lower_has_kind(e->args[i], CC_CT_FLOAT16) &&
-                             cc_target_current()->id == CC_TARGET_I386;
+        /* a _Float16 goes as its bits -- in a stack word on i386, an %xmm register on x86-64 -- to a variadic
+         * function too (unpromoted, as gcc's) */
+        arg_needs_half_abi = !arg_is_aggregate && e->args[i] != NULL && lower_has_kind(e->args[i], CC_CT_FLOAT16);
         /* (an empty structure's CC_CALL_ARG_ABI_ZERO stays: it takes no register and no stack) */
         if (CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_MEM &&
             CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_REG &&
@@ -3673,8 +3675,8 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
     if (lower_has_kind(e, CC_CT_FLOAT)) {
         /* a float comes back in single precision */
         in.agg_class = CC_ABI_RET_FLOAT;
-    } else if (lower_has_kind(e, CC_CT_FLOAT16) && cc_target_current()->id == CC_TARGET_I386) {
-        /* and on i386 a _Float16 as its bits in %xmm0 */
+    } else if (lower_has_kind(e, CC_CT_FLOAT16)) {
+        /* and a _Float16 as its bits in %xmm0 */
         in.agg_class = CC_ABI_RET_HALF;
     }
     if (lower_record_id(e) >= 0) {

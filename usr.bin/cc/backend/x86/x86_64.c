@@ -713,6 +713,13 @@ static void emit_x86_64_store_agg_part_from_xmm(FILE *fp, const char *reg, int b
     fprintf(fp, "\t%s %s, %d(%%rbp)\n", bytes > 4 ? "movsd" : "movss", reg, base_off + (int)off);
 }
 
+/*
+ * The call being emitted's _Float16 arguments: per argument, where its bits are from %rsp once the stack
+ * arguments' area is made (made first, emit_x86_64_call(), as __truncdfhf2 is a call the argument registers
+ * would not survive); -1 for another argument.
+ */
+static long *g_x64_half_arg_off;
+
 static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
                                              const cc_ssa_instr_t *in, size_t arg_index, int value,
                                              const abi_loc_t *loc, cc_diag_t *diag) {
@@ -722,6 +729,22 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
     }
     if (loc->kind == ABI_LOC_NONE) {
         return 0;
+    }
+    if (g_x64_half_arg_off != NULL && g_x64_half_arg_off[arg_index] >= 0) {
+        /* a _Float16's bits, made already: in an %xmm register, or an eightbyte's low bytes */
+        long off = g_x64_half_arg_off[arg_index];
+
+        if (loc->kind == ABI_LOC_XMM && arg_reg64_xmm(loc->index) != NULL) {
+            fprintf(fp, "\tmovd %ld(%%rsp), %s\n", off, arg_reg64_xmm(loc->index));
+            return 0;
+        }
+        if (loc->kind == ABI_LOC_STACK) {
+            fprintf(fp, "\tmovl %ld(%%rsp), %%eax\n", off);
+            fprintf(fp, "\tmovl %%eax, %zu(%%rsp)\n", loc->index);
+            return 0;
+        }
+        set_diag(diag, "call with unsupported _Float16 argument location");
+        return -1;
     }
     if (loc->kind == ABI_LOC_XMM) {
         const char *reg = arg_reg64_xmm(loc->index);
@@ -1001,6 +1024,8 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     long agg_ret_size = 0;
     int agg_ret_memory = 0;
     size_t gpr_start = 0;
+    size_t half_count = 0;
+    size_t half_area = 0; /* the stack the _Float16 arguments' bits take */
 
     int_regs_flush(fp, f, lay, ist);
 
@@ -1026,6 +1051,33 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     stack_pad = (stack_bytes & 0xF) == 0 ? 0 : (16 - (stack_bytes & 0xF));
     stack_total = stack_bytes + stack_pad;
 
+    /* the _Float16 arguments' bits, made before any argument is put in place, above the stack arguments' area */
+    for (a = 0; a < in->arg_count; ++a) {
+        half_count += in->call_arg_abi != NULL && in->call_arg_abi[a] == CC_CALL_ARG_ABI_HALF;
+    }
+    if (half_count > 0) {
+        size_t k = 0;
+
+        half_area = (half_count * 8 + 15) & ~(size_t)15;
+        g_x64_half_arg_off = (long *)malloc(in->arg_count * sizeof(*g_x64_half_arg_off));
+        if (g_x64_half_arg_off == NULL) {
+            free(locs);
+            set_diag(diag, "out of memory placing _Float16 arguments");
+            return -1;
+        }
+        fprintf(fp, "\tsubq $%zu, %%rsp\n", half_area);
+        for (a = 0; a < in->arg_count; ++a) {
+            g_x64_half_arg_off[a] = -1;
+            if (in->call_arg_abi[a] != CC_CALL_ARG_ABI_HALF) {
+                continue;
+            }
+            fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(lay, in->args[a]));
+            fprintf(fp, "\tcall __truncdfhf2\n");
+            fprintf(fp, "\tmovss %%xmm0, %zu(%%rsp)\n", 8 * k);
+            g_x64_half_arg_off[a] = (long)(stack_total + 8 * k);
+            k++;
+        }
+    }
     if (stack_total > 0) {
         fprintf(fp, "\tsubq $%zu, %%rsp\n", stack_total);
     }
@@ -1036,9 +1088,13 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         int arg_value = in->args[a];
         if (emit_x86_64_move_value_to_abi_loc(fp, f, lay, in, a, arg_value, &locs[a], diag) != 0) {
             free(locs);
+            free(g_x64_half_arg_off);
+            g_x64_half_arg_off = NULL;
             return -1;
         }
     }
+    free(g_x64_half_arg_off);
+    g_x64_half_arg_off = NULL;
     if (in->call_is_variadic) {
         fprintf(fp, "\tmovb $%zu, %%al\n", xmm_regs);
     }
@@ -1056,8 +1112,8 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         }
         fprintf(fp, "\tcall %s\n", in->sym);
     }
-    if (stack_total > 0) {
-        fprintf(fp, "\taddq $%zu, %%rsp\n", stack_total);
+    if (stack_total + half_area > 0) {
+        fprintf(fp, "\taddq $%zu, %%rsp\n", stack_total + half_area);
     }
     free(locs);
     if (agg_ret_ptr >= 0) {
@@ -1074,6 +1130,9 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
             } else {
                 if ((in->agg_class & CC_ABI_RET_FLOAT) != 0) {
                     fprintf(fp, "\tcvtss2sd %%xmm0, %%xmm0\n");
+                } else if ((in->agg_class & CC_ABI_RET_HALF) != 0) {
+                    /* a _Float16's bits, to the double the value is */
+                    fprintf(fp, "\tcall __extendhfdf2\n");
                 }
                 fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(lay, in->dst));
             }
@@ -1152,6 +1211,8 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         slot_layout_t lay;
         int_reg_state_t ist;
         size_t j;
+        int half_params[64]; /* the _Float16 parameters not yet converted from their bits */
+        size_t half_param_count = 0;
         int frame;
         int raw_frame;
         int va_state_off = 0;
@@ -1333,6 +1394,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             return -1;
         }
 
+        half_param_count = 0;
         for (j = 0; j < f->instr_count; ++j) {
             const cc_ssa_instr_t *in = &f->instrs[j];
             ist.cur_index = (int)j;
@@ -1343,6 +1405,18 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             }
             int_regs_flush(fp, f, &lay, &ist);
             x86_diag_at(f, in);
+            if (half_param_count > 0 && in->op != CC_SSA_PARAM) {
+                /* the _Float16 parameters' bits, kept in their slots: to the doubles they are, once every
+                 * parameter is out of its register (__extendhfdf2 is a call) */
+                size_t h;
+
+                for (h = 0; h < half_param_count; ++h) {
+                    fprintf(fp, "\tmovss %d(%%rbp), %%xmm0\n", slot_off(&lay, half_params[h]));
+                    fprintf(fp, "\tcall __extendhfdf2\n");
+                    fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(&lay, half_params[h]));
+                }
+                half_param_count = 0;
+            }
 
             switch (in->op) {
             case CC_SSA_PARAM: {
@@ -1514,6 +1588,18 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                         int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                         emit_x86_64_load_int_param_from_stack(fp, ist.regs[rd], poff, pbytes, in->is_unsigned);
                     }
+                }
+                if (vt == CC_VAL_F64 && f->param_abi != NULL && in->param_index >= 0 &&
+                    (size_t)in->param_index < f->param_count &&
+                    f->param_abi[in->param_index] == CC_CALL_ARG_ABI_HALF) {
+                    /* its bits, stored above as a double's would be: converted after the parameters */
+                    if (half_param_count >= sizeof(half_params) / sizeof(half_params[0])) {
+                        int_regs_free(&ist);
+                        slot_layout_free(&lay);
+                        set_diag(diag, "too many _Float16 parameters");
+                        return -1;
+                    }
+                    half_params[half_param_count++] = in->dst;
                 }
                 break;
             }
@@ -2047,6 +2133,9 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                             if (f->ret_abi == CC_CALL_ARG_ABI_FLOAT) {
                                 /* a float is returned in single precision */
                                 fprintf(fp, "\tcvtsd2ss %%xmm0, %%xmm0\n");
+                            } else if (f->ret_abi == CC_CALL_ARG_ABI_HALF) {
+                                /* a _Float16 as its bits, which __truncdfhf2 leaves in %xmm0 */
+                                fprintf(fp, "\tcall __truncdfhf2\n");
                             }
                         }
                     } else if ((in->agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX)) != 0) {
