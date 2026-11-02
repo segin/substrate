@@ -1,18 +1,22 @@
 # libelfobj ABI Policy
 
-This library follows a strict, versioned ABI policy.
+This library follows a strict ABI policy.
 
 ## Current ABI
 
-- ABI generation: `ELFOBJ_1.0`
+- ABI generation: the soname, `libelfobj.so.0`
 - Public API version macro: `ELFOBJ_API_VERSION` (currently `1`)
-- Symbol version script: `usr.lib/elfobj/libelfobj.map`
+- No symbol versions.  A version script (once `libelfobj.map`) was never
+  applied to the shared library, and Substrate's own `ld`, which links it
+  in a native build, has no `--version-script`; its exports are the
+  library's non-static functions, the `elf_*` API among them.  An
+  incompatible change gets a new soname.
 
 ## Stability Rules
 
 - Public handles remain opaque (`elfobj_t`, `elf_section_t`, `elf_symbol_t`, `elf_reloc_t`).
 - Existing exported function signatures are never changed in place.
-- New APIs are additive and introduced under a newer symbol version when required.
+- New APIs are additive.
 - Error code numeric values in `elf_err_t` are stable once released.
 - Existing behavior is preserved unless documented as a bug fix.
 
@@ -30,6 +34,5 @@ This library follows a strict, versioned ABI policy.
   `tests/abi_api_v1.txt`.
 - Any intentional API changes must update:
   - `include/elfobj.h`
-  - `usr.lib/elfobj/libelfobj.map`
-  - `usr.lib/elfobj/tests/abi_api_v1.txt` (or add a new version file)
+  - `tests/usr.lib/elfobj/abi_api_v1.txt` (or add a new version file)
   - manual pages under `man/man3/`

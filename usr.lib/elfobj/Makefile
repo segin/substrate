@@ -84,7 +84,6 @@ install: $(O)$(LIBNAME) $(if $(NATIVE_BUILD),,$(O)$(SHLIB))
 	cp $(O)$(LIBNAME) $(DESTDIR)/usr/$(LIBDIR)/
 	cp ../../include/elfobj.h $(DESTDIR)/usr/include/
 	cp elfobj.pc $(DESTDIR)/usr/$(LIBDIR)/pkgconfig/
-	cp libelfobj.map $(DESTDIR)/usr/$(LIBDIR)/
 ifndef NATIVE_BUILD
 	install -m 755 $(O)$(SHLIB) $(DESTDIR)/$(LIBDIR)/
 	@ln -sf $(SHLIB) $(DESTDIR)/$(LIBDIR)/libelfobj.so

@@ -26,7 +26,7 @@
 ## Documentation and Support Policy
 - Sync `README.md`, `COMPATIBILITY_MATRIX.md`, and `ARCHITECTURE.md` entries.
 - Ensure man pages reflect public API changes.
-- Confirm ABI policy compatibility (`ABI_POLICY.md`, `libelfobj.map`, API baseline file).
+- Confirm ABI policy compatibility (`ABI_POLICY.md`, the API baseline file).
 
 ## Support Policy
 - Public API in `include/elfobj.h` follows additive-compatibility rules.
