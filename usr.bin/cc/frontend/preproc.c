@@ -898,16 +898,92 @@ static size_t count_pp_tokens(const char *src) {
     return count;
 }
 
+/* What gcc's __has_c_attribute and __has_attribute are for a standard attribute: C23's date. */
+#define PP_STD_ATTRIBUTE_VALUE 202311L
+
 static int has_c_attribute_name(const char *name) {
     if (name == NULL) {
         return 0;
     }
     if (strcmp(name, "deprecated") == 0 || strcmp(name, "fallthrough") == 0 || strcmp(name, "maybe_unused") == 0 ||
-        strcmp(name, "nodiscard") == 0 || strcmp(name, "noreturn") == 0 ||
+        strcmp(name, "nodiscard") == 0 || strcmp(name, "noreturn") == 0 || strcmp(name, "_Noreturn") == 0 ||
         strcmp(name, "reproducible") == 0 || strcmp(name, "unsequenced") == 0) {
         return 1;
     }
     return 0;
+}
+
+static int has_gnu_attribute_name(const char *name);
+
+/**
+ * Copy @p n bytes of an attribute name's spelling into @p out without the
+ * underscores of its `__name__` form, as gcc reads `__packed__` as `packed`.
+ *
+ * @param s    the spelling
+ * @param n    its length
+ * @param out  receives the name
+ * @param cap  the size of @p out
+ * @return     0, or -1 if it does not fit
+ */
+static int attribute_plain_name(const char *s, size_t n, char *out, size_t cap) {
+    if (n > 4 && s[0] == '_' && s[1] == '_' && s[n - 1] == '_' && s[n - 2] == '_') {
+        s += 2;
+        n -= 4;
+    }
+    if (n + 1 > cap) {
+        return -1;
+    }
+    memcpy(out, s, n);
+    out[n] = '\0';
+    return 0;
+}
+
+/**
+ * The value of `__has_c_attribute(operand)` (@p c_form) or of
+ * `__has_attribute(operand)`, as gcc gives it: a standard attribute, in
+ * either spelling, is PP_STD_ATTRIBUTE_VALUE; `gnu::name` (or
+ * `__gnu__::name`) is 1 for a GNU attribute; another scope is 0; and an
+ * unscoped name that is no standard attribute is 0 for
+ * __has_c_attribute, and 1 for __has_attribute if it is a GNU one.
+ *
+ * @param operand  the operand, white space around `::` allowed
+ * @param c_form   nonzero for __has_c_attribute
+ * @return         the value
+ */
+static long attribute_has_value(const char *operand, int c_form) {
+    const char *sep = strstr(operand, "::");
+    char scope[64];
+    char name[128];
+    const char *a = operand;
+    const char *b;
+
+    if (sep != NULL) {
+        b = sep;
+        while (b > a && isspace((unsigned char)b[-1])) {
+            b--;
+        }
+        if (attribute_plain_name(a, (size_t)(b - a), scope, sizeof(scope)) != 0) {
+            return 0;
+        }
+        a = sep + 2;
+        while (isspace((unsigned char)*a)) {
+            a++;
+        }
+    }
+    b = a + strlen(a);
+    while (b > a && isspace((unsigned char)b[-1])) {
+        b--;
+    }
+    if (attribute_plain_name(a, (size_t)(b - a), name, sizeof(name)) != 0) {
+        return 0;
+    }
+    if (sep != NULL) {
+        return strcmp(scope, "gnu") == 0 && has_gnu_attribute_name(name) ? 1 : 0;
+    }
+    if (has_c_attribute_name(name)) {
+        return PP_STD_ATTRIBUTE_VALUE;
+    }
+    return !c_form && has_gnu_attribute_name(name) ? 1 : 0;
 }
 
 static int has_gnu_attribute_name(const char *name) {
@@ -926,7 +1002,9 @@ static int has_gnu_attribute_name(const char *name) {
         strcmp(name, "vector_size") == 0 || strcmp(name, "ext_vector_type") == 0 ||
         strcmp(name, "no_instrument_function") == 0 || strcmp(name, "nocf_check") == 0 ||
         strcmp(name, "patchable_function_entry") == 0 || strcmp(name, "no_stack_protector") == 0 ||
-        strcmp(name, "stack_protect") == 0) {
+        strcmp(name, "stack_protect") == 0 || strcmp(name, "constructor") == 0 ||
+        strcmp(name, "destructor") == 0 || strcmp(name, "counted_by") == 0 || strcmp(name, "gnu_inline") == 0 ||
+        strcmp(name, "mode") == 0 || strcmp(name, "regparm") == 0) {
         return 1;
     }
     return 0;
@@ -4989,15 +5067,17 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                 i = j;
                 continue;
             }
-            if (strcmp(name, "__has_attribute") == 0 || strcmp(name, "__has_builtin") == 0) {
+            if (strcmp(name, "__has_attribute") == 0 || strcmp(name, "__has_c_attribute") == 0 ||
+                strcmp(name, "__has_builtin") == 0) {
                 /*
-                 * outside #if too, gcc's operators are 1 or 0: Linux's trace.c tests
+                 * outside #if too, gcc's operators have their values: Linux's trace.c tests
                  * `IS_ENABLED(...) && __has_attribute(btf_type_tag)` in a statement
                  */
                 size_t k = j;
                 size_t a;
                 char *operand;
-                int has_v;
+                long has_v;
+                char num[24];
 
                 while (src[k] == ' ' || src[k] == '\t' || src[k] == '\r' || src[k] == '\n') {
                     k++;
@@ -5008,7 +5088,8 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         k++;
                     }
                     a = k;
-                    while (is_ident_char((unsigned char)src[k])) {
+                    while (is_ident_char((unsigned char)src[k]) ||
+                           (name[6] != 'b' && (src[k] == ':' || src[k] == ' ' || src[k] == '\t'))) {
                         k++;
                     }
                     operand = k > a ? cc_strndup(src + a, k - a) : NULL;
@@ -5016,9 +5097,11 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         k++;
                     }
                     if (operand != NULL && src[k] == ')') {
-                        has_v = name[6] == 'a' ? has_gnu_attribute_name(operand) : has_builtin_name(operand);
+                        has_v = name[6] == 'b' ? has_builtin_name(operand)
+                                               : attribute_has_value(operand, name[6] == 'c');
                         free(operand);
-                        if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                        snprintf(num, sizeof(num), "%ld", has_v);
+                        if (sb_append(&out, num) != 0) {
                             free(name);
                             sb_free(&out);
                             return NULL;
@@ -5959,8 +6042,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     const char *name_a = NULL;
                     const char *name_b = NULL;
                     char *name = NULL;
-                    char *base = NULL;
-                    int has_attr = 0;
+                    char num[24];
                     while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
                         k++;
                     }
@@ -5980,7 +6062,8 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     }
                     name_a = expr + k;
                     k++;
-                    while (is_ident_char((unsigned char)expr[k]) || expr[k] == ':') {
+                    while (is_ident_char((unsigned char)expr[k]) || expr[k] == ':' || expr[k] == ' ' ||
+                           expr[k] == '\t') {
                         k++;
                     }
                     name_b = expr + k;
@@ -5998,15 +6081,9 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         sb_free(&out);
                         return -1;
                     }
-                    base = strrchr(name, ':');
-                    if (base != NULL && base[1] != '\0') {
-                        base++;
-                    } else {
-                        base = name;
-                    }
-                    has_attr = has_c_attribute_name(base);
+                    snprintf(num, sizeof(num), "%ld", attribute_has_value(name, 1));
                     free(name);
-                    if (sb_append(&out, has_attr ? "1" : "0") != 0) {
+                    if (sb_append(&out, num) != 0) {
                         sb_free(&out);
                         return -1;
                     }
@@ -6178,7 +6255,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     const char *name_a = NULL;
                     const char *name_b = NULL;
                     char *name = NULL;
-                    int has_v = 0;
+                    char num[24];
                     while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
                         k++;
                     }
@@ -6198,7 +6275,8 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     }
                     name_a = expr + k;
                     k++;
-                    while (is_ident_char((unsigned char)expr[k])) {
+                    while (is_ident_char((unsigned char)expr[k]) || expr[k] == ':' || expr[k] == ' ' ||
+                           expr[k] == '\t') {
                         k++;
                     }
                     name_b = expr + k;
@@ -6216,9 +6294,9 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         sb_free(&out);
                         return -1;
                     }
-                    has_v = has_gnu_attribute_name(name);
+                    snprintf(num, sizeof(num), "%ld", attribute_has_value(name, 0));
                     free(name);
-                    if (sb_append(&out, has_v ? "1" : "0") != 0) {
+                    if (sb_append(&out, num) != 0) {
                         sb_free(&out);
                         return -1;
                     }
