@@ -443,21 +443,31 @@ static void sf_i2f(sf_t *z, int dst, int v, int is_unsigned, int to_float) {
 }
 
 /**
- * Floating to integer (F2I), truncated: an unsigned 64-bit result by __fixuns*di; any other the low bits of the
- * 64-bit __fix*di's, as the x87's fistp of 64 bits gives them (so an unsigned int from 2^31 up is right
- * whether or not the conversion is marked unsigned).
+ * Floating to integer (F2I), truncated, by the routine gcc calls: to an integer narrower than 64 bits whose
+ * type lowering noted (cc_ssa_instr_t.f2i_to), the 32-bit __fix*si, or __fixuns*si for an unsigned one (a
+ * char's and a short's the low bits of it); to a 64-bit one, __fix*di or __fixuns*di; from a float whose bits
+ * are known, the float's own (__fixsf*), else the double's or the long double's.  A narrow one whose type is
+ * not known takes the low bits of __fix*di's, right for either signedness, as the x87's fistp of 64 bits.
  */
 static void sf_f2i(sf_t *z, const cc_ssa_instr_t *in) {
     long db = cc_ssa_value_size(z->f, in->dst);
-    int uns = in->is_unsigned || cc_ssa_value_is_unsigned(z->f, in->dst);
+    int wide = db >= 8 || in->is_unsigned || in->f2i_to == 0;
+    int uns = wide ? db >= 8 && (in->is_unsigned || cc_ssa_value_is_unsigned(z->f, in->dst))
+                   : in->f2i_to == CC_SSA_F2I_TO_UNSIGNED;
+    int lhs = in->lhs;
+    const char *mode = sf_kind(z, lhs) == SF_LD ? "xf" : "df";
     char name[32];
-    sf_arg_t a = sf_arg(z, in->lhs);
+    sf_arg_t a = sf_arg(z, lhs);
 
     if (db > 8) {
         db = 8;
     }
-    snprintf(name, sizeof(name), "__fix%s%sdi", (uns && db == 8) ? "uns" : "", sf_kind(z, in->lhs) == SF_LD ? "xf" : "df");
-    sf_call(z, name, in->dst, 0, db, uns, &a, 1);
+    if (sf_kind(z, lhs) == SF_D && lhs < z->nvals && z->fbits[lhs] >= 0) {
+        a = sf_arg_i(z->fbits[lhs], 4);
+        mode = "sf";
+    }
+    snprintf(name, sizeof(name), "__fix%s%s%s", uns ? "uns" : "", mode, wide ? "di" : "si");
+    sf_call(z, name, in->dst, 0, db, cc_ssa_value_is_unsigned(z->f, in->dst), &a, 1);
 }
 
 /**

@@ -2711,6 +2711,31 @@ static void mark_int_nsw(cc_ssa_function_t *sf, int v, int int_args) {
 }
 
 /**
+ * Note on the conversion that made value @p v, if it is a floating value's to an integer (F2I), whether the
+ * integer type narrower than 64 bits it converts to is unsigned (cc_ssa_instr_t.f2i_to): the conversion's
+ * result is the same either way, kept to the type's bits after it, but i386 soft-float calls gcc's routine of
+ * that signedness.
+ *
+ * @param sf            the function
+ * @param v             the value
+ * @param want_unsigned whether the type converted to is unsigned
+ */
+static void mark_f2i_target(cc_ssa_function_t *sf, int v, int want_unsigned) {
+    size_t k;
+
+    for (k = sf->instr_count; k > 0; --k) {
+        cc_ssa_instr_t *def = &sf->instrs[k - 1];
+
+        if (def->dst == v) {
+            if (def->op == CC_SSA_F2I && !def->is_unsigned) {
+                def->f2i_to = want_unsigned ? CC_SSA_F2I_TO_UNSIGNED : CC_SSA_F2I_TO_SIGNED;
+            }
+            return;
+        }
+    }
+}
+
+/**
  * Convert an integer value to standard integer type @p t: compare a
  * `_Bool` with zero, otherwise keep the type's low bits, sign- or
  * zero-extended (see normalize_int_ct() for the bit-precise types).
@@ -2813,6 +2838,7 @@ int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *t, 
         return v;
     }
 
+    mark_f2i_target(sf, v, want_unsigned);
     if (!want_unsigned && cc_target_pointer_size() <= 4 && bits == 32 && value_size(sf, v) <= 4) {
         /* already a signed word: relabelling it is enough */
         cc_ir_set_size(sf, v, 4);

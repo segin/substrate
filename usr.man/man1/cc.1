@@ -811,6 +811,22 @@ a
 .Ic long double
 in
 .Li %eax:%edx:%ecx .
+A conversion to an integer calls the routine
+.Xr gcc 1
+calls for its type: to one of 32 bits or fewer
+.Fn __fixdfsi
+.Pq Fn __fixunsdfsi No for an unsigned one ,
+to a
+.Ic long long
+.Fn __fixdfdi
+.Pq Fn __fixunsdfdi ,
+and from a
+.Ic float
+or a
+.Ic long double
+.Fn __fixsfsi ,
+.Fn __fixxfsi
+and the rest.
 This applies where the x87 would do the doubles; where SSE does them
 .Pq Fl mfpmath=sse , or Fl msse2 without Fl mfpmath=387
 a

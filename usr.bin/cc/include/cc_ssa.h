@@ -159,6 +159,10 @@ static inline int cc_ssa_ext_needs_scratch(int bits, int is_unsigned, long size,
 #define CC_SSA_SEG_FS 1
 #define CC_SSA_SEG_GS 2
 
+/** cc_ssa_instr_t.f2i_to: the narrow integer type an F2I converts to is signed, or unsigned. */
+#define CC_SSA_F2I_TO_SIGNED 1
+#define CC_SSA_F2I_TO_UNSIGNED 2
+
 typedef struct {
     cc_ssa_opcode_t op;
     int dst;
@@ -178,6 +182,10 @@ typedef struct {
     unsigned char nsw;    /**< ADD, SUB, MUL: a C operation on signed ints, whose overflow is undefined (without
                                -fwrapv): of two values held as ints, the result is held as one.  Only a licence to
                                drop an extension -- a pass that loses it loses nothing else; the text form omits it */
+    unsigned char f2i_to; /**< F2I to an integer narrower than 64 bits: the C type converted to, CC_SSA_F2I_TO_SIGNED
+                               or CC_SSA_F2I_TO_UNSIGNED, which i386 soft-float calls gcc's routine for (__fix*si,
+                               __fixuns*si); 0 not known, and it calls the 64-bit one, whose low bits are right for
+                               either.  The result is the same; the text form omits it */
     unsigned asm_seg_in;  /**< ASM: bit i set when memory input i is in address space seg */
     unsigned asm_seg_out; /**< ASM: the same for the outputs */
     double fimm;
