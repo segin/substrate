@@ -191,7 +191,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
 static int can_parse_oldstyle_param_names(parser_t *p);
 static int parse_function(parser_t *p, cc_function_t *f);
 static int function_param_index_by_name(const cc_function_t *f, const char *name);
-static int probe_is_function_head(parser_t *p);
+static int probe_is_function_head(parser_t *p, int need_body);
 static void free_func(cc_function_t *f);
 static int enum_tag_find_n(const parser_t *p, const char *tag, size_t len);
 static int enum_tag_set(parser_t *p, const char *tag, size_t len, const cc_ctype_t *ctype, int complete);
@@ -11301,7 +11301,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             set_diag(p->diag, p->tok.line, p->tok.col, "unexpected end of file in function body");
             return -1;
         }
-        if (parser_is_gnu_mode() && is_declspec_start(p) && probe_is_function_head(p)) {
+        if (parser_is_gnu_mode() && is_declspec_start(p) && probe_is_function_head(p, 1)) {
             cc_function_t nested;
             if (parse_function(p, &nested) != 0) {
                 if (diag_is_oom(p->diag)) {
@@ -11391,12 +11391,16 @@ static int probe_skip_params(parser_t *p, void *ctx) {
 /**
  * Whether the declaration at the parser declares a function -- its
  * declarator's name directly followed by a parameter list -- rather than
- * an object.  Parses a copy of the parser, so consumes nothing.
+ * an object; with @p need_body, whether it also defines it, the body (or
+ * old-style parameter declarations) following, as a nested function in a
+ * block must: `extern int k(int);` there only declares one.  Parses a copy
+ * of the parser, so consumes nothing.
  *
- * @param p  the parser, at the declaration's specifiers
- * @return   1 if it declares a function, else 0
+ * @param p          the parser, at the declaration's specifiers
+ * @param need_body  nonzero to ask for a definition
+ * @return           1 if it does, else 0
  */
-static int probe_is_function_head(parser_t *p) {
+static int probe_is_function_head(parser_t *p, int need_body) {
     parser_t q = *p;
     int is_typedef = 0;
     declarator_t d;
@@ -11429,6 +11433,10 @@ static int probe_is_function_head(parser_t *p) {
     d.name_params = probe_skip_params;
     d.name_params_ctx = &rc;
     if (parse_declarator_into(&q, &d, 0) != 0) {
+        rc = 0;
+    }
+    if (rc && need_body &&
+        (skip_decl_gnu_suffix(&q, NULL) != 0 || (q.tok.kind != TOK_LBRACE && !is_declspec_start(&q)))) {
         rc = 0;
     }
     declarator_free(&d);
@@ -11648,7 +11656,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
             free_stmt(&asm_stmt);
             continue;
         }
-        if (is_declspec_start(&p) && !probe_is_function_head(&p)) {
+        if (is_declspec_start(&p) && !probe_is_function_head(&p, 0)) {
             cc_stmt_t *decls = NULL;
             size_t decl_count = 0;
             size_t di;
