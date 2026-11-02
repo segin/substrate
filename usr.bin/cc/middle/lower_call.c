@@ -1687,23 +1687,105 @@ static int lower_inline_mem(cc_ssa_function_t *sf, int kind, int dst, int src, l
  * @return            the value, -1 on error, or LOWER_NOT_BUILTIN when the
  *                    call is to be made as an ordinary call
  */
+/** Where a va_list a builtin reads or writes is: a local variable, or memory at an address. */
+typedef struct {
+    int var_idx; /**< the local variable, or -1 */
+    int addr;    /**< else the address of the va_list object */
+} va_list_slot_t;
+
+/**
+ * Find the va_list lvalue @p ap names: a local variable by name, or any
+ * other lvalue -- `*ap` of a `va_list *`, `s->ap` -- by its address, as
+ * Linux's efi libstub vsprintf.c has `va_arg(*ap, int)`.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int va_list_find(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                        var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *ap, va_list_slot_t *slot,
+                        cc_diag_t *diag) {
+    cc_expr_t addr_of;
+
+    slot->var_idx = -1;
+    slot->addr = -1;
+    if (ap == NULL) {
+        set_diag(diag, "missing va_list operand");
+        return -1;
+    }
+    if (ap->kind == CC_EXPR_IDENT && ap->ident != NULL) {
+        slot->var_idx = var_find_visible(vars, var_count, ap->ident, depth);
+        if (slot->var_idx >= 0) {
+            return 0;
+        }
+    }
+    memset(&addr_of, 0, sizeof(addr_of));
+    addr_of.kind = CC_EXPR_ADDR;
+    addr_of.lhs = (cc_expr_t *)ap;
+    addr_of.line = ap->line;
+    addr_of.col = ap->col;
+    slot->addr = lower_expr(tu, sf, ctx, vars, var_count, depth, &addr_of, diag);
+    if (slot->addr < 0) {
+        return -1;
+    }
+    slot->addr = cast_value(sf, slot->addr, CC_VAL_I64, diag);
+    return slot->addr < 0 ? -1 : 0;
+}
+
+/** The value of the va_list in @p slot: the pointer it holds. */
+static int va_list_load(cc_ssa_function_t *sf, var_entry_t *vars, const va_list_slot_t *slot, cc_diag_t *diag) {
+    cc_ssa_instr_t ld;
+
+    if (slot->var_idx >= 0) {
+        return emit_local_var_scalar_load(sf, &vars[slot->var_idx], diag);
+    }
+    memset(&ld, 0, sizeof(ld));
+    ld.op = CC_SSA_LOAD;
+    ld.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    ld.lhs = slot->addr;
+    ld.rhs = -1;
+    ld.imm = cc_target_pointer_size();
+    ld.is_unsigned = 1;
+    if (ld.dst < 0 || cc_ir_push(sf, ld) != 0) {
+        set_diag(diag, "out of memory loading va_list");
+        return -1;
+    }
+    return ld.dst;
+}
+
+/** Store @p v in the va_list in @p slot. */
+static int va_list_store(cc_ssa_function_t *sf, var_entry_t *vars, const va_list_slot_t *slot, int v,
+                         cc_diag_t *diag) {
+    cc_ssa_instr_t st;
+
+    if (slot->var_idx >= 0) {
+        return emit_local_var_scalar_store(sf, &vars[slot->var_idx], v, diag);
+    }
+    memset(&st, 0, sizeof(st));
+    st.op = CC_SSA_STORE;
+    st.dst = -1;
+    st.lhs = slot->addr;
+    st.rhs = v;
+    st.imm = cc_target_pointer_size();
+    if (cc_ir_push(sf, st) != 0) {
+        set_diag(diag, "out of memory storing va_list");
+        return -1;
+    }
+    return 0;
+}
+
 static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e,
                               builtin_kind_t bk, int bswap_bits, cc_ssa_instr_t *in_io, cc_diag_t *diag) {
     cc_ssa_instr_t in = *in_io;
 
     if (bk == BUILTIN_VA_START) {
-        int dst_idx;
+        va_list_slot_t dst;
         int last_idx;
         int va_start_dst;
-        if (e->arg_count != 2 || e->args[0] == NULL || e->args[1] == NULL || e->args[0]->kind != CC_EXPR_IDENT ||
-            e->args[1]->kind != CC_EXPR_IDENT) {
-            set_diag(diag, "__builtin_va_start lowering expects (identifier, parameter-identifier)");
+        if (e->arg_count != 2 || e->args[0] == NULL || e->args[1] == NULL || e->args[1]->kind != CC_EXPR_IDENT) {
+            set_diag(diag, "__builtin_va_start lowering expects (va_list, parameter-identifier)");
             return -1;
         }
-        dst_idx = var_find_visible(vars, var_count, e->args[0]->ident, depth);
-        if (dst_idx < 0) {
-            set_diag(diag, "__builtin_va_start destination must be a local va_list variable");
+        if (va_list_find(tu, sf, ctx, vars, var_count, depth, e->args[0], &dst, diag) != 0) {
             return -1;
         }
         last_idx = function_param_index_by_name(ctx, e->args[1]->ident);
@@ -1720,7 +1802,7 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             return -1;
         }
         va_start_dst = in.dst;
-        if (emit_local_var_scalar_store(sf, &vars[dst_idx], va_start_dst, diag) != 0) {
+        if (va_list_store(sf, vars, &dst, va_start_dst, diag) != 0) {
             return -1;
         }
         return va_start_dst;
@@ -1729,17 +1811,12 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         return cc_ir_const(sf, 0);
     }
     if (bk == BUILTIN_VA_COPY) {
-        int dst_idx;
+        va_list_slot_t dst;
         int srcv;
         int copy_src;
         int copy_dst;
-        if (e->arg_count != 2 || e->args[0] == NULL || e->args[1] == NULL || e->args[0]->kind != CC_EXPR_IDENT) {
-            set_diag(diag, "__builtin_va_copy lowering expects destination identifier");
-            return -1;
-        }
-        dst_idx = var_find_visible(vars, var_count, e->args[0]->ident, depth);
-        if (dst_idx < 0) {
-            set_diag(diag, "__builtin_va_copy destination must be a local va_list variable");
+        if (e->arg_count != 2 || e->args[1] == NULL ||
+            va_list_find(tu, sf, ctx, vars, var_count, depth, e->args[0], &dst, diag) != 0) {
             return -1;
         }
         srcv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag);
@@ -1770,26 +1847,20 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             }
             srcv = copy_dst;
         }
-        if (emit_local_var_scalar_store(sf, &vars[dst_idx], srcv, diag) != 0) {
-            set_diag(diag, "out of memory appending va_copy");
+        if (va_list_store(sf, vars, &dst, srcv, diag) != 0) {
             return -1;
         }
         return srcv;
     }
     if (bk == BUILTIN_VA_ARG) {
-        int ap_idx;
+        va_list_slot_t ap;
         int cur_ap;
         int load_v;
         int next_ap;
         long mem_size;
         cc_abi_va_type_t va_type;
-        if (e->arg_count != 1 || e->args[0] == NULL || e->args[0]->kind != CC_EXPR_IDENT) {
-            set_diag(diag, "__builtin_va_arg lowering expects va_list identifier");
-            return -1;
-        }
-        ap_idx = var_find_visible(vars, var_count, e->args[0]->ident, depth);
-        if (ap_idx < 0) {
-            set_diag(diag, "__builtin_va_arg operand must be a local va_list variable");
+        if (e->arg_count != 1 ||
+            va_list_find(tu, sf, ctx, vars, var_count, depth, e->args[0], &ap, diag) != 0) {
             return -1;
         }
         /* the value is of the type named, which is the expression's */
@@ -1805,7 +1876,7 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         va_type.is_ldouble = lower_has_kind(e, CC_CT_LDOUBLE);
         va_type.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
 
-        cur_ap = emit_local_var_scalar_load(sf, &vars[ap_idx], diag);
+        cur_ap = va_list_load(sf, vars, &ap, diag);
         if (cur_ap < 0) {
             return -1;
         }
@@ -1818,7 +1889,7 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         if (load_v < 0) {
             return -1;
         }
-        if (next_ap >= 0 && emit_local_var_scalar_store(sf, &vars[ap_idx], next_ap, diag) != 0) {
+        if (next_ap >= 0 && va_list_store(sf, vars, &ap, next_ap, diag) != 0) {
             set_diag(diag, "out of memory appending va_arg pointer update");
             return -1;
         }
