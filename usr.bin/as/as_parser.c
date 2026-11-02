@@ -1395,6 +1395,35 @@ static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t
  * was begun for it is kept: its text was, on every operand in error --
  * `movl %nosuch, %eax` lost eleven bytes.
  */
+/**
+ * Whether a register may be written as a bare name here: not on x86 in
+ * AT&T syntax, where registers are written with `%` and `st`, `p1` or
+ * `c3` are symbols (a C compiler's `static int p1` is referred to as
+ * `movl p1, %ecx`); Intel syntax writes them bare.
+ *
+ * @param ctx  the parse
+ * @return     1 if so, else 0
+ */
+static int bare_name_may_be_register(const parse_ctx_t *ctx) {
+    return ctx == NULL || ctx->cfg == NULL || ctx->cfg->arch != AS_PARSER_ARCH_X86 || ctx->syntax_intel;
+}
+
+/**
+ * Whether bare @p text names a coprocessor operand: ARM's `p0`..`p15`
+ * and `c0`..`c15`, which x86 has none of, and the x87 stack's `st` where
+ * a register may be bare.
+ *
+ * @param ctx   the parse
+ * @param text  the operand's one token
+ * @return      1 if so, else 0
+ */
+static int bare_coprocessor_operand(const parse_ctx_t *ctx, const char *text) {
+    if (ctx != NULL && ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_X86) {
+        return ctx->syntax_intel && text != NULL && streq_ci(text, "st");
+    }
+    return is_coprocessor_text(text);
+}
+
 static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *op) {
     int rc = parse_operand_tokens(ctx, tokv, n, op);
 
@@ -1500,14 +1529,14 @@ static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t
      */
     if (n == 1 &&
         (tokv[0].kind == AS_TOK_IDENTIFIER || tokv[0].kind == AS_TOK_REGISTER) &&
-        (streq_ci(tokv[0].text, "st") || streq_ci(tokv[0].text, "%st"))) {
+        ((streq_ci(tokv[0].text, "st") && bare_name_may_be_register(ctx)) || streq_ci(tokv[0].text, "%st"))) {
         op->kind = AS_OPERAND_COPROCESSOR;
         op->u.coproc = xstrdup("st");
         return op->u.coproc != NULL ? 0 : -1;
     }
     if (n == 4 &&
         (tokv[0].kind == AS_TOK_REGISTER || tokv[0].kind == AS_TOK_IDENTIFIER) &&
-        (streq_ci(tokv[0].text, "%st") || streq_ci(tokv[0].text, "st")) &&
+        (streq_ci(tokv[0].text, "%st") || (streq_ci(tokv[0].text, "st") && bare_name_may_be_register(ctx))) &&
         tokv[1].kind == AS_TOK_PUNCT && strcmp(tokv[1].text, "(") == 0 &&
         (tokv[2].kind == AS_TOK_NUMBER || tokv[2].kind == AS_TOK_IDENTIFIER) &&
         tokv[3].kind == AS_TOK_PUNCT && strcmp(tokv[3].text, ")") == 0) {
@@ -1560,7 +1589,7 @@ static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t
         return op->u.reg != NULL ? 0 : -1;
     }
 
-    if (n == 1 && is_coprocessor_text(tokv[0].text)) {
+    if (n == 1 && bare_coprocessor_operand(ctx, tokv[0].text)) {
         op->kind = AS_OPERAND_COPROCESSOR;
         op->u.coproc = xstrdup(tokv[0].text);
         return op->u.coproc != NULL ? 0 : -1;
