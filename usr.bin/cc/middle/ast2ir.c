@@ -1791,6 +1791,32 @@ static void jump_scope_pop(const lower_ctx_t *ctx) {
 }
 
 /**
+ * Where a `break` and a `continue` go from inside the innermost loop or
+ * switch being lowered: for a statement expression in it, whose `break`
+ * and `continue` are the enclosing statement's (GNU C).
+ *
+ * @param ctx             the lowering context
+ * @param break_label     receives the innermost scope's break label, or -1
+ * @param continue_label  receives the innermost loop's continue label, or -1
+ */
+static void jump_scope_targets(const lower_ctx_t *ctx, int *break_label, int *continue_label) {
+    size_t i;
+
+    *break_label = -1;
+    *continue_label = -1;
+    if (ctx == NULL || ctx->jumps == NULL || ctx->jumps->count == 0) {
+        return;
+    }
+    *break_label = ctx->jumps->at[ctx->jumps->count - 1].break_label;
+    for (i = ctx->jumps->count; i > 0; --i) {
+        if (ctx->jumps->at[i - 1].continue_label >= 0) {
+            *continue_label = ctx->jumps->at[i - 1].continue_label;
+            return;
+        }
+    }
+}
+
+/**
  * Before a break or continue to @p label: run the cleanups of the variables it takes out of scope, those
  * declared in the innermost loop or switch body it leaves since the body began.
  *
@@ -7635,6 +7661,8 @@ static int lower_stmt_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     size_t j;
     int saw_ret_dummy = 0;
     int outv = -1;
+    int brk;
+    int cont;
 
     if (var_count > 0) {
         lvars = (var_entry_t *)calloc(var_count, sizeof(*lvars));
@@ -7682,7 +7710,8 @@ static int lower_stmt_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             }
             continue;
         }
-        if (lower_stmt(tu, sf, &lvars, &lcount, ctx, depth + 1, -1, -1, cur, &saw_ret_dummy,
+        jump_scope_targets(ctx, &brk, &cont);
+        if (lower_stmt(tu, sf, &lvars, &lcount, ctx, depth + 1, brk, cont, cur, &saw_ret_dummy,
                        diag) != 0) {
             vars_pop_to(lvars, &lcount, 0);
             free(lvars);
