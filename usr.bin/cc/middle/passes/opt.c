@@ -3702,6 +3702,10 @@ static long called_function(const cc_ssa_module_t *m, const char *sym) {
     return sym != NULL ? fn_lookup(m, sym, strlen(sym)) : -1;
 }
 
+long cc_ssa_module_function(const cc_ssa_module_t *m, const char *name) {
+    return called_function(m, name);
+}
+
 /** The index of the function of @p m that symbol @p sym names (an offset or @PLT after it ignored), or -1. */
 static long function_named(const cc_ssa_module_t *m, const char *sym) {
     return sym != NULL ? fn_lookup(m, sym, sym_name_len(sym)) : -1;
@@ -5537,6 +5541,9 @@ done:
     return rc;
 }
 
+/** The most rounds inline_module() inlines, in a function, calls an inlined body brought in that take a local's address. */
+#define INLINE_LOCAL_ROUNDS 4
+
 /**
  * Inline the module's small static inline functions (passes/inline.c) bottom-up: a function is
  * rewritten once every function it calls is, so what it copies has its own calls inlined and is
@@ -5555,6 +5562,7 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
     size_t *next = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*next));
     size_t root;
     int rc = 0;
+    int round;
 
     if (open == NULL || done == NULL || once == NULL || stack == NULL || next == NULL ||
         mark_called_once(m, once) != 0) {
@@ -5593,9 +5601,20 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
                 continue;
             }
             top--;
-            rc = cc_inline_calls(m, fi, done, once, opt_level);
+            rc = cc_inline_calls(m, fi, done, once, opt_level, 0);
             if (rc > 0) {
                 rc = optimize_function(&m->funcs[fi], opt_level);
+                /*
+                 * a call an inlined body brought in, which passes a local of this function by address now, is
+                 * weighed again here, as gcc's inliner weighs the calls of what it inlined in their new place
+                 */
+                for (round = 0; rc == 0 && round < INLINE_LOCAL_ROUNDS; ++round) {
+                    rc = cc_inline_calls(m, fi, done, once, opt_level, 1);
+                    if (rc <= 0) {
+                        break;
+                    }
+                    rc = optimize_function(&m->funcs[fi], opt_level);
+                }
             }
             /*
              * a load from a const table at an offset the inlined constants made known, as its initializer

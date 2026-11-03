@@ -182,6 +182,17 @@ int cc_fold_ranges(cc_ssa_function_t *f, const cc_range_t *params, cc_range_call
 int cc_dead_defs(cc_ssa_function_t *f);
 
 /**
+ * The index of the function of @p m named @p name, or -1 when the module
+ * has none (passes/opt.c): looked up in an index of the module's
+ * functions by name, made again when they change.
+ *
+ * @param m     the module
+ * @param name  the name
+ * @return      the first function so named, or -1
+ */
+long cc_ssa_module_function(const cc_ssa_module_t *m, const char *name);
+
+/**
  * Whether @p g may be inlined (passes/inline.c): static, inline by its
  * storage or always_inline and not noinline, small enough, its interface
  * plain values, and its body free of what depends on its own frame.
@@ -205,10 +216,14 @@ int cc_inline_candidate(const cc_ssa_function_t *g);
  *               and at a larger size; may be NULL
  * @param opt_level  the optimization level, which a copy of a callee is
  *               folded at to weigh it where the call passes constants
+ * @param again  nonzero for a round after the first, once what the first
+ *               inlined is folded: only the calls inlined bodies brought
+ *               in that pass a local's address to a function declared
+ *               inline, which the round before could not see so
  * @return       how many calls were inlined, or -1 when out of memory
  */
 int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, const unsigned char *once,
-                    int opt_level);
+                    int opt_level, int again);
 
 /**
  * Fold, propagate and drop what is dead in @p f, one function alone, as

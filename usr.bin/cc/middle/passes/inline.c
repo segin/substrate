@@ -17,6 +17,14 @@
  * frame past gcc's limit (frame_growth_ok()), and the copy, called by
  * nothing then, is dropped with the other unused static functions.
  *
+ * A function declared inline is inlined at a larger size too where the
+ * call passes it the address of the caller's own local, one only such
+ * calls take (takes_local_slot()): inlined, what it reads and writes
+ * through the pointer are the local's fields, which mem.c follows, as
+ * gcc reckons them gone after scalar replacement.  The calls an inlined
+ * body brings in are weighed so again in the caller, where their
+ * argument may have become such a local (opt.c's inline_module()).
+ *
  * A call of a function of the module that is static, inline (by its
  * storage or always_inline) and not noinline, small, and whose interface
  * is plain values (no aggregate passed or returned in memory, no
@@ -49,6 +57,11 @@
  * gcc's.  Measured over six Linux objects on both targets: 10 smallest on i386, within half a percent on x86-64.
  */
 #define INLINE_MAX_COST 10
+/**
+ * The most code (body_cost()) a function declared inline may have to be inlined at a call that passes it the
+ * address of the caller's local (takes_local_slot()): gcc's max-inline-insns-single at -O2.
+ */
+#define LOCAL_ARG_MAX_COST 70
 /** The same for an always_inline function, which gcc inlines whatever its size. */
 #define ALWAYS_INLINE_MAX_INSTRS 4000
 /** The same for a static function called from one place, which gcc inlines unless very large. */
@@ -865,16 +878,9 @@ static int frame_growth_ok(long was, long now) {
            (now <= CALLED_ONCE_MAX_FRAME && now - was <= was * LARGE_STACK_FRAME_GROWTH / 100);
 }
 
-/** The index of the function of @p m named @p name, or -1. */
+/** The index of the function of @p m named @p name, or -1: by opt.c's index of them, not a walk of them all. */
 static long find_function(const cc_ssa_module_t *m, const char *name) {
-    size_t i;
-
-    for (i = 0; i < m->func_count; ++i) {
-        if (m->funcs[i].name != NULL && strcmp(m->funcs[i].name, name) == 0) {
-            return (long)i;
-        }
-    }
-    return -1;
+    return cc_ssa_module_function(m, name);
 }
 
 /**
@@ -963,8 +969,198 @@ out:
     return small;
 }
 
+/** Whether @p g is static and declared inline, and not noinline: a call of it may take a local's address in. */
+static int declared_inline(const cc_ssa_function_t *g) {
+    return (g->storage & CC_STORAGE_STATIC) != 0 && (g->storage & CC_STORAGE_INLINE) != 0 &&
+           (g->attr_flags & CC_ATTR_NOINLINE) == 0;
+}
+
+/**
+ * Per value of @p f, 1 where it is the address of one of @p f's own stack slots -- its STACKALLOC, or a constant
+ * offset into one through moves -- that nothing lets out of the function: it is only loaded and stored through,
+ * copied to or from or zeroed whole by memcpy and memset, or passed to functions of @p m declared static inline.
+ * Once those calls are inlined it is a local only loaded and stored, which mem.c follows field by field.  NULL
+ * when out of memory.
+ */
+static unsigned char *local_slot_args(const cc_ssa_module_t *m, const cc_ssa_function_t *f) {
+    size_t n = (size_t)(f->value_count > 0 ? f->value_count : 1);
+    int *defs = (int *)calloc(n, sizeof(int));
+    int *slot = (int *)malloc(n * sizeof(int));
+    unsigned char *is_k = (unsigned char *)calloc(n, 1);
+    unsigned char *bad = (unsigned char *)calloc(n, 1);
+    unsigned char *out = NULL;
+    size_t i;
+    size_t k;
+    int v;
+    int changed;
+
+    if (defs == NULL || slot == NULL || is_k == NULL || bad == NULL) {
+        goto done;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->dst >= 0 && in->dst < f->value_count) {
+            defs[in->dst]++;
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int o = in->asm_out_values[k];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(o)) {
+                o = CC_SSA_ASM_MEM_INDIRECT_DECODE(o);
+            }
+            if (o >= 0 && o < f->value_count) {
+                defs[o] += 2;
+            }
+        }
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        slot[v] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_CONST && in->dst >= 0 && in->dst < f->value_count && defs[in->dst] == 1) {
+            is_k[in->dst] = 1;
+        }
+    }
+    /* addresses through moves and constant offsets, in as many rounds as they take */
+    do {
+        changed = 0;
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int d = in->dst;
+
+            if (d < 0 || d >= f->value_count || slot[d] >= 0 || defs[d] != 1) {
+                continue;
+            }
+            if (in->op == CC_SSA_STACKALLOC) {
+                slot[d] = d;
+            } else if ((in->op == CC_SSA_MOV || in->op == CC_SSA_ADD) && in->lhs >= 0 && in->lhs < f->value_count &&
+                       slot[in->lhs] >= 0 &&
+                       (in->op == CC_SSA_MOV || (in->rhs >= 0 && in->rhs < f->value_count && is_k[in->rhs]))) {
+                slot[d] = slot[in->lhs];
+            } else {
+                continue;
+            }
+            changed = 1;
+        }
+    } while (changed);
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int ok_args = 0;
+        int ops[2];
+        int o;
+
+        if (in->op == CC_SSA_STACKALLOC || in->op == CC_SSA_CONST || in->op == CC_SSA_PARAM ||
+            in->op == CC_SSA_LABEL || in->op == CC_SSA_BR) {
+            continue;
+        }
+        if ((in->op == CC_SSA_MOV || in->op == CC_SSA_ADD) && in->dst >= 0 && in->dst < f->value_count &&
+            slot[in->dst] >= 0) {
+            continue; /* the derivation of an address */
+        }
+        if (in->op == CC_SSA_LOAD) {
+            continue;
+        }
+        if (in->op == CC_SSA_STORE) {
+            if (in->rhs >= 0 && in->rhs < f->value_count && slot[in->rhs] >= 0) {
+                bad[slot[in->rhs]] = 1; /* the address itself stored */
+            }
+            continue;
+        }
+        if (in->op == CC_SSA_CALL && in->sym != NULL && in->call_chain == 0) {
+            long gi;
+
+            if (strcmp(in->sym, "memcpy") == 0 || strcmp(in->sym, "memset") == 0) {
+                ok_args = 1;
+            } else if ((gi = find_function(m, in->sym)) >= 0 && declared_inline(&m->funcs[gi])) {
+                ok_args = 1;
+            }
+            for (k = 0; k < in->arg_count; ++k) {
+                o = in->args[k];
+                if (!ok_args && o >= 0 && o < f->value_count && slot[o] >= 0) {
+                    bad[slot[o]] = 1;
+                }
+            }
+            if (in->rhs >= 0 && in->rhs == in->dst && in->rhs < f->value_count && slot[in->rhs] >= 0) {
+                bad[slot[in->rhs]] = 1; /* a structure result's buffer */
+            }
+            continue;
+        }
+        /* any other operand an address into a slot is lets it out */
+        ops[0] = in->lhs;
+        ops[1] = in->rhs;
+        for (k = 0; k < 2; ++k) {
+            if (ops[k] >= 0 && ops[k] < f->value_count && slot[ops[k]] >= 0) {
+                bad[slot[ops[k]]] = 1;
+            }
+        }
+        if (in->call_chain > 0 && in->call_chain - 1 < f->value_count && slot[in->call_chain - 1] >= 0) {
+            bad[slot[in->call_chain - 1]] = 1;
+        }
+        for (k = 0; k < in->arg_count; ++k) {
+            o = in->args[k];
+            if (o >= 0 && o < f->value_count && slot[o] >= 0) {
+                bad[slot[o]] = 1;
+            }
+        }
+        for (k = 0; k < in->asm_out_count + in->asm_in_count; ++k) {
+            o = k < in->asm_out_count ? in->asm_out_values[k] : in->asm_in_values[k - in->asm_out_count];
+            if (CC_SSA_ASM_MEM_INDIRECT_P(o)) {
+                o = CC_SSA_ASM_MEM_INDIRECT_DECODE(o);
+            }
+            if (o >= 0 && o < f->value_count && slot[o] >= 0) {
+                bad[slot[o]] = 1;
+            }
+        }
+        if (in->op == CC_SSA_ASM && in->asm_is_goto) {
+            /* an asm goto: nothing of the function's memory stays known (as mem.c takes it) */
+            memset(bad, 1, n);
+        }
+    }
+    out = (unsigned char *)calloc(n, 1);
+    if (out != NULL) {
+        for (v = 0; v < f->value_count; ++v) {
+            out[v] = slot[v] >= 0 && !bad[slot[v]];
+        }
+    }
+done:
+    free(defs);
+    free(slot);
+    free(is_k);
+    free(bad);
+    return out;
+}
+
+/**
+ * Whether @p call, in @p f, passes @p g, declared inline, the address of a local of @p f that only such calls
+ * let out (@p local, as local_slot_args() leaves it), and @p g is no bigger than LOCAL_ARG_MAX_COST: gcc inlines
+ * a function declared inline up to its max-inline-insns-single, and reckons what the body loads and stores
+ * through a parameter that points to the caller's local gone once it is (its fields are the caller's values
+ * then, by scalar replacement).  Linux's generic page-table walkers keep their state in an on-stack
+ * `struct pt_state` that each level's walker sets up with a constant level and hands to helpers by address,
+ * pt_range_to_index(&pts) and pt_load_entry(&pts), and a BUILD_BUG_ON() in a branch for another level must be
+ * proven dead: only with the helpers inlined is the level the caller stored the one the branch reads.
+ */
+static int takes_local_slot(const cc_ssa_function_t *g, const cc_ssa_instr_t *call, const unsigned char *local,
+                            int n) {
+    size_t i;
+
+    if (local == NULL || !declared_inline(g) || body_cost(g) > LOCAL_ARG_MAX_COST ||
+        !inline_body_ok(g, ALWAYS_INLINE_MAX_INSTRS)) {
+        return 0;
+    }
+    for (i = 0; i < call->arg_count; ++i) {
+        if (call->args[i] >= 0 && call->args[i] < n && local[call->args[i]]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, const unsigned char *once,
-                    int opt_level) {
+                    int opt_level, int again) {
     cc_ssa_function_t *f = &m->funcs[fi];
     ivec_t out;
     size_t i;
@@ -974,8 +1170,14 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
     int nk = f->value_count;     /* the values the calls' arguments are */
     unsigned char *is_const;
     long long *consts;
+    unsigned char *local = NULL; /* the addresses of locals only calls of inline functions take */
 
     if (find_constants(f, nk, &is_const, &consts) != 0) {
+        return -1;
+    }
+    if (opt_level > 0 && (local = local_slot_args(m, f)) == NULL) {
+        free(is_const);
+        free(consts);
         return -1;
     }
     memset(&out, 0, sizeof(out));
@@ -993,10 +1195,11 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
             g = NULL;
         }
         if (g != NULL && (size_t)gi != fi && ready[gi] &&
-            (cc_inline_candidate(g) ||
-             (once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&
+            ((!again && cc_inline_candidate(g)) ||
+             (!again && once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&
               frame_growth_ok(frame, grown + frame_cost(g))) ||
-             (inline_hint_too_big(g) && hint_folds_to_small(g, call, is_const, consts, nk, opt_level))) &&
+             (!again && inline_hint_too_big(g) && hint_folds_to_small(g, call, is_const, consts, nk, opt_level)) ||
+             (takes_local_slot(g, call, local, nk) && frame_growth_ok(frame, grown + frame_cost(g)))) &&
             call_site_inlinable(f, call, g)) {
             grown += frame_cost(g);
             if (splice_body(f, call, g, &out) != 0) {
@@ -1027,6 +1230,7 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
     }
     free(is_const);
     free(consts);
+    free(local);
     if (i < f->instr_count) {
         /* out of memory: the instructions moved are in out, the rest still in f */
         size_t k;

@@ -81,7 +81,13 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   (`cc_inline_candidate()`: static and inline or always_inline, small --
   inline alone no bigger than about a call, `INLINE_MAX_COST`, but at a
   call whose constant arguments, bound in a copy of it folded on its own
-  (`cc_optimize_function()`), bring it to that, `hint_folds_to_small()` --
+  (`cc_optimize_function()`), bring it to that, `hint_folds_to_small()`,
+  or at a call passing the address of a local of the caller that only
+  calls of inline functions take, up to gcc's max-inline-insns-single,
+  `LOCAL_ARG_MAX_COST` (`takes_local_slot()`: inlined, what it loads and
+  stores through the pointer are the local's fields, as gcc reckons
+  them gone; the calls such a body brings in are weighed again in the
+  caller, a few rounds, `INLINE_LOCAL_ROUNDS` in `opt.c`) --
   an interface of plain values or structures by value -- an argument's
   storage taken for the parameter where the body only reads it, a result
   stored to the call's buffer, its words or a copy from where it points
