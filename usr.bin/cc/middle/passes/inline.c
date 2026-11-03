@@ -25,6 +25,13 @@
  * body brings in are weighed so again in the caller, where their
  * argument may have become such a local (opt.c's inline_module()).
  *
+ * A call through a pointer that is a function's address (calli_target())
+ * is weighed and inlined as a call of that function, once inlining has
+ * made the pointer known: Linux's libeth hands its own fill function to
+ * an always_inline loop that calls it through the pointer.  opt.c visits
+ * a function whose address another takes before that other, as it does
+ * the callees.
+ *
  * A call of a function of the module that is static, inline (by its
  * storage or always_inline) and not noinline, small, and whose interface
  * is plain values (no aggregate passed or returned in memory, no
@@ -969,6 +976,91 @@ out:
     return small;
 }
 
+/**
+ * Per value of @p f, the instruction that defines it, where one alone does (an asm's output counts as one more):
+ * -1 for none or more.
+ *
+ * @return the array (free it), or NULL when out of memory
+ */
+static long *one_defs(const cc_ssa_function_t *f) {
+    size_t n = (size_t)(f->value_count > 0 ? f->value_count : 1);
+    long *at = (long *)malloc(n * sizeof(*at));
+    int *count = (int *)calloc(n, sizeof(*count));
+    size_t i;
+    size_t k;
+
+    if (at == NULL || count == NULL) {
+        free(at);
+        free(count);
+        return NULL;
+    }
+    for (i = 0; i < n; ++i) {
+        at[i] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->dst >= 0 && in->dst < f->value_count && count[in->dst]++ == 0) {
+            at[in->dst] = (long)i;
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int v = in->asm_out_values[k];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+                v = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
+            }
+            if (v >= 0 && v < f->value_count) {
+                count[v] += 2;
+            }
+        }
+    }
+    for (i = 0; i < (size_t)f->value_count; ++i) {
+        if (count[i] != 1) {
+            at[i] = -1;
+        }
+    }
+    free(count);
+    return at;
+}
+
+/** Whether @p g takes a structure by value. */
+static int has_struct_param(const cc_ssa_function_t *g) {
+    size_t i;
+
+    for (i = 0; g->param_abi != NULL && i < g->param_count; ++i) {
+        if (abi_is_struct(g->param_abi[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * The function of @p m that indirect call @p call of @p f calls, if its target is that function's address: a
+ * GADDR of its name alone, through copies, each value defined once (@p fdef, one_defs()'s).
+ *
+ * @return its index, or -1
+ */
+static long calli_target(const cc_ssa_module_t *m, const cc_ssa_function_t *f, const long *fdef,
+                         const cc_ssa_instr_t *call) {
+    int v = call->lhs;
+    int depth;
+
+    for (depth = 0; depth < 16 && v >= 0 && v < f->value_count && fdef[v] >= 0; ++depth) {
+        const cc_ssa_instr_t *d = &f->instrs[fdef[v]];
+
+        if (d->op == CC_SSA_MOV) {
+            v = d->lhs;
+            continue;
+        }
+        if (d->op == CC_SSA_GADDR && d->sym != NULL && strpbrk(d->sym, "+-@") == NULL) {
+            return find_function(m, d->sym);
+        }
+        break;
+    }
+    return -1;
+}
+
 /** Whether @p g is static and declared inline, and not noinline: a call of it may take a local's address in. */
 static int declared_inline(const cc_ssa_function_t *g) {
     return (g->storage & CC_STORAGE_STATIC) != 0 && (g->storage & CC_STORAGE_INLINE) != 0 &&
@@ -1171,23 +1263,50 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
     unsigned char *is_const;
     long long *consts;
     unsigned char *local = NULL; /* the addresses of locals only calls of inline functions take */
+    long *fdef = NULL;           /* per value: its one defining instruction, -1 for none or more */
 
     if (find_constants(f, nk, &is_const, &consts) != 0) {
         return -1;
     }
-    if (opt_level > 0 && (local = local_slot_args(m, f)) == NULL) {
+    if (opt_level > 0 && ((local = local_slot_args(m, f)) == NULL || (fdef = one_defs(f)) == NULL)) {
         free(is_const);
         free(consts);
+        free(local);
         return -1;
     }
     memset(&out, 0, sizeof(out));
     for (i = 0; i < f->instr_count; ++i) {
-        cc_ssa_instr_t *call = &f->instrs[i];
+        cc_ssa_instr_t *orig = &f->instrs[i];
+        cc_ssa_instr_t *call = orig;
+        cc_ssa_instr_t direct;  /* a call through a known function's address, as a call of it */
+        int again_here = again; /* (a call made direct only now is weighed as a call seen for the first time) */
         long gi = -1;
         const cc_ssa_function_t *g;
 
         if (call->op == CC_SSA_CALL && call->sym != NULL && out.count < CALLER_MAX_INSTRS) {
             gi = find_function(m, call->sym);
+        } else if (call->op == CC_SSA_CALLI && opt_level > 0 && out.count < CALLER_MAX_INSTRS) {
+            /*
+             * a call through a pointer that is a function's address: a call of that function, as gcc makes it
+             * once the pointer is known -- an always_inline function of Linux's libeth passes its caller's
+             * libeth_xsk_xmit_fill_buf to another, which calls it, and its BUILD_BUG_ON() on its caller's
+             * constant stayed in a body never inlined
+             */
+            gi = calli_target(m, f, fdef, call);
+            if (gi >= 0 && (m->funcs[gi].is_variadic || has_struct_param(&m->funcs[gi]))) {
+                /* (a structure through a pointer is lowered otherwise than one to a declared function) */
+                gi = -1;
+            }
+            if (gi >= 0) {
+                /* (lowering sets a pointer's call up as a variadic one's, whatever the pointer's prototype) */
+                direct = *call;
+                direct.op = CC_SSA_CALL;
+                direct.lhs = -1;
+                direct.call_is_variadic = 0;
+                direct.call_fixed_count = 0;
+                call = &direct;
+                again_here = 0;
+            }
         }
         g = gi >= 0 ? &m->funcs[gi] : NULL;
         /* at -O0 only what must be: an always_inline function, as gcc inlines it there too */
@@ -1195,10 +1314,11 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
             g = NULL;
         }
         if (g != NULL && (size_t)gi != fi && ready[gi] &&
-            ((!again && cc_inline_candidate(g)) ||
-             (!again && once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&
+            ((!again_here && cc_inline_candidate(g)) ||
+             (!again_here && once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&
               frame_growth_ok(frame, grown + frame_cost(g))) ||
-             (!again && inline_hint_too_big(g) && hint_folds_to_small(g, call, is_const, consts, nk, opt_level)) ||
+             (!again_here && inline_hint_too_big(g) &&
+              hint_folds_to_small(g, call, is_const, consts, nk, opt_level)) ||
              (takes_local_slot(g, call, local, nk) && frame_growth_ok(frame, grown + frame_cost(g)))) &&
             call_site_inlinable(f, call, g)) {
             grown += frame_cost(g);
@@ -1215,22 +1335,23 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
                     }
                 }
                 if (k < g->keep_sym_count) {
-                    cc_ssa_instr_free(call);
+                    cc_ssa_instr_free(orig);
                     i++;
                     break;
                 }
             }
-            cc_ssa_instr_free(call);
+            cc_ssa_instr_free(orig);
             inlined++;
             continue;
         }
-        if (ivec_put(&out, call) != 0) {
+        if (ivec_put(&out, orig) != 0) {
             break;
         }
     }
     free(is_const);
     free(consts);
     free(local);
+    free(fdef);
     if (i < f->instr_count) {
         /* out of memory: the instructions moved are in out, the rest still in f */
         size_t k;

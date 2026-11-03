@@ -6111,7 +6111,8 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
             while (next[fi] < f->instr_count && gi < 0) {
                 const cc_ssa_instr_t *in = &f->instrs[next[fi]++];
 
-                if (in->op == CC_SSA_CALL && in->sym != NULL) {
+                /* (and a function whose address it takes, which a call through the address may become) */
+                if ((in->op == CC_SSA_CALL || (in->op == CC_SSA_GADDR && opt_level > 0)) && in->sym != NULL) {
                     gi = called_function(m, in->sym);
                     if (gi >= 0 && open[gi]) {
                         gi = -1;

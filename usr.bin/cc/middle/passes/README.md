@@ -114,7 +114,9 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   frame reckoned by the slots that stay memory, `mem.c`'s
   `cc_ssa_memory_slot_bytes()`, and a few spills, the values being the
   register allocator's) and
-  the copy of a body in place of a call (`cc_inline_calls()`), which
+  the copy of a body in place of a call (`cc_inline_calls()`; a call
+  through a pointer inlining has made a function's address a call of
+  that function, `calli_target()`), which
   hands the caller the callee's `keep_syms` too: the static locals
   marked `used` that the object keeps while some function still holds
   them, whether or not its code names them.
