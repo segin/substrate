@@ -27,6 +27,8 @@ usr.bin/ld/
 ├── ld_gc.c                  # --gc-sections (of the inputs' sections) and identical code folding
 ├── ld_map.c                 # The link map and the --reproduce bundle
 ├── ld_plugin.c              # LTO plugins that are programs
+├── ld_buildid.c             # --build-id: the .note.gnu.build-id note, as GNU ld makes it
+├── ld_version.c             # Version scripts: --version-script and a script's VERSION { }
 ├── SPEC.md                  # Feature and parity requirements
 ├── TASKLIST_LINKER.md       # Remaining compatibility and parity backlog
 ├── Makefile                 # Build wiring, alias links, libelfobj dependency
@@ -166,7 +168,7 @@ Target mode: The default build produces the Substrate-target linker for inclusio
 
 Alias links: The Makefile installs `ld.i386`, `ld.x86_64`, `ld.x86`, and `ld.x64` symlinks for architecture-specific invocation surfaces.
 
-Single-binary design: The linker is one program in sixteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. The files were cut from a single `ld.c` along its function families without changing a function; what is `static` is private to its file, and `ld.h` declares the rest.
+Single-binary design: The linker is one program in eighteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. Sixteen of the files were cut from a single `ld.c` along its function families without changing a function, and `ld_buildid.c` and `ld_version.c` were written after; what is `static` is private to its file, and `ld.h` declares the rest.
 
 ## 7. Security Considerations
 
@@ -204,7 +206,7 @@ Repository Path: `usr.bin/ld/`
 
 Primary Consumers: Direct user invocation, `usr.bin/cc`, native toolchain/package validation
 
-Date of Last Update: 2026-10-09
+Date of Last Update: 2026-11-02
 
 ## 11. Glossary / Acronyms
 

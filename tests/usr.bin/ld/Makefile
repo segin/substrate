@@ -61,5 +61,6 @@ run:
 	./test_eh_frame_fde_short.sh
 	./test_search_state_reset.sh
 	./test_spec_status.sh
+	./test_architecture_files.sh
 
 clean:
