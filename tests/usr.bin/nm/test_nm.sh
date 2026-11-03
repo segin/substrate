@@ -426,6 +426,14 @@ SRC
     same_output "--format sysv takes sysv as the format" "$WANT_FS" -a --format sysv "$TMP/a.o"
     WANT_FP=$($NM -P "$TMP/a.o" "$TMP/b.o")
     same_output "-f posix with two files" "$WANT_FP" -f posix "$TMP/a.o" "$TMP/b.o"
+    # GNU decides the format by the first letter in either case, and the
+    # radix by the first character.
+    same_output "-f s takes s as sysv" "$WANT_FS" -a -f s "$TMP/a.o"
+    same_output "--format=SYSV takes SYSV as sysv" "$WANT_FS" -a --format=SYSV "$TMP/a.o"
+    same_output "-fp takes p as posix" "$WANT_FP" -fp "$TMP/a.o" "$TMP/b.o"
+    same_output "-t dec takes dec as d" "$WANT_TD" -a -t dec "$TMP/a.o" "$TMP/b.o"
+    OUT_RD=$($NM --radix=D "$TMP/a.o" 2>&1) && fail "--radix=D is rejected (got: $OUT_RD)"
+    expect_match "--radix=D is rejected" "$OUT_RD" 'invalid radix'
 
     if nm --version 2>/dev/null | grep -q 'GNU nm'; then
         GOT=$(cd "$TMP" && $NM -- -dash.o b.o)
@@ -436,7 +444,8 @@ SRC
             exit 1
         }
         pass "nm -- matches GNU nm"
-        for flags in "-gt x" "-g --radix x" "-gf bsd" "-g -f bsd" "-g --format bsd"; do
+        for flags in "-gt x" "-g --radix x" "-gf bsd" "-g -f bsd" "-g --format bsd" \
+                     "-gt xx" "-g --radix=octal" "-gfb" "-g --format=BSD"; do
             # shellcheck disable=SC2086
             GOT=$($NM $flags "$TMP/a.o" "$TMP/b.o")
             # shellcheck disable=SC2086

@@ -1652,15 +1652,19 @@ static int starts_with(const char *s, const char *prefix)
 /**
  * @brief Set the value radix from the argument of -t or --radix.
  *
- * @param r  "d", "o" or "x".
+ * As GNU nm does, only the first character counts, and its case
+ * matters: "d", "o" or "x", so "xx" and "dec" are accepted too.
+ *
+ * @param r  The argument.
  * @return 0 on success, -1 (after a diagnostic) for any other value.
  */
 static int set_radix(const char *r)
 {
-    if (strcmp(r, "d") == 0) opts.radix = 10;
-    else if (strcmp(r, "o") == 0) opts.radix = 8;
-    else if (strcmp(r, "x") == 0) opts.radix = 16;
-    else {
+    switch (r[0]) {
+    case 'd': opts.radix = 10; break;
+    case 'o': opts.radix = 8;  break;
+    case 'x': opts.radix = 16; break;
+    default:
         fprintf(stderr, "%s: %s: invalid radix\n", progname, r);
         return -1;
     }
@@ -1670,15 +1674,20 @@ static int set_radix(const char *r)
 /**
  * @brief Set the output format from the argument of -f or --format.
  *
- * @param f  "bsd", "posix" or "sysv".
+ * As GNU nm does, only the first character counts, in either case:
+ * 'b' is bsd, 'p' posix and 's' sysv, so "-f s" and "--format=SYSV"
+ * are accepted too.
+ *
+ * @param f  The argument.
  * @return 0 on success, -1 (after a diagnostic) for any other value.
  */
 static int set_format(const char *f)
 {
-    if (strcmp(f, "bsd") == 0) opts.format = FMT_BSD;
-    else if (strcmp(f, "posix") == 0) opts.format = FMT_POSIX;
-    else if (strcmp(f, "sysv") == 0) opts.format = FMT_SYSV;
-    else {
+    switch (f[0]) {
+    case 'b': case 'B': opts.format = FMT_BSD;   break;
+    case 'p': case 'P': opts.format = FMT_POSIX; break;
+    case 's': case 'S': opts.format = FMT_SYSV;  break;
+    default:
         fprintf(stderr, "%s: %s: invalid output format\n", progname, f);
         return -1;
     }

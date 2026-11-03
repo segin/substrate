@@ -125,6 +125,9 @@ for decimal,
 for octal, or
 .Sq x
 for hexadecimal (default).
+Only the first character of
+.Ar radix
+is looked at, as with GNU nm.
 .It Fl u , Fl -undefined-only
 Display only undefined symbols.
 .It Fl V , Fl -version
@@ -136,6 +139,12 @@ Select output format:
 .Sq posix ,
 or
 .Sq sysv .
+As with GNU nm, only the first letter is looked at, in either case,
+so
+.Fl f Ar s
+and
+.Fl -format Ns = Ns Ar SYSV
+also select the System V format.
 .It Fl -radix Ns = Ns Ar r , Fl -radix Ar r
 Equivalent to
 .Fl t ;
