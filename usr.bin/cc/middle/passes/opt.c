@@ -4340,12 +4340,110 @@ static int const_load(const cc_ssa_module_t *m, const cc_ssa_function_t *f, cons
 }
 
 /**
+ * Where value @p v of @p f points, if it is a constant offset into a string literal: a STR, and moves, additions
+ * and subtractions of constants on one, each value defined once.
+ *
+ * @param f       the function
+ * @param def_at  per value: the instruction that defines it, its only definition, or < 0 (single_def_at())
+ * @param k       the values constant on every path (single_def_consts())
+ * @param v       the value
+ * @param lit     receives the literal's text, as lowering keeps it
+ * @param off     receives the offset into it
+ * @param depth   how many definitions the walk is in, which ends it at 16
+ * @return 1, or 0 when it is not known so
+ */
+static int literal_address(const cc_ssa_function_t *f, const long *def_at, const const_state_t *k, int v,
+                           const char **lit, long long *off, int depth) {
+    const cc_ssa_instr_t *in;
+
+    if (v < 0 || v >= f->value_count || def_at[v] < 0 || depth > 16) {
+        return 0;
+    }
+    in = &f->instrs[def_at[v]];
+    switch (in->op) {
+    case CC_SSA_STR:
+        if (in->sym == NULL) {
+            return 0;
+        }
+        *lit = in->sym;
+        *off = 0;
+        return 1;
+    case CC_SSA_MOV:
+        return literal_address(f, def_at, k, in->lhs, lit, off, depth + 1);
+    case CC_SSA_ADD:
+    case CC_SSA_SUB: {
+        int base = in->lhs;
+        long long c;
+
+        if (in->rhs >= 0 && in->rhs < f->value_count && k[in->rhs].known && k[in->rhs].type == CC_VAL_I64) {
+            c = k[in->rhs].i;
+        } else if (in->op == CC_SSA_ADD && in->lhs >= 0 && in->lhs < f->value_count && k[in->lhs].known &&
+                   k[in->lhs].type == CC_VAL_I64) {
+            c = k[in->lhs].i;
+            base = in->rhs;
+        } else {
+            return 0;
+        }
+        if (c < -(1LL << 40) || c > (1LL << 40) || !literal_address(f, def_at, k, base, lit, off, depth + 1)) {
+            return 0;
+        }
+        *off += in->op == CC_SSA_SUB ? -c : c;
+        return 1;
+    }
+    default:
+        return 0;
+    }
+}
+
+/**
+ * What load @p in of @p f reads at offset @p off into string literal @p lit (its bytes as the backend emits
+ * them, and the null byte after them): an integer load of 1, 2, 4 or 8 bytes, outside a named address space,
+ * wholly inside the literal; x86's byte order, extended as the load extends them.
+ *
+ * @return 1 with *@p out set, or 0 when it is not known
+ */
+static int literal_load(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const char *lit, long long off,
+                        long long *out) {
+    data_window_t w;
+    unsigned long long v = 0;
+    long len;
+    long b;
+
+    if (in->op != CC_SSA_LOAD || in->seg != 0 || in->dst < 0 || in->dst >= f->value_count ||
+        cc_ssa_value_class(f, in->dst) != CC_VAL_I64 || f->value_ty[in->dst].kind != CC_TY_INT ||
+        (in->imm != 1 && in->imm != 2 && in->imm != 4 && in->imm != 8) ||
+        (long long)cc_ssa_value_size(f, in->dst) < in->imm || off < 0 || off > (1LL << 30)) {
+        return 0;
+    }
+    memset(&w, 0, sizeof(w));
+    w.off = (long)off;
+    w.n = (long)in->imm;
+    len = window_put_literal(&w, 0, lit, 1);
+    if (len < 0 || off + in->imm > len) {
+        return 0;
+    }
+    for (b = w.n - 1; b >= 0; --b) {
+        if (w.have[b] != 1) {
+            return 0;
+        }
+        v = (v << 8) | w.b[b];
+    }
+    if (w.n < 8 && !in->is_unsigned && (v & (1ULL << (w.n * 8 - 1))) != 0) {
+        v |= ~((1ULL << (w.n * 8)) - 1);
+    }
+    *out = (long long)v;
+    return 1;
+}
+
+/**
  * Fold the loads of @p f from read-only globals of @p m at constant offsets to what their initializers
  * put there, as gcc does once inlining has made the offsets constant: Linux's reverse_cpuid_check(),
  * inlined with a constant leaf, has BUILD_BUG_ON(reverse_cpuid[x86_leaf].function == 0), whose call of
  * an undefined __compiletime_assert_N must go.  Only an integer load that reads bytes the initializer
  * gives, or zeros past it, wholly inside the object (foldable_global() says which objects); x86's byte
- * order, extended as the load extends them.
+ * order, extended as the load extends them.  And a load from a string literal at a constant offset, as gcc
+ * folds `"..."[k]`: Linux's printk wrappers in iwlwifi check BUILD_BUG_ON(fmt[sizeof(fmt) - 2] != '\n') of
+ * their literal format, and left 2600 calls of undefined __compiletime_assert_N while the byte stayed a load.
  *
  * @return 1 when a load was folded, 0 when none was, or -1 when out of memory
  */
@@ -4355,7 +4453,7 @@ static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     size_t i;
     int changed = 0;
 
-    if (f->value_count <= 0 || m->global_count == 0) {
+    if (f->value_count <= 0) {
         return 0;
     }
     /* (a function that loads nothing has nothing to fold) */
@@ -4378,8 +4476,11 @@ static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
         long long off = 0;
         long long v = 0;
 
-        if (in->op != CC_SSA_LOAD || in->dst < 0 || in->dst >= f->value_count ||
-            !symbol_address(f, def_at, k, in->lhs, &sym, &off, 0) || !const_load(m, f, in, sym, off, &v)) {
+        if (in->op != CC_SSA_LOAD || in->dst < 0 || in->dst >= f->value_count) {
+            continue;
+        }
+        if (!(symbol_address(f, def_at, k, in->lhs, &sym, &off, 0) && const_load(m, f, in, sym, off, &v)) &&
+            !(literal_address(f, def_at, k, in->lhs, &sym, &off, 0) && literal_load(f, in, sym, off, &v))) {
             continue;
         }
         in->op = CC_SSA_CONST;

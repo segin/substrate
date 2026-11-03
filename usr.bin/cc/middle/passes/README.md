@@ -45,7 +45,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   a constant offset its initializer's bytes, and so a load from a stack
   slot one memcpy fills from such a table and nothing else writes or
   lets escape (`fold_const_copies()`: Linux's pack_fields() checks a
-  copy of each element of its field table), and a compare of two
+  copy of each element of its field table), a load from a string
+  literal at a constant offset the literal's byte (`"..."[k]`, as
+  iwlwifi's printk wrappers check their format's last character), and
+  a compare of two
   constant offsets from one object's address the compare of the
   offsets, the address of a stack slot or of an object or a function
   the module defines, not weak, not null; and a loop computing only from
