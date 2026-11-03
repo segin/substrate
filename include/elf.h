@@ -229,6 +229,10 @@
 #define STT_COMMON  5
 #define STT_TLS     6
 #define STT_GNU_IFUNC 10
+#define STT_LOOS    10
+#define STT_HIOS    12
+#define STT_LOPROC  13
+#define STT_HIPROC  15
 
 /* Basic ELF types */
 typedef uint32_t Elf32_Addr;

@@ -636,8 +636,21 @@ static void print_sysv_header(const char *file)
            "Name", "Value", "Class", "Type", "Size", "Section");
 }
 
+/**
+ * @brief Name a symbol type for the System V format's Type column.
+ *
+ * Uses GNU nm's wording: the generic types by name, anything else by
+ * its range and number, so an IFUNC (STT_GNU_IFUNC, 10) is
+ * "<OS specific>: 10".
+ *
+ * @param stype ELF symbol type (ELF_ST_TYPE of st_info).
+ * @return The name; a type outside the generic set is formatted into a
+ *         static buffer that the next call overwrites.
+ */
 static const char *stt_name(uint8_t stype)
 {
+    static char buf[32];
+
     switch (stype) {
     case STT_NOTYPE:  return "NOTYPE";
     case STT_OBJECT:  return "OBJECT";
@@ -646,8 +659,16 @@ static const char *stt_name(uint8_t stype)
     case STT_FILE:    return "FILE";
     case STT_COMMON:  return "COMMON";
     case STT_TLS:     return "TLS";
-    default:          return "?";
+    default:          break;
     }
+
+    if (stype >= STT_LOPROC && stype <= STT_HIPROC)
+        snprintf(buf, sizeof(buf), "<processor specific>: %u", (unsigned)stype);
+    else if (stype >= STT_LOOS && stype <= STT_HIOS)
+        snprintf(buf, sizeof(buf), "<OS specific>: %u", (unsigned)stype);
+    else
+        snprintf(buf, sizeof(buf), "<unknown>: %u", (unsigned)stype);
+    return buf;
 }
 
 static void print_sysv_line(const nm_sym_t *sym, elfobj_class_t cls, const char *file, elfobj_t *obj)

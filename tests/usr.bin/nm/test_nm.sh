@@ -275,6 +275,8 @@ SRC
     OUT_XS=$($NM --format=sysv "$TMP/gnuext.o")
     expect_match "sysv types STT_COMMON as COMMON" "$OUT_XS" '^com_var +\|[^|]*\|[^|]*\| *COMMON *\|'
     expect_match "sysv shows IFUNC class i" "$OUT_XS" '^g_ifunc +\|[^|]*\| *i *\|'
+    # GNU names a type outside the generic set by its range and number.
+    expect_match "sysv types IFUNC as GNU does" "$OUT_XS" '^g_ifunc +\|[^|]*\|[^|]*\| *<OS specific>: 10 *\|'
 
     if nm --version 2>/dev/null | grep -q 'GNU nm'; then
         for flags in "" "-g"; do
