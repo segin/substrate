@@ -129,6 +129,42 @@ else
     compare "a script's VERSION"
 fi
 
+# A pattern the script's lexer splits, "ns::fn" (':' does not go in a
+# name), must be put back whole: the VERSION text was rebuilt with a space
+# between every two tokens, so it read as the patterns "ns" and "fn", and
+# the symbol fell to local: *.
+cat > colon.s <<'EOF'
+	.text
+	.globl	"ns::fn", plain, hidden
+	.type	"ns::fn", @function
+	.type	plain, @function
+	.type	hidden, @function
+"ns::fn":
+plain:
+hidden:
+	ret
+EOF
+${GCC:-gcc} -c -o colon.o colon.s || exit 1
+cat > colon.lds <<'EOF'
+VERSION {
+	COLON_1 {
+	global:
+		ns::fn;
+		plain;
+	local: *;
+	};
+}
+EOF
+"${GNU_LD:-ld}" -shared -soname libc1.so -T colon.lds -o gnu.so colon.o 2>/dev/null || exit 1
+if ! ./ld -m elf_x86_64 -shared -soname libc1.so -T colon.lds -o ours.so colon.o > said 2>&1; then
+    echo "FAIL: ld -T with VERSION ns::fn: $(head -1 said)"; fail=1
+else
+    if ! dynsyms gnu.so | grep -q 'ns::fn'; then
+        echo "FAIL: GNU ld did not export ns::fn"; fail=1
+    fi
+    compare "a script's VERSION with ns::fn"
+fi
+
 if [ $fail -eq 0 ]; then
     echo "ok   test_version_script"
 fi

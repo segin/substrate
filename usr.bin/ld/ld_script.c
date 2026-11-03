@@ -1931,12 +1931,15 @@ static int lp_skip_group(lds_parser_t *p, lds_tok_kind_t open, lds_tok_kind_t cl
  * @brief VERSION { ... }: its text, kept on the script (version_text) for ld_version_script_parse().
  *
  * The tokens are put back together as they stood, those that touched in the script touching again, so
- * that a pattern the lexer split ("__vdso_*") is whole.
+ * that a pattern the lexer split ("ns::fn", ':' not going in a name) is whole.  Where the last token
+ * stood is kept by value: lp_peek() hands back the parser's one token slot, which the next token is
+ * read into.
  *
  * @return 0, or -1 (said)
  */
 static int lp_version(lds_parser_t *p) {
-    const lds_tok_t *prev = NULL;
+    int have_prev = 0;
+    size_t prev_line = 0, prev_col = 0;
     size_t prev_len = 0;
     char *text = NULL;
     size_t len = 0, cap = 0;
@@ -1986,13 +1989,15 @@ static int lp_version(lds_parser_t *p) {
             text = next;
             cap = nc;
         }
-        if (prev != NULL && !(prev->line == t->line && prev->col + prev_len == t->col)) {
+        if (have_prev && !(prev_line == t->line && prev_col + prev_len == t->col)) {
             text[len++] = ' ';
         }
         memcpy(text + len, tt, n);
         len += n;
         text[len] = '\0';
-        prev = t;
+        have_prev = 1;
+        prev_line = t->line;
+        prev_col = t->col;
         prev_len = n;
         lp_take(p);
     }
