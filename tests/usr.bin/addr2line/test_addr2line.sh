@@ -419,14 +419,6 @@ tfunc:
 SRC
 }
 
-# Normalise addr2line output for an exact comparison: GNU zero-pads
-# -a addresses to the target's width and appends "(discriminator N)",
-# neither of which is what the inline-frame checks are about.
-norm_a2l() {
-    printf '%s\n' "$1" | sed -e 's/^0x0*\([0-9a-f]\)/0x\1/' \
-                             -e 's/ (discriminator [0-9]*)$//'
-}
-
 # Function names only (the odd lines) of "-f -i" output.
 inline_names() {
     printf '%s\n' "$1" | awk 'NR % 2 == 1' | tr '\n' ' '
@@ -685,9 +677,9 @@ SRC
     [ "$FCIP_LINES" -ge 2 ] || fail "10g-2 expected multiple pretty inline lines"
     expect_nonempty_match "10g-2" "$(first_line "$OUT_FCIP")" '^.+ at .+:[0-9]+$'
 
-    # 10g-3: -a prepends address column
+    # 10g-3: -a prepends address column, padded to 16 digits for ELF64
     OUT_A=$($BIN -a -e "$TMP/exec64_v5" 0x$A5)
-    A5_CANON=$(printf '%x' $((0x$A5)))
+    A5_CANON=$(printf '%016x' $((0x$A5)))
     expect_eq "10g-3" "$(first_line "$OUT_A")" "0x$A5_CANON"
 
     # 10g-4: stdin mode resolves one output per input line
@@ -839,8 +831,8 @@ SRC
             Q=$(printf '%x' $((0x$TO + OFF)))
             for FLAGS in "-f" "-f -i" "-i" "-a -f -i" "-f -i -p" "-f -i -p -a" \
                          "-f -p -a" "-p" "-i -p" "-a -p" "-a -i -p"; do
-                HOST_O=$(norm_a2l "$(addr2line $FLAGS -e "$TMP/tl/tl_v$V" 0x$Q)")
-                OUR_O=$(norm_a2l "$($BIN $FLAGS -e "$TMP/tl/tl_v$V" 0x$Q)")
+                HOST_O=$(addr2line $FLAGS -e "$TMP/tl/tl_v$V" 0x$Q)
+                OUR_O=$($BIN $FLAGS -e "$TMP/tl/tl_v$V" 0x$Q)
                 [ "$OUR_O" = "$HOST_O" ] || {
                     printf 'FAIL: 10m v%s +%s %s\n  got :\n%s\n  want:\n%s\n' \
                         "$V" "$OFF" "$FLAGS" "$OUR_O" "$HOST_O" >&2
@@ -854,6 +846,51 @@ SRC
         done
         [ "$SEEN_INNER" -eq 1 ] || fail "10m v$V no address inside inlined tl_inner"
         pass "10m v$V"
+    done
+
+    # 10m-2: GNU addr2line prints a row's discriminator as
+    # "LINE (discriminator N)" (on every frame of an -i chain) and pads
+    # -a addresses to the file's address width.  A loop whose body is
+    # on its header's line gets discriminators at -O2; every address of
+    # the function is compared verbatim with GNU, at ELF64 and ELF32.
+    mkdir -p "$TMP/disc"
+    cat > "$TMP/disc/disc.c" <<'SRC'
+static inline __attribute__((always_inline)) int dsum(const int *a, int n)
+{
+    int s = 0; for (int i = 0; i < n; i++) { s += a[i] * (i & 3 ? 3 : 5); } return s;
+}
+int disc_fn(const int *a, int n) { return dsum(a, n) + dsum(a + 1, n - 1); }
+int main(void) { static int a[64]; return disc_fn(a, 64); }
+SRC
+    for M in 64 32; do
+        if [ $M = 32 ] && [ ! -f "$TMP/exec32_v4" ]; then
+            pass "10m-2 elf32 skipped (no -m32 toolchain)"
+            continue
+        fi
+        cc -m$M -O2 -g -no-pie -o "$TMP/disc/disc$M" "$TMP/disc/disc.c"
+        DO=$(addr_of "$TMP/disc/disc$M" disc_fn)
+        DS=$(nm -S "$TMP/disc/disc$M" | awk '$4=="disc_fn" {print $2; exit}')
+        [ -n "$DO" ] && [ -n "$DS" ] || fail "10m-2 elf$M symbol disc_fn not found"
+        SEEN_DISC=0
+        OFF=0
+        while [ "$OFF" -lt $((0x$DS)) ]; do
+            Q=$(printf '%x' $((0x$DO + OFF)))
+            for FLAGS in "" "-a" "-a -f -i" "-a -p -f -i" "-p -i"; do
+                HOST_O=$(addr2line $FLAGS -e "$TMP/disc/disc$M" 0x$Q)
+                OUR_O=$($BIN $FLAGS -e "$TMP/disc/disc$M" 0x$Q)
+                [ "$OUR_O" = "$HOST_O" ] || {
+                    printf 'FAIL: 10m-2 elf%s +%s %s\n  got :\n%s\n  want:\n%s\n' \
+                        "$M" "$OFF" "$FLAGS" "$OUR_O" "$HOST_O" >&2
+                    exit 1
+                }
+            done
+            case $HOST_O in
+            *"(discriminator "*) SEEN_DISC=1 ;;
+            esac
+            OFF=$((OFF + 1))
+        done
+        [ "$SEEN_DISC" -eq 1 ] || fail "10m-2 elf$M no address has a discriminator"
+        pass "10m-2 elf$M"
     done
 
     # 10n: line-number sequences bound the addresses they resolve.  A
@@ -1002,17 +1039,17 @@ SRC
                  "-f --demangle=auto -e $QF" "-f --demangle=none -e $QF" \
                  "-f --dem -e $QF" "--func --demangle --exe $QF" \
                  "-asfe $QF" "--addr --basenames --pretty -f --inl -e $QF"; do
-        HOST_Q=$(norm_a2l "$(addr2line $FLAGS 0x$QA)")
+        HOST_Q=$(addr2line $FLAGS 0x$QA)
         OUR_Q=$($BIN $FLAGS 0x$QA 2>"$TMP/q.err") ||
             { cat "$TMP/q.err" >&2; fail "10q-1 $FLAGS rejected"; }
-        expect_eq "10q-1 $FLAGS" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+        expect_eq "10q-1 $FLAGS" "$OUR_Q" "$HOST_Q"
     done
     QT=$(readelf -SW "$TMP/exec64_v5" | \
         awk '$2==".text" {print $4; exit} $3==".text" {print $5; exit}')
     [ -n "$QT" ] || fail "10q-1 .text address not found"
     QOFF=$(printf '%x' $((0x$A5 - 0x$QT)))
     for FLAGS in "-j.text" "-fj.text" "-fj .text" "--section .text" \
-                 "--section=.text" "--sec .text"; do
+                 "--section=.text" "--sec .text" "-a -j .text" "-a -p -f -j .text"; do
         HOST_Q=$(addr2line $FLAGS -e "$TMP/exec64_v5" 0x$QOFF)
         OUR_Q=$($BIN $FLAGS -e "$TMP/exec64_v5" 0x$QOFF 2>"$TMP/q.err") ||
             { cat "$TMP/q.err" >&2; fail "10q-1 $FLAGS rejected"; }
@@ -1052,24 +1089,24 @@ SRC
     # command line and from standard input, under each output form.
     Q6_ADDRS="zz 10zz 0x10 0X10 -5 - f1 f1+4 f1+0x8 main 0x$A5 ffffffffffffffffff"
     for FLAGS in "-a" "-a -f" "-a -f -p" "-p" "-f -p" "-f -i"; do
-        HOST_Q=$(norm_a2l "$(addr2line $FLAGS -e "$TMP/exec64_v5" -- $Q6_ADDRS 2>&1)")
+        HOST_Q=$(addr2line $FLAGS -e "$TMP/exec64_v5" -- $Q6_ADDRS 2>&1)
         OUR_Q=$($BIN $FLAGS -e "$TMP/exec64_v5" -- $Q6_ADDRS 2>"$TMP/q.err")
-        expect_eq "10q-6 argv '$FLAGS'" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+        expect_eq "10q-6 argv '$FLAGS'" "$OUR_Q" "$HOST_Q"
         expect_eq "10q-6 argv '$FLAGS' stderr" "$(cat "$TMP/q.err")" ""
         HOST_Q=$(printf '%s\n' $Q6_ADDRS "  0x$A5" " f1 + 2" | \
             addr2line $FLAGS -e "$TMP/exec64_v5" 2>&1)
         OUR_Q=$(printf '%s\n' $Q6_ADDRS "  0x$A5" " f1 + 2" | \
             $BIN $FLAGS -e "$TMP/exec64_v5" 2>"$TMP/q.err")
-        expect_eq "10q-6 stdin '$FLAGS'" "$(norm_a2l "$OUR_Q")" "$(norm_a2l "$HOST_Q")"
+        expect_eq "10q-6 stdin '$FLAGS'" "$OUR_Q" "$HOST_Q"
         expect_eq "10q-6 stdin '$FLAGS' stderr" "$(cat "$TMP/q.err")" ""
     done
-    HOST_Q=$(norm_a2l "$(addr2line -a -f -C -e "$QF" 'Ns::FooBar(int)' _ZN2Ns6FooBarEi+1)")
+    HOST_Q=$(addr2line -a -f -C -e "$QF" 'Ns::FooBar(int)' _ZN2Ns6FooBarEi+1)
     OUR_Q=$($BIN -a -f -C -e "$QF" 'Ns::FooBar(int)' _ZN2Ns6FooBarEi+1)
-    expect_eq "10q-6 demangled symbol" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+    expect_eq "10q-6 demangled symbol" "$OUR_Q" "$HOST_Q"
     if [ -f "$TMP/exec32_v4" ]; then
-        HOST_Q=$(norm_a2l "$(addr2line -a -e "$TMP/exec32_v4" -- 100000010 -1 f1)")
+        HOST_Q=$(addr2line -a -e "$TMP/exec32_v4" -- 100000010 -1 f1)
         OUR_Q=$($BIN -a -e "$TMP/exec32_v4" -- 100000010 -1 f1)
-        expect_eq "10q-6 elf32" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+        expect_eq "10q-6 elf32" "$OUR_Q" "$HOST_Q"
     fi
 
     # 10q-4: options may follow the addresses, as getopt_long(3) permutes
@@ -1084,10 +1121,10 @@ SRC
                 "--rec -e $QF 0x$QA" "-b elf64-x86-64 -e $QF 0x$QA" \
                 "-belf64-x86-64 -e $QF 0x$QA" "--target=elf64-x86-64 -e $QF 0x$QA" \
                 "--tar elf64-little -e $QF 0x$QA" "-b default -e $QF 0x$QA"; do
-        HOST_Q=$(norm_a2l "$(addr2line $ARGS 2>&1)")
+        HOST_Q=$(addr2line $ARGS 2>&1)
         OUR_Q=$($BIN $ARGS 2>"$TMP/q.err") ||
             { cat "$TMP/q.err" >&2; fail "10q-4 '$ARGS' rejected"; }
-        expect_eq "10q-4 '$ARGS'" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+        expect_eq "10q-4 '$ARGS'" "$OUR_Q" "$HOST_Q"
     done
     HOST_Q=$(POSIXLY_CORRECT=1 addr2line -e "$QF" 0x$QA -f 2>/dev/null)
     OUR_Q=$(POSIXLY_CORRECT=1 $BIN -e "$QF" 0x$QA -f 2>/dev/null)

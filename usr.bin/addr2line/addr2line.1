@@ -140,6 +140,12 @@ or with
 as an
 .RB \(lq 0x \fIaddr\fP: \(rq
 prefix on the first frame.
+As in GNU
+.BR addr2line ,
+the address is zero-padded to 16 hex digits for an ELF64 file and 8 for
+ELF32, and is shown as it was given (with
+.BR \-j ,
+the offset, not the address it names).
 .TP
 .B \-c
 Print
@@ -152,6 +158,15 @@ Print usage and exit with status 0.
 .BR \-V ", " \-v ", " \-\-version
 Print version information and exit with status 0.
 .SH OUTPUT
+When the line-table row for the address has a discriminator, the line
+is followed by
+.RI \(lq " (discriminator " N ) \(rq,
+as GNU
+.B addr2line
+prints it, on every frame of an
+.B \-i
+chain.
+.PP
 If a lookup fails,
 .B addr2line
 prints:
@@ -280,7 +295,7 @@ Show the inline chain of an address in one-line form:
 .RS
 .EX
 $ addr2line -f -i -p -a -s -e ./t 0x401144
-0x401144: inner at t.c:2
+0x0000000000401144: inner at t.c:2
  (inlined by) mid at t.c:4
  (inlined by) outer at t.c:5
 .EE

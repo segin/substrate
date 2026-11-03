@@ -194,6 +194,7 @@ typedef struct {
     uint32_t file;
     uint32_t line;
     uint32_t column;
+    uint32_t discriminator;
     size_t unit_index;
 } line_entry_t;
 
@@ -327,7 +328,8 @@ static void emit_frame_result(const addr2line_opts_t *opts,
                               const char *function_name,
                               const char *path,
                               uint32_t line,
-                              uint32_t column);
+                              uint32_t column,
+                              uint32_t discriminator);
 static void emit_unresolved_frame(const addr2line_opts_t *opts);
 
 static void usage(FILE *out) {
@@ -1482,6 +1484,7 @@ static int build_line_entries(addr2line_image_t *img) {
             entry.file = row->file;
             entry.line = row->line;
             entry.column = row->column;
+            entry.discriminator = row->discriminator;
             entry.unit_index = row->unit_index;
             if (image_append_line_entry(img, &entry) != 0) {
                 return -1;
@@ -3610,14 +3613,21 @@ static uint64_t read_address(const addr2line_image_t *img, const char *text) {
  * @brief Print the queried address, as -a asks, ahead of its frames.
  *
  * On a line of its own, or with -p as a "0xADDR: " prefix on the
- * first frame.
+ * first frame.  As GNU addr2line does, the address is zero-padded to
+ * the width of the file's addresses: 16 digits for ELF64, 8 for ELF32.
  *
+ * @param img   Open image.
  * @param opts  Output options.
  * @param query Address being resolved.
  */
-static void emit_query_address(const addr2line_opts_t *opts, uint64_t query) {
+static void emit_query_address(const addr2line_image_t *img,
+                               const addr2line_opts_t *opts,
+                               uint64_t query) {
+    int width = img->elf_class == ELFOBJ_CLASS_32 ? 8 : 16;
+
     if (opts->show_addresses) {
-        printf(opts->pretty ? "0x%llx: " : "0x%llx\n", (unsigned long long)query);
+        printf("0x%0*llx", width, (unsigned long long)query);
+        fputs(opts->pretty ? ": " : "\n", stdout);
     }
 }
 
@@ -3644,12 +3654,15 @@ static const char *path_basename_view(const char *path) {
  * @param path          Source file ("??" if NULL).
  * @param line          Source line (0 when unknown).
  * @param column        Source column (0 when unknown).
+ * @param discriminator Line-table discriminator, shown as GNU addr2line
+ *                      shows it when not 0.
  */
 static void emit_frame_result(const addr2line_opts_t *opts,
                               const char *function_name,
                               const char *path,
                               uint32_t line,
-                              uint32_t column) {
+                              uint32_t column,
+                              uint32_t discriminator) {
     const char *out_path = path != NULL ? path : "??";
     const char *func = function_name != NULL ? function_name : "??";
     const char *display_func = func;
@@ -3679,6 +3692,9 @@ static void emit_frame_result(const addr2line_opts_t *opts,
     printf("%s:%u", display_path, (unsigned)line);
     if (opts->show_column) {
         printf(":%u", (unsigned)column);
+    }
+    if (discriminator != 0u) {
+        printf(" (discriminator %u)", (unsigned)discriminator);
     }
     putchar('\n');
 
@@ -3803,7 +3819,17 @@ static char *line_entry_path(const addr2line_image_t *img, const line_entry_t *e
     return line_path_for_unit_file(img, entry->unit_index, entry->file);
 }
 
+/**
+ * @brief Print the result for one address.
+ *
+ * @param img   Open image.
+ * @param shown The address as read, which -a shows (as GNU addr2line
+ *              shows it, before a -j section's address is added).
+ * @param query The address to look up.
+ * @param opts  Output options.
+ */
 static void output_lookup(const addr2line_image_t *img,
+                          uint64_t shown,
                           uint64_t query,
                           const addr2line_opts_t *opts) {
     const line_entry_t *entry = lookup_line_entry(img, query);
@@ -3812,9 +3838,10 @@ static void output_lookup(const addr2line_image_t *img,
     size_t n = collect_inline_chain(img, query, chain, 256u);
     const char *inner;
     char *path = NULL;
+    uint32_t discriminator = entry != NULL ? entry->discriminator : 0u;
     size_t k;
 
-    emit_query_address(opts, query);
+    emit_query_address(img, opts, shown);
 
     /*
      * Frame 0 is the innermost function (the deepest inlined subroutine,
@@ -3831,9 +3858,9 @@ static void output_lookup(const addr2line_image_t *img,
         return;
     }
     if (path == NULL || path[0] == '\0') {
-        emit_frame_result(opts, inner, "??", 0, 0);
+        emit_frame_result(opts, inner, "??", 0, 0, 0);
     } else {
-        emit_frame_result(opts, inner, path, entry->line, entry->column);
+        emit_frame_result(opts, inner, path, entry->line, entry->column, discriminator);
     }
     free(path);
     if (!opts->show_inlines) {
@@ -3843,7 +3870,8 @@ static void output_lookup(const addr2line_image_t *img,
     /*
      * Each outer frame k is the function that frame k-1 was inlined
      * into, at the call site frame k-1 records; frame n is the
-     * enclosing subprogram.
+     * enclosing subprogram.  GNU addr2line repeats the address's
+     * discriminator on every outer frame, and so does this.
      */
     for (k = 1; k <= n; ++k) {
         const dwarf_inline_t *callee = &img->inlines[chain[k - 1u]];
@@ -3854,7 +3882,7 @@ static void output_lookup(const addr2line_image_t *img,
             fputs(" (inlined by) ", stdout);
         }
         emit_frame_result(opts, name, path != NULL ? path : "??",
-                          callee->call_line, callee->call_column);
+                          callee->call_line, callee->call_column, discriminator);
         free(path);
     }
 }
@@ -3863,7 +3891,9 @@ static int resolve_stdin(const addr2line_image_t *img, const addr2line_opts_t *o
     char line[256];
 
     while (fgets(line, sizeof(line), stdin) != NULL) {
-        output_lookup(img, adjust_query_address(img, opts, read_address(img, line)), opts);
+        uint64_t addr = read_address(img, line);
+
+        output_lookup(img, addr, adjust_query_address(img, opts, addr), opts);
     }
 
     return 0;
@@ -3876,7 +3906,9 @@ static int resolve_argv(const addr2line_image_t *img,
     size_t i;
 
     for (i = 0; i < n; ++i) {
-        output_lookup(img, adjust_query_address(img, opts, read_address(img, args[i])), opts);
+        uint64_t addr = read_address(img, args[i]);
+
+        output_lookup(img, addr, adjust_query_address(img, opts, addr), opts);
     }
 
     return 0;
