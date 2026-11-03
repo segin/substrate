@@ -4,7 +4,13 @@ include ../../Makefile.inc
 
 PROG = nm
 SRCS = nm.c
+# A native (host) build of elfobj and demangle produces only the static
+# archives, so link those; the target build links the shared libraries.
+ifeq ($(NATIVE_BUILD),1)
+LDADD += $(TOP)/usr.lib/elfobj/libelfobj.a $(TOP)/usr.lib/demangle/libdemangle.a
+else
 LDADD += -L$(TOP)/usr.lib/elfobj -l:libelfobj.so.0 -L$(TOP)/usr.lib/demangle -l:libdemangle.so.0
+endif
 USER_CFLAGS += -idirafter ../../include
 EXTRA_CLEAN += .build-mode
 

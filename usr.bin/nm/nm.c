@@ -316,6 +316,11 @@ static int filter_symbol(const nm_sym_t *sym)
     if (opts.no_weak && sym->bind == STB_WEAK)
         return 0;
 
+    /* Sorting by size only makes sense for symbols that have one */
+    if (opts.sort_mode == SORT_SIZE &&
+        (sym->shndx == SHN_UNDEF || sym->sz == 0))
+        return 0;
+
     return 1;
 }
 
@@ -445,6 +450,10 @@ static void print_bsd_line(const nm_sym_t *sym, elfobj_class_t cls, const char *
 {
     int w = (cls == ELFOBJ_CLASS_64) ? 16 : 8;
     const char *name = display_name(sym);
+    /* --size-sort without -S shows the size in place of the value */
+    unsigned long long first = (opts.sort_mode == SORT_SIZE && !opts.print_size)
+                             ? (unsigned long long)sym->sz
+                             : (unsigned long long)sym->value;
 
     if (opts.print_file && file)
         printf("%s:", file);
@@ -453,11 +462,11 @@ static void print_bsd_line(const nm_sym_t *sym, elfobj_class_t cls, const char *
         printf("%*s %c", w, "", sym->type_char);
     } else {
         if (opts.radix == 8)
-            printf("%0*llo %c", w, (unsigned long long)sym->value, sym->type_char);
+            printf("%0*llo %c", w, first, sym->type_char);
         else if (opts.radix == 16)
-            printf("%0*llx %c", w, (unsigned long long)sym->value, sym->type_char);
+            printf("%0*llx %c", w, first, sym->type_char);
         else
-            printf("%*llu %c", w, (unsigned long long)sym->value, sym->type_char);
+            printf("%*llu %c", w, first, sym->type_char);
     }
 
     if (opts.print_size && sym->sz > 0) {

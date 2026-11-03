@@ -107,6 +107,53 @@ SRC
     expect_match "archive member symbol alpha" "$OUT_AR" '[[:space:]]T[[:space:]]+alpha$'
     expect_match "archive member symbol beta" "$OUT_AR" '[[:space:]]T[[:space:]]+beta$'
 
+    # --size-sort: ascending by size, undefined and size-0 symbols are
+    # dropped, and without -S the BSD value column carries the size.
+    cat > "$TMP/sizes.c" <<'SRC'
+extern int ext_sz;
+char big_arr[300] = { 1 };
+short mid_arr[40] = { 2 };
+int small_var = 3;
+__asm__(".globl zero_sym\n.data\nzero_sym:\n.text\n");
+int sz_fn(void) { return ext_sz + big_arr[0] + mid_arr[0] + small_var; }
+SRC
+    cc -c -o "$TMP/sizes.o" "$TMP/sizes.c"
+
+    OUT_SS=$($NM --size-sort "$TMP/sizes.o")
+    expect_nomatch "--size-sort drops undefined" "$OUT_SS" 'ext_sz'
+    expect_nomatch "--size-sort drops size-0 symbols" "$OUT_SS" 'zero_sym'
+    expect_match "--size-sort prints size of small_var" "$OUT_SS" '^0+4 D small_var$'
+    expect_match "--size-sort prints size of mid_arr" "$OUT_SS" '^0+50 D mid_arr$'
+    expect_match "--size-sort prints size of big_arr" "$OUT_SS" '^0+12c D big_arr$'
+    ORDER=$(printf '%s\n' "$OUT_SS" | awk '{print $3}' | grep -E '^(small_var|mid_arr|big_arr)$' | tr '\n' ' ')
+    [ "$ORDER" = "small_var mid_arr big_arr " ] ||
+        fail "--size-sort order is ascending (got: $ORDER)"
+    pass "--size-sort order is ascending"
+
+    OUT_SSS=$($NM --size-sort -S "$TMP/sizes.o")
+    # Both the value and the size (4) are shown; the -S column order
+    # itself is not what this checks.
+    NF_SV=$(printf '%s\n' "$OUT_SSS" | awk '$NF == "small_var" { n = 0; for (i = 1; i < NF; i++) if ($i ~ /^0+4$/) n++; print NF ":" n }')
+    [ "$NF_SV" = "4:1" ] ||
+        fail "--size-sort -S prints value and size (got: $OUT_SSS)"
+    pass "--size-sort -S prints value and size"
+    expect_nomatch "--size-sort -S drops undefined" "$OUT_SSS" 'ext_sz'
+
+    if nm --version 2>/dev/null | grep -q 'GNU nm'; then
+        for flags in "--size-sort" "--size-sort -r" "--size-sort -g" "--size-sort -u"; do
+            # shellcheck disable=SC2086
+            GOT=$($NM $flags "$TMP/sizes.o")
+            # shellcheck disable=SC2086
+            WANT=$(nm $flags "$TMP/sizes.o")
+            [ "$GOT" = "$WANT" ] || {
+                printf 'FAIL: nm %s differs from GNU nm\n--- got:\n%s\n--- want:\n%s\n' \
+                    "$flags" "$GOT" "$WANT" >&2
+                exit 1
+            }
+            pass "nm $flags matches GNU nm"
+        done
+    fi
+
     if [ -x /bin/ls ]; then
         OUT_DYN=$($NM -D /bin/ls)
         expect_match "-D dynamic symbols produce output" "$OUT_DYN" '^[[:space:]]*[0-9a-fA-F]*[[:space:]]+[A-Za-z][[:space:]]+'

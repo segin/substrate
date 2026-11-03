@@ -115,7 +115,12 @@ Display only defined symbols.
 .It Fl -no-weak
 Exclude weak symbols from the output.
 .It Fl -size-sort
-Sort symbols by size (largest first), with ties broken by name.
+Sort symbols by size (smallest first), with ties broken by name.
+Undefined symbols and symbols of size zero are not listed.
+In the default BSD format the first column then shows the symbol's
+size instead of its value; with
+.Fl S
+as well, both the value and the size are shown.
 .It Fl -special-syms
 Include target-specific special symbols in the output.
 .El
