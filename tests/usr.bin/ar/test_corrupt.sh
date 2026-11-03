@@ -134,9 +134,16 @@ main() {
     cp lname.a lfar.a;  poke lfar.a "$hdr2" '/999999'
     cp lname.a lend.a;  poke lend.a "$hdr2" "/$tsize"
     cp good.a lnotab.a; poke lnotab.a 8 '/0    '
+    # A reference is the digits after the '/': GNU reads them and
+    # ignores what follows, so "/9999x" is past the table and "/0x"
+    # names the first entry.  Neither may fall back to the name before
+    # the '/', which is empty.
+    cp lname.a ljunk.a; poke ljunk.a "$hdr2" '/9999x'
+    cp lname.a lzero.a; poke lzero.a "$hdr2" '/0x'
     gnu_rejects lfar.a t
     gnu_rejects lend.a t
-    for a in lfar.a lend.a lnotab.a; do
+    gnu_rejects ljunk.a t
+    for a in lfar.a lend.a lnotab.a ljunk.a; do
         must_reject "$a" t
         must_reject "$a" p
         must_reject "$a" r c.txt
@@ -144,6 +151,14 @@ main() {
         grep -q 'malformed archive' "$TMP/err" ||
             fail "ar d $a: $(cat "$TMP/err")"
     done
+    want=$(ar t lzero.a) || fail "GNU ar t lzero.a failed; the test is wrong"
+    out=$("$AR" t lzero.a) || fail "ar t lzero.a failed"
+    [ "$out" = "$want" ] || fail "ar t lzero.a: '$out', GNU ar lists '$want'"
+    ar p lzero.a "$long" > lzero.gnu
+    "$AR" p lzero.a "$long" > lzero.out || fail "ar p lzero.a failed"
+    [ -s lzero.gnu ] || fail "GNU ar p lzero.a printed nothing; the test is wrong"
+    cmp -s lzero.gnu lzero.out || fail "ar p lzero.a differs from GNU ar p"
+    pass "ar resolves a reference with trailing junk as GNU ar does"
 
     # ranlib rewrites the archive too.
     ln -s "$AR" "$TMP/ranlib"

@@ -166,6 +166,13 @@ Either way
 .Nm
 exits with status 1 and leaves the archive unchanged, whatever the
 operation.
+As in GNU
+.Nm ,
+the offset of a
+.Dq / Ns Ar offset
+reference is the run of digits after the
+.Ql / ,
+and anything after the digits is ignored.
 Non-numeric uid, gid and mode fields are reported but accepted.
 .Sh ENVIRONMENT
 .Bl -tag -width "SOURCE_DATE_EPOCH"

@@ -630,18 +630,26 @@ static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special,
         }
 
         if (tmp[0] == '/' && isdigit((unsigned char)tmp[1])) {
-            char *end = NULL;
-            unsigned long off = strtoul(tmp + 1, &end, 10);
-            if (end != NULL && *end == '\0' &&
-                (gnu_name_table == NULL || off >= gnu_name_table_size)) {
-                /* A reference past the end of the name table, or with
-                 * no table at all, names nothing.  Taking the name
-                 * up to its first '/' would give the member an empty
-                 * name; GNU calls this a malformed archive. */
+            /*
+             * A '/' followed by a digit is a reference into the name
+             * table, whatever follows the digits: GNU reads the offset
+             * from the leading digits and ignores the rest.  It must
+             * not fall through to the '/' cut below, which would give
+             * the member an empty name, and an archive rewritten from
+             * that would lose the member's data.  A reference past the
+             * end of the name table, or with no table at all, names
+             * nothing; GNU calls that a malformed archive.
+             */
+            unsigned long off;
+
+            errno = 0;
+            off = strtoul(tmp + 1, NULL, 10);
+            if (errno != 0 || gnu_name_table == NULL ||
+                off >= gnu_name_table_size) {
                 *malformed = true;
                 return NULL;
             }
-            if (end != NULL && *end == '\0') {
+            {
                 const char *start = gnu_name_table + off;
                 const char *p = start;
                 while ((size_t)(p - gnu_name_table) < gnu_name_table_size &&
