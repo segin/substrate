@@ -151,7 +151,7 @@ int fill_eh_frame_hdr(elfobj_t *out) {
     haddr = elf_section_addr(hdr);
     while (usable && off + 4 <= size) {
         uint32_t len = read_u32_endian(data + off, e);
-        uint32_t id;
+        uint32_t id, cie_len;
         size_t cie_off;
         uint64_t field, start;
         int enc;
@@ -169,10 +169,17 @@ int fill_eh_frame_hdr(elfobj_t *out) {
             off += 4 + (size_t)len;
             continue;
         }
-        /* An FDE: its CIE is `id` bytes back from the id. */
+        /* An FDE: its CIE is `id` bytes back from the id.  That may be
+         * anywhere before it, not only at a record the walk has checked,
+         * so the CIE's own length must fit in what is left. */
         cie_off = off + 4 - (size_t)id;
-        if ((size_t)id > off + 4 || cie_off + 8 > size || read_u32_endian(data + cie_off + 4, e) != 0 ||
-            (enc = eh_cie_fde_encoding(data + cie_off, read_u32_endian(data + cie_off, e), ptr_size)) < 0) {
+        if ((size_t)id > off + 4 || cie_off + 8 > size || read_u32_endian(data + cie_off + 4, e) != 0) {
+            usable = 0;
+            break;
+        }
+        cie_len = read_u32_endian(data + cie_off, e);
+        if ((size_t)cie_len > size - cie_off - 4 ||
+            (enc = eh_cie_fde_encoding(data + cie_off, cie_len, ptr_size)) < 0) {
             usable = 0;
             break;
         }
