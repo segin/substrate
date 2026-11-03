@@ -1258,11 +1258,26 @@ static void move_members(char **members, int count) {
     }
 }
 
+/**
+ * @brief Report whether a member is a symbol table or a name table.
+ *
+ * The GNU "/", "/SYM64/" and "//" members and the BSD "__.SYMDEF" and
+ * "__.SYMDEF SORTED" members describe the archive rather than hold a
+ * file of it, so t, p and x pass over them, as GNU ar does.
+ *
+ * @param m Archive member.
+ * @return true for a symbol-table or name-table member.
+ */
+static bool is_table_member(const struct ar_memb *m) {
+    return strcmp(m->name, RANLIBMAG) == 0 || strcmp(m->name, RANLIBSORT) == 0 ||
+           strcmp(m->name, "/") == 0 || strcmp(m->name, "/SYM64/") == 0 ||
+           strcmp(m->name, "//") == 0;
+}
+
 static void print_members(char **members, int count) {
     struct ar_memb *cur = head;
     while (cur) {
-        if (cur->deleted) { cur = cur->next; continue; }
-        if (strcmp(cur->name, RANLIBMAG) == 0) { cur = cur->next; continue; }
+        if (cur->deleted || is_table_member(cur)) { cur = cur->next; continue; }
 
         bool match = (count == 0);
         for (int i = 0; i < count; i++) {
@@ -1313,7 +1328,7 @@ static void extract_members(char **members, int count) {
     }
 
     while (cur) {
-        if (cur->deleted) { cur = cur->next; continue; }
+        if (cur->deleted || is_table_member(cur)) { cur = cur->next; continue; }
         bool match = (count == 0);
         for (int i = 0; i < count; i++) {
             if (strcmp(cur->name, members[i]) == 0) {
@@ -1436,12 +1451,7 @@ static void list_members(char **members, int count) {
     }
 
     while (cur) {
-        if (cur->deleted) { cur = cur->next; continue; }
-        if (strcmp(cur->name, RANLIBMAG) == 0 || strcmp(cur->name, RANLIBSORT) == 0 ||
-            strcmp(cur->name, "/") == 0 || strcmp(cur->name, "/SYM64/") == 0 ||
-            strcmp(cur->name, "//") == 0) {
-            cur = cur->next; continue;
-        }
+        if (cur->deleted || is_table_member(cur)) { cur = cur->next; continue; }
         bool match = (count == 0);
         for (int i = 0; i < count; i++) {
             if (strcmp(cur->name, members[i]) == 0) {

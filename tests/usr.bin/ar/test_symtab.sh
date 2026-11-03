@@ -293,6 +293,33 @@ SRC
     cmp -s gthin2.syms thin2.syms ||
         fail "thin s armap differs from GNU ar's: $(diff gthin2.syms thin2.syms | head -5)"
     pass "s on a thin archive resolves members against the archive's directory"
+
+    # 11. p and x pass over the symbol and name tables, as GNU ar does:
+    #     p prints only the members' bytes and x writes only the members.
+    cat foo.o averyveryverylongmembername.o baz.o > members.cat
+    ar p gnu.a > gnu.p
+    cmp -s members.cat gnu.p || fail "GNU ar p gnu.a is not the members; the test is wrong"
+    "$AR" p ourslong.a > ours.p || fail "p ourslong.a failed"
+    cmp -s gnu.p ours.p || fail "p of an indexed archive prints more than the members"
+    cat foo.o baz.o > thin.cat
+    "$AR" p thin.a > thin.p || fail "p thin.a failed"
+    cmp -s thin.cat thin.p || fail "p of an indexed thin archive prints more than the members"
+    pass "p prints only the members"
+
+    for a in ourslong.a thin.a oursbsd.a; do
+        rm -rf xout
+        mkdir xout
+        (cd xout && "$AR" x "../$a") 2> x.err || fail "x $a failed"
+        [ ! -s x.err ] || fail "x $a warned: $(cat x.err)"
+        for f in xout/*; do
+            case "$f" in
+            xout/foo.o|xout/baz.o|xout/averyveryverylongmembername.o)
+                cmp -s "$f" "${f#xout/}" || fail "x $a wrote the wrong bytes to $f" ;;
+            *) fail "x $a wrote '$f', which is not a member" ;;
+            esac
+        done
+    done
+    pass "x writes only the members"
 }
 
 main "$@"

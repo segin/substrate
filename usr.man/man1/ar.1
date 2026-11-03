@@ -38,6 +38,12 @@ List members.
 Write member contents to standard output.
 .It Fl x
 Extract members.
+.Pp
+None of these three touches the symbol table or the long-name table:
+.Fl p
+prints only the members' bytes and
+.Fl x
+writes only the members' files.
 .It Fl m
 Move members within the archive.
 .It Fl s
