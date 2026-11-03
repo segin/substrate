@@ -1687,8 +1687,10 @@ static bool load_thin_member(const struct ar_memb *m, void **out_data, size_t *o
  *
  * @param m Archive member.
  * @param sym_head List the member's symbols are pushed onto.
+ * @return true if the member is an ELF object, whether or not it
+ *         defines any symbol.
  */
-static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
+static bool get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
     elfobj_t *obj = NULL;
     elf_err_t open_err;
     size_t symbol_count;
@@ -1697,12 +1699,12 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
     void *thin_data = NULL;
 
     if (m == NULL) {
-        return;
+        return false;
     }
     if (m->thin_ref) {
         if (m->thin_path == NULL ||
             !load_thin_member(m, &thin_data, &image_size)) {
-            return;
+            return false;
         }
         image = thin_data;
     } else {
@@ -1711,7 +1713,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
     }
     if (image == NULL || image_size == 0) {
         free(thin_data);
-        return;
+        return false;
     }
 
     /*
@@ -1721,7 +1723,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
     open_err = elf_open_memory_with_options(image, image_size, ELFOBJ_OPEN_NOCOPY, &obj);
     if (open_err != ELF_OK || obj == NULL) {
         free(thin_data);
-        return;
+        return false;
     }
 
     symbol_count = elf_symbol_count(obj);
@@ -1776,6 +1778,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
 
     elf_close(obj);
     free(thin_data);
+    return true;
 }
 
 static int compare_syms(const void *a, const void *b) {
@@ -1873,26 +1876,37 @@ static void ranlib(void) {
 
     struct sym_entry *list = NULL;
     int count = 0;
+    bool has_object = false;
     cur = head;
     while (cur) {
-        if (!cur->deleted) get_elf_symbols(cur, &list);
+        if (!cur->deleted && get_elf_symbols(cur, &list)) has_object = true;
         cur = cur->next;
     }
 
-    if (list == NULL) return;
+    /*
+     * As GNU ar does, an archive holding any object file gets a table,
+     * an empty one if no object defines a symbol; one holding no
+     * object file gets none.
+     */
+    if (!has_object) return;
 
     struct sym_entry *s = list;
     while (s) { count++; s = s->next; }
 
     /* Convert to array for sorting */
-    struct sym_entry **arr = malloc(count * sizeof(struct sym_entry*));
+    struct sym_entry **arr = malloc((count > 0 ? count : 1) * sizeof(struct sym_entry*));
+    if (arr == NULL) {
+        errx(1, "out of memory building symbol table");
+    }
     s = list;
     for (int i = 0; i < count; i++) {
         arr[i] = s;
         s = s->next;
     }
 
-    qsort(arr, count, sizeof(struct sym_entry*), compare_syms);
+    if (count > 0) {
+        qsort(arr, count, sizeof(struct sym_entry*), compare_syms);
+    }
 
     int strsize = 0;
     for (int i = 0; i < count; i++) strsize += arr[i]->name_len + 1;
@@ -2075,15 +2089,23 @@ static void write_archive(const char *path) {
             m = m->next;
         }
 
-        /* Convert to array and sort */
-        if (count > 0) {
-            struct sym_entry **arr = malloc(count * sizeof(struct sym_entry*));
+        /*
+         * Convert to array and sort.  With no symbols the table is
+         * still written, holding a count of zero, as GNU ar writes it.
+         */
+        {
+            struct sym_entry **arr = malloc((count > 0 ? count : 1) * sizeof(struct sym_entry*));
+            if (arr == NULL) {
+                errx(1, "out of memory building symbol table");
+            }
             struct sym_entry *s = list;
             for (int i = 0; i < count; i++) {
                 arr[i] = s;
                 s = s->next;
             }
-            qsort(arr, count, sizeof(struct sym_entry*), compare_syms);
+            if (count > 0) {
+                qsort(arr, count, sizeof(struct sym_entry*), compare_syms);
+            }
 
             /* Fill symdef data */
             int strsize = 0;

@@ -48,6 +48,11 @@ writes only the members' files.
 Move members within the archive.
 .It Fl s
 Create or update the archive symbol table.
+As with GNU
+.Nm ,
+an archive that holds an object file gets a table even when no object
+defines a symbol (the table is then empty), and one that holds no
+object file gets none.
 An archive that already has a symbol table gets a new one whenever
 .Fl r ,
 .Fl q ,

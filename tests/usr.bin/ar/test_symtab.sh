@@ -228,6 +228,29 @@ SRC
         fail "armap after d differs from GNU ar's: $(diff gdel.map del.map | head -5)"
     pass "d without s rebuilds the symbol table"
 
+    # An archive that holds an object file keeps a table, an empty one
+    # when no object defines a symbol; with no object file it has none.
+    # GNU ar writes "/" as a count of zero, four bytes.
+    printf 'static int only(void) { return 0; }\n' > st.c
+    cc -c -o st.o st.c
+    "$AR" rcs empty.a foo.o st.o
+    "$AR" d empty.a foo.o
+    ar rcs gempty.a foo.o st.o
+    ar d gempty.a foo.o
+    "$AR" rcs empty2.a st.o
+    ar rcs gempty2.a st.o
+    for a in empty.a empty2.a; do
+        for f in "$a" "g$a"; do
+            [ "$(name_at "$f" 8)" = "/" ] || fail "$f: first member is '$(name_at "$f" 8)', not /"
+            [ "$(dd if="$f" bs=1 skip=56 count=10 2>/dev/null | tr -d ' ')" = 4 ] ||
+                fail "$f: / is not 4 bytes"
+            [ "$(be32_at "$f" 68)" -eq 0 ] || fail "$f: / is not empty"
+        done
+    done
+    [ "$(name_at gdel.a 8)" != "/" ] || fail "GNU ar indexes an archive with no object; the test is wrong"
+    [ "$(name_at del.a 8)" != "/" ] || fail "an archive with no object file has a symbol table"
+    pass "an archive of objects that define nothing has an empty table"
+
     # 8. BSD format: the table read from the archive is rebuilt at its
     #    new size, not written over its old buffer.
     "$AR" --format=bsd rcs bsdupd.a foo.o
