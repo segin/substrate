@@ -27,6 +27,8 @@ typedef struct {
 static const_state_t *single_def_consts(const cc_ssa_function_t *f) {
     const_state_t *g = (const_state_t *)calloc((size_t)f->value_count, sizeof(*g));
     int *defs = (int *)calloc((size_t)f->value_count, sizeof(*defs));
+    int *agree;     /* per value, in a round: how many of its definitions copy one constant, or -1 for one not */
+    long long *val; /* and that constant */
     size_t i;
 
     if (g == NULL || defs == NULL) {
@@ -70,37 +72,48 @@ static const_state_t *single_def_consts(const cc_ssa_function_t *f) {
      * that computed x is gone (Linux's `IS_ENABLED(CONFIG_TMPFS) &&
      * is_tmpfs`), and of `x && 0`, 0 on both paths.
      */
+    /*
+     * (each round one walk of the instructions, every value's definitions weighed together: a walk per value made
+     * this most of the compile of a function of thousands of inlined bodies, Linux's kvm_initialize_cpu_caps())
+     */
+    agree = (int *)malloc((size_t)(f->value_count > 0 ? f->value_count : 1) * sizeof(*agree));
+    val = (long long *)malloc((size_t)(f->value_count > 0 ? f->value_count : 1) * sizeof(*val));
+    if (agree == NULL || val == NULL) {
+        free(agree);
+        free(val);
+        free(defs);
+        free(g);
+        return NULL;
+    }
     for (;;) {
         int changed = 0;
         size_t v;
 
-        for (v = 0; v < (size_t)f->value_count; ++v) {
-            int agree = 0;
-            long long val = 0;
-            int ok = defs[v] > 0 && !g[v].known && cc_ssa_value_class(f, (int)v) == CC_VAL_I64;
+        memset(agree, 0, (size_t)f->value_count * sizeof(*agree));
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int d = in->dst;
 
-            for (i = 0; ok && i < f->instr_count; ++i) {
-                const cc_ssa_instr_t *in = &f->instrs[i];
-
-                if (in->dst != (int)v) {
-                    continue;
-                }
-                /* (of another size only a constant that is the same at every width and either signedness: a
-                 * bool copied into an int and back, Linux's `likely(!ia32_fxstate)` of an inlined parameter) */
-                if (in->op != CC_SSA_MOV || in->lhs < 0 || in->lhs >= f->value_count || !g[in->lhs].known ||
-                    (cc_ssa_value_size(f, (int)v) != cc_ssa_value_size(f, in->lhs) &&
-                     (g[in->lhs].i < 0 || g[in->lhs].i > 127)) ||
-                    (agree > 0 && g[in->lhs].i != val)) {
-                    ok = 0;
-                    break;
-                }
-                val = g[in->lhs].i;
-                agree++;
+            if (d < 0 || d >= f->value_count || g[d].known || agree[d] < 0) {
+                continue;
             }
-            if (ok && agree == defs[v]) {
+            /* (of another size only a constant that is the same at every width and either signedness: a
+             * bool copied into an int and back, Linux's `likely(!ia32_fxstate)` of an inlined parameter) */
+            if (in->op != CC_SSA_MOV || in->lhs < 0 || in->lhs >= f->value_count || !g[in->lhs].known ||
+                (cc_ssa_value_size(f, d) != cc_ssa_value_size(f, in->lhs) &&
+                 (g[in->lhs].i < 0 || g[in->lhs].i > 127)) ||
+                (agree[d] > 0 && g[in->lhs].i != val[d])) {
+                agree[d] = -1;
+                continue;
+            }
+            val[d] = g[in->lhs].i;
+            agree[d]++;
+        }
+        for (v = 0; v < (size_t)f->value_count; ++v) {
+            if (!g[v].known && defs[v] > 0 && agree[v] == defs[v] && cc_ssa_value_class(f, (int)v) == CC_VAL_I64) {
                 g[v].known = 1;
                 g[v].type = CC_VAL_I64;
-                g[v].i = val;
+                g[v].i = val[v];
                 changed = 1;
             }
         }
@@ -108,6 +121,8 @@ static const_state_t *single_def_consts(const cc_ssa_function_t *f) {
             break;
         }
     }
+    free(agree);
+    free(val);
     free(defs);
     return g;
 }
@@ -1013,6 +1028,43 @@ static int thread_jumps(cc_ssa_function_t *f) {
     return changed;
 }
 
+/**
+ * Put back in @p st what @p g holds of each value that fold_function() may have written since the last label:
+ * the values instructions @p from to @p to (not included) of @p f define, an asm's outputs among them, and the
+ * variables the join at label @p entered (-1 for none) set -- what was a copy of all of @p g at every label, a
+ * function's values times its labels, most of the compile of Linux's kvm_initialize_cpu_caps().
+ */
+static void restore_states(const cc_ssa_function_t *f, const const_state_t *g, const_state_t *st,
+                           const join_state_t *j, size_t from, size_t to, int entered) {
+    size_t i;
+    size_t k;
+
+    for (i = from; i < to; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->dst >= 0 && in->dst < f->value_count) {
+            st[in->dst] = g[in->dst];
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int ov = in->asm_out_values[k];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(ov)) {
+                ov = CC_SSA_ASM_MEM_INDIRECT_DECODE(ov);
+            }
+            if (ov >= 0 && ov < f->value_count) {
+                st[ov] = g[ov];
+            }
+        }
+    }
+    if (entered >= 0 && entered < f->label_count && j->nvars > 0 && !j->forget[entered] && j->reached[entered]) {
+        for (k = 0; k < (size_t)j->nvars; ++k) {
+            if (j->seen[(size_t)entered * (size_t)j->nvars + k] == 1) {
+                st[j->vars[k]] = g[j->vars[k]];
+            }
+        }
+    }
+}
+
 static int fold_function(cc_ssa_function_t *f, int fold_branches) {
     const_state_t *st;
     const_state_t *g;
@@ -1022,6 +1074,8 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
     int *pair_half = NULL;         /* per value: the words of its one PAIR, two each, or -1 (fold_branches only) */
     ext_info_t *ext = NULL;        /* per value: what extends it (fold_branches only) */
     int live = 1; /* the code being walked can run, as far as the joins tell (join_enter()) */
+    size_t since = 0; /* the first instruction after the last label: what it and those after write of st */
+    int entered = -1; /* the last label, whose join_enter() wrote st too */
     size_t i;
     int x;
     int changed = 0;
@@ -1576,7 +1630,9 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
              * control-flow joins -- but for what every edge into it agrees
              * on (join_state_t).
              */
-            memcpy(st, g, (size_t)f->value_count * sizeof(*st));
+            restore_states(f, g, st, &join, since, i, entered);
+            since = i + 1;
+            entered = in->label;
             live = join_enter(&join, in->label, f->label_count, st);
             break;
 
