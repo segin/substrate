@@ -13,14 +13,35 @@
 
 int main(void) {
     /* 'A'; a section of 19 bytes, its length counting itself (4), "aeabi\0" (6) and the subsection (9);
-     * the file subsection, tag 1, of 9 bytes: the tag, its size (4), and Tag_CPU_name (4) "A7" */
+     * the file subsection, tag 1, of 9 bytes: the tag, its size (4), and Tag_CPU_raw_name (4) "A7" */
     static const unsigned char arm_attrs[] = {
         'A', 19, 0, 0, 0, 'a', 'e', 'a', 'b', 'i', 0, 1, 9, 0, 0, 0, 4, 'A', '7', 0
     };
-    /* The same layout with Tag_CPU_name "B9" */
+    /* The same layout with Tag_CPU_raw_name "B9" */
     static const unsigned char arm_attrs2[] = {
         'A', 19, 0, 0, 0, 'a', 'e', 'a', 'b', 'i', 0, 1, 9, 0, 0, 0, 4, 'B', '9', 0
     };
+    /*
+     * What gcc and gas write for a Cortex-A7: a section of 50 bytes (4 + "aeabi\0" + 40) whose file
+     * subsection of 40 bytes holds Tag_CPU_name (5) "cortex-a7", Tag_CPU_arch (6) 10,
+     * Tag_CPU_arch_profile (7) 'A', Tag_ARM_ISA_use (8) 1, Tag_THUMB_ISA_use (9) 2,
+     * Tag_compatibility (32) 1 "gnu", Tag_CPU_unaligned_access (34) 1, Tag_conformance (67) "2.09"
+     * and Tag_Virtualization_use (68) 1 -- as readelf -A reads it.  Tag 5 is a string, 32 an integer
+     * and a string, and an odd tag from 32 on a string: read as integers, the rest is nonsense.
+     */
+    static const unsigned char arm_attrs_gcc[] = {
+        'A', 50, 0, 0, 0, 'a', 'e', 'a', 'b', 'i', 0, 1, 40, 0, 0, 0,
+        5, 'c', 'o', 'r', 't', 'e', 'x', '-', 'a', '7', 0,
+        6, 10, 7, 'A', 8, 1, 9, 2,
+        32, 1, 'g', 'n', 'u', 0,
+        34, 1,
+        67, '2', '.', '0', '9', 0,
+        68, 1
+    };
+    static const uint32_t arm_gcc_tags[] = { 5, 6, 7, 8, 9, 32, 34, 67, 68 };
+    static const uint64_t arm_gcc_values[] = { 0, 10, 'A', 1, 2, 1, 1, 0, 1 };
+    static const char *const arm_gcc_strings[] = { "cortex-a7", NULL, NULL, NULL, NULL, "gnu", NULL, "2.09", NULL };
+    size_t ai;
     elfobj_t *arm = NULL;
     elfobj_t *arm2 = NULL;
     const char *arm_str1;
@@ -99,6 +120,21 @@ int main(void) {
     arm_str2 = elf_arm_attribute_string_at(arm, 0);
     CHECK(arm_str2 != NULL && strcmp(arm_str2, "A7") == 0);
     CHECK(strcmp(arm_str1, "A7") == 0);
+    elf_close(arm2);
+
+    /* Each attribute is read as its tag says: the names, Tag_compatibility's flag and vendor, and
+     * what follows them where readelf -A finds it. */
+    arm2 = elf_init_arm();
+    CHECK(arm2 != NULL);
+    CHECK(elf_add_arm_attributes(arm2, arm_attrs_gcc, sizeof(arm_attrs_gcc)) == ELF_OK);
+    CHECK(elf_arm_attribute_count(arm2) == sizeof(arm_gcc_tags) / sizeof(arm_gcc_tags[0]));
+    for (ai = 0; ai < sizeof(arm_gcc_tags) / sizeof(arm_gcc_tags[0]); ++ai) {
+        const char *s = elf_arm_attribute_string_at(arm2, ai);
+
+        CHECK(elf_arm_attribute_tag_at(arm2, ai) == arm_gcc_tags[ai]);
+        CHECK(elf_arm_attribute_value_at(arm2, ai) == arm_gcc_values[ai]);
+        CHECK(arm_gcc_strings[ai] == NULL ? s == NULL : s != NULL && strcmp(s, arm_gcc_strings[ai]) == 0);
+    }
     elf_close(arm2);
 
     CHECK(strcmp(elf_reloc_name_for_machine(EM_AARCH64, R_AARCH64_NONE), "R_AARCH64_NONE") == 0);

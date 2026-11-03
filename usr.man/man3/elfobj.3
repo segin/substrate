@@ -277,6 +277,15 @@ for .riscv.attributes inspection.
 and
 .Fn elf_arm_attribute_string_at
 inspect .ARM.attributes.
+Each attribute of the file subsection is read as the ARM EABI gives its
+tag's value:
+.Dv Tag_CPU_raw_name
+(4) and
+.Dv Tag_CPU_name
+(5) are strings,
+.Dv Tag_compatibility
+(32) is an integer and then a string, any other tag below 32 is an integer,
+and from 32 on an odd tag is a string and an even one an integer.
 .Fn elf_arm_attribute_string_at
 returns a pointer into the section's own data, or NULL when the entry does
 not exist or holds an integer; the string stays valid until that section's

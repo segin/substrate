@@ -342,10 +342,37 @@ int elf_mips_abiflags(const elfobj_t *obj, elf_mips_abiflags_t *out) {
     return 1;
 }
 
+/**
+ * What an ARM EABI attribute's value is, by its tag, as the EABI's addenda (and binutils) read it:
+ * Tag_CPU_raw_name and Tag_CPU_name are a NUL-terminated string, Tag_compatibility an integer (ULEB128)
+ * and then a string, any other tag below 32 an integer, and from 32 on an odd tag a string and an even
+ * one an integer.
+ *
+ * @param tag  the attribute's tag
+ * @param num  set to whether a ULEB128 integer comes first
+ * @param str  set to whether a NUL-terminated string comes (after the integer, if any)
+ */
+static void arm_attr_kind(uint64_t tag, int *num, int *str) {
+    if (tag == Tag_CPU_raw_name || tag == Tag_CPU_name) {
+        *num = 0;
+        *str = 1;
+    } else if (tag == Tag_compatibility) {
+        *num = 1;
+        *str = 1;
+    } else if (tag < 32 || tag == Tag_nodefaults) {
+        *num = 1;
+        *str = 0;
+    } else {
+        *num = (tag & 1) == 0;
+        *str = (tag & 1) != 0;
+    }
+}
+
 /* Walk the attribute section and return the total attribute count. When
  * `out` is non-NULL it receives ONLY the single attribute at position
  * `want_index` (in out[0]); callers pass a one-element buffer. Storing at a
- * running `outn` index into a single-element buffer was a stack overflow. */
+ * running `outn` index into a single-element buffer was a stack overflow.
+ * Each attribute is read as arm_attr_kind() says its tag's value is. */
 static size_t parse_arm_attrs(const elfobj_t *obj, arm_attr_item_t *out, size_t want_index) {
     const elf_section_t *s;
     const uint8_t *p;
@@ -405,23 +432,27 @@ static size_t parse_arm_attrs(const elfobj_t *obj, arm_attr_item_t *out, size_t 
                 uint64_t tag = read_uleb128(p, sub_end, &off, &ok);
                 uint64_t value = 0;
                 const char *str = NULL;
+                int has_num, has_str;
                 if (!ok) {
                     break;
                 }
-                if (tag == 4) {
-                    size_t st = off;
-                    while (off < sub_end && p[off] != '\0') {
-                        off++;
-                    }
-                    if (off < sub_end) {
-                        str = (const char *)(p + st);
-                        off++;
-                    }
-                } else {
+                arm_attr_kind(tag, &has_num, &has_str);
+                if (has_num) {
                     value = read_uleb128(p, sub_end, &off, &ok);
                     if (!ok) {
                         break;
                     }
+                }
+                if (has_str) {
+                    size_t st = off;
+                    while (off < sub_end && p[off] != '\0') {
+                        off++;
+                    }
+                    if (off >= sub_end) {
+                        break;      /* a string the subsection does not end */
+                    }
+                    str = (const char *)(p + st);
+                    off++;
                 }
                 if (out != NULL && outn == want_index) {
                     out[0].tag = (uint32_t)tag;

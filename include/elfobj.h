@@ -508,6 +508,16 @@ typedef enum {
 #define SHF_ARM_PURECODE 0x20000000u
 #endif
 
+/* ARM EABI build attributes (.ARM.attributes) whose values are not of the
+ * kind their tag's number gives (below 32 an integer; from 32 on, odd a
+ * string and even an integer). */
+#ifndef Tag_CPU_raw_name
+#define Tag_CPU_raw_name 4          /* a string */
+#define Tag_CPU_name 5              /* a string */
+#define Tag_compatibility 32        /* an integer, then a string */
+#define Tag_nodefaults 64           /* an integer */
+#endif
+
 #ifndef PT_ARM_EXIDX
 #define PT_ARM_EXIDX 0x70000001u
 #endif
