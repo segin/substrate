@@ -320,7 +320,6 @@ static char *line_path_for_unit_file(const addr2line_image_t *img,
 static const char *path_basename_view(const char *path);
 static void output_unresolved(void);
 static void emit_frame_result(const addr2line_opts_t *opts,
-                              uint64_t query,
                               const char *function_name,
                               const char *path,
                               uint32_t line,
@@ -3477,30 +3476,28 @@ static size_t find_innermost_inline(const addr2line_image_t *img, uint64_t addr)
     return best;
 }
 
-static void output_inline_chain(const addr2line_image_t *img,
-                                uint64_t query,
-                                const addr2line_opts_t *opts) {
-    size_t chain[256];
+/**
+ * @brief Collect the inlined-subroutine chain covering an address.
+ *
+ * @param img   Loaded image.
+ * @param addr  Address to resolve.
+ * @param chain Receives indexes into img->inlines, innermost first.
+ * @param cap   Capacity of @p chain.
+ * @return Number of entries stored (0 when no inlined subroutine covers
+ *         @p addr).
+ */
+static size_t collect_inline_chain(const addr2line_image_t *img,
+                                   uint64_t addr,
+                                   size_t *chain,
+                                   size_t cap) {
     size_t n = 0;
-    size_t idx = find_innermost_inline(img, query);
+    size_t idx = find_innermost_inline(img, addr);
 
-    while (idx != SIZE_MAX && n < 256u) {
+    while (idx != SIZE_MAX && n < cap) {
         chain[n++] = idx;
         idx = img->inlines[idx].parent_inline;
     }
-
-    for (idx = 0; idx < n; ++idx) {
-        const dwarf_inline_t *inl = &img->inlines[chain[idx]];
-        char *path = line_path_for_unit_file(img, inl->line_unit_index, inl->call_file);
-        const char *name = inline_function_name(img, inl);
-        emit_frame_result(opts,
-                          query,
-                          name,
-                          path != NULL ? path : "??",
-                          inl->call_line,
-                          inl->call_column);
-        free(path);
-    }
+    return n;
 }
 
 static void print_open_error(const char *path, elf_err_t err) {
@@ -3618,8 +3615,19 @@ static const char *path_basename_view(const char *path) {
     return path;
 }
 
+/**
+ * @brief Print one frame of a lookup result.
+ *
+ * The queried address (-a) and the " (inlined by) " marker are not
+ * printed here: output_lookup() prints them ahead of the frame.
+ *
+ * @param opts          Output options.
+ * @param function_name Function to show for this frame ("??" if NULL).
+ * @param path          Source file ("??" if NULL).
+ * @param line          Source line (0 when unknown).
+ * @param column        Source column (0 when unknown).
+ */
 static void emit_frame_result(const addr2line_opts_t *opts,
-                              uint64_t query,
                               const char *function_name,
                               const char *path,
                               uint32_t line,
@@ -3642,9 +3650,6 @@ static void emit_frame_result(const addr2line_opts_t *opts,
     display_path = out_path;
 
     if (opts->pretty) {
-        if (opts->show_addresses) {
-            printf("0x%llx: ", (unsigned long long)query);
-        }
         printf("%s at %s:%u", display_func, display_path, (unsigned)line);
         if (opts->show_column) {
             printf(":%u", (unsigned)column);
@@ -3654,9 +3659,6 @@ static void emit_frame_result(const addr2line_opts_t *opts,
         return;
     }
 
-    if (opts->show_addresses) {
-        printf("0x%llx\n", (unsigned long long)query);
-    }
     if (opts->show_functions) {
         puts(display_func);
     }
@@ -3771,23 +3773,52 @@ static void output_lookup(const addr2line_image_t *img,
                           uint64_t query,
                           const addr2line_opts_t *opts) {
     const line_entry_t *entry = lookup_line_entry(img, query);
-    char *path;
     const char *func = lookup_function_name(img, query);
-    if (opts->show_inlines) {
-        output_inline_chain(img, query, opts);
+    size_t chain[256];
+    size_t n = collect_inline_chain(img, query, chain, 256u);
+    const char *inner;
+    char *path = NULL;
+    size_t k;
+
+    if (opts->show_addresses) {
+        printf(opts->pretty ? "0x%llx: " : "0x%llx\n", (unsigned long long)query);
     }
-    if (entry == NULL) {
-        emit_frame_result(opts, query, func, "??", 0, 0);
-        return;
+
+    /*
+     * Frame 0 is the innermost function (the deepest inlined subroutine,
+     * or the subprogram itself) at the .debug_line location.
+     */
+    inner = n > 0u ? inline_function_name(img, &img->inlines[chain[0]]) : func;
+    if (entry != NULL) {
+        path = line_entry_path(img, entry);
     }
-    path = line_entry_path(img, entry);
     if (path == NULL || path[0] == '\0') {
-        free(path);
-        emit_frame_result(opts, query, func, "??", 0, 0);
+        emit_frame_result(opts, inner, "??", 0, 0);
+    } else {
+        emit_frame_result(opts, inner, path, entry->line, entry->column);
+    }
+    free(path);
+    if (!opts->show_inlines) {
         return;
     }
-    emit_frame_result(opts, query, func, path, entry->line, entry->column);
-    free(path);
+
+    /*
+     * Each outer frame k is the function that frame k-1 was inlined
+     * into, at the call site frame k-1 records; frame n is the
+     * enclosing subprogram.
+     */
+    for (k = 1; k <= n; ++k) {
+        const dwarf_inline_t *callee = &img->inlines[chain[k - 1u]];
+        const char *name = k < n ? inline_function_name(img, &img->inlines[chain[k]]) : func;
+
+        path = line_path_for_unit_file(img, callee->line_unit_index, callee->call_file);
+        if (opts->pretty) {
+            fputs(" (inlined by) ", stdout);
+        }
+        emit_frame_result(opts, name, path != NULL ? path : "??",
+                          callee->call_line, callee->call_column);
+        free(path);
+    }
 }
 
 static int resolve_stdin(const addr2line_image_t *img, const addr2line_opts_t *opts) {

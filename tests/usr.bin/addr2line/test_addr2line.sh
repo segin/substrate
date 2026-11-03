@@ -235,6 +235,37 @@ int main(int c, char **) { return run_shape(c) + ref_user(c); }
 SRC
 }
 
+build_fixture_two_level_inline() {
+    dir=$1
+    mkdir -p "$dir"
+    # Every function body sits on its own lines, so each frame of the
+    # inline chain has a distinct source line to be paired with.
+    cat > "$dir/two_level.c" <<'SRC'
+static inline __attribute__((always_inline)) int tl_inner(volatile int *p)
+{
+    return *p * 7 + 1;
+}
+static inline __attribute__((always_inline)) int tl_mid(volatile int *p)
+{
+    return tl_inner(p) + 5;
+}
+int tl_outer(int x)
+{
+    volatile int v = x;
+    return tl_mid(&v) * 3;
+}
+int main(int c, char **v) { (void)v; return tl_outer(c); }
+SRC
+}
+
+# Normalise addr2line output for an exact comparison: GNU zero-pads
+# -a addresses to the target's width and appends "(discriminator N)",
+# neither of which is what the inline-frame checks are about.
+norm_a2l() {
+    printf '%s\n' "$1" | sed -e 's/^0x0*\([0-9a-f]\)/0x\1/' \
+                             -e 's/ (discriminator [0-9]*)$//'
+}
+
 # Function names only (the odd lines) of "-f -i" output.
 inline_names() {
     printf '%s\n' "$1" | awk 'NR % 2 == 1' | tr '\n' ' '
@@ -587,6 +618,43 @@ SRC
                 "$($BIN -f -C -e "$TMP/nref/nref_v${V}_nosym" 0x$RA)" \
                 "$HOST_R"
         done
+    done
+
+    # 10m: an address inside a two-level inline chain (tl_inner inlined
+    # into tl_mid inlined into tl_outer).  Each function name must be
+    # paired with its own source line: the innermost frame with the
+    # .debug_line row, every outer frame with the call site recorded on
+    # the frame it inlined.  Without -i the innermost function is named.
+    # With -a the address is printed once, and in -p mode every later
+    # frame starts with " (inlined by) ".  GNU addr2line is the judge,
+    # over every address of tl_outer.
+    build_fixture_two_level_inline "$TMP/tl"
+    for V in 4 5; do
+        cc -O2 -g -gdwarf-$V -no-pie -o "$TMP/tl/tl_v$V" "$TMP/tl/two_level.c"
+        TO=$(addr_of "$TMP/tl/tl_v$V" tl_outer)
+        TS=$(nm -S "$TMP/tl/tl_v$V" | awk '$4=="tl_outer" {print $2; exit}')
+        [ -n "$TO" ] && [ -n "$TS" ] || fail "10m v$V symbol tl_outer not found"
+        SEEN_INNER=0
+        OFF=0
+        while [ "$OFF" -lt $((0x$TS)) ]; do
+            Q=$(printf '%x' $((0x$TO + OFF)))
+            for FLAGS in "-f" "-f -i" "-i" "-a -f -i" "-f -i -p" "-f -i -p -a" \
+                         "-f -p -a"; do
+                HOST_O=$(norm_a2l "$(addr2line $FLAGS -e "$TMP/tl/tl_v$V" 0x$Q)")
+                OUR_O=$(norm_a2l "$($BIN $FLAGS -e "$TMP/tl/tl_v$V" 0x$Q)")
+                [ "$OUR_O" = "$HOST_O" ] || {
+                    printf 'FAIL: 10m v%s +%s %s\n  got :\n%s\n  want:\n%s\n' \
+                        "$V" "$OFF" "$FLAGS" "$OUR_O" "$HOST_O" >&2
+                    exit 1
+                }
+            done
+            case $(inline_names "$(addr2line -f -i -e "$TMP/tl/tl_v$V" 0x$Q)") in
+            "tl_inner tl_mid tl_outer ") SEEN_INNER=1 ;;
+            esac
+            OFF=$((OFF + 1))
+        done
+        [ "$SEEN_INNER" -eq 1 ] || fail "10m v$V no address inside inlined tl_inner"
+        pass "10m v$V"
     done
 
     pass "all"

@@ -27,7 +27,11 @@ as the input ELF object (default:
 Print function names before source locations.
 .TP
 .BR \-i ", " \-\-inlines
-Print inline call frames from innermost to outermost.
+When the address lies in inlined code, also print the functions it was
+inlined into, from innermost to outermost.
+The innermost function is shown with the line the address belongs to;
+each outer function is shown with the line of the call that was inlined
+into it, ending with the function that contains the code.
 .TP
 .BR \-s ", " \-\-basenames
 Strip directory prefixes from file names.
@@ -43,9 +47,18 @@ Demangle function names using
 .BR \-p ", " \-\-pretty\-print
 Print each frame on one line as
 .IR "function at file:line" .
+With
+.BR \-i ,
+each frame after the first begins with
+.RB \(lq " (inlined by) " \(rq.
 .TP
 .BR \-a ", " \-\-addresses
-Print the queried address before each result.
+Print the queried address once before its result: on a line of its own,
+or with
+.B \-p
+as an
+.RB \(lq 0x \fIaddr\fP: \(rq
+prefix on the first frame.
 .TP
 .B \-c
 Print
@@ -89,7 +102,10 @@ Supported DWARF versions: v2, v3, v4, v5.
 .PP
 Function names come from the
 .B DW_TAG_subprogram
-that covers the address.
+that covers the address, or, when the address lies in inlined code, the
+innermost
+.B DW_TAG_inlined_subroutine
+that covers it.
 A subprogram with no name of its own, such as an out-of-line C++ member
 function definition or an out-of-line copy of an inline function, is
 named through its
@@ -127,6 +143,17 @@ Resolve runtime-style PIE addresses with function names:
 .RS
 .EX
 addr2line -f -e ./app.pie 0x555551a3 0x5555520f
+.EE
+.RE
+.TP
+Show the inline chain of an address in one-line form:
+.PP
+.RS
+.EX
+$ addr2line -f -i -p -a -s -e ./t 0x401144
+0x401144: inner at t.c:2
+ (inlined by) mid at t.c:4
+ (inlined by) outer at t.c:5
 .EE
 .RE
 .TP
