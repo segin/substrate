@@ -9,7 +9,7 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   that constant -- and, on i386, a pair masked with 32 bits of ones its
   low word, as 64-bit arithmetic cut to a long is; after the last
   passes, folding repeats while it drops
-  arms that cannot run, `settle_function()`), jump threading
+  arms that cannot run or folds anything, `settle_function()`), jump threading
   (`thread_jumps()`: a way into a block that only tests a variable goes
   where the value it sets goes, or branches on the compare it sets, a
   jump to the next label, its only way in, merging the blocks first; a

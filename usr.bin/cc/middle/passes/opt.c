@@ -4188,7 +4188,10 @@ static int drop_effectless_calls(cc_ssa_module_t *m, int opt_level) {
  * Fold @p f, read its copies as their sources, thread its jumps and drop what cannot run, again while dropping it
  * changed anything: an arm gone may leave a variable one definition, which folds what reads it -- the `ia32 = 1`
  * of Linux's fpu__restore_sig(), in an arm `ia32_frame && use_fxsr()` with ia32_frame 0, was the last thing to go,
- * and the call of convert_to_fxsr() it guarded, an undefined function, stayed.
+ * and the call of convert_to_fxsr() it guarded, an undefined function, stayed.  And again while the folding
+ * itself changed anything: a value it made a constant is known past a label only from the next round on --
+ * Linux's min(), its BUILD_BUG_ON's `2 + __is_nonneg(x)` folded in one block and tested in the next once
+ * resolve_isconst() made the __builtin_constant_p 0, left its call of an undefined __compiletime_assert_N.
  *
  * @return 0, or -1 when out of memory
  */
@@ -4196,7 +4199,8 @@ static int settle_function(cc_ssa_function_t *f) {
     int round;
 
     for (round = 0; round < 4; ++round) {
-        int rc = fold_function(f, 1);
+        int folded = fold_function(f, 1);
+        int rc = folded;
 
         rc = rc < 0 ? -1 : cc_propagate_copies(f);
         rc = rc < 0 ? -1 : thread_jumps(f);
@@ -4205,6 +4209,9 @@ static int settle_function(cc_ssa_function_t *f) {
             /* (and what the dead definitions leave only jumping on) */
             rc = dce_function(f);
             rc = rc <= 0 ? rc : thread_jumps(f);
+        }
+        if (rc == 0 && folded > 0) {
+            rc = 1;
         }
         if (rc <= 0) {
             return rc < 0 ? -1 : 0;
