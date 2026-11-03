@@ -10,6 +10,8 @@ extern "C" {
 #define DEMANGLE_NO_PARAMS  (1u << 0)
 #define DEMANGLE_NO_VERBOSE (1u << 1)
 #define DEMANGLE_TYPES      (1u << 2)
+/* Lift the bound on how deeply a name may nest (GNU's DMGL_NO_RECURSE_LIMIT). */
+#define DEMANGLE_NO_RECURSE_LIMIT (1u << 3)
 
 #define DEMANGLE_AUTO       (1u << 8)
 #define DEMANGLE_ITANIUM    (1u << 9)

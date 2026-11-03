@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -2294,6 +2295,9 @@ demangle_itanium(const char *mangled, int options)
     parser.input = mangled;
     parser.cur = mangled;
     parser.options = options;
+    if ((options & DEMANGLE_NO_RECURSE_LIMIT) != 0) {
+        parser.recursion_limit = INT_MAX;
+    }
 
     if (mangled[0] == '_' && mangled[1] == 'Z') {
         parser.cur += 2;

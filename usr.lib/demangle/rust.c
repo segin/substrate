@@ -224,7 +224,8 @@ rust_parser_init(rust_parser_t *p, const char *mangled, int options)
     p->input = mangled;
     p->cur = mangled;
     p->options = options;
-    p->recursion_limit = RUST_RECURSION_DEFAULT_LIMIT;
+    p->recursion_limit = (options & DEMANGLE_NO_RECURSE_LIMIT) != 0
+                             ? INT_MAX : RUST_RECURSION_DEFAULT_LIMIT;
 
     if (rust_buf_reserve(&p->out, 0u) != 0) {
         return -1;

@@ -131,6 +131,50 @@ test_itanium_deep_pointer_recursion(void)
     PASS("test_itanium_deep_pointer_recursion");
 }
 
+/*
+ * DEMANGLE_NO_RECURSE_LIMIT lifts the nesting bound, as GNU's
+ * --no-recurse-limit does: a parameter of 300 pointers (past the
+ * 256-level Itanium bound, well short of exhausting the stack) fails
+ * without the flag and demangles in full with it.
+ */
+static void
+test_itanium_no_recurse_limit(void)
+{
+    enum { DEPTH = 300 };
+    char buf[DEPTH + 16];
+    size_t n;
+    size_t stars = 0;
+    char *bounded;
+    char *unbounded;
+    const char *c;
+    int i;
+
+    n = (size_t)snprintf(buf, sizeof(buf), "_Z1f");
+    for (i = 0; i < DEPTH; i++) {
+        buf[n++] = 'P';
+    }
+    buf[n++] = 'i';
+    buf[n] = '\0';
+
+    bounded = demangle(buf, 0);
+    unbounded = demangle(buf, DEMANGLE_NO_RECURSE_LIMIT);
+    if (unbounded != NULL) {
+        for (c = unbounded; *c != '\0'; c++) {
+            stars += *c == '*';
+        }
+    }
+    if (bounded != NULL) {
+        FAIL("test_itanium_no_recurse_limit", "bound did not fire without the flag");
+    } else if (unbounded == NULL || strncmp(unbounded, "f(int*", 6) != 0 ||
+               stars != DEPTH) {
+        FAIL("test_itanium_no_recurse_limit", "flag did not lift the bound");
+    } else {
+        PASS("test_itanium_no_recurse_limit");
+    }
+    demangle_free(bounded);
+    demangle_free(unbounded);
+}
+
 /* Same as above but via templates: I…I…I…E…E…E nesting. */
 static void
 test_itanium_deep_template_recursion(void)
@@ -426,6 +470,7 @@ main(void)
     test_dlang_qbackref_no_uaf();
     test_dlang_qbackref_storm();
     test_itanium_deep_pointer_recursion();
+    test_itanium_no_recurse_limit();
     test_itanium_deep_template_recursion();
     test_rust_v0_deep_recursion();
     test_itanium_huge_length_prefix_rejected();

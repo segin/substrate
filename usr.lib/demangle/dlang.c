@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -190,7 +191,8 @@ dlang_parser_init(dlang_parser_t *p, const char *mangled, int options)
     p->input = mangled;
     p->cur = mangled;
     p->options = options;
-    p->recursion_limit = DLANG_RECURSION_DEFAULT_LIMIT;
+    p->recursion_limit = (options & DEMANGLE_NO_RECURSE_LIMIT) != 0
+                             ? INT_MAX : DLANG_RECURSION_DEFAULT_LIMIT;
 
     if (dlang_buf_reserve(&p->out, 0u) != 0) {
         return -1;
