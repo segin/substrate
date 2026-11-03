@@ -32,7 +32,8 @@
  * extension of a variable, so is that variable's narrow part.  Such a
  * fact holds from where it is learned until the value is defined again or
  * until a label some other way reaches: a label any edge into which comes
- * from before the fact, or from later in the stream (a loop's jump back).
+ * from before the fact, or from later in the stream (a loop's jump back);
+ * a label nothing reaches changes nothing, as what follows it does not run.
  * A definition of a value defined once made where facts hold has their
  * interval wherever it is read, as every read comes after it; a
  * variable's, as a fact of its own.
@@ -1077,6 +1078,16 @@ static int range_walk(range_t *s) {
         if (in->op == CC_SSA_LABEL) {
             int l = in->label;
             int keep = l >= 0 && l < f->label_count && s->edge_count[l] > 0 && s->edge_max[l] < (long)i;
+
+            if (l >= 0 && l < f->label_count && s->edge_count[l] == 0) {
+                /*
+                 * nothing reaches it: what follows does not run, and whatever is known holds there; the next
+                 * label something reaches decides by its own ways in (an arm emptied when its branch was threaded
+                 * past it, as `if (!page) break;` in Linux's pktgen_finalize_skb() left one, forgot the
+                 * `while (datalen > 0)` its min() relies on)
+                 */
+                continue;
+            }
 
             /* what held before holds on only if every way in comes from where it held */
             k = 0;

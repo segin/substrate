@@ -116,7 +116,8 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   sums that cannot overflow, a variable the union of its definitions' --
   and along the stream from the branches on a compare with a constant,
   into a label nothing else reaches, until the value is defined again or
-  a label another way reaches; a compare both operands' intervals answer
+  a label another way reaches (a label nothing reaches, whose code does
+  not run, does not end it); a compare both operands' intervals answer
   one way folds to that answer.  `opt.c`'s `fold_module_ranges()` runs
   it over each function, gathering what every direct call passes, then
   again over each static function only direct calls reach
