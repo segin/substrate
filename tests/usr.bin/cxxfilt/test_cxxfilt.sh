@@ -56,6 +56,15 @@ expect_eq "8d-3" "$("$BIN" -s none _Z3fooi)" "_Z3fooi"
 expect_eq "8d-4" "$("$BIN" -s rust _RNvCshgxSpmajvKg_7mycrate3foo)" "{s14492079435488262969}mycrate::{foo}"
 expect_eq "8d-5" "$("$BIN" -s dlang _D3foo3barFiZi)" "foo.bar: int function(int)"
 expect_eq "8d-6" "$("$BIN" -t i)" "int"
+# -t demangles bare type words read from stdin too, not only operands;
+# words that are not types, and _Z names, behave as without -t.
+expect_eq "8d-6b" "$(printf 'i\n' | "$BIN" -t)" "int"
+expect_eq "8d-6c" "$(printf 'PKc\n' | "$BIN" -t)" "char const*"
+expect_eq "8d-6d" "$(printf 'this is a test i PKc _Z3foov x.i foo$i\n' | "$BIN" -t)" \
+    'this is signed char test int char const* foo() x.i foo$i'
+expect_eq "8d-6e" "$(printf '_i\n' | "$BIN" -t)" "_i"
+expect_eq "8d-6f" "$(printf '_i\n' | "$BIN" -t -_)" "int"
+expect_eq "8d-6g" "$(printf 'a i\n' | "$BIN" -t -s rust)" "a i"
 expect_eq "8d-7" "$("$BIN" -V)" "$("$BIN" --version)"
 
 # 8e failures/edge

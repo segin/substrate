@@ -472,6 +472,11 @@ process_line(const char *line, size_t line_len, const cxxfilt_cfg_t *cfg, FILE *
      * "_Z" inside a word ("FOO_Z3bar", the second underscore of
      * "__Z3foov") does not start a symbol; only -_ may peel one
      * leading underscore off the word, in demangle_with_cfg().
+     *
+     * With -t every word is a candidate, as in argv mode: a bare type
+     * encoding such as "i" or "PKc" has no mangling prefix, and GNU
+     * c++filt demangles it in both modes.  A word that does not parse
+     * as a type is copied unchanged.
      */
     i = 0u;
     while (i < line_len) {
@@ -495,7 +500,8 @@ process_line(const char *line, size_t line_len, const cxxfilt_cfg_t *cfg, FILE *
             j++;
         }
 
-        if (!(j - i >= 2u && is_mangled_prefix(line + i)) &&
+        if (!cfg->types &&
+            !(j - i >= 2u && is_mangled_prefix(line + i)) &&
             !(cfg->strip == STRIP_ONE && j - i >= 3u &&
               line[i] == '_' && is_mangled_prefix(line + i + 1u))) {
             if (outbuf_append(&ob, line + i, j - i) != 0) {
