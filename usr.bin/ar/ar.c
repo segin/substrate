@@ -97,6 +97,7 @@ static void warnx(const char *fmt, ...);
 static void err(int eval, const char *fmt, ...);
 static void errx(int eval, const char *fmt, ...);
 static const char *get_basename(const char *path);
+static char *thin_member_file(const struct ar_memb *m);
 
 static void read_archive(const char *path);
 static void write_archive(const char *path);
@@ -959,6 +960,93 @@ static void read_archive(const char *path) {
     close(fd);
 }
 
+/**
+ * @brief Build the path a thin archive stores for a file being added.
+ *
+ * A thin archive names its member files relative to the directory that
+ * holds the archive, as GNU ar does, so the archive can be read from any
+ * current directory.  An absolute name is stored as given.  A relative
+ * one is canonicalized together with the archive's directory, their
+ * common leading components are dropped, and one "../" is prepended for
+ * each directory component of the archive's directory that remains.
+ * When either path cannot be canonicalized, the name is stored as given.
+ *
+ * @param fname Member file as named on the command line.
+ * @return Newly allocated path, or NULL when out of memory.
+ */
+static char *thin_stored_path(const char *fname) {
+    const char *slash;
+    char *dir = NULL;
+    char *file_real = NULL;
+    char *dir_real = NULL;
+    char *out = NULL;
+    const char *fp;
+    const char *dp;
+    size_t ups = 0;
+    size_t rest_len;
+
+    if (fname[0] == '/' || archive_name == NULL) {
+        return strdup(fname);
+    }
+
+    slash = strrchr(archive_name, '/');
+    if (slash == NULL) {
+        dir = strdup(".");
+    } else if (slash == archive_name) {
+        dir = strdup("/");
+    } else {
+        dir = malloc((size_t)(slash - archive_name) + 1);
+        if (dir != NULL) {
+            memcpy(dir, archive_name, (size_t)(slash - archive_name));
+            dir[slash - archive_name] = '\0';
+        }
+    }
+    if (dir == NULL) {
+        return NULL;
+    }
+    file_real = realpath(fname, NULL);
+    dir_real = realpath(dir, NULL);
+    free(dir);
+    if (file_real == NULL || dir_real == NULL) {
+        free(file_real);
+        free(dir_real);
+        return strdup(fname);
+    }
+
+    /* Both are absolute; skip the leading '/' and drop shared directories. */
+    fp = file_real + 1;
+    dp = dir_real + 1;
+    for (;;) {
+        const char *fe = strchr(fp, '/');
+        size_t dl = strcspn(dp, "/");
+
+        if (fe == NULL || dl == 0 || (size_t)(fe - fp) != dl ||
+            memcmp(fp, dp, dl) != 0) {
+            break;
+        }
+        fp = fe + 1;
+        dp += dl;
+        if (*dp == '/') dp++;
+    }
+    while (*dp != '\0') {
+        ups++;
+        dp += strcspn(dp, "/");
+        if (*dp == '/') dp++;
+    }
+
+    rest_len = strlen(fp);
+    out = malloc(ups * 3 + rest_len + 1);
+    if (out != NULL) {
+        for (size_t i = 0; i < ups; i++) {
+            memcpy(out + i * 3, "../", 3);
+        }
+        memcpy(out + ups * 3, fp, rest_len + 1);
+    }
+    free(file_real);
+    free(dir_real);
+    return out;
+}
+
 static void append_files(char **files, int count) {
     for (int i = 0; i < count; i++) {
         const char *fname = files[i];
@@ -1037,7 +1125,7 @@ static void append_files(char **files, int count) {
         m->name = strdup(base);
         m->name_len = strlen(m->name);
         m->thin_ref = thin_mode;
-        m->thin_path = thin_mode ? strdup(fname) : NULL;
+        m->thin_path = thin_mode ? thin_stored_path(fname) : NULL;
         if (thin_mode && m->thin_path == NULL) {
             warnx("%s: out of memory", fname);
             if (m->data != NULL) free(m->data);
@@ -1158,9 +1246,12 @@ static void print_members(char **members, int count) {
         if (match) {
             if (modifiers & MOD_VERBOSE) printf("p - %s\n", cur->name);
             if (cur->thin_ref && cur->thin_path != NULL) {
-                int fd = open(cur->thin_path, O_RDONLY);
-                if (fd < 0) {
-                    warn("%s", cur->thin_path);
+                char *src = thin_member_file(cur);
+                int fd = src != NULL ? open(src, O_RDONLY) : -1;
+                if (src == NULL) {
+                    warnx("%s: out of memory", cur->thin_path);
+                } else if (fd < 0) {
+                    warn("%s", src);
                 } else {
                     char buf[4096];
                     ssize_t nr;
@@ -1172,6 +1263,7 @@ static void print_members(char **members, int count) {
                     }
                     close(fd);
                 }
+                free(src);
             } else {
                 fwrite(cur->data, cur->size, 1, stdout);
             }
@@ -1225,6 +1317,27 @@ static void extract_members(char **members, int count) {
             }
 
             if (modifiers & MOD_VERBOSE) printf("x - %s\n", name);
+
+            /*
+             * Open a thin member's file first, so a missing one leaves
+             * no empty file behind under the member's name.
+             */
+            int srcfd = -1;
+            if (cur->thin_ref && cur->thin_path != NULL) {
+                char *src = thin_member_file(cur);
+                if (src == NULL) {
+                    warnx("%s: out of memory", cur->thin_path);
+                } else {
+                    srcfd = open(src, O_RDONLY);
+                    if (srcfd < 0) warn("%s", src);
+                    free(src);
+                }
+                if (srcfd < 0) {
+                    cur = cur->next;
+                    continue;
+                }
+            }
+
             int oflags = O_WRONLY | O_CREAT;
             if (modifiers & MOD_NOCLOBBER) {
                 oflags |= O_EXCL;
@@ -1232,23 +1345,20 @@ static void extract_members(char **members, int count) {
                 oflags |= O_TRUNC;
             }
             int fd = open(name, oflags, mode & 07777);
-            if (fd < 0) warn("%s", name);
-            else {
-                if (cur->thin_ref && cur->thin_path != NULL) {
-                    int srcfd = open(cur->thin_path, O_RDONLY);
-                    if (srcfd < 0) {
-                        warn("%s", cur->thin_path);
-                    } else {
-                        char buf[4096];
-                        ssize_t nr;
-                        while ((nr = read(srcfd, buf, sizeof(buf))) > 0) {
-                            if (write(fd, buf, (size_t)nr) != nr) {
-                                warn("%s", name);
-                                break;
-                            }
+            if (fd < 0) {
+                warn("%s", name);
+                if (srcfd >= 0) close(srcfd);
+            } else {
+                if (srcfd >= 0) {
+                    char buf[4096];
+                    ssize_t nr;
+                    while ((nr = read(srcfd, buf, sizeof(buf))) > 0) {
+                        if (write(fd, buf, (size_t)nr) != nr) {
+                            warn("%s", name);
+                            break;
                         }
-                        close(srcfd);
                     }
+                    close(srcfd);
                 } else {
                     ssize_t wr = write(fd, cur->data, cur->size);
                     if (wr != (ssize_t)cur->size) {
@@ -1348,9 +1458,12 @@ static void list_members(char **members, int count) {
                 else if (S_ISSOCK(mode)) type_char = 's';
 #endif
 
-                if (cur->thin_ref && cur->thin_path != NULL &&
-                    stat(cur->thin_path, &stbuf) == 0) {
-                    display_size = (long)stbuf.st_size;
+                if (cur->thin_ref && cur->thin_path != NULL) {
+                    char *src = thin_member_file(cur);
+                    if (src != NULL && stat(src, &stbuf) == 0) {
+                        display_size = (long)stbuf.st_size;
+                    }
+                    free(src);
                 }
 
                 printf("%c%c%c%c%c%c%c%c%c%c %ld/%ld %6ld %s %s\n",
@@ -1372,10 +1485,10 @@ static void list_members(char **members, int count) {
 /**
  * @brief Build the path under which a thin member's file can be opened.
  *
- * A member added on this command line names its file as the user gave
- * it, relative to the current directory.  A member read from a thin
- * archive names its file relative to the directory holding the archive,
- * so a relative name is joined onto that directory.
+ * A thin member names its file relative to the directory holding the
+ * archive, whether it was read from the archive or added on this command
+ * line (see thin_stored_path()), so a relative name is joined onto that
+ * directory.
  *
  * @param m Thin archive member (thin_ref set, thin_path non-NULL).
  * @return Newly allocated path, or NULL when out of memory.
@@ -1387,7 +1500,7 @@ static char *thin_member_file(const struct ar_memb *m) {
     char *full;
 
     slash = archive_name != NULL ? strrchr(archive_name, '/') : NULL;
-    if (m->dirty || m->thin_path[0] == '/' || slash == NULL) {
+    if (m->thin_path[0] == '/' || slash == NULL) {
         return strdup(m->thin_path);
     }
 
