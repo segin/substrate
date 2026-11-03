@@ -848,10 +848,12 @@ elf_err_t elf_finalize(elfobj_t *obj) {
     if (obj->finalized) {
         return ELF_OK;
     }
-    if (obj->readonly && obj->image != NULL && obj->dirty == 0) {
+    if (obj->readonly && obj->image_current && obj->image != NULL && obj->dirty == 0) {
         obj->finalized = 1;
         return ELF_OK;
     }
+    /* laid out again, the object no longer matches the image it was read from, however it is written */
+    obj->image_current = 0;
     err = elf__layout(obj);
     if (err != ELF_OK) {
         elf__set_err(obj, err, "layout failed during finalize");

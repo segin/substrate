@@ -2079,7 +2079,9 @@ elf_err_t elf_write_file(elfobj_t *obj, const char *path) {
         return ELF_ERR_STATE;
     }
 
-    if (obj->readonly && obj->dirty == 0 && obj->image != NULL) {
+    /* the image read in is written back only while it still is the object: once an edit has made
+     * finalize lay it out again, writing it a second time must give the edited object again */
+    if (obj->readonly && obj->image_current && obj->dirty == 0 && obj->image != NULL) {
         return elf__write_file_atomic(path, obj->image, obj->image_size);
     }
 

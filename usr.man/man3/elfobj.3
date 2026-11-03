@@ -195,8 +195,15 @@ construction, and top-level metadata queries.
 Objects created by
 .Fn elf_create
 are mutable until finalized.
-Objects returned by open APIs are parsed from existing bytes and are effectively
-read-only for structural mutation calls.
+Objects returned by open APIs are parsed from existing bytes and can be edited
+the same way, except a core file
+.Pq Dv ET_CORE ,
+which is read-only and which
+.Fn elf_write_file
+writes back exactly as it was read.
+.Fn elf_write_file
+finalizes an object that is not yet finalized; writing the same object again
+gives the same bytes, edits included, never the image it was read from.
 .Pp
 .Fn elf_write_file
 writes to a temporary file beside

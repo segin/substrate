@@ -176,6 +176,7 @@ struct elfobj {
     size_t image_size;
     uint8_t owns_image;
     uint8_t mmapped_image;
+    uint8_t image_current;     /* image is still the object byte for byte: read in, not laid out again */
     uint8_t readonly;
     uint8_t finalized;
     uint8_t no_load_headers;   /* the ELF and program headers are in no PT_LOAD (elf_set_load_headers) */

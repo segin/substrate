@@ -1371,6 +1371,7 @@ static elf_err_t parse_object(elfobj_t *obj) {
      * would not lay out again, and it is not to be written back */
     obj->readonly = obj->type == ET_CORE;
     obj->dirty = 0;
+    obj->image_current = 1;
     return ELF_OK;
 }
 
