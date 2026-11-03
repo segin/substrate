@@ -38,6 +38,13 @@
  * interval wherever it is read, as every read comes after it; a
  * variable's, as a fact of its own.
  *
+ * Beside the intervals, the bits each value is known to have, over the
+ * whole function (kbits_settle()): a constant's, what masks, ors, xors and
+ * shifts by a constant make of them, the zeros a narrow load extends with,
+ * i386's words of a 64-bit value, and a variable's those all its
+ * definitions agree on.  An equality compare a bit known 1 on one side and
+ * 0 on the other decides is that answer too.
+ *
  * A compare both of whose operands' intervals answer it one way is that
  * answer: an unsigned compare only where neither interval straddles the
  * sign.  Nothing else is changed here; the folding that follows (opt.c)
@@ -100,6 +107,9 @@ typedef struct {
     vfact_t *facts;           /**< what holds at the walk's place */
     int nfacts;
     int cap;
+    unsigned long long *k1;   /**< per value: the bits known to be 1 anywhere it is read (kbits_settle()) */
+    unsigned long long *k0;   /**< per value: the bits known to be 0 */
+    unsigned char *kseen;     /**< per value: a definition of it gave k1 and k0 something */
 } range_t;
 
 /** The interval of every value of @p bits bits. */
@@ -852,6 +862,9 @@ static void range_free(range_t *s) {
     free(s->edge);
     free(s->edge_n);
     free(s->facts);
+    free(s->k1);
+    free(s->k0);
+    free(s->kseen);
 }
 
 /** Note value @p v as reached otherwise than by its name (cc_ssa_for_each_use() callback). */
@@ -907,9 +920,13 @@ static int range_init(range_t *s, cc_ssa_function_t *f) {
     s->edge_count = (int *)calloc(nl, sizeof(int));
     s->edge = (vfact_t *)malloc(nl * EDGE_FACTS * sizeof(vfact_t));
     s->edge_n = (int *)calloc(nl, sizeof(int));
+    s->k1 = (unsigned long long *)calloc(nv, sizeof(*s->k1));
+    s->k0 = (unsigned long long *)calloc(nv, sizeof(*s->k0));
+    s->kseen = (unsigned char *)calloc(nv, 1);
     if (s->bits == NULL || s->pinned == NULL || s->ndefs == NULL || s->def_at == NULL || s->r == NULL ||
         s->grew == NULL || s->shl_s == NULL || s->shl_z == NULL || s->label_at == NULL || s->edge_min == NULL ||
-        s->edge_max == NULL || s->edge_count == NULL || s->edge == NULL || s->edge_n == NULL) {
+        s->edge_max == NULL || s->edge_count == NULL || s->edge == NULL || s->edge_n == NULL || s->k1 == NULL ||
+        s->k0 == NULL || s->kseen == NULL) {
         return -1;
     }
     for (v = 0; v < f->value_count; ++v) {
@@ -1029,6 +1046,220 @@ static int range_settle(range_t *s) {
     return 0;
 }
 
+/** The mask of a value's low @p bits bits. */
+static unsigned long long width_mask(int bits) {
+    return bits >= 64 ? ~0ULL : (1ULL << bits) - 1;
+}
+
+/**
+ * The bits instruction @p in defines known to be 1 (*@p n1) and 0 (*@p n0), from its operands' (s->k1, s->k0):
+ * constants, copies, masks, shifts by a constant, narrow loads that zero-extend, compares.  Anything else is
+ * not known.
+ *
+ * @return 1 when known so, 0 when an operand has no bits yet (the settling comes back to it)
+ */
+static int kbits_eval(const range_t *s, const cc_ssa_instr_t *in, unsigned long long *n1, unsigned long long *n0) {
+    int bits = s->bits[in->dst];
+    unsigned long long wm = width_mask(bits);
+    unsigned long long a1;
+    unsigned long long a0;
+    unsigned long long b1;
+    unsigned long long b0;
+    int k;
+
+    *n1 = 0;
+    *n0 = 0;
+    switch (in->op) {
+    case CC_SSA_CONST:
+        *n1 = (unsigned long long)in->imm & wm;
+        *n0 = ~(unsigned long long)in->imm & wm;
+        return 1;
+    case CC_SSA_CMP:
+    case CC_SSA_ISCONST:
+        *n0 = ~1ULL & wm;
+        return 1;
+    case CC_SSA_LOAD:
+        if (in->seg == 0 && in->is_unsigned && (in->imm == 1 || in->imm == 2 || in->imm == 4) && 8 * in->imm < bits) {
+            *n0 = ~width_mask((int)(8 * in->imm)) & wm;
+        }
+        return 1;
+    case CC_SSA_MOV:
+        if (!tracked(s, in->lhs) || s->bits[in->lhs] != bits) {
+            return 1;
+        }
+        if (!s->kseen[in->lhs]) {
+            return 0;
+        }
+        *n1 = s->k1[in->lhs];
+        *n0 = s->k0[in->lhs];
+        return 1;
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
+    case CC_SSA_PAIR:
+        /* (i386's words of a 64-bit value, and a 64-bit value of two words) */
+        if (!tracked(s, in->lhs) || s->bits[in->lhs] != (in->op == CC_SSA_PAIR ? 32 : 64) ||
+            (in->op == CC_SSA_PAIR && (!tracked(s, in->rhs) || s->bits[in->rhs] != 32))) {
+            return 1;
+        }
+        if (!s->kseen[in->lhs] || (in->op == CC_SSA_PAIR && !s->kseen[in->rhs])) {
+            return 0;
+        }
+        if (in->op == CC_SSA_PAIR) {
+            *n1 = ((s->k1[in->lhs] & 0xffffffffULL) | (s->k1[in->rhs] << 32)) & wm;
+            *n0 = ((s->k0[in->lhs] & 0xffffffffULL) | (s->k0[in->rhs] << 32)) & wm;
+        } else {
+            k = in->op == CC_SSA_HI32 ? 32 : 0;
+            *n1 = (s->k1[in->lhs] >> k) & 0xffffffffULL & wm;
+            *n0 = (s->k0[in->lhs] >> k) & 0xffffffffULL & wm;
+        }
+        return 1;
+    case CC_SSA_AND:
+    case CC_SSA_OR:
+    case CC_SSA_XOR:
+        if (!tracked(s, in->lhs) || !tracked(s, in->rhs) || s->bits[in->lhs] != bits || s->bits[in->rhs] != bits) {
+            return 1;
+        }
+        if (!s->kseen[in->lhs] || !s->kseen[in->rhs]) {
+            return 0;
+        }
+        a1 = s->k1[in->lhs];
+        a0 = s->k0[in->lhs];
+        b1 = s->k1[in->rhs];
+        b0 = s->k0[in->rhs];
+        if (in->op == CC_SSA_AND) {
+            *n1 = a1 & b1;
+            *n0 = a0 | b0;
+        } else if (in->op == CC_SSA_OR) {
+            *n1 = a1 | b1;
+            *n0 = a0 & b0;
+        } else {
+            *n1 = (a1 & b0) | (a0 & b1);
+            *n0 = (a0 & b0) | (a1 & b1);
+        }
+        return 1;
+    case CC_SSA_SHL:
+    case CC_SSA_SHR: {
+        /* (by a constant: the instruction's, or a value's defined once by one) */
+        long long by = in->imm;
+
+        if (in->rhs >= 0) {
+            by = in->rhs < s->nv && s->def_at[in->rhs] >= 0 && s->f->instrs[s->def_at[in->rhs]].op == CC_SSA_CONST
+                     ? s->f->instrs[s->def_at[in->rhs]].imm
+                     : -1;
+        }
+        if (by <= 0 || by >= bits || !tracked(s, in->lhs) || s->bits[in->lhs] != bits) {
+            return 1;
+        }
+        if (!s->kseen[in->lhs]) {
+            return 0;
+        }
+        k = (int)by;
+        a1 = s->k1[in->lhs] & wm;
+        a0 = s->k0[in->lhs] & wm;
+        if (in->op == CC_SSA_SHL) {
+            *n1 = (a1 << k) & wm;
+            *n0 = ((a0 << k) | width_mask(k)) & wm;
+        } else {
+            unsigned long long top = wm & ~(wm >> k); /* the k bits shifted in */
+            unsigned long long sign = 1ULL << (bits - 1);
+
+            *n1 = a1 >> k;
+            *n0 = a0 >> k;
+            if (in->is_unsigned || (a0 & sign) != 0) {
+                *n0 |= top;
+            } else if ((a1 & sign) != 0) {
+                *n1 |= top;
+            }
+        }
+        return 1;
+    }
+    default:
+        return 1;
+    }
+}
+
+/**
+ * The bits each value is known to have anywhere it is read: each definition's from its operands' (kbits_eval()),
+ * and a value defined more than once those all its definitions agree on, until nothing changes -- a mask of a
+ * variable that is one of two constants (Linux's vmx_recalc_pmu_msr_intercepts() clears one bit of a local
+ * before BUILD_BUG_ON(!(val & VM_EXIT_...)) of it, which gcc's bit tracking answers).  A value no definition gave
+ * anything, or that the rounds do not settle, has none known.
+ */
+static void kbits_settle(range_t *s) {
+    cc_ssa_function_t *f = s->f;
+    int round;
+    int v;
+
+    for (round = 0; round < RANGE_ROUNDS; ++round) {
+        int changed = 0;
+        size_t i;
+
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int d = in->dst;
+            unsigned long long n1;
+            unsigned long long n0;
+
+            if (!tracked(s, d) || !kbits_eval(s, in, &n1, &n0)) {
+                continue;
+            }
+            if (!s->kseen[d]) {
+                s->kseen[d] = 1;
+                s->k1[d] = n1;
+                s->k0[d] = n0;
+                changed = 1;
+            } else if ((s->k1[d] & n1) != s->k1[d] || (s->k0[d] & n0) != s->k0[d]) {
+                s->k1[d] &= n1;
+                s->k0[d] &= n0;
+                changed = 1;
+            }
+        }
+        if (!changed) {
+            break;
+        }
+    }
+    for (v = 0; v < s->nv; ++v) {
+        if (round == RANGE_ROUNDS || !s->kseen[v]) {
+            s->k1[v] = 0;
+            s->k0[v] = 0;
+            s->kseen[v] = 1;
+        }
+    }
+}
+
+/**
+ * Whether the equality compare @p in of two values is decided by the bits they are known to have, in the
+ * compare's width: a bit known 1 in one and 0 in the other makes them differ; every bit known, alike, makes them
+ * equal.  @p out receives the answer.
+ */
+static int kbits_decide(const range_t *s, const cc_ssa_instr_t *in, long long *out) {
+    unsigned long long m;
+    unsigned long long a1;
+    unsigned long long a0;
+    unsigned long long b1;
+    unsigned long long b0;
+    uint32_t size;
+
+    if ((in->cmp_kind != CC_CMP_EQ && in->cmp_kind != CC_CMP_NE) || !tracked(s, in->lhs) || !tracked(s, in->rhs)) {
+        return 0;
+    }
+    size = cc_ssa_value_size(s->f, in->lhs);
+    m = width_mask(size > 0 && size < 8 ? (int)(8 * size) : 64) & width_mask(s->bits[in->lhs]);
+    a1 = s->k1[in->lhs] & m;
+    a0 = s->k0[in->lhs] & m;
+    b1 = s->k1[in->rhs] & m;
+    b0 = s->k0[in->rhs] & m;
+    if ((a1 & b0) != 0 || (a0 & b1) != 0) {
+        *out = in->cmp_kind == CC_CMP_NE;
+        return 1;
+    }
+    if ((a1 | a0) == m && (b1 | b0) == m && a1 == b1) {
+        *out = in->cmp_kind == CC_CMP_EQ;
+        return 1;
+    }
+    return 0;
+}
+
 /**
  * Report the direct call @p in to s->on_call: each argument's interval where the walk is (@p walking), or
  * every value where nothing is known.
@@ -1132,7 +1363,8 @@ static int range_walk(range_t *s) {
             s->bits[in->lhs] == s->bits[in->rhs]) {
             long long out;
 
-            if (decide(in->cmp_kind, in->is_unsigned, current(s, in->lhs, 1), current(s, in->rhs, 1), &out)) {
+            if (decide(in->cmp_kind, in->is_unsigned, current(s, in->lhs, 1), current(s, in->rhs, 1), &out) ||
+                kbits_decide(s, in, &out)) {
                 in->op = CC_SSA_CONST;
                 in->imm = out;
                 in->lhs = -1;
@@ -1213,6 +1445,7 @@ int cc_fold_ranges(cc_ssa_function_t *f, const cc_range_t *params, cc_range_call
     s.on_call = on_call;
     s.ctx = ctx;
     if (f->value_count > 0 && range_settle(&s)) {
+        kbits_settle(&s);
         rc = range_walk(&s);
     } else if (on_call != NULL) {
         /* nothing known: every call passes anything */

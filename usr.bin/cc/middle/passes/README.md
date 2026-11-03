@@ -124,7 +124,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   into a label nothing else reaches, until the value is defined again or
   a label another way reaches (a label nothing reaches, whose code does
   not run, does not end it); a compare both operands' intervals answer
-  one way folds to that answer.  `opt.c`'s `fold_module_ranges()` runs
+  one way folds to that answer, and so does an equality compare that the
+  bits its operands are known to have decide (`kbits_settle()`: a
+  constant's, through masks, ors, xors, shifts by a constant and
+  zero-extending loads, a variable's those its definitions agree on).  `opt.c`'s `fold_module_ranges()` runs
   it over each function, gathering what every direct call passes, then
   again over each static function only direct calls reach
   (`mark_only_called()`, which `constant_args()` shares) with its
