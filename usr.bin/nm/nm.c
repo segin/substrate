@@ -212,13 +212,6 @@ static char classify_symbol(elfobj_t *obj, uint32_t shndx, uint8_t bind,
         return 'U';
     }
 
-    /* Absolute */
-    if (shndx == SHN_ABS) {
-        if (sec_name_out)
-            *sec_name_out = "*ABS*";
-        return (bind == STB_LOCAL) ? 'a' : 'A';
-    }
-
     /* Common */
     if (shndx == SHN_COMMON) {
         if (sec_name_out)
@@ -227,27 +220,36 @@ static char classify_symbol(elfobj_t *obj, uint32_t shndx, uint8_t bind,
     }
 
     /*
-     * GNU extensions, checked in the order GNU nm checks them: an
-     * IFUNC is 'i' whatever its binding (local, global or weak), and a
-     * unique global is 'u' whatever section it lives in.
+     * Checked in the order GNU's bfd_decode_symclass checks them, all
+     * before the section is looked at, absolute included: an IFUNC is
+     * 'i' whatever its binding, a weak definition is 'W' or 'V', and a
+     * unique global is 'u', wherever each one lives.
      */
-    if (stype == STT_GNU_IFUNC || bind == STB_GNU_UNIQUE) {
-        sec = elf_section_get(obj, shndx);
-        if (sec && sec_name_out) {
-            sname = elf_section_name(sec);
-            *sec_name_out = sname ? sname : "";
+    if (stype == STT_GNU_IFUNC || bind == STB_WEAK ||
+        bind == STB_GNU_UNIQUE) {
+        if (sec_name_out) {
+            if (shndx == SHN_ABS) {
+                *sec_name_out = "*ABS*";
+            } else {
+                sec = elf_section_get(obj, shndx);
+                if (sec) {
+                    sname = elf_section_name(sec);
+                    *sec_name_out = sname ? sname : "";
+                }
+            }
         }
-        return (stype == STT_GNU_IFUNC) ? 'i' : 'u';
+        if (stype == STT_GNU_IFUNC)
+            return 'i';
+        if (bind == STB_WEAK)
+            return (stype == STT_OBJECT) ? 'V' : 'W';
+        return 'u';
     }
 
-    /* Weak defined symbols get W/V regardless of section */
-    if (bind == STB_WEAK) {
-        sec = elf_section_get(obj, shndx);
-        if (sec && sec_name_out) {
-            sname = elf_section_name(sec);
-            *sec_name_out = sname ? sname : "";
-        }
-        return (stype == STT_OBJECT) ? 'V' : 'W';
+    /* Absolute */
+    if (shndx == SHN_ABS) {
+        if (sec_name_out)
+            *sec_name_out = "*ABS*";
+        return (bind == STB_LOCAL) ? 'a' : 'A';
     }
 
     /* Look up the section for defined symbols */

@@ -250,7 +250,11 @@ __asm__(".text\n.weak w_ifunc\n.type w_ifunc, @gnu_indirect_function\n"
         ".size u_obj, 4\nu_obj:\n.long 1\n"
         ".section .bss.u_bss,\"aw\",@nobits\n"
         ".globl u_bss\n.type u_bss, @gnu_unique_object\n"
-        ".size u_bss, 4\nu_bss:\n.zero 4\n.text\n");
+        ".size u_bss, 4\nu_bss:\n.zero 4\n.text\n"
+        ".globl i_abs\n.type i_abs, @gnu_indirect_function\n.set i_abs, 0x20\n"
+        ".weak w_abs\n.set w_abs, 0x30\n"
+        ".weak v_abs\n.type v_abs, @object\n.set v_abs, 0x38\n"
+        ".globl u_abs\n.type u_abs, @gnu_unique_object\n.set u_abs, 0x40\n");
 SRC
     cc -c -fcommon -Wa,--elf-stt-common=yes -o "$TMP/gnuext.o" "$TMP/gnuext.c"
 
@@ -261,6 +265,12 @@ SRC
     expect_match "unique data is u" "$OUT_X" '[[:space:]]u[[:space:]]+u_obj$'
     expect_match "unique bss is u" "$OUT_X" '[[:space:]]u[[:space:]]+u_bss$'
     expect_match "common is C" "$OUT_X" '[[:space:]]C[[:space:]]+com_var$'
+    # GNU decides IFUNC, weak and unique before it looks at the section,
+    # so an absolute symbol of any of those kinds is not 'A'.
+    expect_match "absolute IFUNC is i" "$OUT_X" '[[:space:]]i[[:space:]]+i_abs$'
+    expect_match "weak absolute is W" "$OUT_X" '[[:space:]]W[[:space:]]+w_abs$'
+    expect_match "weak absolute object is V" "$OUT_X" '[[:space:]]V[[:space:]]+v_abs$'
+    expect_match "unique absolute is u" "$OUT_X" '[[:space:]]u[[:space:]]+u_abs$'
 
     OUT_XS=$($NM --format=sysv "$TMP/gnuext.o")
     expect_match "sysv types STT_COMMON as COMMON" "$OUT_XS" '^com_var +\|[^|]*\|[^|]*\| *COMMON *\|'
