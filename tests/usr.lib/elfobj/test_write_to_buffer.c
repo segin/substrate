@@ -529,6 +529,110 @@ static void test_tls(void) {
 	elf_close(obj);
 }
 
+/**
+ * Find the only program header of a type, failing if there is none or more
+ * than one.
+ *
+ * @param test  the test's name, for the failure message
+ * @param obj   the object read back
+ * @param type  the PT_* type
+ * @return the header
+ */
+static const struct elf_phdr *require_one_phdr(const char *test, elfobj_t *obj, uint32_t type) {
+	const struct elf_phdr *found = NULL;
+	size_t i;
+
+	for(i = 0; i < obj->phdr_count; ++i) {
+		if(obj->phdrs[i].type != type)
+			continue;
+		if(found != NULL)
+			failf(test, "more than one program header of type 0x%x", (unsigned)type);
+		found = &obj->phdrs[i];
+	}
+	if(found == NULL)
+		failf(test, "no program header of type 0x%x", (unsigned)type);
+	return(found);
+}
+
+/**
+ * Add an allocated section at an address, with contents or, for
+ * SHT_NOBITS, just a size.
+ */
+static elf_section_t *add_placed(const char *test, elfobj_t *obj, const char *name, uint32_t type,
+    uint64_t flags, uint64_t addr, uint64_t align, const void *data, size_t size) {
+	elf_section_t *s = elf_add_section(obj, name, type, flags);
+
+	require_true(test, s != NULL, "elf_add_section failed");
+	require_ok(test, "elf_section_set_align", elf_section_set_align(s, align));
+	require_ok(test, "elf_section_set_addr", elf_section_set_addr(s, addr));
+	require_ok(test, "elf_section_set_data", elf_section_set_data(s, data, size));
+	return(s);
+}
+
+/*
+ * An executable written with no segments of its own gets its program
+ * headers made up from its sections: .tdata and .tbss share one PT_TLS whose
+ * memory size takes in .tbss and whose file size does not, and .dynamic,
+ * after them, still gets its PT_DYNAMIC.
+ */
+static void test_made_up_tls_phdr(void) {
+	const char *t = "made_up_tls_phdr";
+	elfobj_t *obj = elf_create(ET_DYN, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+	uint8_t code[1] = {0x90};
+	uint8_t tdata[4] = {1, 2, 3, 4};
+	uint8_t dyn[16] = {0};
+	const struct elf_phdr *tls;
+	const struct elf_phdr *dynamic;
+	rt_obj_t rt;
+
+	require_true(t, obj != NULL, "elf_create failed");
+	add_placed(t, obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0x1000, 16, code, sizeof(code));
+	add_placed(t, obj, ".tdata", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE | SHF_TLS, 0x2000, 4, tdata, sizeof(tdata));
+	add_placed(t, obj, ".tbss", SHT_NOBITS, SHF_ALLOC | SHF_WRITE | SHF_TLS, 0x2008, 8, NULL, 16);
+	add_placed(t, obj, ".dynamic", SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE, 0x3000, 8, dyn, sizeof(dyn));
+
+	rt = roundtrip_validate(t, obj, ELF_VALIDATE_PERMISSIVE);
+	tls = require_one_phdr(t, rt.obj, PT_TLS);
+	require_true(t, tls->vaddr == 0x2000, "PT_TLS does not start at .tdata");
+	require_true(t, tls->filesz == 4, "PT_TLS file size is not .tdata's");
+	require_true(t, tls->memsz == 0x18, "PT_TLS memory size does not reach the end of .tbss");
+	require_true(t, tls->align == 8, "PT_TLS alignment is not the largest TLS section's");
+	require_true(t, tls->offset == require_section(t, rt.obj, ".tdata")->offset,
+	    "PT_TLS offset is not .tdata's");
+	dynamic = require_one_phdr(t, rt.obj, PT_DYNAMIC);
+	require_true(t, dynamic->vaddr == 0x3000, "PT_DYNAMIC address is not .dynamic's");
+	rt_close(&rt);
+	elf_close(obj);
+}
+
+/*
+ * The same for ARM: .ARM.exidx gets its PT_ARM_EXIDX without taking the
+ * place of the PT_DYNAMIC that follows it.
+ */
+static void test_made_up_exidx_phdr(void) {
+	const char *t = "made_up_exidx_phdr";
+	elfobj_t *obj = elf_create(ET_EXEC, EM_ARM, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+	uint8_t code[4] = {0};
+	uint8_t exidx[8] = {0};
+	uint8_t dyn[16] = {0};
+	const struct elf_phdr *ph;
+	rt_obj_t rt;
+
+	require_true(t, obj != NULL, "elf_create failed");
+	add_placed(t, obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0x10000, 4, code, sizeof(code));
+	add_placed(t, obj, ".ARM.exidx", SHT_ARM_EXIDX, SHF_ALLOC | SHF_LINK_ORDER, 0x10004, 4, exidx,
+	    sizeof(exidx));
+	add_placed(t, obj, ".dynamic", SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE, 0x20000, 4, dyn, sizeof(dyn));
+
+	rt = roundtrip_validate(t, obj, ELF_VALIDATE_PERMISSIVE);
+	ph = require_one_phdr(t, rt.obj, PT_ARM_EXIDX);
+	require_true(t, ph->vaddr == 0x10004 && ph->filesz == 8 && ph->memsz == 8, "PT_ARM_EXIDX extent wrong");
+	ph = require_one_phdr(t, rt.obj, PT_DYNAMIC);
+	require_true(t, ph->vaddr == 0x20000, "PT_DYNAMIC address is not .dynamic's");
+	rt_close(&rt);
+	elf_close(obj);
+}
+
 static void test_entry_point(void) {
 	const char *t = "entry_point";
 	elfobj_t *obj = make_exec_dyn_obj(t, ET_EXEC);
@@ -598,6 +702,8 @@ int main(void) {
 	test_reloc_local();
 	test_reloc_weak();
 	test_tls();
+	test_made_up_tls_phdr();
+	test_made_up_exidx_phdr();
 	test_entry_point();
 	test_build_dynstr();
 	test_invalid_args();

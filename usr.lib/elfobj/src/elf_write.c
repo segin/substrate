@@ -164,6 +164,62 @@ static int u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
     return elf__u64_add(a, b, out);
 }
 
+/**
+ * @brief The extent one made-up program header covers: every output section
+ * that goes in it, as GNU ld gives a single PT_TLS to .tdata and .tbss, and a
+ * single PT_ARM_EXIDX to the unwind index.
+ *
+ * The header starts at the lowest-addressed member.  Its memory size reaches
+ * the end of the highest member; its file size only the end of the highest
+ * member that has file contents, so a trailing SHT_NOBITS (.tbss) adds memory
+ * and no file bytes.  Its alignment is the largest member's.
+ *
+ * @param secs      the output sections
+ * @param sec_count how many there are
+ * @param tls       nonzero to take the SHF_TLS sections, zero for SHT_ARM_EXIDX
+ * @param offset    set to the header's file offset
+ * @param vaddr     set to its address
+ * @param filesz    set to its file size
+ * @param memsz     set to its memory size
+ * @param align     set to its alignment
+ */
+static void made_up_phdr_span(const out_sec_t *secs, size_t sec_count, int tls, uint64_t *offset,
+                              uint64_t *vaddr, uint64_t *filesz, uint64_t *memsz, uint64_t *align) {
+    uint64_t lo = UINT64_MAX, lo_off = 0, mem_hi = 0, file_hi = 0, al = 1;
+    size_t i;
+
+    for (i = 1; i < sec_count; ++i) {
+        uint64_t end;
+        if (tls ? (secs[i].flags & SHF_TLS) == 0 : secs[i].type != SHT_ARM_EXIDX) {
+            continue;
+        }
+        if (!elf__u64_add(secs[i].addr, secs[i].size, &end)) {
+            end = UINT64_MAX;
+        }
+        if (secs[i].addr < lo) {
+            lo = secs[i].addr;
+            lo_off = secs[i].offset;
+        }
+        if (end > mem_hi) {
+            mem_hi = end;
+        }
+        if (secs[i].type != SHT_NOBITS && end > file_hi) {
+            file_hi = end;
+        }
+        if (secs[i].addralign > al) {
+            al = secs[i].addralign;
+        }
+    }
+    if (lo == UINT64_MAX) {
+        lo = 0;
+    }
+    *offset = lo_off;
+    *vaddr = lo;
+    *filesz = file_hi > lo ? file_hi - lo : 0;
+    *memsz = mem_hi > lo ? mem_hi - lo : 0;
+    *align = al;
+}
+
 static int find_alloc_file_bias(const out_sec_t *secs, size_t sec_count, uint64_t *out_bias) {
     size_t i;
 
@@ -1428,6 +1484,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         int has_dynamic = 0;
         int has_tls = 0;
         int has_interp = 0;
+        int has_exidx = 0;
         phnum = 1;
         for (i = 1; i < sec_count; ++i) {
             if (secs[i].type == SHT_DYNAMIC) {
@@ -1435,6 +1492,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             }
             if ((secs[i].flags & SHF_TLS) != 0) {
                 has_tls = 1;
+            }
+            if (obj->machine == EM_ARM && secs[i].type == SHT_ARM_EXIDX) {
+                has_exidx = 1;
             }
             if (strcmp(secs[i].name ? secs[i].name : "", ".interp") == 0) {
                 has_interp = 1;
@@ -1447,6 +1507,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             phnum++;
         }
         if (has_tls) {
+            phnum++;
+        }
+        if (has_exidx) {
             phnum++;
         }
     }
@@ -1909,6 +1972,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             uint64_t load_addr_hi = 0;
             uint32_t load_flags = 0;
             int has_load = 0;
+            int tls_done = 0;
+            int exidx_done = 0;
 
             for (i = 1; i < sec_count; ++i) {
                 uint64_t end;
@@ -1975,6 +2040,11 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             for (i = 1; i < sec_count && phidx < phnum; ++i) {
                 uint32_t ptype = 0;
                 uint32_t pflags = 0x4;
+                uint64_t p_off = secs[i].offset;
+                uint64_t p_va = secs[i].addr;
+                uint64_t p_filesz = secs[i].size;
+                uint64_t p_memsz = secs[i].size;
+                uint64_t p_align = secs[i].addralign ? secs[i].addralign : 1;
                 uint8_t *p;
                 if (secs[i].type == SHT_DYNAMIC) {
                     ptype = PT_DYNAMIC;
@@ -1989,25 +2059,36 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 if (ptype == 0) {
                     continue;
                 }
+                /* One PT_TLS for all the TLS sections and one PT_ARM_EXIDX
+                 * for the index, as the count above made room for. */
+                if (ptype == PT_TLS || ptype == PT_ARM_EXIDX) {
+                    int *done = ptype == PT_TLS ? &tls_done : &exidx_done;
+                    if (*done) {
+                        continue;
+                    }
+                    *done = 1;
+                    made_up_phdr_span(secs, sec_count, ptype == PT_TLS, &p_off, &p_va, &p_filesz, &p_memsz,
+                                      &p_align);
+                }
                 p = img + phoff + (phidx * phentsz);
                 if (obj->cls == ELFOBJ_CLASS_32) {
                     elf__wr32(p + 0, obj->endian, ptype);
-                    elf__wr32(p + 4, obj->endian, (uint32_t)secs[i].offset);
-                    elf__wr32(p + 8, obj->endian, (uint32_t)secs[i].addr);
-                    elf__wr32(p + 12, obj->endian, (uint32_t)secs[i].addr);
-                    elf__wr32(p + 16, obj->endian, (uint32_t)secs[i].size);
-                    elf__wr32(p + 20, obj->endian, (uint32_t)secs[i].size);
+                    elf__wr32(p + 4, obj->endian, (uint32_t)p_off);
+                    elf__wr32(p + 8, obj->endian, (uint32_t)p_va);
+                    elf__wr32(p + 12, obj->endian, (uint32_t)p_va);
+                    elf__wr32(p + 16, obj->endian, (uint32_t)p_filesz);
+                    elf__wr32(p + 20, obj->endian, (uint32_t)p_memsz);
                     elf__wr32(p + 24, obj->endian, pflags);
-                    elf__wr32(p + 28, obj->endian, (uint32_t)(secs[i].addralign ? secs[i].addralign : 1));
+                    elf__wr32(p + 28, obj->endian, (uint32_t)p_align);
                 } else {
                     elf__wr32(p + 0, obj->endian, ptype);
                     elf__wr32(p + 4, obj->endian, pflags);
-                    elf__wr64(p + 8, obj->endian, secs[i].offset);
-                    elf__wr64(p + 16, obj->endian, secs[i].addr);
-                    elf__wr64(p + 24, obj->endian, secs[i].addr);
-                    elf__wr64(p + 32, obj->endian, secs[i].size);
-                    elf__wr64(p + 40, obj->endian, secs[i].size);
-                    elf__wr64(p + 48, obj->endian, secs[i].addralign ? secs[i].addralign : 1);
+                    elf__wr64(p + 8, obj->endian, p_off);
+                    elf__wr64(p + 16, obj->endian, p_va);
+                    elf__wr64(p + 24, obj->endian, p_va);
+                    elf__wr64(p + 32, obj->endian, p_filesz);
+                    elf__wr64(p + 40, obj->endian, p_memsz);
+                    elf__wr64(p + 48, obj->endian, p_align);
                 }
                 phidx++;
             }
