@@ -38,11 +38,20 @@ expect_eq "8b-5" "$(printf 'FOO_Z3bar __Z3foov a._Z3foov x$_Z1fv _Z3foov,_Z1fv (
     'FOO_Z3bar __Z3foov a._Z3foov x$_Z1fv foo(),f() (foo())'
 expect_eq "8b-6" "$(printf 'FOO_Z3bar __Z3foov\n' | "$BIN")" "FOO_Z3bar __Z3foov"
 expect_eq "8b-7" "$(printf 'FOO_Z3bar __Z3foov\n' | "$BIN" -_)" "FOO_Z3bar foo()"
+# One leading '.' or '$' (assembler dot-symbols) is skipped before the
+# word is demangled, and a '.' is printed again, as GNU c++filt does.
+# Outputs taken from GNU c++filt.
+expect_eq "8b-8" "$(printf '._Z3foov $_Z3foov\n' | "$BIN")" '.foo() foo()'
+expect_eq "8b-9" "$(printf '._Z3foov $_Z3foov\n' | "$BIN" -n)" '.foo() foo()'
+expect_eq "8b-10" "$(printf '._Z3foov .__Z3foov $__Z1fv\n' | "$BIN" -_)" '._Z3foov .foo() f()'
+expect_eq "8b-11" "$(printf '. $ .x $x .._Z3foov\n' | "$BIN")" '. $ .x $x .._Z3foov'
 
 # 8c argv mode
 expect_eq "8c-1" "$("$BIN" _Z3fooi)" "foo(int)"
 expect_eq "8c-2" "$("$BIN" _Z3fooi _ZN3Foo3barEv)" "foo(int)
 Foo::bar()"
+expect_eq "8c-3" "$("$BIN" ._Z3foov '$_Z3foov')" ".foo()
+foo()"
 
 # 8d flags
 expect_eq "8d-1" "$("$BIN" -p _Z3fooi)" "foo"
@@ -69,6 +78,8 @@ expect_eq "8d-6d" "$(printf 'this is a test i PKc _Z3foov x.i foo$i\n' | "$BIN" 
 expect_eq "8d-6e" "$(printf '_i\n' | "$BIN" -t)" "_i"
 expect_eq "8d-6f" "$(printf '_i\n' | "$BIN" -t -_)" "int"
 expect_eq "8d-6g" "$(printf 'a i\n' | "$BIN" -t -s rust)" "a i"
+expect_eq "8d-6h" "$(printf '.i $i x.i\n' | "$BIN" -t)" '.int int x.i'
+expect_eq "8d-6i" "$(printf '. $ .\n' | "$BIN" -t)" '. $ .'
 expect_eq "8d-7" "$("$BIN" -V)" "$("$BIN" --version)"
 
 # 8e failures/edge

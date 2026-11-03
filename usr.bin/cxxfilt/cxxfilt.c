@@ -45,6 +45,7 @@ static int outbuf_appendc(outbuf_t *b, char ch);
 static void outbuf_destroy(outbuf_t *b);
 
 static int is_mangled_prefix(const char *s);
+static size_t mangled_lead_len(const char *s);
 static int is_token_char(char ch);
 static int style_to_demangle_flag(style_t style, int *out_flag);
 static char *demangle_with_cfg(const char *sym, const cxxfilt_cfg_t *cfg);
@@ -349,6 +350,21 @@ is_mangled_prefix(const char *s)
     return (s[0] == '_' && (s[1] == 'Z' || s[1] == 'R' || s[1] == 'D'));
 }
 
+/**
+ * mangled_lead_len - length of the assembler marker before a symbol
+ * @s: the word to look at
+ *
+ * GNU c++filt skips one leading '.' or '$' before it demangles a word,
+ * because assemblers mark some symbol names that way.
+ *
+ * Return: 1 if @s starts with '.' or '$', 0 otherwise.
+ */
+static size_t
+mangled_lead_len(const char *s)
+{
+    return (s[0] == '.' || s[0] == '$') ? 1u : 0u;
+}
+
 static int
 is_token_char(char ch)
 {
@@ -431,7 +447,14 @@ demangle_with_cfg(const char *sym, const cxxfilt_cfg_t *cfg)
         options |= DEMANGLE_NO_VERBOSE;
     }
 
-    candidate = sym;
+    /*
+     * Assemblers put a '.' or '$' in front of some symbol names (the
+     * PowerPC64 ELFv1 dot-symbols, for one), so one of them is skipped
+     * before the name is demangled, as GNU c++filt does, and a '.' is
+     * printed again in front of the result.  -_ then strips one
+     * underscore from what is left.
+     */
+    candidate = sym + mangled_lead_len(sym);
     if (cfg->strip == STRIP_ONE && candidate[0] == '_') {
         candidate++;
     }
@@ -442,11 +465,25 @@ demangle_with_cfg(const char *sym, const cxxfilt_cfg_t *cfg)
      * demangle, and the word is echoed unchanged.
      */
     out = demangle(candidate, options);
-    if (out != NULL) {
-        return out;
+    if (out == NULL) {
+        return xstrdup(sym);
     }
 
-    return xstrdup(sym);
+    if (sym[0] == '.') {
+        size_t n = strlen(out);
+        char *dotted = (char *)malloc(n + 2u);
+
+        if (dotted == NULL) {
+            free(out);
+            return NULL;
+        }
+        dotted[0] = '.';
+        memcpy(dotted + 1u, out, n + 1u);
+        free(out);
+        return dotted;
+    }
+
+    return out;
 }
 
 static int
@@ -480,6 +517,7 @@ process_line(const char *line, size_t line_len, const cxxfilt_cfg_t *cfg, FILE *
     while (i < line_len) {
         size_t consume_start;
         size_t j;
+        size_t k;
         char *sym;
         char *demangled;
 
@@ -498,10 +536,12 @@ process_line(const char *line, size_t line_len, const cxxfilt_cfg_t *cfg, FILE *
             j++;
         }
 
+        /* The prefix is looked for after a leading '.' or '$'. */
+        k = i + mangled_lead_len(line + i);
         if (!cfg->types &&
-            !(j - i >= 2u && is_mangled_prefix(line + i)) &&
-            !(cfg->strip == STRIP_ONE && j - i >= 3u &&
-              line[i] == '_' && is_mangled_prefix(line + i + 1u))) {
+            !(j - k >= 2u && is_mangled_prefix(line + k)) &&
+            !(cfg->strip == STRIP_ONE && j - k >= 3u &&
+              line[k] == '_' && is_mangled_prefix(line + k + 1u))) {
             if (outbuf_append(&ob, line + i, j - i) != 0) {
                 outbuf_destroy(&ob);
                 return -1;

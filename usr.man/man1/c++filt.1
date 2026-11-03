@@ -65,6 +65,22 @@ A word is demangled only as a whole; a mangling prefix such as
 in the middle of a word (for example
 .BR FOO_Z3bar )
 does not start a symbol, and the word is copied unchanged.
+The one exception is a single leading
+.B .
+or
+.BR $ ,
+which assemblers put in front of some symbol names: it is skipped before
+the word is demangled, and a
+.B .
+is printed again in front of the result, so
+.B ._Z3foov
+becomes
+.B .foo()
+and
+.B $_Z3foov
+becomes
+.BR foo() .
+Operands are treated the same way.
 .PP
 With
 .BR -t ,
