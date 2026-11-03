@@ -258,6 +258,126 @@ int main(int c, char **v) { (void)v; return tl_outer(c); }
 SRC
 }
 
+# Hand-written x86-64 line programs in two units.  overlap.c has two
+# sequences, one nested inside the other: [ofunc, ofunc+0x40) at line
+# 20 and [ofunc+8, ofunc+0xc) at line 30.  unterm.c has one sequence
+# for ufunc (line 10 at +0, line 11 at +4) that the program never ends
+# with DW_LNE_end_sequence.  ufunc is the last code with line rows, so
+# everything above it (main among it) is past the end of every sequence.
+build_fixture_sequences() {
+    dir=$1
+    mkdir -p "$dir"
+    cat > "$dir/seq.s" <<'SRC'
+	.text
+	.globl ofunc
+	.type ofunc, @function
+ofunc:
+	.fill 0x3f, 1, 0x90
+	ret
+	.size ofunc, .-ofunc
+	.globl ufunc
+	.type ufunc, @function
+ufunc:
+	.fill 0xf, 1, 0x90
+	ret
+	.size ufunc, .-ufunc
+
+	.section .debug_abbrev,"",@progbits
+.Labbrev:
+	.uleb128 1
+	.uleb128 0x11
+	.byte 0
+	.uleb128 0x03
+	.uleb128 0x08
+	.uleb128 0x10
+	.uleb128 0x17
+	.byte 0, 0
+	.byte 0
+
+	.section .debug_info,"",@progbits
+	.long .Lcu1_end - .Lcu1_ver
+.Lcu1_ver:
+	.short 4
+	.long .Labbrev
+	.byte 8
+	.uleb128 1
+	.asciz "unterm.c"
+	.long .Lline1
+.Lcu1_end:
+	.long .Lcu2_end - .Lcu2_ver
+.Lcu2_ver:
+	.short 4
+	.long .Labbrev
+	.byte 8
+	.uleb128 1
+	.asciz "overlap.c"
+	.long .Lline2
+.Lcu2_end:
+
+	.section .debug_line,"",@progbits
+.Lline1:
+	.long .Lline1_end - .Lline1_ver
+.Lline1_ver:
+	.short 4
+	.long .Lline1_prog - .Lline1_hdr
+.Lline1_hdr:
+	.byte 1, 1, 1, -5, 14, 13
+	.byte 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1
+	.asciz "/srcroot/seq"
+	.byte 0
+	.asciz "unterm.c"
+	.uleb128 1, 0, 0
+	.byte 0
+.Lline1_prog:
+	.byte 0, 9, 2
+	.quad ufunc
+	.byte 3
+	.sleb128 9
+	.byte 1
+	.byte 2
+	.uleb128 4
+	.byte 3
+	.sleb128 1
+	.byte 1
+.Lline1_end:
+.Lline2:
+	.long .Lline2_end - .Lline2_ver
+.Lline2_ver:
+	.short 4
+	.long .Lline2_prog - .Lline2_hdr
+.Lline2_hdr:
+	.byte 1, 1, 1, -5, 14, 13
+	.byte 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1
+	.asciz "/srcroot/seq"
+	.byte 0
+	.asciz "overlap.c"
+	.uleb128 1, 0, 0
+	.byte 0
+.Lline2_prog:
+	.byte 0, 9, 2
+	.quad ofunc
+	.byte 3
+	.sleb128 19
+	.byte 1
+	.byte 2
+	.uleb128 0x40
+	.byte 0, 1, 1
+	.byte 0, 9, 2
+	.quad ofunc + 8
+	.byte 3
+	.sleb128 29
+	.byte 1
+	.byte 2
+	.uleb128 4
+	.byte 0, 1, 1
+.Lline2_end:
+SRC
+    cat > "$dir/seq_main.c" <<'SRC'
+int ofunc(void), ufunc(void);
+int main(void) { ofunc(); ufunc(); return 0; }
+SRC
+}
+
 # Normalise addr2line output for an exact comparison: GNU zero-pads
 # -a addresses to the target's width and appends "(discriminator N)",
 # neither of which is what the inline-frame checks are about.
@@ -656,6 +776,46 @@ SRC
         [ "$SEEN_INNER" -eq 1 ] || fail "10m v$V no address inside inlined tl_inner"
         pass "10m v$V"
     done
+
+    # 10n: line-number sequences bound the addresses they resolve.  A
+    # sequence the program never ends ends at its last row, so its last
+    # row and every address above it (main here) resolve to nothing, not
+    # to that row.  Where one sequence is nested inside another, an
+    # address the outer one covers resolves through it, even when the
+    # nearest lower row belongs to the inner one.  GNU addr2line is the
+    # judge for every byte of ofunc and ufunc and for main; it prints an
+    # unresolved line in a unit with no address ranges as "??:?", which
+    # is mapped to the "??:0" addr2line prints.
+    require_cmd as
+    build_fixture_sequences "$TMP/seq"
+    as -o "$TMP/seq/seq.o" "$TMP/seq/seq.s"
+    cc -no-pie -o "$TMP/seq/seq" "$TMP/seq/seq.o" "$TMP/seq/seq_main.c"
+    for S in ofunc ufunc main; do
+        SA=$(addr_of "$TMP/seq/seq" "$S")
+        [ -n "$SA" ] || fail "10n symbol $S not found"
+        case $S in
+        ofunc) SN=64 ;;
+        ufunc) SN=16 ;;
+        main) SN=1 ;;
+        esac
+        OFF=0
+        while [ "$OFF" -lt "$SN" ]; do
+            Q=$(printf '%x' $((0x$SA + OFF)))
+            HOST_Q=$(addr2line -e "$TMP/seq/seq" 0x$Q | sed 's/^??:?$/??:0/')
+            expect_eq "10n $S+$OFF" "$($BIN -e "$TMP/seq/seq" 0x$Q)" "$HOST_Q"
+            OFF=$((OFF + 1))
+        done
+    done
+    # The cases the GNU comparison above must have covered.
+    UA=$(addr_of "$TMP/seq/seq" ufunc)
+    OA=$(addr_of "$TMP/seq/seq" ofunc)
+    expect_eq "10n unterminated last row" \
+        "$($BIN -e "$TMP/seq/seq" 0x$(printf '%x' $((0x$UA + 4))))" "??:0"
+    expect_eq "10n past every sequence" \
+        "$($BIN -e "$TMP/seq/seq" 0x$(addr_of "$TMP/seq/seq" main))" "??:0"
+    expect_eq "10n outer sequence beyond the nested one" \
+        "$($BIN -e "$TMP/seq/seq" 0x$(printf '%x' $((0x$OA + 0x20))))" \
+        "/srcroot/seq/overlap.c:20"
 
     pass "all"
 }

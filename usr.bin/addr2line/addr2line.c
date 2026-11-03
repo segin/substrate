@@ -183,9 +183,19 @@ typedef struct {
     size_t unit_index;
 } line_row_t;
 
+/*
+ * One row of a line-number sequence, covering [low, high).  seq_low and
+ * seq_high bound the whole sequence the row belongs to; max_high is the
+ * largest high of this entry and every entry sorted before it, which
+ * lets a lookup stop scanning back once nothing earlier can cover the
+ * address.
+ */
 typedef struct {
     uint64_t low;
     uint64_t high;
+    uint64_t seq_low;
+    uint64_t seq_high;
+    uint64_t max_high;
     uint32_t file;
     uint32_t line;
     uint32_t column;
@@ -1424,30 +1434,70 @@ static int image_append_line_entry(addr2line_image_t *img, const line_entry_t *e
     return 0;
 }
 
+/**
+ * @brief Turn the decoded line-number rows into sorted address ranges.
+ *
+ * Rows are taken one sequence at a time.  A sequence runs from its
+ * first row to its DW_LNE_end_sequence row, or, when the line program
+ * ends without one, to the address of its last row (as GNU addr2line
+ * bounds it): every row but that last one covers the addresses up to
+ * the next row, and an unterminated sequence's last row covers nothing.
+ * The entries are then sorted by start address and each is given the
+ * running maximum of the end addresses before it.
+ *
+ * @param img Image whose line_rows are converted into line_entries.
+ * @return 0 on success, -1 when memory runs out.
+ */
 static int build_line_entries(addr2line_image_t *img) {
-    size_t i;
-    for (i = 0; i < img->line_row_count; ++i) {
-        const line_row_t *row = &img->line_rows[i];
-        line_entry_t entry;
-        if (row->end_sequence) {
-            continue;
+    size_t i = 0;
+    size_t k;
+    uint64_t max_high = 0;
+
+    while (i < img->line_row_count) {
+        size_t start = i;
+        size_t end = i;
+        uint64_t seq_low = img->line_rows[start].address;
+        uint64_t seq_high;
+        int terminated;
+
+        /* Find the row that ends this sequence: end_sequence, or the
+         * last row before the unit (or the whole table) runs out. */
+        while (end < img->line_row_count &&
+               img->line_rows[end].unit_index == img->line_rows[start].unit_index &&
+               !img->line_rows[end].end_sequence) {
+            end++;
         }
-        entry.low = row->address;
-        if (i + 1u < img->line_row_count &&
-            img->line_rows[i + 1u].unit_index == row->unit_index) {
-            entry.high = img->line_rows[i + 1u].address;
+        terminated = end < img->line_row_count &&
+                     img->line_rows[end].unit_index == img->line_rows[start].unit_index;
+        if (terminated) {
+            seq_high = img->line_rows[end].address;
+            i = end + 1u;
+        } else {
+            seq_high = img->line_rows[end - 1u].address;
+            i = end;
+        }
+
+        for (k = start; k < end; ++k) {
+            const line_row_t *row = &img->line_rows[k];
+            line_entry_t entry;
+            if (k + 1u == end && !terminated) {
+                break;
+            }
+            entry.low = row->address;
+            entry.high = img->line_rows[k + 1u].address;
             if (entry.high <= entry.low) {
                 entry.high = entry.low + 1u;
             }
-        } else {
-            entry.high = UINT64_MAX;
-        }
-        entry.file = row->file;
-        entry.line = row->line;
-        entry.column = row->column;
-        entry.unit_index = row->unit_index;
-        if (image_append_line_entry(img, &entry) != 0) {
-            return -1;
+            entry.seq_low = seq_low;
+            entry.seq_high = seq_high;
+            entry.max_high = 0;
+            entry.file = row->file;
+            entry.line = row->line;
+            entry.column = row->column;
+            entry.unit_index = row->unit_index;
+            if (image_append_line_entry(img, &entry) != 0) {
+                return -1;
+            }
         }
     }
 
@@ -1457,13 +1507,54 @@ static int build_line_entries(addr2line_image_t *img) {
               sizeof(img->line_entries[0]),
               line_entry_cmp);
     }
+    for (k = 0; k < img->line_entry_count; ++k) {
+        if (img->line_entries[k].high > max_high) {
+            max_high = img->line_entries[k].high;
+        }
+        img->line_entries[k].max_high = max_high;
+    }
     return 0;
 }
 
+/**
+ * @brief Decide which of two line entries covering one address wins.
+ *
+ * Sequences may overlap (sections discarded by the linker and left at
+ * address 0, or the unrelocated sections of an object file).  As GNU
+ * addr2line does, the sequence that starts first wins, then the longer
+ * one, then the earlier unit.
+ *
+ * @param a Candidate entry.
+ * @param b The best entry so far.
+ * @return Non-zero when @p a should be preferred over @p b.
+ */
+static int line_entry_better(const line_entry_t *a, const line_entry_t *b) {
+    if (a->seq_low != b->seq_low) {
+        return a->seq_low < b->seq_low;
+    }
+    if (a->seq_high != b->seq_high) {
+        return a->seq_high > b->seq_high;
+    }
+    return a->unit_index < b->unit_index;
+}
+
+/**
+ * @brief Find the line entry that covers an address.
+ *
+ * Binary-searches for the last entry starting at or below @p addr, then
+ * scans back over every earlier entry that could still reach it (an
+ * earlier entry can be longer than a later one, so a covering entry
+ * need not be the nearest), stopping once max_high shows that none can.
+ *
+ * @param img  Image with sorted line_entries.
+ * @param addr Address to look up.
+ * @return The covering entry, or NULL when no sequence covers @p addr.
+ */
 static const line_entry_t *lookup_line_entry(const addr2line_image_t *img, uint64_t addr) {
     size_t lo = 0;
     size_t hi = img->line_entry_count;
     size_t pos;
+    const line_entry_t *best = NULL;
 
     if (img->line_entry_count == 0u) {
         return NULL;
@@ -1477,25 +1568,17 @@ static const line_entry_t *lookup_line_entry(const addr2line_image_t *img, uint6
             hi = mid;
         }
     }
-    if (lo == 0u) {
-        return NULL;
-    }
-    pos = lo - 1u;
 
-    while (1) {
-        const line_entry_t *e = &img->line_entries[pos];
-        if (addr >= e->low && addr < e->high) {
-            return e;
-        }
-        if (pos == 0u) {
+    for (pos = lo; pos > 0u; --pos) {
+        const line_entry_t *e = &img->line_entries[pos - 1u];
+        if (e->max_high <= addr) {
             break;
         }
-        if (img->line_entries[pos - 1u].low < e->low) {
-            break;
+        if (addr < e->high && (best == NULL || line_entry_better(e, best))) {
+            best = e;
         }
-        pos--;
     }
-    return NULL;
+    return best;
 }
 
 static size_t find_line_unit_by_stmt_list(const addr2line_image_t *img, uint64_t stmt_list) {

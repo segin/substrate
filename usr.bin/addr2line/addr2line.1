@@ -115,6 +115,17 @@ or
 reference.
 The ELF symbol table is used only when no subprogram names the address.
 .PP
+File names and line numbers come from the
+.I .debug_line
+sequence that covers the address.
+A sequence ends at its
+.B DW_LNE_end_sequence
+row; one whose line program stops without that row ends at the address
+of its last row, which therefore resolves to nothing, as do addresses
+beyond it.
+Where sequences overlap, the one that starts first wins, then the longer
+one.
+.PP
 Supported compressed debug formats:
 .I .zdebug_*
 (GNU zlib)
