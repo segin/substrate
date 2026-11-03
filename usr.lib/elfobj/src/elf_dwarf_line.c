@@ -114,8 +114,11 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
 
         /* line_range is the divisor/modulus for special opcodes; a zero
          * value (DW_LNS_const_add_pc and special-opcode advance) is a
-         * division by zero. Skip a unit with a malformed header. */
-        if (line_range == 0) {
+         * division by zero. opcode_base must be at least 1 (opcode 0 is
+         * the extended-opcode escape); with 0 every opcode, extended and
+         * standard ones included, would decode as a special opcode.  Skip
+         * a unit with a malformed header. */
+        if (line_range == 0 || opcode_base == 0) {
             off = unit_end;
             continue;
         }

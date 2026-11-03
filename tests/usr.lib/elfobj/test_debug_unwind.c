@@ -249,7 +249,94 @@ static void test_section_is_debug(void) {
     elf_close(obj);
 }
 
+/**
+ * Build an object whose .debug_line holds @p data, look up @p addr with
+ * elf_dwarf_get_line_info(), and return the answer.
+ *
+ * @param data     raw .debug_line contents
+ * @param size     size of @p data in bytes
+ * @param addr     address to look up
+ * @param out_line receives the line number (0 when there is no answer)
+ * @return the file name (caller frees), or NULL when there is no answer
+ */
+static char *line_lookup(const uint8_t *data, size_t size, uint64_t addr, int *out_line) {
+    elfobj_t *obj = elf_create(ET_REL, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    elf_section_t *debug_line;
+    char *file = NULL;
+
+    if (obj == NULL) fail("elf_create");
+    debug_line = elf_add_section(obj, ".debug_line", SHT_PROGBITS, 0);
+    if (debug_line == NULL) fail("add .debug_line");
+    if (elf_section_set_data(debug_line, data, size) != ELF_OK) fail("set .debug_line");
+    if (elf_dwarf_get_line_info(obj, addr, &file, out_line) != ELF_OK)
+        fail("elf_dwarf_get_line_info failed");
+    elf_close(obj);
+    return file;
+}
+
+/**
+ * A line-program header with opcode_base 0 is malformed (DWARF requires
+ * at least 1).  Taking it at face value turns every opcode, the extended
+ * and standard ones included, into a special opcode and decodes the
+ * program as garbage.  The unit must be skipped, and a well-formed unit
+ * after it must still be read.
+ */
+static void test_line_opcode_base_zero(void) {
+    /* DWARF 2 unit, opcode_base 0, file "bad.c", program:
+     * set_address 0x1000, copy, end_sequence. */
+    static const uint8_t bad_unit[] = {
+        0x21, 0x00, 0x00, 0x00,             /* unit_length 33 */
+        0x02, 0x00,                         /* version 2 */
+        0x10, 0x00, 0x00, 0x00,             /* header_length 16 */
+        0x01, 0x01, 0xfb, 0x0e, 0x00,       /* min_inst, is_stmt, base -5, range 14, opcode_base 0 */
+        0x00,                               /* no include dirs */
+        'b', 'a', 'd', '.', 'c', 0x00, 0x00, 0x00, 0x00,
+        0x00,                               /* end of file names */
+        0x00, 0x05, 0x02, 0x00, 0x10, 0x00, 0x00, /* DW_LNE_set_address 0x1000 */
+        0x01,                               /* DW_LNS_copy */
+        0x00, 0x01, 0x01                    /* DW_LNE_end_sequence */
+    };
+    /* The same unit, well formed (opcode_base 13), file "good.c", with
+     * advance_line 6 so the row at 0x1000 is line 7. */
+    static const uint8_t good_unit[] = {
+        0x30, 0x00, 0x00, 0x00,             /* unit_length 48 */
+        0x02, 0x00,                         /* version 2 */
+        0x1d, 0x00, 0x00, 0x00,             /* header_length 29 */
+        0x01, 0x01, 0xfb, 0x0e, 0x0d,       /* min_inst, is_stmt, base -5, range 14, opcode_base 13 */
+        0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01,
+        0x00,                               /* no include dirs */
+        'g', 'o', 'o', 'd', '.', 'c', 0x00, 0x00, 0x00, 0x00,
+        0x00,                               /* end of file names */
+        0x00, 0x05, 0x02, 0x00, 0x10, 0x00, 0x00, /* DW_LNE_set_address 0x1000 */
+        0x03, 0x06,                         /* DW_LNS_advance_line 6 */
+        0x01,                               /* DW_LNS_copy */
+        0x00, 0x01, 0x01                    /* DW_LNE_end_sequence */
+    };
+    uint8_t both[sizeof(bad_unit) + sizeof(good_unit)];
+    char *file;
+    int line = -1;
+
+    file = line_lookup(bad_unit, sizeof(bad_unit), 0x1000, &line);
+    if (file != NULL || line != 0) {
+        fprintf(stderr, "test_debug_unwind: opcode_base 0 unit answered %s:%d\n",
+                file ? file : "(null)", line);
+        exit(1);
+    }
+
+    memcpy(both, bad_unit, sizeof(bad_unit));
+    memcpy(both + sizeof(bad_unit), good_unit, sizeof(good_unit));
+    line = -1;
+    file = line_lookup(both, sizeof(both), 0x1000, &line);
+    if (file == NULL || strcmp(file, "good.c") != 0 || line != 7) {
+        fprintf(stderr, "test_debug_unwind: unit after opcode_base 0 answered %s:%d, want good.c:7\n",
+                file ? file : "(null)", line);
+        exit(1);
+    }
+    free(file);
+}
+
 int main(void) {
+    test_line_opcode_base_zero();
     test_deterministic_sorted_debug_sections();
     test_roundtrip_and_validate();
     test_malformed_cfi_validator();
