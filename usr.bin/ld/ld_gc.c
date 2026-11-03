@@ -449,7 +449,8 @@ out:
  * --icf=all, as lld folds it.  Nothing writable is: two variables that
  * start out alike do not stay so.  Nor is a section of a group, one whose
  * contents the merge rewrites (strings and constants, TLS, compressed),
- * or one ordered by another.
+ * or one ordered by another.  Nor is code with an LSDA, whose FDE says
+ * what its handlers catch (icf_note_lsda_sections).
  *
  * --icf=safe also leaves out code whose address is taken, as gold does:
  * two functions are two addresses in C, and a program may compare
@@ -645,6 +646,146 @@ static void icf_note_taken_addresses(const objvec_t *inputs, const ld_symtab_t *
     }
 }
 
+/* An FDE of an input's .eh_frame, while icf_note_lsda_sections() reads it. */
+typedef struct {
+    uint64_t start;             /* where its record begins in .eh_frame */
+    uint64_t end;               /* and ends */
+    const elf_reloc_t *pc;      /* the relocation of its initial location, NULL if none */
+    int other;                  /* it has another relocation: its LSDA's */
+} icf_fde_t;
+
+/**
+ * Mark every section a relocation of .eh_frame section @p sec of input @p i refers to: a frame that cannot
+ * be read may name an LSDA for any of them.
+ *
+ * @param inputs the inputs
+ * @param symtab which definition of a name the link takes
+ * @param i      the input
+ * @param sec    its .eh_frame
+ * @param skip   skip[in][s] set for each section referred to
+ */
+static void icf_note_eh_frame_targets(const objvec_t *inputs, const ld_symtab_t *symtab, size_t i,
+                                      const elf_section_t *sec, uint8_t **skip) {
+    size_t ri, in, at;
+
+    for (ri = 0; ri < elf_section_reloc_count(sec); ++ri) {
+        const elf_reloc_t *r = elf_section_reloc_at((elf_section_t *)sec, ri);
+
+        if (r != NULL && gc_symbol_section(inputs, symtab, i, elf_reloc_symbol(r), &in, &at) &&
+            at < elf_section_count(inputs->objs[in])) {
+            skip[in][at] = 1;
+        }
+    }
+}
+
+/**
+ * Mark each input section whose code has an LSDA: its FDE in .eh_frame names one (in .gcc_except_table),
+ * which says what the code's handlers catch and where they are.  Two functions of the same code and
+ * relocations may catch different exceptions; the unwinder finds the LSDA by the FDE of the address it
+ * unwinds through, and a folded pair has one address, so such a section is never folded, as lld leaves it.
+ *
+ * An FDE has relocations only for its initial location (8 bytes into its record) and its LSDA pointer: one
+ * with another relocation names an LSDA.  An .eh_frame that cannot be read marks every section it refers to.
+ *
+ * @param inputs the inputs
+ * @param symtab which definition of a name the link takes
+ * @param skip   skip[i][s] set for section s of input i
+ * @return 0, or -1 out of memory
+ */
+static int icf_note_lsda_sections(const objvec_t *inputs, const ld_symtab_t *symtab, uint8_t **skip) {
+    icf_fde_t *fdes = NULL;
+    size_t cap = 0, i, s;
+    int rc = 0;
+
+    for (i = 0; i < inputs->count && rc == 0; ++i) {
+        elfobj_t *o = inputs->objs[i];
+
+        for (s = 0; s < elf_section_count(o) && rc == 0; ++s) {
+            const elf_section_t *sec = elf_section_get(o, s);
+            const char *name = sec != NULL ? elf_section_name(sec) : NULL;
+            const uint8_t *data;
+            size_t size = 0, off = 0, n = 0, ri, k, in, at;
+            int bad = 0;
+
+            if (name == NULL || strcmp(name, ".eh_frame") != 0 || elf_section_reloc_count(sec) == 0) {
+                continue;
+            }
+            data = (const uint8_t *)elf_section_data(sec, &size);
+            if (data == NULL) {
+                bad = 1;
+            }
+            while (!bad && off + 4 <= size) {
+                uint32_t len = read_u32_endian(data + off, elf_endian(o));
+
+                if (len == 0) {
+                    off += 4;
+                    continue;
+                }
+                if (len == 0xffffffffu || len < 4 || (size_t)len > size - off - 4) {
+                    bad = 1;
+                    break;
+                }
+                if (read_u32_endian(data + off + 4, elf_endian(o)) != 0) {        /* an FDE, not a CIE */
+                    if (ld_vec_room(&fdes, &cap, n, sizeof(fdes[0])) != 0) {
+                        rc = -1;
+                        break;
+                    }
+                    fdes[n].start = off;
+                    fdes[n].end = off + 4 + (size_t)len;
+                    fdes[n].pc = NULL;
+                    fdes[n].other = 0;
+                    n++;
+                }
+                off += 4 + (size_t)len;
+            }
+            if (rc != 0) {
+                break;
+            }
+            if (bad) {
+                icf_note_eh_frame_targets(inputs, symtab, i, sec, skip);
+                continue;
+            }
+            /* each relocation to its FDE (the records are in order of place) */
+            for (ri = 0; ri < elf_section_reloc_count(sec); ++ri) {
+                const elf_reloc_t *r = elf_section_reloc_at((elf_section_t *)sec, ri);
+                uint64_t roff;
+                size_t lo = 0, hi = n;
+
+                if (r == NULL) {
+                    continue;
+                }
+                roff = elf_reloc_offset(r);
+                while (lo < hi) {
+                    size_t mid = lo + (hi - lo) / 2;
+
+                    if (fdes[mid].end <= roff) {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                if (lo >= n || roff < fdes[lo].start) {
+                    continue;   /* a CIE's: its personality routine */
+                }
+                if (roff == fdes[lo].start + 8 && fdes[lo].pc == NULL) {
+                    fdes[lo].pc = r;
+                } else {
+                    fdes[lo].other = 1;
+                }
+            }
+            for (k = 0; k < n; ++k) {
+                if (fdes[k].pc != NULL && fdes[k].other &&
+                    gc_symbol_section(inputs, symtab, i, elf_reloc_symbol(fdes[k].pc), &in, &at) &&
+                    at < elf_section_count(inputs->objs[in])) {
+                    skip[in][at] = 1;
+                }
+            }
+        }
+    }
+    free(fdes);
+    return rc;
+}
+
 /* A section that may be folded, while the classes are being found. */
 typedef struct {
     const elf_section_t *section;
@@ -713,7 +854,7 @@ static int icf_member_cmp(const void *a, const void *b) {
 
 int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab) {
     icf_candidate_t *cands = NULL;
-    uint8_t **taken = NULL;
+    uint8_t **skip = NULL;      /* skip[i][s]: section s of input i is never folded */
     size_t count = 0, cap = 0, members = 0, i, j, s;
     int rc = -1;
 
@@ -721,26 +862,28 @@ int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_s
     ctx->icf_members = NULL;
     ctx->icf_member_count = 0;
     ctx->icf_class_count = 0;
-    if (ctx->opt.icf_mode == 1) {
-        taken = (uint8_t **)calloc(inputs->count ? inputs->count : 1, sizeof(taken[0]));
-        if (taken == NULL) {
+    skip = (uint8_t **)calloc(inputs->count ? inputs->count : 1, sizeof(skip[0]));
+    if (skip == NULL) {
+        goto out;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        skip[i] = (uint8_t *)calloc(elf_section_count(inputs->objs[i]) + 1, 1);
+        if (skip[i] == NULL) {
             goto out;
         }
-        for (i = 0; i < inputs->count; ++i) {
-            taken[i] = (uint8_t *)calloc(elf_section_count(inputs->objs[i]) + 1, 1);
-            if (taken[i] == NULL) {
-                goto out;
-            }
-        }
-        icf_note_taken_addresses(inputs, symtab, taken);
+    }
+    if (ctx->opt.icf_mode == 1) {
+        icf_note_taken_addresses(inputs, symtab, skip);
+    }
+    if (icf_note_lsda_sections(inputs, symtab, skip) != 0) {
+        goto out;
     }
     for (i = 0; i < inputs->count; ++i) {
         for (s = 0; s < elf_section_count(inputs->objs[i]); ++s) {
             const elf_section_t *sec = elf_section_get(inputs->objs[i], s);
 
             if (!is_icf_candidate_section(sec, ctx->opt.icf_mode) ||
-                (ctx->opt.gc_sections && !gc_keep_input_section(sec, ctx)) ||
-                (taken != NULL && taken[i][s])) {
+                (ctx->opt.gc_sections && !gc_keep_input_section(sec, ctx)) || skip[i][s]) {
                 continue;
             }
             if (ld_vec_room(&cands, &cap, count, sizeof(cands[0])) != 0) {
@@ -795,10 +938,10 @@ int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_s
     }
     rc = 0;
 out:
-    for (i = 0; taken != NULL && i < inputs->count; ++i) {
-        free(taken[i]);
+    for (i = 0; skip != NULL && i < inputs->count; ++i) {
+        free(skip[i]);
     }
-    free(taken);
+    free(skip);
     free(cands);
     return rc;
 }

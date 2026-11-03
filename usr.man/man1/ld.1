@@ -425,7 +425,12 @@ and
 .Pa .rodata.* )
 is folded too.
 Writable sections, sections of a group, mergeable, thread-local and
-compressed sections are never folded.
+compressed sections are never folded, nor is code whose frame in
+.Pa .eh_frame
+names an LSDA (the table of what its exception handlers catch, in
+.Pa .gcc_except_table ) ,
+as lld leaves it: two such functions may catch different exceptions,
+and the unwinder finds the table by the address it unwinds through.
 .Ar none ,
 the default, folds nothing.
 Not with
