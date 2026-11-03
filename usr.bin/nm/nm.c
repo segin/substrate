@@ -1438,7 +1438,8 @@ static int process_archive(const char *archive_path, const uint8_t *buf, size_t 
         const struct ar_raw_header *hdr =
             (const struct ar_raw_header *)(const void *)(buf + off);
         uint64_t msize_u64 = 0;
-        size_t msize, payload_size, payload_off, next_off;
+        uint64_t payload_u64;
+        size_t payload_size, payload_off, next_off;
         char *member_name = NULL;
         char *member_label = NULL;
         char *thin_ref_path = NULL;
@@ -1454,24 +1455,26 @@ static int process_archive(const char *archive_path, const uint8_t *buf, size_t 
             return -1;
         }
 
-        if (parse_decimal_field(hdr->size, sizeof(hdr->size), &msize_u64) != 0 ||
-            msize_u64 > SIZE_MAX) {
+        if (parse_decimal_field(hdr->size, sizeof(hdr->size), &msize_u64) != 0) {
             fprintf(stderr, "%s: %s: malformed archive member size\n", progname, archive_path);
             *any_fail = 1;
             free(archive_dir);
             return -1;
         }
-        msize = (size_t)msize_u64;
-        payload_size = msize;
 
+        /*
+         * Work out, in 64 bits, how many bytes follow the header.  A thin
+         * member stores none: its size field is the external file's size
+         * and is never used, so it may exceed SIZE_MAX (a file over 4 GiB
+         * on ILP32) without making the archive malformed.
+         */
+        payload_u64 = msize_u64;
         if (is_thin) {
             if (memcmp(hdr->name, "#1/", 3) == 0) {
                 uint64_t extlen_u64 = 0;
-                if (parse_decimal_field(hdr->name + 3, 13, &extlen_u64) != 0 ||
-                    extlen_u64 > msize)
-                    payload_size = msize;
-                else
-                    payload_size = (size_t)extlen_u64;
+                if (parse_decimal_field(hdr->name + 3, 13, &extlen_u64) == 0 &&
+                    extlen_u64 <= msize_u64)
+                    payload_u64 = extlen_u64;
             } else {
                 char *raw_name = dup_member_name_simple(hdr->name);
                 if (raw_name && (strcmp(raw_name, "/") == 0 ||
@@ -1480,12 +1483,19 @@ static int process_archive(const char *archive_path, const uint8_t *buf, size_t 
                     strcmp(raw_name, "/SYM64/") == 0 ||
                     strcmp(raw_name, "__.SYMDEF") == 0 ||
                     strcmp(raw_name, "__.SYMDEF SORTED") == 0))
-                    payload_size = msize;
+                    payload_u64 = msize_u64;
                 else
-                    payload_size = 0;
+                    payload_u64 = 0;
                 free(raw_name);
             }
         }
+        if (payload_u64 > SIZE_MAX) {
+            fprintf(stderr, "%s: %s: malformed archive member size\n", progname, archive_path);
+            *any_fail = 1;
+            free(archive_dir);
+            return -1;
+        }
+        payload_size = (size_t)payload_u64;
 
         payload_off = off + AR_HDR_LEN;
         if (payload_off > size || payload_size > size - payload_off) {

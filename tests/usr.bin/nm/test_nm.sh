@@ -184,6 +184,51 @@ SRC
         pass "nm thin archive listing matches GNU nm"
     fi
 
+    # A thin member's size field is never used to read or skip data, so
+    # a size near SIZE_MAX on ILP32 must not wrap the walk, and one past
+    # it (an external file over 4 GiB) must not make the archive
+    # malformed.  Only an ILP32 nm can show either, so besides the nm
+    # under test a 32-bit host build is checked when cc -m32 can link.
+    (cd "$TMP" && ar rcST thinbig.a a.o b.o)
+    # Layout: magic (8), "//" header (60) + "a.o/\nb.o/\n" (10), then the
+    # two member headers; each size field is 48 bytes into its header.
+    [ "$(dd if="$TMP/thinbig.a" bs=1 skip=78 count=3 2>/dev/null)" = "/0 " ] &&
+        [ "$(dd if="$TMP/thinbig.a" bs=1 skip=138 count=3 2>/dev/null)" = "/5 " ] ||
+        fail "thin archive layout is as expected"
+    printf '%-10s' 4294967294 | dd of="$TMP/thinbig.a" bs=1 seek=126 conv=notrunc 2>/dev/null
+    printf '%-10s' 9999999999 | dd of="$TMP/thinbig.a" bs=1 seek=186 conv=notrunc 2>/dev/null
+    thin_big_check() {
+        tb_label=$1
+        tb_got=$(cd "$TMP" && "$2" thinbig.a 2>&1) || {
+            printf 'FAIL: %s (exit status)\n%s\n' "$tb_label" "$tb_got" >&2
+            exit 1
+        }
+        expect_match "$tb_label lists the first member" "$tb_got" '[[:space:]]T[[:space:]]+alpha$'
+        expect_match "$tb_label lists the second member" "$tb_got" '[[:space:]]T[[:space:]]+beta$'
+    }
+    thin_big_check "thin archive with huge size fields" "$NM"
+    if nm --version 2>/dev/null | grep -q 'GNU nm'; then
+        GOT=$(cd "$TMP" && $NM thinbig.a | grep -v ':$')
+        WANT=$(cd "$TMP" && nm thinbig.a | grep -v ':$')
+        [ "$GOT" = "$WANT" ] || {
+            printf 'FAIL: nm thin archive with huge size fields differs from GNU nm\n--- got:\n%s\n--- want:\n%s\n' \
+                "$GOT" "$WANT" >&2
+            exit 1
+        }
+        pass "nm thin archive with huge size fields matches GNU nm"
+    fi
+    if printf 'int main(void){return 0;}\n' > "$TMP/m32.c" &&
+       cc -m32 -o "$TMP/m32" "$TMP/m32.c" 2>/dev/null && "$TMP/m32"; then
+        cc -m32 -O0 -w -idirafter "$ROOT/include" -idirafter "$ROOT/sys" \
+            -idirafter "$ROOT/sys/include" -I"$ROOT/usr.lib/elfobj/src" \
+            -I"$ROOT/usr.lib/demangle" "$ROOT"/usr.lib/elfobj/src/*.c \
+            "$ROOT"/usr.lib/demangle/*.c "$ROOT/usr.bin/nm/nm.c" -o "$TMP/nm32" ||
+            fail "32-bit host nm builds"
+        thin_big_check "ILP32 nm, thin archive with huge size fields" "$TMP/nm32"
+    else
+        printf 'skip: no cc -m32; ILP32 thin archive check not run\n'
+    fi
+
     # --size-sort: ascending by size, undefined, absolute and size-0
     # symbols are dropped, and without -S the BSD value column carries the size.
     cat > "$TMP/sizes.c" <<'SRC'
