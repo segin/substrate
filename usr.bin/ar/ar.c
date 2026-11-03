@@ -1660,8 +1660,15 @@ static void write_archive(const char *path) {
         struct sym_entry *list = NULL;
         int count = 0;
 
-        /* Calculate initial offset past symdef */
-        uint64_t current_off = offset + sizeof(struct ar_hdr) + symdef->size + (symdef->size % 2);
+        /*
+         * Member offsets are first taken relative to the end of the
+         * symbol table member: in GNU format the table's final size
+         * (32-bit "/" or 64-bit "/SYM64/") is only known once the
+         * symbols are counted and the largest offset is seen, and
+         * the real header offsets are the relative ones plus that
+         * size.
+         */
+        uint64_t current_off = 0;
         if (archive_format == ARFMT_GNU && gnu_table_len > 0) {
             current_off += sizeof(struct ar_hdr) + gnu_table_len + (gnu_table_len % 2);
         }
@@ -1713,14 +1720,28 @@ static void write_archive(const char *path) {
             /* Fill symdef data */
             int strsize = 0;
             for (int i = 0; i < count; i++) strsize += arr[i]->name_len + 1;
-            if (archive_format == ARFMT_GNU) {
-                uint64_t max_off = 0;
-                for (int i = 0; i < count; i++) {
-                    if (arr[i]->offset > max_off) {
-                        max_off = arr[i]->offset;
-                    }
+            uint64_t max_off = 0;
+            for (int i = 0; i < count; i++) {
+                if (arr[i]->offset > max_off) {
+                    max_off = arr[i]->offset;
                 }
-                if (max_off > 0xffffffffULL) {
+            }
+            bool wide = false;
+            uint64_t table_size = symdef->size;
+            if (archive_format == ARFMT_GNU) {
+                table_size = sizeof(uint32_t) + (uint64_t)count * sizeof(uint32_t) + strsize;
+                if (offset + sizeof(struct ar_hdr) + table_size + (table_size % 2) +
+                    max_off > 0xffffffffULL) {
+                    wide = true;
+                    table_size = sizeof(uint64_t) + (uint64_t)count * sizeof(uint64_t) + strsize;
+                }
+            }
+            uint64_t base = offset + sizeof(struct ar_hdr) + table_size + (table_size % 2);
+            for (int i = 0; i < count; i++) {
+                arr[i]->offset += base;
+            }
+            if (archive_format == ARFMT_GNU) {
+                if (wide) {
                     size_t total = sizeof(uint64_t) + (size_t)count * sizeof(uint64_t) + strsize;
                     unsigned char *p;
                     unsigned char *strp;
