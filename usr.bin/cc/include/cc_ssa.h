@@ -197,6 +197,12 @@ typedef struct {
                                or CC_SSA_F2I_TO_UNSIGNED, which i386 soft-float calls gcc's routine for (__fix*si,
                                __fixuns*si); 0 not known, and it calls the 64-bit one, whose low bits are right for
                                either.  The result is the same; the text form omits it */
+    unsigned char plain;  /**< LOAD: a read of an ordinary object, lowering knows -- through an lvalue neither
+                               volatile nor atomic.  Two plain loads of one address with nothing between that may
+                               write it read the same value, and the optimizer reads the second as the first
+                               (passes/opt.c); a load not marked so -- volatile, atomic, or one a pass made -- is
+                               never merged.  Only a licence: a pass that loses it loses nothing else; the text form
+                               omits it */
     unsigned asm_seg_in;  /**< ASM: bit i set when memory input i is in address space seg */
     unsigned asm_seg_out; /**< ASM: the same for the outputs */
     double fimm;

@@ -2767,8 +2767,8 @@ static size_t cse_hash(const cse_entry_t *e) {
  * block has made already from the same operands, not written since, becomes a copy of the value that holds it,
  * while that value still does -- and copy propagation then reads the first instead.  The IR is not strictly SSA
  * (a variable is written more than once), so each value has a version, bumped where it is written, and a
- * computation is the same only of the same versions.  Loads are not shared: the IR does not say which are
- * volatile.  Linux's bitmap helpers compute an index three times in one statement, `s[v / 32] |= ...`.
+ * computation is the same only of the same versions.  Loads are cse_loads()'s, which knows what may write
+ * memory between them.  Linux's bitmap helpers compute an index three times in one statement, `s[v / 32] |= ...`.
  *
  * @return the computations turned into copies, or -1 when out of memory
  */
@@ -2925,6 +2925,611 @@ static int cse_function(cc_ssa_function_t *f) {
     return changed;
 }
 
+/**
+ * The blocks of a function as cse_loads() walks them: a block starts at the function's start, at a label and
+ * after an instruction control does not simply pass on from; a block entered only from one block above it is
+ * that block's child, and the tree they make says which blocks every path to another runs through last.
+ */
+typedef struct {
+    int *of;      /**< per instruction: its block */
+    int *parent;  /**< per block: the one block above it that alone enters it, or -1 */
+    int *pre;     /**< per block: when a walk of the tree enters it */
+    int *post;    /**< per block: when the walk leaves it */
+    int count;
+} ld_blocks_t;
+
+/** Free what ld_blocks_build() allocated in @p b. */
+static void ld_blocks_free(ld_blocks_t *b) {
+    free(b->of);
+    free(b->parent);
+    free(b->pre);
+    free(b->post);
+}
+
+/**
+ * Whether block @p a is block @p b or one of its ancestors: every path from the function's start to @p b leaves
+ * @p a last through the blocks between, each entered only from the one before it.
+ */
+static int ld_dominates(const ld_blocks_t *b, int a, int c) {
+    return a >= 0 && c >= 0 && b->pre[a] <= b->pre[c] && b->post[c] <= b->post[a];
+}
+
+/**
+ * Split @p f into blocks and find each one's parent (ld_blocks_t): a block reached by one edge only -- the
+ * fall-through from the block before it, or one branch or asm goto of a block above it -- whose label's address
+ * is not taken.  The function's first block is entered from outside it too.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int ld_blocks_build(const cc_ssa_function_t *f, ld_blocks_t *b) {
+    size_t n = f->instr_count;
+    int nl = f->label_count > 0 ? f->label_count : 1;
+    int *label_block = NULL;
+    int *npred = NULL;
+    int *pred = NULL;
+    int *child = NULL;
+    int *sibling = NULL;
+    int *stack = NULL;
+    int nb = 0;
+    int clock = 0;
+    int rc = -1;
+    size_t i;
+    int k;
+
+    memset(b, 0, sizeof(*b));
+    b->of = (int *)malloc((n > 0 ? n : 1) * sizeof(int));
+    label_block = (int *)malloc((size_t)nl * sizeof(int));
+    if (b->of == NULL || label_block == NULL) {
+        goto out;
+    }
+    for (k = 0; k < nl; ++k) {
+        label_block[k] = -1;
+    }
+    for (i = 0; i < n; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        const cc_ssa_instr_t *prev = i > 0 ? &f->instrs[i - 1] : NULL;
+
+        if (i == 0 || in->op == CC_SSA_LABEL || ends_flow(prev) || (prev->op == CC_SSA_ASM && prev->asm_is_goto)) {
+            nb++;
+        }
+        b->of[i] = nb - 1;
+        if (in->op == CC_SSA_LABEL && in->label >= 0 && in->label < f->label_count) {
+            label_block[in->label] = nb - 1;
+        }
+    }
+    b->count = nb;
+    b->parent = (int *)malloc((size_t)(nb > 0 ? nb : 1) * sizeof(int));
+    b->pre = (int *)calloc((size_t)(nb > 0 ? nb : 1), sizeof(int));
+    b->post = (int *)calloc((size_t)(nb > 0 ? nb : 1), sizeof(int));
+    npred = (int *)calloc((size_t)(nb > 0 ? nb : 1), sizeof(int));
+    pred = (int *)malloc((size_t)(nb > 0 ? nb : 1) * sizeof(int));
+    child = (int *)malloc((size_t)(nb > 0 ? nb : 1) * sizeof(int));
+    sibling = (int *)malloc((size_t)(nb > 0 ? nb : 1) * sizeof(int));
+    stack = (int *)malloc((size_t)(nb > 0 ? nb : 1) * sizeof(int));
+    if (b->parent == NULL || b->pre == NULL || b->post == NULL || npred == NULL || pred == NULL || child == NULL ||
+        sibling == NULL || stack == NULL) {
+        goto out;
+    }
+    for (k = 0; k < nb; ++k) {
+        pred[k] = -1;
+        child[k] = -1;
+        sibling[k] = -1;
+    }
+    if (nb > 0) {
+        npred[0] = 1; /* (the function's entry) */
+    }
+#define LD_EDGE(from, l)                                                                                         \
+    do {                                                                                                         \
+        int _l = (l);                                                                                            \
+        if (_l >= 0 && _l < f->label_count && label_block[_l] >= 0) {                                            \
+            npred[label_block[_l]]++;                                                                            \
+            pred[label_block[_l]] = (from);                                                                      \
+        }                                                                                                        \
+    } while (0)
+    for (i = 0; i < n; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t g;
+
+        if (i > 0 && b->of[i] != b->of[i - 1] && !ends_flow(&f->instrs[i - 1])) {
+            npred[b->of[i]]++;
+            pred[b->of[i]] = b->of[i - 1];
+        }
+        if (in->op == CC_SSA_BR) {
+            LD_EDGE(b->of[i], in->label);
+        } else if (in->op == CC_SSA_BR_COND) {
+            LD_EDGE(b->of[i], in->true_label);
+            LD_EDGE(b->of[i], in->false_label);
+        } else if (in->op == CC_SSA_ASM) {
+            for (g = 0; g < in->asm_goto_count; ++g) {
+                LD_EDGE(b->of[i], in->asm_goto_labels[g]);
+            }
+        } else if (in->op == CC_SSA_LADDR && in->label >= 0 && in->label < f->label_count &&
+                   label_block[in->label] >= 0) {
+            npred[label_block[in->label]] += 2; /* (a computed jump may reach it from anywhere) */
+        }
+    }
+#undef LD_EDGE
+    for (k = nb - 1; k >= 0; --k) {
+        b->parent[k] = npred[k] == 1 && pred[k] >= 0 && pred[k] < k ? pred[k] : -1;
+        if (b->parent[k] >= 0) {
+            sibling[k] = child[b->parent[k]];
+            child[b->parent[k]] = k;
+        }
+    }
+    /* each tree walked from its root: a block's pre and post bracket its descendants' */
+    for (k = 0; k < nb; ++k) {
+        int sp = 0;
+
+        if (b->parent[k] >= 0) {
+            continue;
+        }
+        stack[sp++] = k;
+        b->pre[k] = ++clock;
+        while (sp > 0) {
+            int top = stack[sp - 1];
+            int c = child[top];
+
+            if (c >= 0) {
+                child[top] = sibling[c]; /* (consumed: the next child the next time) */
+                b->pre[c] = ++clock;
+                stack[sp++] = c;
+            } else {
+                b->post[top] = ++clock;
+                sp--;
+            }
+        }
+    }
+    rc = 0;
+out:
+    free(label_block);
+    free(npred);
+    free(pred);
+    free(child);
+    free(sibling);
+    free(stack);
+    if (rc != 0) {
+        ld_blocks_free(b);
+    }
+    return rc;
+}
+
+/**
+ * An address as cse_loads() knows it: a base value at one version, and a constant offset from it; and the
+ * object it lies in, if that is known.
+ */
+typedef struct {
+    int base;           /**< the base value, or -1 for a constant address (off alone) */
+    unsigned bver;      /**< the base's version */
+    unsigned long long off;
+    int root;           /**< the stack slot's or the global's address (ld_state_t's obj) it is within, or -1 */
+} ld_addr_t;
+
+/** ld_state_t's obj: what a value is the address of. */
+enum { LD_OBJ_NONE = 0, LD_OBJ_SLOT, LD_OBJ_GLOBAL };
+
+/** A plain load cse_loads() has seen: the address and shape read, and the value that holds what it read. */
+typedef struct {
+    unsigned char used;
+    ld_addr_t at;
+    long long size;
+    int is_unsigned;
+    unsigned char seg;
+    cc_ssa_type_t ty;
+    int block;          /**< the block it was made in: it holds only in that block and the ones it dominates */
+    unsigned mem_all;   /**< the version of all memory it read */
+    unsigned mem_part;  /**< the version of the part of memory it read (ld_part()) */
+    int dst;
+    unsigned dver;      /**< dst's version once written: dst still holds the value while that is current */
+} ld_entry_t;
+
+/** What cse_loads() knows while it walks a function. */
+typedef struct {
+    const cc_ssa_function_t *f;
+    const ld_blocks_t *blocks;
+    int cur;                /**< the block being walked */
+    unsigned *ver;          /**< per value: its version, bumped where it is written */
+    unsigned char *has_dec; /**< per value: dec holds its address as a base and an offset */
+    ld_addr_t *dec;
+    unsigned *dec_ver;      /**< the value's version dec describes */
+    int *dec_block;         /**< the block that wrote it */
+    unsigned char *obj;     /**< per value: LD_OBJ_SLOT for the address of a stack slot, one STACKALLOC's, the only
+                                 definition of the value; LD_OBJ_GLOBAL for a symbol's, one GADDR's; else 0 */
+    unsigned *slot_mem;     /**< per slot value: the version of its memory */
+    unsigned mem_all;       /**< the version of all memory */
+    unsigned mem_glob;      /**< the version of the globals' memory */
+    unsigned mem_other;     /**< the version of the memory a pointer of unknown object reaches */
+    unsigned tick;          /**< the last version handed out */
+} ld_state_t;
+
+/** cc_ssa_for_each_use() callback: a value read otherwise than as a load's or a store's address is marked. */
+static void ld_note_use(void *ctx, int v, int role) {
+    unsigned char *other_use = (unsigned char *)ctx;
+
+    if (role != 1) {
+        other_use[v] = 1;
+    }
+}
+
+/** Whether value @p v of @p f is an integer of the target's pointer size, which an address is. */
+static int ld_word(const cc_ssa_function_t *f, int v) {
+    return v >= 0 && v < f->value_count && cc_ssa_value_class(f, v) == CC_VAL_I64 &&
+           f->value_ty[v].kind == CC_TY_INT && f->value_ty[v].size == (uint32_t)cc_target_pointer_size();
+}
+
+/** Value @p v as an address now: what wrote it, if that is known and still holds, else @p v itself. */
+static ld_addr_t ld_addr_of(const ld_state_t *s, int v) {
+    ld_addr_t a;
+
+    if (s->has_dec[v] && s->dec_ver[v] == s->ver[v] && ld_dominates(s->blocks, s->dec_block[v], s->cur)) {
+        return s->dec[v];
+    }
+    a.base = v;
+    a.bver = s->ver[v];
+    a.off = 0;
+    a.root = s->obj[v] != LD_OBJ_NONE ? v : -1;
+    return a;
+}
+
+/**
+ * The address instruction @p in writes, as a base and an offset, from what its operands hold now: a constant,
+ * a copy, or a constant added to or subtracted from an address -- all of the pointer's size, so no wrap at
+ * another width tells two apart -- within the object the address is within.  0 for anything else, whose object
+ * is not known either: an index added (`&t[i]`) may be another object's distance from it.
+ */
+static int ld_addr_def(const ld_state_t *s, const cc_ssa_instr_t *in, ld_addr_t *out) {
+    const cc_ssa_function_t *f = s->f;
+    ld_addr_t a;
+    ld_addr_t b;
+
+    if (!ld_word(f, in->dst)) {
+        return 0;
+    }
+    switch (in->op) {
+    case CC_SSA_CONST:
+        out->base = -1;
+        out->bver = 0;
+        out->off = (unsigned long long)in->imm;
+        out->root = -1;
+        return 1;
+    case CC_SSA_MOV:
+        if (!ld_word(f, in->lhs)) {
+            return 0;
+        }
+        *out = ld_addr_of(s, in->lhs);
+        return 1;
+    case CC_SSA_ADD:
+    case CC_SSA_SUB:
+        if (!ld_word(f, in->lhs) || !ld_word(f, in->rhs)) {
+            return 0;
+        }
+        a = ld_addr_of(s, in->lhs);
+        b = ld_addr_of(s, in->rhs);
+        if (b.base < 0) {
+            *out = a;
+            out->off = in->op == CC_SSA_ADD ? a.off + b.off : a.off - b.off;
+            return 1;
+        }
+        if (a.base < 0 && in->op == CC_SSA_ADD) {
+            *out = b;
+            out->off = a.off + b.off;
+            return 1;
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+/**
+ * Whether instruction @p in may write memory a load reads: anything but a pure computation, a plain load, a
+ * jump or a return -- a store, a call, a volatile or atomic load (which may have effects of its own), an asm
+ * unless it neither clobbers "memory" nor has a memory output (gcc's rule: another asm, basic asm among them,
+ * is taken to write any memory).
+ */
+static int ld_writes_memory(const cc_ssa_instr_t *in) {
+    size_t k;
+
+    switch (in->op) {
+    case CC_SSA_LOAD:
+        return !in->plain;
+    case CC_SSA_ASM:
+        if (in->asm_is_basic) {
+            return 1;
+        }
+        for (k = 0; k < in->asm_clobber_count; ++k) {
+            if (in->asm_clobbers[k] == NULL || strcmp(in->asm_clobbers[k], "memory") == 0) {
+                return 1;
+            }
+        }
+        for (k = 0; k < in->asm_out_count; ++k) {
+            if (CC_SSA_ASM_MEM_INDIRECT_P(in->asm_out_values[k])) {
+                return 1;
+            }
+        }
+        return 0;
+    case CC_SSA_LABEL:
+    case CC_SSA_BR:
+    case CC_SSA_BR_COND:
+    case CC_SSA_RET:
+    case CC_SSA_TRAP:
+    case CC_SSA_CHAIN:
+    case CC_SSA_REGREAD:
+        return 0;
+    case CC_SSA_STACKALLOC:
+        return 0;
+    default:
+        return !is_pure(in);
+    }
+}
+
+/** A hash of the address and shape entry @p e reads. */
+static size_t ld_hash(const ld_entry_t *e) {
+    size_t h = (size_t)(e->at.base + 2) * 1000003u;
+
+    h = (h ^ (size_t)e->at.bver) * 16777619u;
+    h = (h ^ (size_t)e->at.off) * 16777619u;
+    h = (h ^ (size_t)e->size) * 16777619u;
+    return h;
+}
+
+/**
+ * Whether entries @p a and @p b read the same bytes the same way into values of one type -- of one signedness,
+ * unless they fill a word, where nothing extends them (`pos = outarg.offset`: an unsigned 64-bit member read
+ * into a signed loff_t).
+ */
+static int ld_same(const ld_entry_t *a, const ld_entry_t *b) {
+    return a->at.base == b->at.base && a->at.bver == b->at.bver && a->at.off == b->at.off && a->size == b->size &&
+           a->is_unsigned == b->is_unsigned && a->seg == b->seg && a->ty.kind == b->ty.kind &&
+           a->ty.size == b->ty.size &&
+           (a->ty.is_unsigned == b->ty.is_unsigned || a->ty.size >= (uint32_t)cc_target_pointer_size());
+}
+
+/**
+ * The version of the part of memory a load of @p at in address space @p seg reads: its stack slot's, the
+ * globals', or what a pointer of unknown object reaches -- which a load through %fs or %gs is taken to be.
+ */
+static unsigned ld_part(const ld_state_t *s, const ld_addr_t *at, unsigned char seg) {
+    if (seg != 0 || at->root < 0) {
+        return s->mem_other;
+    }
+    return s->obj[at->root] == LD_OBJ_SLOT ? s->slot_mem[at->root] : s->mem_glob;
+}
+
+/**
+ * Common loads, across blocks: a plain load (CC_SSA_LOAD's plain -- never a volatile or an atomic one) of an
+ * address a plain load read before, along every path to it, with nothing between that may write memory there,
+ * becomes a copy of the value that holds what the first read, while that value still does.  gcc's value
+ * numbering does the same, and range folding then knows the second read is the first's: Linux's
+ * fuse_notify_store() returns when `outarg.offset >= MAX_LFS_FILESIZE` and only then reads `pos =
+ * outarg.offset`, whose min() asks of `MAX_LFS_FILESIZE - pos` that it is not negative.
+ *
+ * An address is a base value at a version and a constant offset (ld_addr_def()), so two computations of
+ * `&outarg.offset` are one address.  The first load must be in a block that dominates the second's along blocks
+ * each entered from one place alone (ld_blocks_build()).  Versions -- of each value, of each stack slot's memory,
+ * of the globals', of what a pointer of unknown object reaches and of all memory -- are bumped where they are
+ * written, in the order of the instructions, which holds every path between the two loads, so a write on one is
+ * never missed (one on another path only costs a merge).  A store to a stack slot (one STACKALLOC's address,
+ * plus a constant) writes that slot, and a store to a global (one GADDR's) the globals, and either what a pointer
+ * may reach -- but not the other slots, nor the globals or the slots; any other store, a store through %fs or
+ * %gs, a call, an asm that may write memory (ld_writes_memory()), the write of a value whose address is taken
+ * (ADDR) or of an aggregate's bytes, writes all memory.
+ *
+ * @return the loads turned into copies, or -1 when out of memory
+ */
+static int cse_loads(cc_ssa_function_t *f) {
+    ld_blocks_t blocks;
+    ld_state_t s;
+    ld_entry_t *tab = NULL;
+    unsigned char *pinned = NULL;
+    unsigned char *other_use = NULL;
+    int *ndefs = NULL;
+    size_t nv = (size_t)(f->value_count > 0 ? f->value_count : 1);
+    size_t cap = 16;
+    size_t nloads = 0;
+    int changed = 0;
+    int rc = -1;
+    size_t i;
+
+    for (i = 0; i < f->instr_count; ++i) {
+        nloads += f->instrs[i].op == CC_SSA_LOAD && f->instrs[i].plain;
+    }
+    if (nloads < 2) {
+        return 0;
+    }
+    while (cap < 2 * nloads + 2) {
+        cap *= 2;
+    }
+    if (ld_blocks_build(f, &blocks) != 0) {
+        return -1;
+    }
+    memset(&s, 0, sizeof(s));
+    s.f = f;
+    s.blocks = &blocks;
+    s.ver = (unsigned *)calloc(nv, sizeof(*s.ver));
+    s.has_dec = (unsigned char *)calloc(nv, 1);
+    s.dec = (ld_addr_t *)calloc(nv, sizeof(*s.dec));
+    s.dec_ver = (unsigned *)calloc(nv, sizeof(*s.dec_ver));
+    s.dec_block = (int *)calloc(nv, sizeof(*s.dec_block));
+    s.obj = (unsigned char *)calloc(nv, 1);
+    s.slot_mem = (unsigned *)calloc(nv, sizeof(*s.slot_mem));
+    tab = (ld_entry_t *)calloc(cap, sizeof(*tab));
+    pinned = (unsigned char *)calloc(nv, 1);
+    other_use = (unsigned char *)calloc(nv, 1);
+    ndefs = (int *)calloc(nv, sizeof(*ndefs));
+    if (s.ver == NULL || s.has_dec == NULL || s.dec == NULL || s.dec_ver == NULL || s.dec_block == NULL ||
+        s.obj == NULL || s.slot_mem == NULL || tab == NULL || pinned == NULL || other_use == NULL ||
+        ndefs == NULL) {
+        goto out;
+    }
+    /* the values whose storage an address reaches, and how often each is written: a slot's address once */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+
+        if (in->op == CC_SSA_ADDR && in->lhs >= 0 && in->lhs < f->value_count) {
+            pinned[in->lhs] = 1;
+        }
+        if (in->dst >= 0 && in->dst < f->value_count && in->op != CC_SSA_STORE) {
+            ndefs[in->dst]++;
+        }
+        cc_ssa_for_each_use(in, ld_note_use, other_use);
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int o = in->asm_out_values[k];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(o)) {
+                o = CC_SSA_ASM_MEM_INDIRECT_DECODE(o);
+            }
+            if (o >= 0 && o < f->value_count) {
+                ndefs[o]++;
+            }
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->dst < 0 || in->dst >= f->value_count || ndefs[in->dst] != 1 || pinned[in->dst] ||
+            !ld_word(f, in->dst)) {
+            continue;
+        }
+        if (in->op == CC_SSA_STACKALLOC) {
+            s.obj[in->dst] = LD_OBJ_SLOT;
+        } else if (in->op == CC_SSA_GADDR && in->sym != NULL) {
+            s.obj[in->dst] = LD_OBJ_GLOBAL;
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        ld_entry_t key;
+        int keyed = 0;
+        int writes_all = 0;
+        size_t k;
+
+        s.cur = blocks.of[i];
+        if (in->op == CC_SSA_LOAD && in->plain && in->lhs >= 0 && in->lhs < f->value_count && in->dst >= 0 &&
+            in->dst < f->value_count && in->dst != in->lhs && cc_ssa_value_class(f, in->dst) == CC_VAL_I64 &&
+            f->value_ty[in->dst].kind == CC_TY_INT && ld_word(f, in->lhs) &&
+            !(s.obj[in->lhs] == LD_OBJ_SLOT && !other_use[in->lhs])) {
+            /*
+             * (not a slot only ever loaded and stored whole, a scalar local: mem.c makes it a value, which a copy
+             * of one of its loads only gets in the way of -- a list walk's `n = n->next` kept a second register)
+             */
+            ld_entry_t *hit = NULL;
+            size_t h;
+
+            memset(&key, 0, sizeof(key));
+            key.used = 1;
+            key.at = ld_addr_of(&s, in->lhs);
+            key.size = in->imm;
+            key.is_unsigned = in->is_unsigned;
+            key.seg = in->seg;
+            key.ty = f->value_ty[in->dst];
+            key.block = s.cur;
+            key.mem_all = s.mem_all;
+            key.mem_part = ld_part(&s, &key.at, key.seg);
+            key.dst = in->dst;
+            for (h = ld_hash(&key) & (cap - 1); tab[h].used; h = (h + 1) & (cap - 1)) {
+                ld_entry_t *e = &tab[h];
+
+                if (ld_same(e, &key)) {
+                    if (e->dst != in->dst && s.ver[e->dst] == e->dver && e->mem_all == s.mem_all &&
+                        e->mem_part == key.mem_part && ld_dominates(&blocks, e->block, s.cur)) {
+                        hit = e;
+                    }
+                    break;
+                }
+            }
+            if (hit != NULL) {
+                in->op = CC_SSA_MOV;
+                in->lhs = hit->dst;
+                in->rhs = -1;
+                in->imm = 0;
+                in->seg = 0;
+                in->plain = 0;
+                changed++;
+            } else {
+                keyed = 1;
+            }
+        }
+        /* what it writes of memory */
+        if (in->op == CC_SSA_STORE) {
+            ld_addr_t at;
+
+            at.root = -1;
+            if (ld_word(f, in->lhs)) {
+                at = ld_addr_of(&s, in->lhs);
+            }
+            if (at.root >= 0 && in->seg == 0) {
+                /* one slot's bytes, or the globals', and whatever a pointer may reach of them */
+                if (s.obj[at.root] == LD_OBJ_SLOT) {
+                    s.slot_mem[at.root] = ++s.tick;
+                } else {
+                    s.mem_glob = ++s.tick;
+                }
+                s.mem_other = ++s.tick;
+            } else {
+                writes_all = 1;
+            }
+        } else if (ld_writes_memory(in)) {
+            writes_all = 1;
+        }
+        /* what it writes of values */
+        if (in->dst >= 0 && in->dst < f->value_count && in->op != CC_SSA_STORE) {
+            ld_addr_t d;
+            int known = ld_addr_def(&s, in, &d);
+            int v = in->dst;
+
+            s.ver[v]++;
+            s.has_dec[v] = (unsigned char)known;
+            if (known) {
+                s.dec[v] = d;
+                s.dec_ver[v] = s.ver[v];
+                s.dec_block[v] = s.cur;
+            }
+            if (pinned[v] || f->value_ty[v].kind == CC_TY_AGG || f->value_ty[v].size > 8) {
+                writes_all = 1;
+            }
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int o = in->asm_out_values[k];
+
+            if (!CC_SSA_ASM_MEM_INDIRECT_P(o) && o >= 0 && o < f->value_count) {
+                s.ver[o]++;
+                s.has_dec[o] = 0;
+                if (pinned[o] || f->value_ty[o].kind == CC_TY_AGG || f->value_ty[o].size > 8) {
+                    writes_all = 1;
+                }
+            }
+        }
+        if (writes_all) {
+            s.mem_all = ++s.tick;
+        }
+        if (keyed) {
+            /* (in place of a stale entry of the same key, else in the first free one) */
+            size_t h;
+
+            key.dver = s.ver[in->dst];
+            for (h = ld_hash(&key) & (cap - 1); tab[h].used && !ld_same(&tab[h], &key); h = (h + 1) & (cap - 1)) {
+            }
+            tab[h] = key;
+        }
+    }
+    rc = changed;
+out:
+    ld_blocks_free(&blocks);
+    free(s.ver);
+    free(s.has_dec);
+    free(s.dec);
+    free(s.dec_ver);
+    free(s.dec_block);
+    free(s.obj);
+    free(s.slot_mem);
+    free(tab);
+    free(pinned);
+    free(other_use);
+    free(ndefs);
+    return rc;
+}
+
 static int optimize_function(cc_ssa_function_t *f, int opt_level) {
     int rc1;
     int rc2;
@@ -2951,10 +3556,11 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
                 /* a computation made twice made once; a copy read as its source, which may be known */
                 int rcn = fold_bool_not(f);
                 int rce = rcn < 0 ? -1 : cse_function(f);
-                int rcp = rce < 0 ? -1 : cc_propagate_copies(f);
+                int rcl = rce < 0 ? -1 : cse_loads(f);
+                int rcp = rcl < 0 ? -1 : cc_propagate_copies(f);
                 int rct = rcp < 0 ? -1 : thread_jumps(f);
 
-                rc1 = rct < 0 ? -1 : (rc1 > 0 || rcn > 0 || rce > 0 || rcp > 0 || rct > 0);
+                rc1 = rct < 0 ? -1 : (rc1 > 0 || rcn > 0 || rce > 0 || rcl > 0 || rcp > 0 || rct > 0);
             }
             rc3 = rc1 < 0 ? 0 : unreachable_function(f);
             if (rc0 > 0 && rc1 == 0) {
@@ -5270,6 +5876,7 @@ static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag)
             rc = fold_function(&m->funcs[i], 1);
             rc = rc < 0 ? -1 : fold_bool_not(&m->funcs[i]);
             rc = rc < 0 ? -1 : cse_function(&m->funcs[i]);
+            rc = rc < 0 ? -1 : cse_loads(&m->funcs[i]);
             rc = rc < 0 ? -1 : cc_propagate_copies(&m->funcs[i]);
             rc = rc < 0 ? -1 : thread_jumps(&m->funcs[i]);
             rc = rc < 0 ? -1 : unreachable_function(&m->funcs[i]);

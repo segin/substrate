@@ -5750,6 +5750,74 @@ void lower_expr_instr_init(cc_ssa_instr_t *in) {
 }
 
 /**
+ * Whether an access through type @p t is an ordinary one: the type is known, and neither volatile nor atomic.
+ *
+ * @param t  the type of the lvalue, or of the object, read
+ * @return   1 or 0
+ */
+static int ct_access_plain(const cc_ctype_t *t) {
+    return t != NULL && (t->quals & (CC_CQ_VOLATILE | CC_CQ_ATOMIC)) == 0u;
+}
+
+/**
+ * Whether lvalue @p e designates an ordinary object, which a load of it may read as a load of the same address
+ * before it, with nothing between that may write it (CC_SSA_LOAD's plain): the lvalue's type is neither
+ * volatile nor atomic, nor is the object it is part of -- a member's structure, a variable's declared type, the
+ * type a pointer it is reached through points to.  Anything this does not follow is not plain.
+ *
+ * @param tu         the translation unit
+ * @param vars       the variables in scope
+ * @param var_count  their number
+ * @param depth      the scope depth
+ * @param e          the lvalue
+ * @param level      how deep the walk is; it gives up (not plain) past 32
+ * @return           1 if plain, else 0
+ */
+static int lvalue_plain(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                        const cc_expr_t *e, int level) {
+    if (e == NULL || level > 32 || !ct_access_plain(e->ctype)) {
+        return 0;
+    }
+    switch (e->kind) {
+    case CC_EXPR_IDENT: {
+        int idx = e->ident != NULL ? var_find_visible(vars, var_count, e->ident, depth) : -1;
+        const cc_global_t *g;
+
+        if (idx >= 0) {
+            return ct_access_plain(vars[idx].ctype);
+        }
+        g = e->ident != NULL ? find_global(tu, e->ident) : NULL;
+        return g != NULL && ct_access_plain(global_decl_ctype(g));
+    }
+    case CC_EXPR_MEMBER:
+        if (e->lhs == NULL) {
+            return 0;
+        }
+        if (e->member_is_arrow) {
+            return ct_has_kind(e->lhs->ctype, CC_CT_POINTER) && ct_access_plain(e->lhs->ctype->of);
+        }
+        return lvalue_plain(tu, vars, var_count, depth, e->lhs, level + 1);
+    case CC_EXPR_DEREF: {
+        const cc_expr_t *p = e->lhs;
+
+        /* (an array operand decays to a pointer to its elements, qualifiers and all) */
+        if (p == NULL || !ct_has_kind(lower_value_ctype(p), CC_CT_POINTER) ||
+            !ct_access_plain(lower_value_ctype(p)->of)) {
+            return 0;
+        }
+        /* an element of an array object, `a[i]`: the array is part of an object, which must be plain too */
+        while (p->kind == CC_EXPR_BIN && (p->op == CC_BIN_ADD || p->op == CC_BIN_SUB) && p->lhs != NULL &&
+               p->rhs != NULL) {
+            p = ct_has_kind(lower_value_ctype(p->lhs), CC_CT_POINTER) ? p->lhs : p->rhs;
+        }
+        return !ct_has_kind(p->ctype, CC_CT_ARRAY) || lvalue_plain(tu, vars, var_count, depth, p, level + 1);
+    }
+    default:
+        return 0;
+    }
+}
+
+/**
  * Lower an identifier: a variable's value (or address, for an array, function or aggregate), an enumerator, a function (CC_EXPR_IDENT).
  *
  * @param tu         the translation unit
@@ -5834,6 +5902,7 @@ static int lower_ident_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *
             in.imm = mem_size;
             in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
             in.seg = seg_of_ctype(global_decl_ctype(g)); /* (the declared type: decay drops the qualifiers) */
+            in.plain = (unsigned char)lvalue_plain(tu, vars, var_count, depth, e, 0);
             if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
                 return -1;
             }
@@ -5877,6 +5946,7 @@ static int lower_ident_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *
         in.rhs = -1;
         in.imm = mem_size;
         in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
+        in.plain = (unsigned char)lvalue_plain(tu, vars, var_count, depth, e, 0);
         if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
             return -1;
         }
@@ -5894,6 +5964,7 @@ static int lower_ident_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *
         in.rhs = -1;
         in.imm = mem_size;
         in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
+        in.plain = (unsigned char)lvalue_plain(tu, vars, var_count, depth, e, 0);
         if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
             set_diag(diag, "out of memory loading address-taken local");
             return -1;
@@ -6060,6 +6131,7 @@ static int lower_member_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
     in.imm = mem_size;
     in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
     in.seg = seg_of_ctype(e->ctype);
+    in.plain = (unsigned char)lvalue_plain(tu, vars, var_count, depth, e, 0);
     if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
         return -1;
     }
@@ -8243,6 +8315,7 @@ int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const low
         in.imm = mem_size;
         in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
         in.seg = seg_of_ctype(e->ctype);
+        in.plain = (unsigned char)lvalue_plain(tu, vars, var_count, depth, e, 0);
         if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
             return -1;
         }

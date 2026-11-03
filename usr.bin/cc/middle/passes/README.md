@@ -26,9 +26,19 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   common subexpressions within a block
   (`cse_function()`: a pure computation made again from the same versions
   of the same operands a copy of the first, an operand read as what the
-  block copied it from while neither is written, loads left alone as the
-  IR does not mark the volatile ones; it runs again once slots are
-  values); then, from -O1,
+  block copied it from while neither is written; it runs again once
+  slots are values), and common loads across blocks (`cse_loads()`: a
+  load lowering marked plain -- of an lvalue neither volatile nor
+  atomic, `cc_ssa_instr_t.plain`; never another; not of a scalar local
+  `mem.c` makes a value -- of an address, a base
+  and a constant offset, that a plain load read in a block dominating it
+  along blocks each entered from one place, a copy of what that read,
+  unless something between may write it: a store but one to another
+  stack slot or, from a slot, to a global, a call, a load not plain, an
+  asm that clobbers "memory" or has a memory output, the write of a value
+  whose address is taken; as gcc's value numbering, so a branch on the
+  first read tells range folding of the second -- Linux's
+  fuse_notify_store() reads `outarg.offset` twice); then, from -O1,
   inlining bottom-up over the call graph (a function is rewritten once
   its callees are, then folded again, with what the module's
   declarations tell, `fold_module_facts()`: a load from a const table at
@@ -98,4 +108,5 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   parameters within what they are passed -- not negative, within their
   types -- as gcc's interprocedural range propagation.
 
-Not here yet: mem2reg, CSE across blocks (GVN), LICM and loop transforms.
+Not here yet: mem2reg, CSE of computations across blocks (GVN; loads
+only, above), LICM and loop transforms.
