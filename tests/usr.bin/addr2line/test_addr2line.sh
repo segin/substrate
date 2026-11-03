@@ -129,6 +129,62 @@ SRC
     cc -g -gdwarf-4 -no-pie -o "$dir/a.out" "$dir/main_integ.c"
 }
 
+build_fixture_headers() {
+    dir=$1
+    mkdir -p "$dir/inc"
+    cat > "$dir/inc/helper.h" <<'SRC'
+static int helper_one(int x)
+{
+    return x * 3;
+}
+static int helper_two(int x)
+{
+    return helper_one(x) + 1;
+}
+SRC
+    cat > "$dir/other.h" <<'SRC'
+static int other_fn(int x)
+{
+    return x - 2;
+}
+SRC
+    cat > "$dir/hdr_main.c" <<'SRC'
+#include "helper.h"
+#include "other.h"
+int main(void)
+{
+    return helper_two(4) + other_fn(5);
+}
+SRC
+}
+
+build_fixture_file_zero() {
+    dir=$1
+    mkdir -p "$dir"
+    cat > "$dir/fzero.s" <<'SRC'
+	.file 0 "/srcroot/zero" "zero.c"
+	.file 1 "/srcroot/zero" "zero.c"
+	.file 2 "/srcroot/inc" "part.h"
+	.text
+	.globl zfunc
+	.type zfunc, @function
+zfunc:
+	.loc 0 7 0
+	nop
+	.loc 2 3 0
+	nop
+	.loc 0 9 0
+	ret
+	.size zfunc, .-zfunc
+SRC
+    cat > "$dir/fzero_main.c" <<'SRC'
+int zfunc(void);
+int main(void) { zfunc(); return 0; }
+SRC
+    as --gdwarf-5 -o "$dir/fzero.o" "$dir/fzero.s"
+    cc -no-pie -o "$dir/fzero" "$dir/fzero_main.c" "$dir/fzero.o"
+}
+
 first_line() {
     printf '%s\n' "$1" | sed -n '1p'
 }
@@ -382,6 +438,36 @@ SRC
         addr2line 0x$INTEG_ADDR
     )
     expect_eq "10i-2" "$OUT_10I" "$HOST_10I"
+
+    # 10j: DWARF 5 numbers the line-table file and directory entries
+    # from 0 (file 0 = primary source, directory 0 = compilation
+    # directory); DWARF 4 numbers them from 1.  Every path here is
+    # absolute so host addr2line's output can be compared verbatim.
+    build_fixture_headers "$TMP/hdr"
+    for V in 4 5; do
+        cc -O0 -g -gdwarf-$V -no-pie -I"$TMP/hdr/inc" \
+            -o "$TMP/hdr/hdr_v$V" "$TMP/hdr/hdr_main.c"
+        for S in helper_one helper_two other_fn main; do
+            HA=$(addr_of "$TMP/hdr/hdr_v$V" "$S")
+            [ -n "$HA" ] || fail "10j-1 v$V symbol $S not found"
+            expect_eq "10j-1 v$V $S" \
+                "$($BIN -e "$TMP/hdr/hdr_v$V" 0x$HA)" \
+                "$(addr2line -e "$TMP/hdr/hdr_v$V" 0x$HA)"
+        done
+    done
+
+    # 10j-2: a DWARF 5 line program that names file 0 directly (clang
+    # does this for the primary file), and a file under directory 1.
+    require_cmd as
+    build_fixture_file_zero "$TMP/fzero"
+    ZA=$(addr_of "$TMP/fzero/fzero" zfunc)
+    [ -n "$ZA" ] || fail "10j-2 symbol zfunc not found"
+    for OFF in 0 1 2; do
+        ZQ=$(printf '%x' $((0x$ZA + OFF)))
+        expect_eq "10j-2 +$OFF" \
+            "$($BIN -e "$TMP/fzero/fzero" 0x$ZQ)" \
+            "$(addr2line -e "$TMP/fzero/fzero" 0x$ZQ)"
+    done
 
     pass "all"
 }

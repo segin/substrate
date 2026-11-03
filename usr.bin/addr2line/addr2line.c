@@ -3638,24 +3638,34 @@ static char *line_path_for_unit_file(const addr2line_image_t *img,
     const char *dir = NULL;
     size_t dir_len = 0;
     size_t file_len;
+    uint32_t first;
     char *full;
 
     if (unit_index >= img->line_unit_count) {
         return NULL;
     }
     u = &img->line_units[unit_index];
-    if (file_index == 0u || (size_t)file_index > u->file_count) {
+    /*
+     * DWARF 5 numbers both tables from 0: file 0 is the primary source
+     * file and directory 0 the compilation directory, and both are
+     * stored in the tables.  DWARF 2-4 number them from 1, with 0
+     * meaning "no file" and "the compilation directory" (which the
+     * header does not list), so the tables start at entry 1.
+     */
+    first = (u->version >= 5u) ? 0u : 1u;
+    if (file_index < first || (size_t)(file_index - first) >= u->file_count) {
         return NULL;
     }
-    f = &u->files[file_index - 1u];
+    f = &u->files[file_index - first];
     if (f->name == NULL) {
         return NULL;
     }
     file_len = strlen(f->name);
 
-    if (f->dir_index > 0u && (size_t)f->dir_index <= u->include_dir_count &&
+    if (f->dir_index >= first &&
+        f->dir_index - first < (uint64_t)u->include_dir_count &&
         f->name[0] != '/') {
-        dir = u->include_dirs[f->dir_index - 1u];
+        dir = u->include_dirs[f->dir_index - first];
         if (dir != NULL && dir[0] != '\0') {
             dir_len = strlen(dir);
         }
