@@ -709,7 +709,8 @@ static int symvec_push(elf_symbol_t ***items, size_t *count, size_t *cap, elf_sy
  * names: a name read from the object's full symbol table may carry its version, and "sym@@VER", the
  * default version, is the dynamic symbol "sym" by another spelling, which the copy takes as "sym" (its
  * version is the definition's, given it with the copy's).  "sym@VER", a version that is not the default,
- * is not a name a plain reference reaches, and gives the copy none.
+ * is the dynamic symbol "sym" whose .gnu.version entry is hidden, spelt out: that one gives the copy the
+ * name, with its version (plan_copy_relocs()), and this spelling gives it none.
  *
  * @param name  the shared object's symbol name
  * @param out   set to the bare name, which the caller frees, or to NULL when @p name gives the copy none
@@ -742,6 +743,7 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
      * can be relocated where they are. */
     int pie = elf_type(out) == ET_DYN && ctx->opt.pie;
     size_t si, ri, k;
+    int pass;
 
     if ((elf_type(out) != ET_EXEC && !pie) || ctx->dso_inputs.count == 0) {
         return 0;
@@ -811,41 +813,61 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
                     break;
                 }
             }
-            for (k = 0; k < elf_symbol_count(dso); ++k) {
-                const elf_symbol_t *other = elf_symbol_at(dso, k);
-                const char *oname = other != NULL ? elf_symbol_name(other) : NULL;
-                char *bare = NULL;
-                elf_symbol_t *alias;
+            /* (names of the default version or none first: a plain reference reaches one of those before
+             * the same name of a hidden version, sym@VER, which the copy is given only failing them) */
+            for (pass = 0; pass < 2; ++pass) {
+                for (k = 0; k < elf_symbol_count(dso); ++k) {
+                    const elf_symbol_t *other = elf_symbol_at(dso, k);
+                    const char *oname = other != NULL ? elf_symbol_name(other) : NULL;
+                    char *bare = NULL;
+                    char *ver = NULL;
+                    int hidden = 0;
+                    elf_symbol_t *alias;
 
-                if (oname == NULL || oname[0] == '\0' ||
-                    elf_symbol_shndx(other) != def.shndx || elf_symbol_value(other) != def.value ||
-                    elf_symbol_type(other) != STT_OBJECT ||
-                    (elf_symbol_bind(other) != STB_GLOBAL && elf_symbol_bind(other) != STB_WEAK) ||
-                    (elf_symbol_bind(other) == STB_WEAK) == own_weak) {
-                    continue;
-                }
-                if (copy_alias_bare_name(oname, &bare) != 0) {
-                    ld_dso_close(dso);
-                    return -1;
-                }
-                if (bare == NULL || strcmp(bare, elf_symbol_name(sym)) == 0) {
+                    if (oname == NULL || oname[0] == '\0' ||
+                        elf_symbol_shndx(other) != def.shndx || elf_symbol_value(other) != def.value ||
+                        elf_symbol_type(other) != STT_OBJECT ||
+                        (elf_symbol_bind(other) != STB_GLOBAL && elf_symbol_bind(other) != STB_WEAK) ||
+                        (elf_symbol_bind(other) == STB_WEAK) == own_weak) {
+                        continue;
+                    }
+                    if (ld_dso_symbol_version(dso, other, &ver, &hidden) != 0 ||
+                        copy_alias_bare_name(oname, &bare) != 0) {
+                        free(ver);
+                        ld_dso_close(dso);
+                        return -1;
+                    }
+                    if (!hidden || ver == NULL) {
+                        free(ver);
+                        ver = NULL;
+                        hidden = 0;
+                    }
+                    if (bare == NULL || hidden != pass || strcmp(bare, elf_symbol_name(sym)) == 0) {
+                        free(bare);
+                        free(ver);
+                        continue;
+                    }
+                    alias = elf_find_symbol(out, bare);
+                    if (alias != NULL && elf_symbol_shndx(alias) != SHN_UNDEF) {
+                        free(bare);
+                        free(ver);
+                        continue;   /* the program has one of its own by that name, or has it already */
+                    }
+                    if (alias == NULL) {
+                        alias = elf_add_symbol(out, bare, 0, 0, elf_symbol_bind(other), STT_OBJECT);
+                    }
                     free(bare);
-                    continue;
-                }
-                alias = elf_find_symbol(out, bare);
-                if (alias != NULL && elf_symbol_shndx(alias) != SHN_UNDEF) {
-                    free(bare);
-                    continue;   /* the program has one of its own by that name, or has it already */
-                }
-                if (alias == NULL) {
-                    alias = elf_add_symbol(out, bare, 0, 0, elf_symbol_bind(other), STT_OBJECT);
-                }
-                free(bare);
-                if (alias == NULL || elf_symbol_define(alias, dynbss, off) != ELF_OK ||
-                    elf_symbol_set_type(alias, STT_OBJECT) != ELF_OK || elf_symbol_set_size(alias, def.size) != ELF_OK ||
-                    symvec_push(&imports->copy_aliases, &imports->alias_count, &imports->alias_cap, alias) != 0) {
-                    ld_dso_close(dso);
-                    return -1;
+                    if (alias == NULL || elf_symbol_define(alias, dynbss, off) != ELF_OK ||
+                        elf_symbol_set_type(alias, STT_OBJECT) != ELF_OK ||
+                        elf_symbol_set_size(alias, def.size) != ELF_OK ||
+                        ld_vec_room(&imports->alias_versions, &imports->alias_versions_cap, imports->alias_count,
+                                    sizeof(imports->alias_versions[0])) != 0 ||
+                        symvec_push(&imports->copy_aliases, &imports->alias_count, &imports->alias_cap, alias) != 0) {
+                        free(ver);
+                        ld_dso_close(dso);
+                        return -1;
+                    }
+                    imports->alias_versions[imports->alias_count - 1] = ver;   /* (its version, now the list's) */
                 }
             }
             ld_dso_close(dso);

@@ -9,10 +9,18 @@
 # that its dynamic symbols named var and wvar twice, and it defined V2
 # itself instead of needing it from the library.
 #
+# An other name of a version that is not the default, a weak "wvar@V1"
+# beside "var@@V2", is still given to the copy, with that version: GNU ld
+# exports it as wvar@V1, needed from the library.  The linker gave the copy
+# a bare, unversioned "wvar" (found by the dynamic symbol's name), with no
+# need of V1, whether the library was stripped or not.
+#
 # GNU ld is the judge: a program referring to one name of a versioned
-# weak/strong pair has the same copies, dynamic symbols, symbols and
-# version sections as GNU ld's, and prints what GNU ld's prints, as a PIE
-# and as an executable that is not one.
+# weak/strong pair has the same copies, dynamic symbols and their versions,
+# symbols and version sections as GNU ld's, and prints what GNU ld's
+# prints, as a PIE and as an executable that is not one, for a pair of one
+# version and a pair whose weak name has another, hidden version, and with
+# the library stripped and not.
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -36,7 +44,8 @@ ${CC:-cc} -O0 -w -o "$work/tools/ld" \
     echo "FAIL: the linker does not build for the host"; exit 1; }
 
 cd "$work" || exit 1
-cat > t.c <<'EOF'
+# both names of version V2, the default
+cat > same.c <<'EOF'
 int var_new = 5;
 extern int wvar_new __attribute__((weak, alias("var_new")));
 __asm__(".symver var_new, var@@V2");
@@ -44,8 +53,21 @@ __asm__(".symver wvar_new, wvar@@V2");
 int lib_var(void) { return var_new; }
 int lib_wvar(void) { return wvar_new; }
 EOF
-cat > t.map <<'EOF'
+cat > same.map <<'EOF'
 V2 { global: var; wvar; lib_var; lib_wvar; local: *; };
+EOF
+# the weak name of version V1, not the default: wvar@V1
+cat > hidden.c <<'EOF'
+int var_new = 5;
+extern int wvar_old __attribute__((weak, alias("var_new")));
+__asm__(".symver var_new, var@@V2");
+__asm__(".symver wvar_old, wvar@V1");
+int lib_var(void) { return var_new; }
+int lib_wvar(void) { return wvar_old; }
+EOF
+cat > hidden.map <<'EOF'
+V1 { global: wvar; };
+V2 { global: var; lib_var; lib_wvar; local: *; } V1;
 EOF
 cat > main.c <<'EOF'
 #include <stdio.h>
@@ -59,20 +81,17 @@ int main(void)
     return 0;
 }
 EOF
-gcc -shared -fPIC -Wl,--version-script=t.map -o lib/libt.so t.c || exit 1
-if ! readelf -sW lib/libt.so | grep -q ' var@@V2$'; then
-    echo "skip: the library's full symbol table does not name var@@V2"
-    exit 0
-fi
 
 copies() {
     readelf -rW "$1" 2>/dev/null | awk '/_COPY/ { print $5 }' | sort | tr '\n' ' '
 }
 # The program's dynamic symbols for the variable, with the versions readelf
 # shows beside them (not their indexes, which follow the order of the
-# needed versions).
+# needed versions), and whether .gnu.version marks them hidden.
 names() {
     readelf -W --dyn-syms "$1" 2>/dev/null | awk '$8 ~ /^w?var($|@)/ { print $8 }' | sort | tr '\n' ' '
+    readelf -VW "$1" 2>/dev/null | awk '/^Version symbols section/ { t = 1; next } /^$/ { t = 0 }
+        t { for (i = 2; i <= NF; i++) if ($i ~ /h\(/) print "hidden" }' | sort | uniq -c | tr '\n' ' '
 }
 # Its full symbol table's names: var's, and any still spelling a default
 # version, as no output symbol's name does.
@@ -80,34 +99,48 @@ symtab() {
     readelf -W --syms "$1" 2>/dev/null | awk '/^Symbol table .\.symtab/ { t = 1 }
         t && ($8 ~ /^var($|@)/ || $8 ~ /@@/) { print $8 }' | sort | tr '\n' ' '
 }
-# The version sections and where V2 comes from.
+# The version sections and where V1 and V2 come from.
 versions() {
     readelf -VW "$1" 2>/dev/null | awk '/^Version (definition|needs) section/ { print $1, $2, $3 }
-        /File:/ { file = $5 } /Name: V2/ { print "V2", file }' | sort | tr '\n' ' '
+        /File:/ { file = $5 } /Name: V[12] / { print $3, file }' | sort | tr '\n' ' '
 }
-for kind in "-pie -fPIE" "-no-pie -fno-pie"; do
-    rm -f gnu our
-    gcc $kind -o gnu main.c -Llib -lt || { echo "FAIL: $kind: GNU ld did not link it"; fail=1; continue; }
-    if ! gcc -B"$work/tools/" $kind -o our main.c -Llib -lt > said 2>&1; then
-        echo "FAIL: $kind: $(grep -v collect2 said | head -1)"; fail=1; continue
+
+for lib in same hidden; do
+    gcc -shared -fPIC -Wl,--version-script=$lib.map -o lib/libt.so $lib.c || exit 1
+    if ! readelf -sW lib/libt.so | grep -q ' var@@V2$'; then
+        echo "skip: the library's full symbol table does not name var@@V2"
+        exit 0
     fi
-    want=$(LD_LIBRARY_PATH="$work/lib" ./gnu)
-    got=$(LD_LIBRARY_PATH="$work/lib" ./our 2>&1)
-    if [ "$got" != "$want" ]; then
-        echo "FAIL: $kind: prints [$got], GNU ld's [$want]"; fail=1
-    fi
-    if [ "$(copies our)" != "$(copies gnu)" ]; then
-        echo "FAIL: $kind: copies [$(copies our)], GNU ld's [$(copies gnu)]"; fail=1
-    fi
-    if [ "$(names our)" != "$(names gnu)" ]; then
-        echo "FAIL: $kind: .dynsym [$(names our)], GNU ld's [$(names gnu)]"; fail=1
-    fi
-    if [ "$(symtab our)" != "$(symtab gnu)" ]; then
-        echo "FAIL: $kind: .symtab [$(symtab our)], GNU ld's [$(symtab gnu)]"; fail=1
-    fi
-    if [ "$(versions our)" != "$(versions gnu)" ]; then
-        echo "FAIL: $kind: versions [$(versions our)], GNU ld's [$(versions gnu)]"; fail=1
-    fi
+    for strip in no yes; do
+        if [ $strip = yes ]; then
+            strip lib/libt.so || exit 1
+        fi
+        for kind in "-pie -fPIE" "-no-pie -fno-pie"; do
+            what="$lib, stripped $strip, $kind"
+            rm -f gnu our
+            gcc $kind -o gnu main.c -Llib -lt || { echo "FAIL: $what: GNU ld did not link it"; fail=1; continue; }
+            if ! gcc -B"$work/tools/" $kind -o our main.c -Llib -lt > said 2>&1; then
+                echo "FAIL: $what: $(grep -v collect2 said | head -1)"; fail=1; continue
+            fi
+            want=$(LD_LIBRARY_PATH="$work/lib" ./gnu)
+            got=$(LD_LIBRARY_PATH="$work/lib" ./our 2>&1)
+            if [ "$got" != "$want" ]; then
+                echo "FAIL: $what: prints [$got], GNU ld's [$want]"; fail=1
+            fi
+            if [ "$(copies our)" != "$(copies gnu)" ]; then
+                echo "FAIL: $what: copies [$(copies our)], GNU ld's [$(copies gnu)]"; fail=1
+            fi
+            if [ "$(names our)" != "$(names gnu)" ]; then
+                echo "FAIL: $what: .dynsym [$(names our)], GNU ld's [$(names gnu)]"; fail=1
+            fi
+            if [ "$(symtab our)" != "$(symtab gnu)" ]; then
+                echo "FAIL: $what: .symtab [$(symtab our)], GNU ld's [$(symtab gnu)]"; fail=1
+            fi
+            if [ "$(versions our)" != "$(versions gnu)" ]; then
+                echo "FAIL: $what: versions [$(versions our)], GNU ld's [$(versions gnu)]"; fail=1
+            fi
+        done
+    done
 done
 
 if [ $fail = 0 ]; then

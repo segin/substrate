@@ -249,6 +249,10 @@ void dyn_import_vec_free(dyn_import_vec_t *v) {
     }
     free(v->items);
     free(v->copies);
+    for (i = 0; v->alias_versions != NULL && i < v->alias_count; ++i) {
+        free(v->alias_versions[i]);
+    }
+    free(v->alias_versions);
     free(v->copy_aliases);
     memset(v, 0, sizeof(*v));
 }

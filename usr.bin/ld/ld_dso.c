@@ -874,6 +874,40 @@ const char *dso_needed_name(const ld_ctx_t *ctx, size_t i) {
     return leaf != NULL ? leaf + 1 : path;
 }
 
+/**
+ * The version a shared object gives one of its dynamic symbols, by the number .gnu.version holds for it:
+ * the name its .gnu.version_d gives that number, and whether it is hidden (sym@VER, not the default
+ * version a plain reference binds to).
+ *
+ * @param dso    the shared object
+ * @param sym    one of its symbols
+ * @param out    set to the version's name, which the caller frees, or to NULL for none
+ * @param hidden set to whether the version is hidden
+ * @return 0, or -1 out of memory
+ */
+int ld_dso_symbol_version(const elfobj_t *dso, const elf_symbol_t *sym, char **out, int *hidden) {
+    verdef_table_t defs;
+    uint16_t ver = elf_symbol_version(sym);
+    const char *name;
+
+    *out = NULL;
+    *hidden = (ver & VER_NDX_HIDDEN) != 0;
+    ver = (uint16_t)(ver & (uint16_t)~VER_NDX_HIDDEN);
+    if (ver <= VER_NDX_GLOBAL) {
+        return 0;
+    }
+    if (load_dso_verdef_table(dso, &defs) != 0) {
+        return -1;
+    }
+    name = verdef_lookup(&defs, ver);
+    if (name != NULL && name[0] != '\0' && (*out = xstrdup(name)) == NULL) {
+        verdef_table_free(&defs);
+        return -1;
+    }
+    verdef_table_free(&defs);
+    return 0;
+}
+
 /*
  * Learn those names, once the shared objects of the link are known, and
  * what each refers to without defining.  The second is for the dynamic
@@ -1311,6 +1345,24 @@ static int is_copied_name(const ld_ctx_t *ctx, const char *base, size_t len) {
 }
 
 /**
+ * The version that is not the default which the shared object gives the program's copy's other name
+ * @p base (@p len bytes), "wvar" of a "wvar@V1" (plan_copy_relocs()), or NULL if it has none such.
+ */
+static const char *copy_alias_hidden_version(const ld_ctx_t *ctx, const char *base, size_t len) {
+    size_t i;
+
+    for (i = 0; ctx->dyn_imports.alias_versions != NULL && i < ctx->dyn_imports.alias_count; ++i) {
+        const elf_symbol_t *s = ctx->dyn_imports.copy_aliases[i];
+        const char *n = s != NULL ? elf_symbol_name(s) : NULL;
+
+        if (n != NULL && strncmp(n, base, len) == 0 && n[len] == '\0') {
+            return ctx->dyn_imports.alias_versions[i];
+        }
+    }
+    return NULL;
+}
+
+/**
  * The output's symbol called @p base (@p len bytes), an import or a copy, has version @p ver of a shared
  * object: its .symtab entry is named name@ver, as GNU ld names it.
  *
@@ -1404,7 +1456,23 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
                 base_len != 0 && curr_base <= VER_NDX_GLOBAL) {
                 const char *provider = NULL;
                 char *auto_ver_name = NULL;
-                int found = resolve_default_version_need(ctx, base, base_len, &provider, &auto_ver_name);
+                const char *alias_ver = shndx != SHN_UNDEF ? copy_alias_hidden_version(ctx, base, base_len) : NULL;
+                int found;
+
+                /* a copy's other name the shared object gives a version that is not the default (wvar@V1):
+                 * that version of it, needed from the object, as GNU ld gives it */
+                if (alias_ver != NULL) {
+                    provider = resolve_version_need_provider(ctx, base, base_len, alias_ver);
+                    if (provider != NULL &&
+                        (dyn_ver_plan_get_or_add_need(&plan, provider, alias_ver, &assigned) != 0 ||
+                         versym_write_raw(versym_buf, versym_len, endian, i, assigned) != 0 ||
+                         note_import_version(out, base, base_len, alias_ver) != 0)) {
+                        dyn_ver_plan_free(&plan);
+                        return -1;
+                    }
+                    continue;
+                }
+                found = resolve_default_version_need(ctx, base, base_len, &provider, &auto_ver_name);
 
                 if (found < 0) {
                     dyn_ver_plan_free(&plan);

@@ -143,6 +143,11 @@ typedef struct {
     elf_symbol_t **copy_aliases;
     size_t alias_count;
     size_t alias_cap;
+    /* For each of copy_aliases, the version that is not the default which
+     * the shared object gives that name ("wvar@V1"), which the program's
+     * reference to it needs; NULL for a default or no version. */
+    char **alias_versions;
+    size_t alias_versions_cap;
 } dyn_import_vec_t;
 
 /*
@@ -867,6 +872,7 @@ void ld_dso_close(elfobj_t *obj);
 int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state);
 int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, int *out_has_provider);
 const char *dso_needed_name(const ld_ctx_t *ctx, size_t i);
+int ld_dso_symbol_version(const elfobj_t *dso, const elf_symbol_t *sym, char **out, int *hidden);
 int note_dso_names(ld_ctx_t *ctx);
 int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_buf, size_t *dynstr_len,
                                         size_t *dynstr_cap, const uint8_t *dynsym_buf, size_t dynsym_len, size_t entsz,
