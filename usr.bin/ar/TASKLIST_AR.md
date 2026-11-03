@@ -216,8 +216,10 @@ Goal: implement a full‑featured `ar(1)` archive utility using `libelfobj` for 
 - [ ] Missing archive for `r`/`q`: create new archive (with `-c` suppress warning).
 - [ ] Member not found for `d`/`m`: warn per member.
 - [ ] Path‑traversal member names on extract: refuse with warning.
-- [ ] Truncated archive data: warn, skip remainder.
-- [ ] Invalid numeric header fields: warn, skip member.
+- [x] Truncated archive data: "file truncated", exit 1, archive untouched.
+- [x] Bad `ar_fmag` or `ar_size`: "malformed archive", exit 1, archive
+      untouched.  Non-numeric `ar_uid`/`ar_gid`/`ar_mode`: warn only
+      (GNU ignores them).
 - [ ] `malloc()` failure: fatal error.
 - [ ] Write failure: unlink temp, fatal error with `errno`.
 - [ ] Invalid option combination (`-u` + `q`; `-a` + `-b`): fatal error.

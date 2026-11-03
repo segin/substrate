@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
 #include <time.h>
 #include <sys/time.h>
 #include <stdint.h>
@@ -699,6 +700,14 @@ static size_t member_position(const struct ar_memb *m) {
     return (size_t)-1;
 }
 
+/**
+ * Read the archive at path into the member list.  A damaged archive is
+ * fatal, as it is to GNU ar: a header with a bad trailer or size field
+ * is a "malformed archive", and a header or member cut short by the end
+ * of the file is "file truncated".  Carrying on would read later
+ * headers out of member data, and an operation that rewrites the
+ * archive would then write back only the members read so far.
+ */
 static void read_archive(const char *path) {
     bool first_member = true;
     size_t member_count = 0;
@@ -732,13 +741,18 @@ static void read_archive(const char *path) {
     }
 
     struct ar_hdr hdr;
-    while (read(fd, &hdr, sizeof(hdr)) == sizeof(hdr)) {
+    for (;;) {
         char raw_name[17];
         long long parsed_size = 0;
+        ssize_t got = read(fd, &hdr, sizeof(hdr));
 
+        if (got == 0) break;
+        if (got < 0) err(1, "%s", path);
+        if (got != (ssize_t)sizeof(hdr)) {
+            errx(1, "%s: file truncated", path);
+        }
         if (memcmp(hdr.ar_fmag, ARFMAG, 2) != 0) {
-            warnx("malformed header in %s", path);
-            continue;
+            errx(1, "%s: malformed archive", path);
         }
 
         memcpy(raw_name, hdr.ar_name, 16);
@@ -760,19 +774,16 @@ static void read_archive(const char *path) {
 
         if (!parse_numeric_field(hdr.ar_size, sizeof(hdr.ar_size), 10, &parsed_size) ||
             parsed_size < 0) {
-            warnx("%s: invalid member size field", path);
-            continue;
+            errx(1, "%s: malformed archive", path);
         }
-        if ((unsigned long long)parsed_size > (unsigned long long)SIZE_MAX) {
-            warnx("%s: member size too large", path);
-            break;
+        if ((unsigned long long)parsed_size > (unsigned long long)LONG_MAX) {
+            errx(1, "%s: malformed archive", path);
         }
         long size = (long)parsed_size;
         if (archive_size >= 0) {
             off_t cur_pos = lseek(fd, 0, SEEK_CUR);
-            if (cur_pos >= 0 && cur_pos + (off_t)size > archive_size) {
-                warnx("%s: truncated member data", path);
-                break;
+            if (cur_pos >= 0 && (off_t)size > archive_size - cur_pos) {
+                errx(1, "%s: file truncated", path);
             }
         }
         if (!parse_numeric_field(hdr.ar_uid, sizeof(hdr.ar_uid), 10, &parsed_size)) {
@@ -807,19 +818,14 @@ static void read_archive(const char *path) {
              * a value exceeding the member size underflows payload_size.
              * Reject anything not within the member's own data. */
             if (name_len < 0 || (long)name_len > size) {
-                warnx("%s: invalid extended member name length", path);
-                free(m);
-                break;
+                errx(1, "%s: malformed archive", path);
             }
             m->name = malloc(name_len + 1);
             if (m->name == NULL) {
                 errx(1, "out of memory");
             }
             if (read(fd, m->name, name_len) != name_len) {
-                warnx("%s: truncated extended member name", path);
-                free(m->name);
-                free(m);
-                break;
+                errx(1, "%s: file truncated", path);
             }
             m->name[name_len] = 0;
             while (name_len > 0 && m->name[name_len - 1] == '\0') {
@@ -839,11 +845,7 @@ static void read_archive(const char *path) {
                     errx(1, "out of memory");
                 }
                 if (read(fd, m->thin_path, payload_size) != (ssize_t)payload_size) {
-                    warnx("%s: truncated thin member path", path);
-                    free(m->thin_path);
-                    free(m->name);
-                    free(m);
-                    break;
+                    errx(1, "%s: file truncated", path);
                 }
                 m->thin_path[payload_size] = 0;
                 m->size = 0;
@@ -855,11 +857,7 @@ static void read_archive(const char *path) {
                     errx(1, "out of memory");
                 }
                 if (m->size > 0 && read(fd, m->data, m->size) != (ssize_t)m->size) {
-                    warnx("%s: truncated member payload", path);
-                    free(m->data);
-                    free(m->name);
-                    free(m);
-                    break;
+                    errx(1, "%s: file truncated", path);
                 }
             }
         } else {
@@ -881,11 +879,7 @@ static void read_archive(const char *path) {
                     errx(1, "out of memory");
                 }
                 if (read(fd, m->thin_path, size) != size) {
-                    warnx("%s: truncated thin member path", path);
-                    free(m->thin_path);
-                    free(m->name);
-                    free(m);
-                    break;
+                    errx(1, "%s: file truncated", path);
                 }
                 m->thin_path[size] = 0;
                 m->size = 0;
@@ -897,11 +891,7 @@ static void read_archive(const char *path) {
                     errx(1, "out of memory");
                 }
                 if (size > 0 && read(fd, m->data, size) != size) {
-                    warnx("%s: truncated member payload", path);
-                    free(m->data);
-                    free(m->name);
-                    free(m);
-                    break;
+                    errx(1, "%s: file truncated", path);
                 }
 
                 if (archive_format == ARFMT_GNU && strcmp(m->name, "//") == 0) {
@@ -929,8 +919,7 @@ static void read_archive(const char *path) {
 
         member_count++;
         if (member_count > 1000000) {
-            warnx("%s: refusing archive with too many members", path);
-            break;
+            errx(1, "%s: refusing archive with too many members", path);
         }
     }
 
