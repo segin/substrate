@@ -2434,7 +2434,7 @@ static int aarch64_apply(const elfobj_reloc_ctx_t *ctx,
             return 0;
         case R_AARCH64_ABS16:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_signed_bits(v, 16)) {
+            if (!swide_in_bitfield_bits(v, 16)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 16);

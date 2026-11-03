@@ -87,6 +87,40 @@ static void check_abs32_negative(uint16_t machine, elfobj_class_t cls,
     elf_close(obj);
 }
 
+/**
+ * Check the overflow range of R_AARCH64_ABS16.
+ *
+ * The AArch64 ELF ABI checks the field as -2^15 <= S + A < 2^16, so
+ * an unsigned halfword such as 0xffff fits as well as a negative one
+ * such as -4.  A sum of 0x10000 or below -0x8000 must be refused.
+ */
+static void check_aarch64_abs16(void) {
+    elfobj_t *obj;
+    uint64_t out = 0;
+
+    obj = elf_create(ET_REL, EM_AARCH64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (!obj) fail("elf_create for R_AARCH64_ABS16");
+    if (elf_apply_relocation_value(obj, R_AARCH64_ABS16, 0, 0xffffULL, 0, &out) != ELF_OK ||
+        out != 0xffffu)
+        fail("R_AARCH64_ABS16 refuses S + A = 0xffff");
+    if (elf_apply_relocation_value(obj, R_AARCH64_ABS16, 0, 0x8000ULL, 0, &out) != ELF_OK ||
+        out != 0x8000u)
+        fail("R_AARCH64_ABS16 refuses S + A = 0x8000");
+    if (elf_apply_relocation_value(obj, R_AARCH64_ABS16, 0, 0, -4, &out) != ELF_OK ||
+        out != 0xfffcu)
+        fail("R_AARCH64_ABS16 refuses S + A = -4");
+    if (elf_apply_relocation_value(obj, R_AARCH64_ABS16, 0, 0, -0x8000, &out) != ELF_OK ||
+        out != 0x8000u)
+        fail("R_AARCH64_ABS16 refuses S + A = -0x8000");
+    if (elf_apply_relocation_value(obj, R_AARCH64_ABS16, 0, 0x10000ULL, 0, &out) !=
+        ELF_ERR_RELOC)
+        fail("R_AARCH64_ABS16 takes S + A = 0x10000");
+    if (elf_apply_relocation_value(obj, R_AARCH64_ABS16, 0, 0, -0x8001, &out) !=
+        ELF_ERR_RELOC)
+        fail("R_AARCH64_ABS16 takes S + A = -0x8001");
+    elf_close(obj);
+}
+
 int main(void) {
     elfobj_t *obj32;
     elfobj_t *obj64;
@@ -128,6 +162,8 @@ int main(void) {
                          "R_RISCV_32");
     check_abs32_negative(EM_LOONGARCH, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE, R_LARCH_32, 0,
                          "R_LARCH_32");
+
+    check_aarch64_abs16();
 
     if (elf_apply_relocation_value(obj64, 0xffffffffu, 0, 0, 0, &out) != ELF_ERR_UNSUPPORTED)
         fail("unsupported relocation should fail");
