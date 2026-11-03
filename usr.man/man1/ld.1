@@ -992,20 +992,23 @@ Read and not acted on:
 .Ic GROUP ,
 .Ic STARTUP ,
 .Ic EXTERN ,
-.Ic VERSION ,
 .Ic INSERT ,
 .Ic NOCROSSREFS ,
 .Ic REGION_ALIAS ,
-the load address
-.Pq Ic AT ,
+the load address of a
+.Ic PHDRS
+entry
+.Pq Ic AT No in Ic PHDRS ,
+an output section's load region
+.Pq Ic AT> Ns Ar region ,
+.Ic BLOCK
 and
 .Ic SUBALIGN .
-Refused:
-.Ic BYTE ,
-.Ic SHORT ,
-.Ic LONG
-and
-.Ic QUAD .
+An output section's
+.Ic AT Ns Pq Ar lma ,
+a script's
+.Ic VERSION
+and the data statements are acted on, as told above.
 .Sh OUTPUT
 The output is written beside its name and moved into place when it is
 whole, so that an existing file of that name is replaced at once or not

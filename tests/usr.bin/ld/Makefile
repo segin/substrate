@@ -62,5 +62,6 @@ run:
 	./test_search_state_reset.sh
 	./test_spec_status.sh
 	./test_architecture_files.sh
+	./test_script_man_unused.sh
 
 clean:
