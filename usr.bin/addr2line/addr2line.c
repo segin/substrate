@@ -3046,6 +3046,7 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                                             addr_size,
                                             version,
                                             form) != 0) {
+                            free(name);
                             free(linkage_name);
                             dwarf_abbrev_table_free(&abbrev);
                             return -1;
@@ -3080,6 +3081,7 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                                             addr_size,
                                             version,
                                             form) != 0) {
+                            free(name);
                             free(linkage_name);
                             dwarf_abbrev_table_free(&abbrev);
                             return -1;
@@ -3114,6 +3116,7 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                                             addr_size,
                                             version,
                                             form) != 0) {
+                            free(name);
                             free(linkage_name);
                             dwarf_abbrev_table_free(&abbrev);
                             return -1;
@@ -3147,6 +3150,7 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                                             addr_size,
                                             version,
                                             form) != 0) {
+                            free(name);
                             free(linkage_name);
                             dwarf_abbrev_table_free(&abbrev);
                             return -1;
@@ -3180,6 +3184,7 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                                                 addr_size,
                                                 version,
                                                 form) != 0) {
+                                free(name);
                                 free(linkage_name);
                                 dwarf_abbrev_table_free(&abbrev);
                                 return -1;
@@ -3222,6 +3227,7 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                                                 addr_size,
                                                 version,
                                                 form) != 0) {
+                                free(name);
                                 free(linkage_name);
                                 dwarf_abbrev_table_free(&abbrev);
                                 return -1;
@@ -3309,16 +3315,6 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                     dwarf_abbrev_table_free(&abbrev);
                     return -1;
                 }
-                if (image_add_die_name(img,
-                                       die_offset,
-                                       sp.name,
-                                       sp.linkage_name,
-                                       has_abstract_origin ? abstract_origin : 0,
-                                       has_specification ? specification : 0) != 0) {
-                    dwarf_subprogram_free(&sp);
-                    dwarf_abbrev_table_free(&abbrev);
-                    return -1;
-                }
                 dwarf_subprogram_free(&sp);
             } else if (ab->tag == DW_TAG_inlined_subroutine) {
                 dwarf_inline_t inl;
@@ -3362,15 +3358,6 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                         return -1;
                     }
                     this_inline = img->inline_count - 1u;
-                    if (image_add_die_name(img,
-                                           die_offset,
-                                           img->inlines[this_inline].name,
-                                           img->inlines[this_inline].linkage_name,
-                                           inl.abstract_origin,
-                                           inl.specification) != 0) {
-                        dwarf_abbrev_table_free(&abbrev);
-                        return -1;
-                    }
                 }
                 dwarf_inline_free(&inl);
             } else {

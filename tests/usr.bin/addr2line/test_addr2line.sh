@@ -378,6 +378,47 @@ int main(void) { ofunc(); ufunc(); return 0; }
 SRC
 }
 
+# A compile unit whose DW_AT_name is followed by one attribute that runs
+# past the end of the unit: $2 is the attribute code, $3 its form.  The
+# unit holds a single byte of that attribute's value, too few for any of
+# the forms used, so the value can neither be read nor skipped.
+build_fixture_truncated_attr() {
+    out=$1
+    attr=$2
+    form=$3
+    cat > "$out" <<SRC
+	.text
+	.globl tfunc
+	.type tfunc, @function
+tfunc:
+	ret
+	.size tfunc, .-tfunc
+
+	.section .debug_abbrev,"",@progbits
+.Labbrev:
+	.uleb128 1
+	.uleb128 0x11
+	.byte 0
+	.uleb128 0x03
+	.uleb128 0x08
+	.uleb128 $attr
+	.uleb128 $form
+	.byte 0, 0
+	.byte 0
+
+	.section .debug_info,"",@progbits
+	.long .Lcu_end - .Lcu_ver
+.Lcu_ver:
+	.short 4
+	.long .Labbrev
+	.byte 8
+	.uleb128 1
+	.asciz "truncated.c"
+	.byte 0
+.Lcu_end:
+SRC
+}
+
 # Normalise addr2line output for an exact comparison: GNU zero-pads
 # -a addresses to the target's width and appends "(discriminator N)",
 # neither of which is what the inline-frame checks are about.
@@ -816,6 +857,50 @@ SRC
     expect_eq "10n outer sequence beyond the nested one" \
         "$($BIN -e "$TMP/seq/seq" 0x$(printf '%x' $((0x$OA + 0x20))))" \
         "/srcroot/seq/overlap.c:20"
+
+    # 10o: a DIE whose DW_AT_name is followed by a truncated low_pc,
+    # high_pc, ranges, stmt_list, call_file or abstract_origin makes
+    # .debug_info malformed.  addr2line warns, drops what it parsed and
+    # goes on resolving, so the name it had already read must be freed,
+    # not leaked.  A copy of addr2line built with AddressSanitizer runs
+    # each case and LeakSanitizer must find nothing.
+    if cc -fsanitize=address -x c - -o "$TMP/asan_probe" >/dev/null 2>&1 <<'SRC'
+int main(void) { return 0; }
+SRC
+    then
+        mkdir -p "$TMP/trunc"
+        cc -fsanitize=address -fno-omit-frame-pointer -O1 -g \
+            -idirafter "$ROOT/include" -DADDR2LINE_HAVE_ZLIB \
+            -o "$TMP/trunc/addr2line_asan" "$ROOT/usr.bin/addr2line/addr2line.c" \
+            "$ROOT/usr.lib/elfobj/libelfobj.a" \
+            "$ROOT/usr.lib/demangle/libdemangle.a" -lz
+        printf 'int tfunc(void);\nint main(void) { return tfunc(); }\n' \
+            > "$TMP/trunc/main.c"
+        for CASE in low_pc:0x11:0x01 high_pc:0x12:0x01 ranges:0x55:0x17 \
+                    stmt_list:0x10:0x17 call_file:0x58:0x06 \
+                    abstract_origin:0x31:0x13; do
+            AN=${CASE%%:*}
+            AF=${CASE#*:}
+            build_fixture_truncated_attr "$TMP/trunc/$AN.s" "${AF%%:*}" "${AF#*:}"
+            as -o "$TMP/trunc/$AN.o" "$TMP/trunc/$AN.s"
+            cc -no-pie -o "$TMP/trunc/$AN" "$TMP/trunc/$AN.o" "$TMP/trunc/main.c"
+            TA=$(addr_of "$TMP/trunc/$AN" tfunc)
+            [ -n "$TA" ] || fail "10o $AN symbol tfunc not found"
+            RC=0
+            ASAN_OPTIONS=detect_leaks=1:exitcode=99 \
+                "$TMP/trunc/addr2line_asan" -f -e "$TMP/trunc/$AN" 0x$TA \
+                > "$TMP/trunc/$AN.out" 2> "$TMP/trunc/$AN.err" || RC=$?
+            grep -F 'malformed .debug_info' "$TMP/trunc/$AN.err" >/dev/null ||
+                fail "10o $AN fixture did not make .debug_info malformed"
+            if [ "$RC" -ne 0 ] || grep -F 'LeakSanitizer' "$TMP/trunc/$AN.err" >/dev/null; then
+                cat "$TMP/trunc/$AN.err" >&2
+                fail "10o $AN leaked (exit $RC)"
+            fi
+            pass "10o $AN"
+        done
+    else
+        printf 'skip: 10o (cc cannot build with -fsanitize=address)\n'
+    fi
 
     pass "all"
 }
