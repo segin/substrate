@@ -185,6 +185,31 @@ SRC
     cc -no-pie -o "$dir/fzero" "$dir/fzero_main.c" "$dir/fzero.o"
 }
 
+build_fixture_second_cu_inline() {
+    dir=$1
+    mkdir -p "$dir"
+    cat > "$dir/cu_a.c" <<'SRC'
+static inline __attribute__((always_inline)) int a_leaf(volatile int *p) { return *p * 5 + 2; }
+int a_one(int x) { volatile int v = x; return a_leaf(&v) + 1; }
+int a_two(int x) { volatile int v = x; return a_leaf(&v) - 1; }
+int a_three(int x) { volatile int v = x; return a_leaf(&v) ^ 3; }
+SRC
+    cat > "$dir/cu_b.c" <<'SRC'
+static inline __attribute__((always_inline)) int b_leaf(volatile int *p) { return *p * 7 + 1; }
+static inline __attribute__((always_inline)) int b_mid(volatile int *p) { return b_leaf(p) + b_leaf(p); }
+int b_outer(int x) { volatile int v = x; return b_mid(&v) + 3; }
+SRC
+    cat > "$dir/cu_main.c" <<'SRC'
+int a_one(int), a_two(int), a_three(int), b_outer(int);
+int main(int c, char **v) { (void)v; return a_one(c) + a_two(c) + a_three(c) + b_outer(c); }
+SRC
+}
+
+# Function names only (the odd lines) of "-f -i" output.
+inline_names() {
+    printf '%s\n' "$1" | awk 'NR % 2 == 1' | tr '\n' ' '
+}
+
 first_line() {
     printf '%s\n' "$1" | sed -n '1p'
 }
@@ -467,6 +492,38 @@ SRC
         expect_eq "10j-2 +$OFF" \
             "$($BIN -e "$TMP/fzero/fzero" 0x$ZQ)" \
             "$(addr2line -e "$TMP/fzero/fzero" 0x$ZQ)"
+    done
+
+    # 10k: DW_AT_abstract_origin in DW_FORM_ref4 (and the other
+    # ref1/2/8/ref_udata forms) is an offset from the start of its own
+    # unit.  Inlined frames in any unit after the first must still be
+    # named, so every address of b_outer (second unit, two levels of
+    # inlining) must give host addr2line's chain of function names.
+    build_fixture_second_cu_inline "$TMP/cu2"
+    for V in 4 5; do
+        cc -O2 -g -gdwarf-$V -no-pie -o "$TMP/cu2/cu2_v$V" \
+            "$TMP/cu2/cu_a.c" "$TMP/cu2/cu_b.c" "$TMP/cu2/cu_main.c"
+        BO=$(addr_of "$TMP/cu2/cu2_v$V" b_outer)
+        BS=$(nm -S "$TMP/cu2/cu2_v$V" | awk '$4=="b_outer" {print $2; exit}')
+        [ -n "$BO" ] && [ -n "$BS" ] || fail "10k v$V symbol b_outer not found"
+        SEEN_LEAF=0
+        OFF=0
+        while [ "$OFF" -lt $((0x$BS)) ]; do
+            Q=$(printf '%x' $((0x$BO + OFF)))
+            HOST_N=$(inline_names "$(addr2line -f -i -e "$TMP/cu2/cu2_v$V" 0x$Q)")
+            OUR_N=$(inline_names "$($BIN -f -i -e "$TMP/cu2/cu2_v$V" 0x$Q)")
+            [ "$OUR_N" = "$HOST_N" ] || {
+                printf 'FAIL: 10k v%s +%s\n  got : [%s]\n  want: [%s]\n' \
+                    "$V" "$OFF" "$OUR_N" "$HOST_N" >&2
+                exit 1
+            }
+            case $HOST_N in
+            "b_leaf b_mid b_outer "*) SEEN_LEAF=1 ;;
+            esac
+            OFF=$((OFF + 1))
+        done
+        [ "$SEEN_LEAF" -eq 1 ] || fail "10k v$V no address inside inlined b_leaf"
+        pass "10k v$V"
     done
 
     pass "all"

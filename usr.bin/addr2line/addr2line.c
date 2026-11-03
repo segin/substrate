@@ -2728,6 +2728,36 @@ static int parse_rnglists_ranges_inline(const addr2line_image_t *img,
     return 0;
 }
 
+/**
+ * @brief Tell whether a DIE reference form is relative to its unit.
+ *
+ * DW_FORM_ref1, ref2, ref4, ref8 and ref_udata hold an offset from the
+ * first byte of the referencing unit's header; DW_FORM_ref_addr is
+ * already an offset into .debug_info.  An implicit constant can only be
+ * shared by every unit that uses the abbreviation if it is read the
+ * same way, so it is treated as unit-relative too.
+ *
+ * @param form The attribute's form after DW_FORM_indirect is resolved.
+ * @param implicit Nonzero when the value is an abbreviation's implicit
+ *        constant.
+ * @return 1 when the unit's offset must be added to the value, else 0.
+ */
+static int dwarf_ref_is_unit_relative(uint64_t form, int implicit) {
+    if (implicit) {
+        return 1;
+    }
+    switch (form) {
+    case DW_FORM_ref1:
+    case DW_FORM_ref2:
+    case DW_FORM_ref4:
+    case DW_FORM_ref8:
+    case DW_FORM_ref_udata:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int parse_debug_info_subprograms(addr2line_image_t *img) {
     const uint8_t *p;
     const uint8_t *end;
@@ -2742,6 +2772,7 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
     while (p < end) {
         const uint8_t *unit_payload;
         const uint8_t *unit_end;
+        uint64_t unit_offset = (uint64_t)(p - img->debug_info.data);
         uint32_t len32 = 0;
         uint64_t unit_length = 0;
         size_t offset_size = 4u;
@@ -3112,6 +3143,9 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                         }
                     }
                     free(tmp_str);
+                    if (dwarf_ref_is_unit_relative(form, implicit)) {
+                        ref += unit_offset;
+                    }
                     if (attr_name == DW_AT_abstract_origin) {
                         abstract_origin = ref;
                         has_abstract_origin = 1;
