@@ -37,6 +37,7 @@ run:
 	./test_reloc_section_symbols.sh
 	./test_import_types.sh
 	./test_dynstr_hash.sh
+	./test_dynstr_index_freed.sh
 	./test_x32.sh
 	./test_version_script.sh
 	./test_build_id.sh

@@ -1822,7 +1822,13 @@ done:
     return rc;
 }
 
-int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
+/**
+ * @brief Make .dynstr, .dynsym, .dynamic and the version and hash sections of @p out; the work of
+ * plan_dynamic_needed(), which lets go of the .dynstr index this leaves behind however it returns.
+ *
+ * @return 0, or -1
+ */
+static int plan_dynamic_tables(ld_ctx_t *ctx, elfobj_t *out) {
     elf_section_t *dynstr;
     elf_section_t *dynsym;
     elf_section_t *versym_sec = NULL;
@@ -2488,6 +2494,20 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     free(hash_buf);
     free(gnu_hash_buf);
     return 0;
+}
+
+/**
+ * @brief Make the dynamic sections of @p out (plan_dynamic_tables()), and then let go of the index of
+ * the strings in .dynstr: it serves only while .dynstr is being made, and would otherwise be held,
+ * every string a copy, until the linker exits.
+ *
+ * @return 0, or -1
+ */
+int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
+    int rc = plan_dynamic_tables(ctx, out);
+
+    dynstr_index_reset();
+    return rc;
 }
 
 int patch_dynamic_tag_values(elfobj_t *out) {
