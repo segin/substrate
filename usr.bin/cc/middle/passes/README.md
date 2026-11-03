@@ -35,7 +35,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   a constant offset its initializer's bytes, and a compare of two
   constant offsets from one object's address the compare of the
   offsets, the address of a stack slot or of an object or a function
-  the module defines, not weak, not null); at the end of a function's
+  the module defines, not weak, not null; and a loop computing only from
+  constants and const tables, entered once, run to its end and replaced
+  by the constants it leaves and a jump out, `eval_const_loops()`, as
+  gcc unrolls and folds it); at the end of a function's
   passes, the target's legalization once more, for what it split before
   the constants were known (on i386, a 64-bit division by a local that
   holds a power of two), after a parameter of a static function that

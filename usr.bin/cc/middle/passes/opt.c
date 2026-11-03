@@ -3686,6 +3686,50 @@ static int symbol_address(const cc_ssa_function_t *f, const long *def_at, const 
 }
 
 /**
+ * What load @p in of @p f reads at offset @p off from the symbol @p sym, if a read-only global of @p m holds
+ * there bytes its initializer gives, or zeros past it (foldable_global()): an integer load of 1, 2, 4 or 8
+ * bytes, outside a named address space, wholly inside the object; x86's byte order, extended as the load
+ * extends them.
+ *
+ * @return 1 with *@p out set, or 0 when it is not known
+ */
+static int const_load(const cc_ssa_module_t *m, const cc_ssa_function_t *f, const cc_ssa_instr_t *in,
+                      const char *sym, long long off, long long *out) {
+    const cc_ssa_global_t *g;
+    data_window_t w;
+    unsigned long long v = 0;
+    long sz;
+    long b;
+
+    if (in->op != CC_SSA_LOAD || in->seg != 0 || in->dst < 0 || in->dst >= f->value_count ||
+        cc_ssa_value_class(f, in->dst) != CC_VAL_I64 || f->value_ty[in->dst].kind != CC_TY_INT ||
+        (in->imm != 1 && in->imm != 2 && in->imm != 4 && in->imm != 8) ||
+        (long long)cc_ssa_value_size(f, in->dst) < in->imm) {
+        return 0;
+    }
+    g = foldable_global(m, sym, sym_name_len(sym));
+    sz = g != NULL ? global_data_size(g) : 0;
+    if (sz <= 0 || off < 0 || off + in->imm > sz) {
+        return 0;
+    }
+    memset(&w, 0, sizeof(w));
+    w.off = (long)off;
+    w.n = (long)in->imm;
+    if (!global_window(g, sz, &w)) {
+        return 0;
+    }
+    /* the bytes as the load reads them, then extended as it extends them */
+    for (b = w.n - 1; b >= 0; --b) {
+        v = (v << 8) | w.b[b];
+    }
+    if (w.n < 8 && !in->is_unsigned && (v & (1ULL << (w.n * 8 - 1))) != 0) {
+        v |= ~((1ULL << (w.n * 8)) - 1);
+    }
+    *out = (long long)v;
+    return 1;
+}
+
+/**
  * Fold the loads of @p f from read-only globals of @p m at constant offsets to what their initializers
  * put there, as gcc does once inlining has made the offsets constant: Linux's reverse_cpuid_check(),
  * inlined with a constant leaf, has BUILD_BUG_ON(reverse_cpuid[x86_leaf].function == 0), whose call of
@@ -3720,38 +3764,13 @@ static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
-        const cc_ssa_global_t *g;
         const char *sym = NULL;
         long long off = 0;
-        data_window_t w;
-        unsigned long long v = 0;
-        long sz;
-        long b;
+        long long v = 0;
 
-        if (in->op != CC_SSA_LOAD || in->seg != 0 || in->dst < 0 || in->dst >= f->value_count ||
-            cc_ssa_value_class(f, in->dst) != CC_VAL_I64 || f->value_ty[in->dst].kind != CC_TY_INT ||
-            (in->imm != 1 && in->imm != 2 && in->imm != 4 && in->imm != 8) ||
-            (long long)cc_ssa_value_size(f, in->dst) < in->imm ||
-            !symbol_address(f, def_at, k, in->lhs, &sym, &off, 0)) {
+        if (in->op != CC_SSA_LOAD || in->dst < 0 || in->dst >= f->value_count ||
+            !symbol_address(f, def_at, k, in->lhs, &sym, &off, 0) || !const_load(m, f, in, sym, off, &v)) {
             continue;
-        }
-        g = foldable_global(m, sym, sym_name_len(sym));
-        sz = g != NULL ? global_data_size(g) : 0;
-        if (sz <= 0 || off < 0 || off + in->imm > sz) {
-            continue;
-        }
-        memset(&w, 0, sizeof(w));
-        w.off = (long)off;
-        w.n = (long)in->imm;
-        if (!global_window(g, sz, &w)) {
-            continue;
-        }
-        /* the bytes as the load reads them, then extended as it extends them */
-        for (b = w.n - 1; b >= 0; --b) {
-            v = (v << 8) | w.b[b];
-        }
-        if (w.n < 8 && !in->is_unsigned && (v & (1ULL << (w.n * 8 - 1))) != 0) {
-            v |= ~((1ULL << (w.n * 8)) - 1);
         }
         in->op = CC_SSA_CONST;
         in->imm = (long long)v;
@@ -3995,17 +4014,515 @@ static int fold_address_compares(const cc_ssa_module_t *m, cc_ssa_function_t *f)
     return changed;
 }
 
+/** The most instructions a loop eval_const_loops() runs may have, and the most it runs of them in all. */
+#define LOOP_EVAL_SIZE 256
+#define LOOP_EVAL_STEPS 20000
+
+/** A value as eval_const_loops() knows it while it runs a loop. */
+typedef struct {
+    unsigned char kind; /**< 0 not known, 1 the integer i, 2 the address of sym, plus i */
+    long long i;
+    const char *sym;    /**< an address's symbol reference (an offset perhaps after its name) */
+} loop_val_t;
+
 /**
- * The folds of @p f that read what module @p m declares: loads from its const tables (fold_const_loads()) and
- * compares of addresses (fold_address_compares()).
+ * Run instruction @p in of @p f on the values @p st, as eval_const_loops() runs a loop: integer arithmetic
+ * and compares as the folder computes them, symbols' addresses and constant offsets from them, and loads
+ * from read-only globals (const_load()).  A value made from one not known is not known.
+ *
+ * @return 1, or 0 for what it cannot run: a load from anywhere else, a division that would trap, a floating
+ *         value, any other instruction
+ */
+static int loop_step(const cc_ssa_module_t *m, const cc_ssa_function_t *f, const cc_ssa_instr_t *in,
+                     loop_val_t *st) {
+    loop_val_t *d;
+    const loop_val_t *a;
+    const loop_val_t *b;
+    long long out = 0;
+
+    if (in->dst < 0 || in->dst >= f->value_count || cc_ssa_value_class(f, in->dst) != CC_VAL_I64 ||
+        (in->lhs >= f->value_count) || (in->rhs >= f->value_count)) {
+        return 0;
+    }
+    d = &st[in->dst];
+    a = in->lhs >= 0 ? &st[in->lhs] : NULL;
+    b = in->rhs >= 0 ? &st[in->rhs] : NULL;
+    switch (in->op) {
+    case CC_SSA_CONST:
+        d->kind = 1;
+        d->i = in->imm;
+        return 1;
+    case CC_SSA_GADDR: {
+        size_t n = in->sym != NULL ? sym_name_len(in->sym) : 0;
+        const char *p;
+        long long add = 0;
+
+        d->kind = 0;
+        if (n == 0) {
+            return 1;
+        }
+        if (in->sym[n] == '+' || in->sym[n] == '-') {
+            for (p = in->sym + n + 1; *p >= '0' && *p <= '9' && add < (1LL << 40); ++p) {
+                add = add * 10 + (*p - '0');
+            }
+            if (*p != '\0' || p == in->sym + n + 1) {
+                return 1;
+            }
+        } else if (in->sym[n] != '\0') {
+            return 1;
+        }
+        d->kind = 2;
+        d->sym = in->sym;
+        d->i = in->sym[n] == '-' ? -add : add;
+        return 1;
+    }
+    case CC_SSA_MOV:
+        if (a == NULL) {
+            return 0;
+        }
+        *d = *a;
+        return 1;
+    case CC_SSA_LOAD:
+        if (a == NULL || a->kind != 2 || !const_load(m, f, in, a->sym, a->i, &out)) {
+            return 0;
+        }
+        d->kind = 1;
+        d->i = out;
+        return 1;
+    case CC_SSA_ADD:
+    case CC_SSA_SUB:
+        if (a != NULL && b != NULL && a->kind == 2 && b->kind == 1) {
+            *d = *a;
+            d->i = in->op == CC_SSA_ADD ? a->i + b->i : a->i - b->i;
+            return 1;
+        }
+        if (in->op == CC_SSA_ADD && a != NULL && b != NULL && a->kind == 1 && b->kind == 2) {
+            *d = *b;
+            d->i = a->i + b->i;
+            return 1;
+        }
+        /* fall through */
+    case CC_SSA_MUL:
+    case CC_SSA_DIV:
+    case CC_SSA_AND:
+    case CC_SSA_OR:
+    case CC_SSA_XOR:
+    case CC_SSA_SHL:
+    case CC_SSA_SHR:
+        if (a == NULL || (b == NULL && in->op != CC_SSA_SHL && in->op != CC_SSA_SHR)) {
+            return 0;
+        }
+        if (a->kind != 1 || (b != NULL && b->kind != 1)) {
+            /* (a division by what is not known may trap) */
+            d->kind = 0;
+            return in->op != CC_SSA_DIV;
+        }
+        if (fold_int_binop(in->op, in->is_unsigned, value_is_word32(f, in->dst), a->i, b != NULL ? b->i : in->imm,
+                           &out) != 0) {
+            return 0;
+        }
+        d->kind = 1;
+        d->i = out;
+        return 1;
+    case CC_SSA_CMP:
+        if (a == NULL || b == NULL || cc_ssa_value_class(f, in->lhs) != CC_VAL_I64 ||
+            cc_ssa_value_class(f, in->rhs) != CC_VAL_I64) {
+            return 0;
+        }
+        d->kind = 0;
+        if (a->kind == 1 && b->kind == 1) {
+            d->kind = 1;
+            d->i = fold_int_cmp(in->cmp_kind, in->is_unsigned,
+                                value_is_word32(f, in->lhs) || value_is_word32(f, in->rhs), a->i, b->i);
+        }
+        return 1;
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
+        if (a == NULL) {
+            return 0;
+        }
+        d->kind = 0;
+        if (a->kind == 1) {
+            unsigned long long u = (unsigned long long)a->i;
+
+            d->kind = 1;
+            d->i = (long long)(in->op == CC_SSA_LO32 ? (u & 0xffffffffULL) : (u >> 32));
+        }
+        return 1;
+    case CC_SSA_PAIR:
+        if (a == NULL || b == NULL) {
+            return 0;
+        }
+        d->kind = 0;
+        if (a->kind == 1 && b->kind == 1) {
+            d->kind = 1;
+            d->i = (long long)(((unsigned long long)b->i << 32) | ((unsigned long long)a->i & 0xffffffffULL));
+        }
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/** Mark value @p v as read (cc_ssa_for_each_use() callback). */
+static void note_read(void *ctx, int v, int role) {
+    unsigned char *read = (unsigned char *)ctx;
+
+    (void)role;
+    if (v >= 0) {
+        read[v] = 1;
+    }
+}
+
+/**
+ * Run the loop of @p f whose header is the label at @p h and whose one jump back is the BR at @p e, from the
+ * state the one way into it leaves, and if it ends -- within LOOP_EVAL_STEPS instructions, on a known way
+ * out -- make it what it leaves: each value it set that is read outside it, the constant it ended with,
+ * and a jump to where it left.
+ *
+ * @return 1 when the loop was replaced, 0 when it was not, -1 when out of memory
+ */
+static int eval_loop(const cc_ssa_module_t *m, cc_ssa_function_t *f, const long *label_at, long h, long e) {
+    loop_val_t *st = (loop_val_t *)calloc((size_t)f->value_count, sizeof(*st));
+    unsigned char *set = (unsigned char *)calloc((size_t)f->value_count, 1);
+    unsigned char *read = (unsigned char *)calloc((size_t)f->value_count, 1);
+    unsigned char *pinned = (unsigned char *)calloc((size_t)f->value_count, 1);
+    const_state_t *k = single_def_consts(f);
+    long *def_at = single_def_at(f);
+    long start = h - 1;
+    long pc = h + 1;
+    long steps = 0;
+    int out_label = -1;
+    long i;
+    int v;
+    int ok = 1;
+    long slot;
+
+    if (st == NULL || set == NULL || read == NULL || pinned == NULL || k == NULL || def_at == NULL) {
+        ok = -1;
+        goto done;
+    }
+    /* what the way in leaves: the constants and addresses defined once, then the block that jumps in */
+    for (v = 0; v < f->value_count; ++v) {
+        if (k[v].known && k[v].type == CC_VAL_I64) {
+            st[v].kind = 1;
+            st[v].i = k[v].i;
+        } else if (def_at[v] >= 0 && f->instrs[def_at[v]].op == CC_SSA_GADDR) {
+            (void)loop_step(m, f, &f->instrs[def_at[v]], st);
+        }
+    }
+    while (start > 0 && f->instrs[start - 1].op != CC_SSA_LABEL) {
+        start--;
+    }
+    for (i = start; i < h; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_BR || in->op == CC_SSA_LABEL) {
+            continue;
+        }
+        if (!loop_step(m, f, in, st) && in->dst >= 0 && in->dst < f->value_count) {
+            st[in->dst].kind = 0;
+        }
+        /* (an asm's outputs are not known) */
+        for (v = 0; in->op == CC_SSA_ASM && v < (int)in->asm_out_count; ++v) {
+            int ov = in->asm_out_values[v];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(ov)) {
+                ov = CC_SSA_ASM_MEM_INDIRECT_DECODE(ov);
+            }
+            if (ov >= 0 && ov < f->value_count) {
+                st[ov].kind = 0;
+            }
+        }
+    }
+    /* run it */
+    while (ok == 1 && out_label < 0) {
+        const cc_ssa_instr_t *in = &f->instrs[pc];
+        int target = -1;
+
+        if (++steps > LOOP_EVAL_STEPS) {
+            ok = 0;
+            break;
+        }
+        if (in->op == CC_SSA_LABEL) {
+            pc++;
+            continue;
+        }
+        if (in->op == CC_SSA_BR) {
+            target = in->label;
+        } else if (in->op == CC_SSA_BR_COND) {
+            if (in->lhs < 0 || in->lhs >= f->value_count || st[in->lhs].kind != 1) {
+                ok = 0;
+                break;
+            }
+            target = st[in->lhs].i != 0 ? in->true_label : in->false_label;
+        } else {
+            if (!loop_step(m, f, in, st)) {
+                ok = 0;
+                break;
+            }
+            set[in->dst] = 1;
+            pc++;
+            continue;
+        }
+        if (target < 0 || target >= f->label_count || label_at[target] < 0) {
+            ok = 0;
+        } else if (label_at[target] < h || label_at[target] > e) {
+            out_label = target;
+        } else {
+            pc = label_at[target];
+        }
+    }
+    if (ok != 1) {
+        goto done;
+    }
+    /*
+     * what it set that is read outside it must be known, an integer; and none of it reached otherwise than by
+     * its name (its address taken, an asm's operand), which a load or an asm elsewhere would read
+     */
+    for (i = 0; i < (long)f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (i < h || i > e) {
+            cc_ssa_for_each_use(in, note_read, read);
+        }
+        if (in->op == CC_SSA_ADDR && in->lhs >= 0 && in->lhs < f->value_count) {
+            pinned[in->lhs] = 1;
+        } else if (in->op == CC_SSA_ASM) {
+            cc_ssa_for_each_use(in, note_read, pinned);
+        }
+    }
+    slot = 0;
+    for (v = 0; v < f->value_count && ok == 1; ++v) {
+        if (set[v] && read[v]) {
+            slot++;
+            ok = st[v].kind == 1;
+        }
+        if (set[v] && pinned[v]) {
+            ok = 0;
+        }
+    }
+    /* (room for the constants and the jump out, which the loop's own definitions and branches leave) */
+    if (ok != 1 || slot > e - h - 1) {
+        ok = 0;
+        goto done;
+    }
+    /* the loop becomes the constants it leaves and the jump out; the rest of it, jumps no way reaches */
+    slot = h + 1;
+    for (i = h + 1; i <= e; ++i) {
+        cc_ssa_instr_free(&f->instrs[i]);
+        memset(&f->instrs[i], 0, sizeof(f->instrs[i]));
+        f->instrs[i].dst = -1;
+        f->instrs[i].lhs = -1;
+        f->instrs[i].rhs = -1;
+        f->instrs[i].op = CC_SSA_BR;
+        f->instrs[i].label = out_label;
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        if (set[v] && read[v]) {
+            cc_ssa_instr_t *in = &f->instrs[slot++];
+
+            in->op = CC_SSA_CONST;
+            in->dst = v;
+            in->imm = st[v].i;
+            in->label = 0;
+        }
+    }
+done:
+    free(st);
+    free(set);
+    free(read);
+    free(pinned);
+    free(k);
+    free(def_at);
+    return ok;
+}
+
+/** Per label of a function, the edges into it, as eval_first_loop() counts them. */
+typedef struct {
+    long *label_at; /**< its instruction, or -1 */
+    long *emin;     /**< the first instruction an edge into it comes from, or -1 */
+    long *emax;     /**< the last */
+    int *before;    /**< how many come from before it in the stream */
+    unsigned char *odd; /**< reached otherwise than by a branch: its address taken, an asm goto's */
+} loop_edges_t;
+
+/**
+ * Find the first loop of @p f eval_loop() can run -- its header entered once, from the instruction before it,
+ * its one jump back the last edge into it, nothing inside it reached from outside, nothing inside it but
+ * branches, integer arithmetic, compares, addresses of symbols and loads -- and run it.  @p ed holds
+ * f->label_count entries per array, which this fills.
+ *
+ * @return 1 when a loop was replaced, 0 when none was, -1 when out of memory
+ */
+static int eval_first_loop(const cc_ssa_module_t *m, cc_ssa_function_t *f, loop_edges_t *ed) {
+    size_t i;
+
+    for (i = 0; i < (size_t)f->label_count; ++i) {
+        ed->label_at[i] = -1;
+        ed->emin[i] = -1;
+        ed->emax[i] = -1;
+        ed->before[i] = 0;
+        ed->odd[i] = 0;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        if (f->instrs[i].op == CC_SSA_LABEL && f->instrs[i].label >= 0 && f->instrs[i].label < f->label_count) {
+            ed->label_at[f->instrs[i].label] = (long)i;
+        }
+    }
+    /* each label's edges: the first and last instruction they come from, how many from before it */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int to[3];
+        int nt = 0;
+        int t;
+        size_t a;
+
+        if (in->op == CC_SSA_BR) {
+            to[nt++] = in->label;
+        } else if (in->op == CC_SSA_BR_COND) {
+            to[nt++] = in->true_label;
+            to[nt++] = in->false_label;
+        } else if (in->op == CC_SSA_LADDR && in->label >= 0 && in->label < f->label_count) {
+            ed->odd[in->label] = 1;
+        } else if (in->op == CC_SSA_ASM) {
+            for (a = 0; a < in->asm_goto_count; ++a) {
+                if (in->asm_goto_labels[a] >= 0 && in->asm_goto_labels[a] < f->label_count) {
+                    ed->odd[in->asm_goto_labels[a]] = 1;
+                }
+            }
+        }
+        if (i + 1 < f->instr_count && f->instrs[i + 1].op == CC_SSA_LABEL && !cc_ssa_opcode_is_terminator(in->op)) {
+            to[nt++] = f->instrs[i + 1].label;
+        }
+        for (t = 0; t < nt; ++t) {
+            int l = to[t];
+
+            if (l < 0 || l >= f->label_count) {
+                continue;
+            }
+            ed->emin[l] = ed->emin[l] < 0 || (long)i < ed->emin[l] ? (long)i : ed->emin[l];
+            ed->emax[l] = (long)i > ed->emax[l] ? (long)i : ed->emax[l];
+            if (ed->label_at[l] < 0 || (long)i < ed->label_at[l]) {
+                ed->before[l]++;
+            }
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        long h = (long)i;
+        long e;
+        long j;
+        int fit = 1;
+        int rc;
+
+        if (in->op != CC_SSA_LABEL || in->label < 0 || in->label >= f->label_count || ed->odd[in->label] ||
+            ed->emax[in->label] <= h || ed->before[in->label] != 1 || ed->emin[in->label] != h - 1) {
+            continue;
+        }
+        e = ed->emax[in->label];
+        if (f->instrs[e].op != CC_SSA_BR || e - h > LOOP_EVAL_SIZE) {
+            continue;
+        }
+        /* nothing inside reached from outside; nothing inside that eval_loop() cannot run */
+        for (j = h + 1; j <= e && fit; ++j) {
+            const cc_ssa_instr_t *x = &f->instrs[j];
+
+            switch (x->op) {
+            case CC_SSA_LABEL:
+                /* (a label nothing reaches, a loop's unused `continue`, is no way in) */
+                fit = x->label >= 0 && x->label < f->label_count && !ed->odd[x->label] &&
+                      (ed->emin[x->label] < 0 || (ed->emin[x->label] >= h && ed->emax[x->label] <= e));
+                break;
+            case CC_SSA_BR:
+            case CC_SSA_BR_COND:
+            case CC_SSA_CONST:
+            case CC_SSA_GADDR:
+            case CC_SSA_MOV:
+            case CC_SSA_LOAD:
+            case CC_SSA_ADD:
+            case CC_SSA_SUB:
+            case CC_SSA_MUL:
+            case CC_SSA_DIV:
+            case CC_SSA_AND:
+            case CC_SSA_OR:
+            case CC_SSA_XOR:
+            case CC_SSA_SHL:
+            case CC_SSA_SHR:
+            case CC_SSA_CMP:
+            case CC_SSA_LO32:
+            case CC_SSA_HI32:
+            case CC_SSA_PAIR:
+                break;
+            default:
+                fit = 0;
+                break;
+            }
+        }
+        if (fit && (rc = eval_loop(m, f, ed->label_at, h, e)) != 0) {
+            return rc;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Run each loop of @p f that computes only from constants -- its header entered once from the code before it,
+ * reached from nowhere else, nothing inside it reached from outside, no store, call, asm or load but from a
+ * const table of @p m -- and make it what it leaves (eval_loop()), as gcc unrolls and folds it.  Linux's
+ * net/core/skbuff.c has BUILD_BUG_ON(skb_ext_total_length() > 255) of a loop summing a const table of
+ * sizes, which left a call of an undefined __compiletime_assert_N.
+ *
+ * @return 1 when a loop was replaced, 0 when none was, -1 when out of memory
+ */
+static int eval_const_loops(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
+    size_t nl = (size_t)(f->label_count > 0 ? f->label_count : 1);
+    loop_edges_t ed;
+    int changed = 0;
+    int pass;
+
+    if (f->value_count <= 0 || f->label_count <= 0) {
+        return 0;
+    }
+    ed.label_at = (long *)malloc(nl * sizeof(long));
+    ed.emin = (long *)malloc(nl * sizeof(long));
+    ed.emax = (long *)malloc(nl * sizeof(long));
+    ed.before = (int *)malloc(nl * sizeof(int));
+    ed.odd = (unsigned char *)malloc(nl);
+    if (ed.label_at == NULL || ed.emin == NULL || ed.emax == NULL || ed.before == NULL || ed.odd == NULL) {
+        changed = -1;
+    }
+    /* (after a loop is replaced the edges are counted again: a few loops at most) */
+    for (pass = 0; pass < 8 && changed >= 0; ++pass) {
+        int rc = eval_first_loop(m, f, &ed);
+
+        if (rc <= 0) {
+            changed = rc < 0 ? -1 : changed;
+            break;
+        }
+        changed = 1;
+    }
+    free(ed.label_at);
+    free(ed.emin);
+    free(ed.emax);
+    free(ed.before);
+    free(ed.odd);
+    return changed;
+}
+
+/**
+ * The folds of @p f that read what module @p m declares: loads from its const tables (fold_const_loads()),
+ * compares of addresses (fold_address_compares()) and loops that compute from constants and const tables
+ * only (eval_const_loops()).
  *
  * @return 1 when anything was folded, 0 when nothing was, or -1 when out of memory
  */
 static int fold_module_facts(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     int rl = fold_const_loads(m, f);
     int ra = rl < 0 ? -1 : fold_address_compares(m, f);
+    int re = ra < 0 ? -1 : eval_const_loops(m, f);
 
-    return ra < 0 ? -1 : (rl > 0 || ra > 0);
+    return re < 0 ? -1 : (rl > 0 || ra > 0 || re > 0);
 }
 
 /**
