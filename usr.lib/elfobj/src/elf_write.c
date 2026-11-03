@@ -1101,11 +1101,14 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         }
     }
 
+    /*
+     * The symbol table, its extended indices and a made-up .dynstr are
+     * ours until a push hands them to secs; each pointer is cleared once
+     * its section owns it, and done: frees whichever are still ours.
+     */
     symtab_data = build_symtab(obj, obj->endian, obj->cls, &strtab, group_sig_names, group_count,
                                group_sig_indices, &symtab_size, &symtab_entsz, &xindex_data);
     if (symtab_data == NULL) {
-        free(xindex_data);
-        xindex_data = NULL;
         err = ELF_ERR_OOM;
         goto done;
     }
@@ -1154,6 +1157,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             err = ELF_ERR_OOM;
             goto done;
         }
+        symtab_data = NULL;
     }
 
     /* The sections of the symbols past the reserved indices. */
@@ -1170,7 +1174,6 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         xsec.size = (symtab_size / symtab_entsz) * 4;
         xsec.owns_data = 1;
         if (out_push(&secs, &sec_count, &sec_cap, &xsec) != ELF_OK) {
-            free(xindex_data);
             err = ELF_ERR_OOM;
             goto done;
         }
@@ -1278,6 +1281,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             err = ELF_ERR_OOM;
             goto done;
         }
+        dynstr_data = NULL;
     }
 
     {
@@ -2136,6 +2140,9 @@ done:
     free(ver_names);
     free(versym_data);
     free(verdef_data);
+    free(symtab_data);
+    free(xindex_data);
+    free(dynstr_data);
     free_out_groups(groups, group_count);
     for (i = 0; i < sec_count; ++i) {
         if (secs[i].owns_data) {

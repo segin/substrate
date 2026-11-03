@@ -5,7 +5,8 @@ CFLAGS := $(CFLAGS) -I../../../include -I../../../sys -I../../../usr.lib/elfobj/
 TESTS = test_strtab test_roundtrip test_invalid test_link test_reader_writer test_roundtrip_identity \
 	test_section_segment test_symbols_hash test_reloc_backend test_link_services \
 	test_debug_unwind test_validate_hardening test_perf_io test_matrix test_multiarch_api \
-	test_write_to_buffer test_ensure_symbols_relocs test_push_section test_segment_align test_strtab test_layout test_push_symbol test_write_twice
+	test_write_to_buffer test_ensure_symbols_relocs test_push_section test_segment_align test_strtab test_layout test_push_symbol test_write_twice \
+	test_write_oom
 
 .PHONY: all clean
 
@@ -16,6 +17,7 @@ all: $(TESTS)
 	./test_segment_align
 	./test_write_to_buffer
 	./test_write_twice
+	./test_write_oom
 	./test_roundtrip
 	./test_invalid
 	./test_link
@@ -84,6 +86,11 @@ test_write_to_buffer: test_write_to_buffer.c ../../../usr.lib/elfobj/libelfobj.a
 
 test_write_twice: test_write_twice.c ../../../usr.lib/elfobj/libelfobj.a
 	$(CC) $(CFLAGS) test_write_twice.c ../../../usr.lib/elfobj/libelfobj.a -o test_write_twice
+
+# Every allocation the library makes goes through the test's counters.
+test_write_oom: test_write_oom.c ../../../usr.lib/elfobj/libelfobj.a
+	$(CC) $(CFLAGS) test_write_oom.c ../../../usr.lib/elfobj/libelfobj.a -o test_write_oom \
+		-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 
 test_push_section: test_push_section.c ../../../usr.lib/elfobj/libelfobj.a
 	$(CC) $(CFLAGS) test_push_section.c ../../../usr.lib/elfobj/libelfobj.a -o test_push_section
