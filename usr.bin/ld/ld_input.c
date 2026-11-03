@@ -811,6 +811,11 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
  * directory is passed over, not an error: a search path that names both
  * /lib64 and /lib is an ordinary one.  What is not an ELF file is an
  * archive or a script, and is looked into later.
+ *
+ * What was passed over is noted for the "cannot find" of the same -l
+ * only: load_library_input() forgets it before each search, so that a
+ * library for another machine passed over by an earlier -l that found
+ * what it wanted is not named for a later one that found nothing.
  */
 static char lib_passed_over[512];       /* the last one that was for another machine */
 
@@ -1243,6 +1248,8 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
     int have_shared_match = 0;
     int handled = 0;
 
+    /* what an earlier -l passed over is no reason this one found nothing */
+    lib_passed_over[0] = '\0';
     if (in->text != NULL && in->text[0] == ':') {
         char *path_exact = resolve_library_path_exact(ctx, in->text + 1);
         if (path_exact == NULL) {

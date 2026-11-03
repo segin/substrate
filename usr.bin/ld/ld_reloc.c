@@ -95,9 +95,24 @@ static int reloc_addend_is_signed(uint16_t machine, uint32_t type) {
  * resolver is, which is what its type means.
  *
  * The context is kept here so that resolve_symbol_addr(), which is
- * handed symbols from everywhere, gives the stub.
+ * handed symbols from everywhere, gives the stub.  It is a pass's own,
+ * and forget_ifunc_ctx() lets go of it when the pass's context is freed.
  */
 static const ld_ctx_t *ifunc_ctx;
+
+/**
+ * Let go of @p ctx as the context indirect functions are looked up in,
+ * if it is that one: the context is about to be freed, and the next pass
+ * of the link has a context of its own, which collect_local_got() takes.
+ * Until then resolve_symbol_addr() knows of no indirect functions.
+ *
+ * @param ctx The context being freed.
+ */
+void forget_ifunc_ctx(const ld_ctx_t *ctx) {
+    if (ifunc_ctx == ctx) {
+        ifunc_ctx = NULL;
+    }
+}
 
 static long ifunc_index(const elf_symbol_t *sym) {
     size_t i;

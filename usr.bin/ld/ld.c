@@ -845,6 +845,8 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
 /* Everything the link context owns. */
 static void ctx_free(ld_ctx_t *ctx) {
+    /* the context, and the list of indirect functions in it, end here */
+    forget_ifunc_ctx(ctx);
     inputvec_free(&ctx->opt.inputs);
     strvec_free(&ctx->opt.lib_paths);
     strvec_free(&ctx->opt.rpaths);

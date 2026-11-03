@@ -933,6 +933,7 @@ int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
                                uint64_t *out_addr, const char **undef_name);
 const dyn_import_t *find_planned_import(const ld_ctx_t *ctx, const char *name);
 int collect_local_got(ld_ctx_t *ctx, elfobj_t *out);
+void forget_ifunc_ctx(const ld_ctx_t *ctx);
 int plan_local_got(ld_ctx_t *ctx, elfobj_t *out);
 int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out);
 int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefined);
