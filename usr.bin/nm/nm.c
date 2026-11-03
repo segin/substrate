@@ -370,6 +370,8 @@ static int is_target_special_symbol(uint16_t machine, const char *name)
  */
 static int filter_symbol(const nm_sym_t *sym, uint16_t machine)
 {
+    const char *special_name;
+
     /* Skip the null symbol (index 0, empty name, SHN_UNDEF) */
     if (sym->orig_index == 0 && sym->shndx == SHN_UNDEF &&
         (sym->name == NULL || sym->name[0] == '\0'))
@@ -377,9 +379,16 @@ static int filter_symbol(const nm_sym_t *sym, uint16_t machine)
 
     /*
      * Mapping symbols and the like are hidden unless --special-syms
-     * asks for them; -a does not show them, as with GNU nm.
+     * asks for them; -a does not show them, as with GNU nm.  A section
+     * symbol has no name of its own in the string table, but BFD names
+     * it after its section, and that is the name GNU tests: on RISC-V,
+     * where an empty name is special, ".text" and ".debug_info" are not.
      */
-    if (!opts.special_syms && is_target_special_symbol(machine, sym->name))
+    special_name = sym->name;
+    if (sym->stype == STT_SECTION &&
+        (special_name == NULL || special_name[0] == '\0') && sym->sec_name)
+        special_name = sym->sec_name;
+    if (!opts.special_syms && is_target_special_symbol(machine, special_name))
         return 0;
 
     /* By default, skip STT_FILE and STT_SECTION unless -a */

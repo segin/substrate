@@ -42,6 +42,7 @@ expect_nomatch() {
 main() {
     require_cmd cc
     require_cmd ar
+    require_cmd objcopy
 
     [ -x "$NM" ] || fail "nm binary not found: $NM"
 
@@ -336,6 +337,34 @@ SRC
         expect_names "--special-syms shows $m special symbols" \
             "$ALL_SPECIAL" --special-syms "$TMP/special_$m.o"
     done
+
+    # A section symbol has an empty st_name, but BFD names it after its
+    # section, so RISC-V's "empty names are special" rule does not hide
+    # it: -a lists .text and the .debug_* section symbols there as on
+    # any other machine.  The relocations are stripped because nm
+    # cannot read x86 relocations under a RISC-V e_machine.
+    printf 'int sec_x;\nint sec_f(void) { return sec_x; }\n' > "$TMP/secsym.c"
+    cc -g -c -o "$TMP/secsym_rel.o" "$TMP/secsym.c"
+    objcopy --remove-relocations='*' "$TMP/secsym_rel.o" "$TMP/secsym.o"
+    cp "$TMP/secsym.o" "$TMP/secsym_riscv.o"
+    printf '\363\000' | dd of="$TMP/secsym_riscv.o" bs=1 seek=18 conv=notrunc 2>/dev/null
+    WANT_SEC=$($NM -a "$TMP/secsym.o")
+    printf '%s\n' "$WANT_SEC" | grep -q '[[:space:]]N[[:space:]]' ||
+        fail "x86 -a lists debug section symbols (got: $WANT_SEC)"
+    GOT_SEC=$($NM -a "$TMP/secsym_riscv.o")
+    [ "$GOT_SEC" = "$WANT_SEC" ] || {
+        printf 'FAIL: RISC-V -a keeps section symbols\n--- got:\n%s\n--- want:\n%s\n' \
+            "$GOT_SEC" "$WANT_SEC" >&2
+        exit 1
+    }
+    pass "RISC-V -a keeps section symbols"
+    if nm --version 2>/dev/null | grep -q 'GNU nm'; then
+        N_GOT=$(printf '%s\n' "$GOT_SEC" | wc -l)
+        N_WANT=$(nm -a "$TMP/secsym_riscv.o" | wc -l)
+        [ "$N_GOT" = "$N_WANT" ] ||
+            fail "RISC-V -a lists as many symbols as GNU nm ($N_GOT vs $N_WANT)"
+        pass "RISC-V -a lists as many symbols as GNU nm"
+    fi
 
     # Command-line parsing as GNU getopt does it: "--" ends the
     # options, --line-numbers is the long -l, and an option argument
