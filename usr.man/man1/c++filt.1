@@ -29,6 +29,10 @@ Do not strip a leading underscore.
 .TP
 .B -_, --strip-underscore
 Strip one leading underscore before demangling.
+Only the stripped name is tried: a name that does not demangle without
+its first underscore, such as
+.BR _Z3foov ,
+is printed unchanged.
 .TP
 .B -p, --no-params
 Omit function parameter types.

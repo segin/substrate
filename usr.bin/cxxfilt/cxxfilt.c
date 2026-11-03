@@ -436,16 +436,14 @@ demangle_with_cfg(const char *sym, const cxxfilt_cfg_t *cfg)
         candidate++;
     }
 
+    /*
+     * With -_ the stripped name is the only one tried, as in GNU
+     * c++filt: "_Z3foov" loses its underscore, "Z3foov" does not
+     * demangle, and the word is echoed unchanged.
+     */
     out = demangle(candidate, options);
     if (out != NULL) {
         return out;
-    }
-
-    if (candidate != sym) {
-        out = demangle(sym, options);
-        if (out != NULL) {
-            return out;
-        }
     }
 
     return xstrdup(sym);
