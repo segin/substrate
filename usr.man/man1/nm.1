@@ -83,8 +83,11 @@ Display only external (global and weak) symbols.
 Same as
 .Fl -format Ns = Ns Ar format .
 .It Fl l , Fl -line-numbers
-Display source file name and line number from DWARF debugging
-information (not yet implemented).
+After each defined symbol, print a tab and the source file name and
+line number of the symbol's address, as found in the
+.Dv .debug_line
+table of DWARF version 2, 3 or 4 debugging information.
+Symbols with no line table entry are printed without one.
 .It Fl n , Fl v , Fl -numeric-sort
 Sort symbols numerically by their value (address) instead of
 alphabetically by name.

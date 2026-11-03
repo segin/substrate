@@ -504,6 +504,37 @@ SRC
         done
     fi
 
+    # -l: the file:line printed for a symbol must be the one GNU
+    # addr2line reports for the symbol's address, and nm.1 must
+    # describe -l as working.
+    require_cmd addr2line
+    cat > "$TMP/line.c" <<'SRC'
+int g_line;
+
+int line_fn(int x)
+{
+	return x + g_line;
+}
+
+int main(void) { return line_fn(1); }
+SRC
+    cc -gdwarf-4 -c -o "$TMP/line.o" "$TMP/line.c"
+    cc -gdwarf-4 -o "$TMP/line" "$TMP/line.c"
+    for f in line.o line; do
+        OUT_L=$($NM -l "$TMP/$f")
+        addr=$(printf '%s\n' "$OUT_L" | awk '$3 == "line_fn" { print $1 }')
+        [ -n "$addr" ] || fail "-l $f: no line_fn symbol"
+        want=$(addr2line -e "$TMP/$f" "0x$addr")
+        want="${want##*/}"
+        expect_match "-l $f matches addr2line ($want)" "$OUT_L" \
+            "[[:space:]]T[[:space:]]+line_fn	(.*/)?$want\$"
+    done
+    MAN_L=$(awk '/^\.It Fl l$/ { on = 1; next } /^\.It / { on = 0 } on' \
+        "$ROOT/usr.man/man1/nm.1")
+    [ -n "$MAN_L" ] || fail "nm.1 has no -l entry"
+    expect_nomatch "nm.1 does not call -l unimplemented" "$MAN_L" \
+        'not (yet )?implemented'
+
     if [ -x /bin/ls ]; then
         OUT_DYN=$($NM -D /bin/ls)
         expect_match "-D dynamic symbols produce output" "$OUT_DYN" '^[[:space:]]*[0-9a-fA-F]*[[:space:]]+[A-Za-z][[:space:]]+'
