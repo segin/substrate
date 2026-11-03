@@ -27,6 +27,7 @@ run:
 	./test_link_order.sh
 	./test_local_symbols.sh
 	./test_merge_sections.sh
+	./test_merge_size.sh
 	./test_gnu_property.sh
 	./test_gnu_property_size.sh
 	./test_pie_exports.sh

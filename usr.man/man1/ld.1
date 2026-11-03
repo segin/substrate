@@ -1024,6 +1024,9 @@ entry size, strings or not, and alignment are laid out as one block that
 holds each string or constant once, and a string that ends another is
 found at that one's end.
 A section with relocations of its own is not merged.
+A block that would not fit in the linker's address space, as on a 32-bit
+host the strings of many sections each aligned to a large boundary may
+not, fails the link.
 Under
 .Fl r
 nothing is merged.

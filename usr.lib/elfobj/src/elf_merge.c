@@ -364,7 +364,15 @@ static elf_err_t lay_out_group(struct merge_group *g) {
         if (e->suffix_of != NULL) {
             continue;
         }
+        /* the block is one allocation: it must fit in size_t at every step, or the
+         * offsets would outrun a block cut to the low bits of its size */
+        if (e->align - 1 > (uint64_t)SIZE_MAX - cur) {
+            return ELF_ERR_OOM;
+        }
         cur = (cur + e->align - 1) & ~(e->align - 1);
+        if ((uint64_t)e->len > (uint64_t)SIZE_MAX - cur) {
+            return ELF_ERR_OOM;
+        }
         e->off = cur;
         cur += e->len;
         if (e->align > g->align) {
