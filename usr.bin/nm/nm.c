@@ -414,9 +414,12 @@ static int filter_symbol(const nm_sym_t *sym, uint16_t machine)
     if (opts.no_weak && sym->bind == STB_WEAK)
         return 0;
 
-    /* Sorting by size only makes sense for symbols that have one */
+    /*
+     * Sorting by size only makes sense for symbols that have one.  GNU
+     * nm also drops absolute symbols here, even with a .size.
+     */
     if (opts.sort_mode == SORT_SIZE &&
-        (sym->shndx == SHN_UNDEF || sym->sz == 0))
+        (sym->shndx == SHN_UNDEF || sym->shndx == SHN_ABS || sym->sz == 0))
         return 0;
 
     return 1;

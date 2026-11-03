@@ -184,14 +184,15 @@ SRC
         pass "nm thin archive listing matches GNU nm"
     fi
 
-    # --size-sort: ascending by size, undefined and size-0 symbols are
-    # dropped, and without -S the BSD value column carries the size.
+    # --size-sort: ascending by size, undefined, absolute and size-0
+    # symbols are dropped, and without -S the BSD value column carries the size.
     cat > "$TMP/sizes.c" <<'SRC'
 extern int ext_sz;
 char big_arr[300] = { 1 };
 short mid_arr[40] = { 2 };
 int small_var = 3;
 __asm__(".globl zero_sym\n.data\nzero_sym:\n.text\n");
+__asm__(".globl abs_sz\n.set abs_sz, 0x1234\n.size abs_sz, 8\n");
 int sz_fn(void) { return ext_sz + big_arr[0] + mid_arr[0] + small_var; }
 SRC
     cc -c -o "$TMP/sizes.o" "$TMP/sizes.c"
@@ -199,6 +200,7 @@ SRC
     OUT_SS=$($NM --size-sort "$TMP/sizes.o")
     expect_nomatch "--size-sort drops undefined" "$OUT_SS" 'ext_sz'
     expect_nomatch "--size-sort drops size-0 symbols" "$OUT_SS" 'zero_sym'
+    expect_nomatch "--size-sort drops absolute symbols" "$OUT_SS" 'abs_sz'
     expect_match "--size-sort prints size of small_var" "$OUT_SS" '^0+4 D small_var$'
     expect_match "--size-sort prints size of mid_arr" "$OUT_SS" '^0+50 D mid_arr$'
     expect_match "--size-sort prints size of big_arr" "$OUT_SS" '^0+12c D big_arr$'
