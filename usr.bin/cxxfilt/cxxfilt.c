@@ -466,23 +466,21 @@ process_line(const char *line, size_t line_len, const cxxfilt_cfg_t *cfg, FILE *
         return 0;
     }
 
+    /*
+     * Split the line into words (maximal runs of is_token_char()) as
+     * GNU c++filt does, and hand each whole word to the demangler.  A
+     * "_Z" inside a word ("FOO_Z3bar", the second underscore of
+     * "__Z3foov") does not start a symbol; only -_ may peel one
+     * leading underscore off the word, in demangle_with_cfg().
+     */
     i = 0u;
     while (i < line_len) {
         size_t consume_start;
-        size_t demangle_start;
         size_t j;
         char *sym;
         char *demangled;
 
-        consume_start = i;
-        demangle_start = i;
-
-        if (i + 1u < line_len && is_mangled_prefix(line + i)) {
-            demangle_start = i;
-        } else if (cfg->strip == STRIP_ONE &&
-                   i + 2u < line_len && line[i] == '_' && is_mangled_prefix(line + i + 1u)) {
-            demangle_start = i + 1u;
-        } else {
+        if (!is_token_char(line[i])) {
             if (outbuf_appendc(&ob, line[i]) != 0) {
                 outbuf_destroy(&ob);
                 return -1;
@@ -491,18 +489,30 @@ process_line(const char *line, size_t line_len, const cxxfilt_cfg_t *cfg, FILE *
             continue;
         }
 
-        j = demangle_start;
+        consume_start = i;
+        j = i;
         while (j < line_len && is_token_char(line[j])) {
             j++;
         }
 
-        sym = (char *)malloc((j - demangle_start) + 1u);
+        if (!(j - i >= 2u && is_mangled_prefix(line + i)) &&
+            !(cfg->strip == STRIP_ONE && j - i >= 3u &&
+              line[i] == '_' && is_mangled_prefix(line + i + 1u))) {
+            if (outbuf_append(&ob, line + i, j - i) != 0) {
+                outbuf_destroy(&ob);
+                return -1;
+            }
+            i = j;
+            continue;
+        }
+
+        sym = (char *)malloc((j - consume_start) + 1u);
         if (sym == NULL) {
             outbuf_destroy(&ob);
             return -1;
         }
-        memcpy(sym, line + demangle_start, j - demangle_start);
-        sym[j - demangle_start] = '\0';
+        memcpy(sym, line + consume_start, j - consume_start);
+        sym[j - consume_start] = '\0';
 
         demangled = demangle_with_cfg(sym, cfg);
         free(sym);

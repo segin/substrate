@@ -31,6 +31,13 @@ expect_eq "8b-1" "$(printf 'X _Z3foov Y\n' | "$BIN")" "X foo() Y"
 expect_eq "8b-2" "$(printf '_Z3foov _ZN3Foo3barEv\n' | "$BIN")" "foo() Foo::bar()"
 expect_eq "8b-3" "$(printf '' | "$BIN")" ""
 expect_eq "8b-4" "$(printf 'plain text\n' | "$BIN")" "plain text"
+# A "_Z" in the middle of a word does not start a symbol: each word
+# (a run of alphanumerics, '_', '$' and '.') is demangled whole or
+# left alone, as GNU c++filt does.
+expect_eq "8b-5" "$(printf 'FOO_Z3bar __Z3foov a._Z3foov x$_Z1fv _Z3foov,_Z1fv (_Z3foov)\n' | "$BIN" -n)" \
+    'FOO_Z3bar __Z3foov a._Z3foov x$_Z1fv foo(),f() (foo())'
+expect_eq "8b-6" "$(printf 'FOO_Z3bar __Z3foov\n' | "$BIN")" "FOO_Z3bar __Z3foov"
+expect_eq "8b-7" "$(printf 'FOO_Z3bar __Z3foov\n' | "$BIN" -_)" "FOO_Z3bar foo()"
 
 # 8c argv mode
 expect_eq "8c-1" "$("$BIN" _Z3fooi)" "foo(int)"

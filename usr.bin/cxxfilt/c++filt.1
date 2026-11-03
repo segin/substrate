@@ -51,6 +51,16 @@ If one or more operands are provided, each operand is treated as one input name.
 Otherwise,
 .B c++filt
 reads stdin line-by-line and demangles embedded mangled tokens.
+A token is a whole word: a maximal run of letters, digits,
+.BR _ ,
+.BR $ ,
+and
+.BR . .
+A word is demangled only as a whole; a mangling prefix such as
+.B _Z
+in the middle of a word (for example
+.BR FOO_Z3bar )
+does not start a symbol, and the word is copied unchanged.
 .SH EXIT STATUS
 .TP
 .B 0
