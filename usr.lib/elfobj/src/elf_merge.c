@@ -504,22 +504,35 @@ static int read_x86_props(const elfobj_t *obj, struct x86_prop *props) {
     if (sec == NULL || sec->data == NULL) {
         return -1;
     }
-    while (off + 12 <= sec->data_size) {
+    /*
+     * Every size is tested against what is left (off <= data_size, p <= end) before it is added, so
+     * a size near 4 GiB cannot wrap a 32-bit size_t and move the walk on by nothing, or back.
+     */
+    while (sec->data_size - off >= 12) {
         uint32_t namesz = elf__rd32(sec->data + off, obj->endian);
         uint32_t descsz = elf__rd32(sec->data + off + 4, obj->endian);
         uint32_t ntype = elf__rd32(sec->data + off + 8, obj->endian);
-        size_t desc = off + 12 + ((namesz + 3u) & ~3u);
-        size_t p;
+        size_t left = sec->data_size - off - 12;
+        size_t desc, end, p;
 
-        if (desc > sec->data_size || descsz > sec->data_size - desc) {
+        if (namesz > left || (((size_t)namesz + 3) & ~(size_t)3) > left) {
             break;
         }
+        desc = off + 12 + (((size_t)namesz + 3) & ~(size_t)3);
+        if (descsz > sec->data_size - desc) {
+            break;
+        }
+        end = desc + descsz;
         if (ntype == 5 && namesz == 4 && memcmp(sec->data + off + 12, "GNU", 4) == 0) {
-            for (p = desc; p + 8 <= desc + descsz;) {
+            for (p = desc; end - p >= 8;) {
                 uint32_t ptype = elf__rd32(sec->data + p, obj->endian);
                 uint32_t psz = elf__rd32(sec->data + p + 4, obj->endian);
+                size_t step;
 
-                if (psz == 4 && p + 12 <= desc + descsz) {
+                if (psz > end - p - 8) {
+                    break;      /* runs past the note: bfd calls it corrupt */
+                }
+                if (psz == 4) {
                     uint32_t v = elf__rd32(sec->data + p + 8, obj->endian);
                     int k;
 
@@ -534,10 +547,17 @@ static int read_x86_props(const elfobj_t *obj, struct x86_prop *props) {
                         n++;
                     }
                 }
-                p += 8 + ((psz + pad - 1) & ~(pad - 1));
+                step = ((size_t)psz + pad - 1) & ~(pad - 1);
+                if (step > end - p - 8) {
+                    break;      /* the last property, its padding cut off */
+                }
+                p += 8 + step;
             }
         }
-        off = desc + ((descsz + pad - 1) & ~(pad - 1));
+        if ((((size_t)descsz + pad - 1) & ~(pad - 1)) > sec->data_size - desc) {
+            break;
+        }
+        off = desc + (((size_t)descsz + pad - 1) & ~(pad - 1));
     }
     return n;
 }

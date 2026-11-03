@@ -28,6 +28,7 @@ run:
 	./test_local_symbols.sh
 	./test_merge_sections.sh
 	./test_gnu_property.sh
+	./test_gnu_property_size.sh
 	./test_pie_exports.sh
 	./test_separate_code.sh
 	./test_linker_symbols.sh
