@@ -137,6 +137,31 @@ size instead of its value; with
 as well, both the value and the size are shown.
 .It Fl -special-syms
 Include target-specific special symbols in the output.
+These are hidden by default, and
+.Fl a
+does not show them.
+On ARM they are the mapping and tag symbols, named
+.Ql $
+followed by one lower-case letter and optionally a
+.Ql \&.
+suffix
+.Pq Ql $a , Ql $t , Ql $d , Ql $d.1 ;
+on AArch64 the mapping symbols
+.Ql $x
+and
+.Ql $d ,
+optionally with a
+.Ql \&.
+suffix;
+on RISC-V the mapping symbols
+.Ql $d ,
+.Ql $x
+and
+.Ql $xrv Ns Ar ... ,
+assembler-local labels such as
+.Ql .L1 ,
+and symbols with empty names.
+Other machines have no special symbols.
 .El
 .Sh "SYMBOL TYPE LETTERS"
 Each symbol is classified with a single letter indicating its type.

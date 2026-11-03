@@ -255,6 +255,65 @@ SRC
         done
     fi
 
+    # Target-specific special symbols.  GNU nm hides ARM, AArch64 and
+    # RISC-V mapping symbols (and, on RISC-V, local labels) unless
+    # --special-syms is given; -a does not bring them back, and no
+    # other machine has any.  The host assembler cannot target those
+    # machines, so an x86 object carrying the names gets its e_machine
+    # rewritten: nm only looks at the symbol table here.
+    cat > "$TMP/special.s" <<'SRC'
+        .data
+"$a":   .byte 0
+"$t":   .byte 0
+"$d":   .byte 0
+"$d.1": .byte 0
+"$m":   .byte 0
+"$x":   .byte 0
+"$x.foo": .byte 0
+"$xrv64i2p1": .byte 0
+.Lkeep: .byte 0
+plain:  .byte 0
+SRC
+    cc -m32 -c -Wa,-L -o "$TMP/special32.o" "$TMP/special.s"
+    cc -c -Wa,-L -o "$TMP/special64.o" "$TMP/special.s"
+    cp "$TMP/special32.o" "$TMP/special_arm.o"
+    cp "$TMP/special64.o" "$TMP/special_aarch64.o"
+    cp "$TMP/special64.o" "$TMP/special_riscv.o"
+    # e_machine is the little-endian half-word at offset 18.
+    printf '\050\000' | dd of="$TMP/special_arm.o" bs=1 seek=18 conv=notrunc 2>/dev/null
+    printf '\267\000' | dd of="$TMP/special_aarch64.o" bs=1 seek=18 conv=notrunc 2>/dev/null
+    printf '\363\000' | dd of="$TMP/special_riscv.o" bs=1 seek=18 conv=notrunc 2>/dev/null
+
+    ALL_SPECIAL='$a $d $d.1 $m $t $x $x.foo $xrv64i2p1 .Lkeep plain'
+    special_names() {
+        "$NM" "$@" | awk '{ print $NF }' | grep -v '^\.data$' | tr '\n' ' ' | sed 's/ $//'
+    }
+    expect_names() {
+        label=$1
+        want=$2
+        shift 2
+        got=$(special_names "$@")
+        [ "$got" = "$want" ] || {
+            printf 'FAIL: %s\n  got:  %s\n  want: %s\n' "$label" "$got" "$want" >&2
+            exit 1
+        }
+        pass "$label"
+    }
+
+    expect_names "x86 has no special symbols" "$ALL_SPECIAL" "$TMP/special64.o"
+    expect_names "ARM hides \$<letter> mapping symbols" \
+        '$xrv64i2p1 .Lkeep plain' "$TMP/special_arm.o"
+    expect_names "-a does not show ARM mapping symbols" \
+        '$xrv64i2p1 .Lkeep plain' -a "$TMP/special_arm.o"
+    expect_names "AArch64 hides \$x/\$d mapping symbols" \
+        '$a $m $t $xrv64i2p1 .Lkeep plain' "$TMP/special_aarch64.o"
+    expect_names "RISC-V hides mapping symbols and local labels" \
+        '$a $d.1 $m $t $x.foo plain' "$TMP/special_riscv.o"
+    for m in arm aarch64 riscv; do
+        expect_names "--special-syms shows $m special symbols" \
+            "$ALL_SPECIAL" --special-syms "$TMP/special_$m.o"
+    done
+
     if [ -x /bin/ls ]; then
         OUT_DYN=$($NM -D /bin/ls)
         expect_match "-D dynamic symbols produce output" "$OUT_DYN" '^[[:space:]]*[0-9a-fA-F]*[[:space:]]+[A-Za-z][[:space:]]+'

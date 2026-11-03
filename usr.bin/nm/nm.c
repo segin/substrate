@@ -302,11 +302,83 @@ apply_case:
 /* Filter                                                              */
 /* ------------------------------------------------------------------ */
 
-static int filter_symbol(const nm_sym_t *sym)
+/**
+ * @brief Tell whether a name is an assembler-local label.
+ *
+ * Matches the names GNU BFD treats as local labels in ELF objects:
+ * ".L" and ".." prefixes, gcc's "_.L_" prefix, and the "L<digit>"
+ * names gas gives dollar and forward/backward labels, which carry a
+ * \\001 or \\002 byte.
+ *
+ * @param name Symbol name; never NULL.
+ * @return 1 if the name is a local label, 0 otherwise.
+ */
+static int is_local_label_name(const char *name)
+{
+    if (name[0] == '.' && (name[1] == 'L' || name[1] == '.'))
+        return 1;
+    if (strncmp(name, "_.L_", 4) == 0)
+        return 1;
+    if (name[0] == 'L' && isdigit((unsigned char)name[1]))
+        return strchr(name, '\001') != NULL || strchr(name, '\002') != NULL;
+    return 0;
+}
+
+/**
+ * @brief Tell whether a symbol is a target-specific special symbol.
+ *
+ * These are the symbols GNU nm hides unless --special-syms is given:
+ * ARM mapping and tag symbols ("$" followed by a lower-case letter,
+ * optionally followed by "." and a suffix, e.g. "$a", "$t", "$d.1"),
+ * AArch64 mapping symbols ("$x", "$d", optionally with a "." suffix),
+ * and on RISC-V the mapping symbols ("$d", "$x", "$xrv..."), local
+ * labels and symbols with empty names.  No other machine has any.
+ *
+ * @param machine e_machine of the object the symbol came from.
+ * @param name    Symbol name; may be NULL.
+ * @return 1 if the symbol is special for @p machine, 0 otherwise.
+ */
+static int is_target_special_symbol(uint16_t machine, const char *name)
+{
+    if (name == NULL)
+        name = "";
+
+    switch (machine) {
+    case EM_ARM:
+        return name[0] == '$' && name[1] >= 'a' && name[1] <= 'z' &&
+               (name[2] == '\0' || name[2] == '.');
+    case EM_AARCH64:
+        return name[0] == '$' && (name[1] == 'd' || name[1] == 'x') &&
+               (name[2] == '\0' || name[2] == '.');
+    case EM_RISCV:
+        return name[0] == '\0' || is_local_label_name(name) ||
+               strcmp(name, "$d") == 0 || strcmp(name, "$x") == 0 ||
+               strncmp(name, "$xrv", 4) == 0;
+    default:
+        return 0;
+    }
+}
+
+/**
+ * @brief Decide whether a collected symbol is printed.
+ *
+ * @param sym     The symbol.
+ * @param machine e_machine of the object it came from, for the
+ *                target-specific special symbols --special-syms shows.
+ * @return 1 to print the symbol, 0 to drop it.
+ */
+static int filter_symbol(const nm_sym_t *sym, uint16_t machine)
 {
     /* Skip the null symbol (index 0, empty name, SHN_UNDEF) */
     if (sym->orig_index == 0 && sym->shndx == SHN_UNDEF &&
         (sym->name == NULL || sym->name[0] == '\0'))
+        return 0;
+
+    /*
+     * Mapping symbols and the like are hidden unless --special-syms
+     * asks for them; -a does not show them, as with GNU nm.
+     */
+    if (!opts.special_syms && is_target_special_symbol(machine, sym->name))
         return 0;
 
     /* By default, skip STT_FILE and STT_SECTION unless -a */
@@ -780,11 +852,13 @@ static int process_elf(elfobj_t *obj, const char *display_name_str)
 {
     nm_symtab_t tab;
     elfobj_class_t cls;
+    uint16_t machine;
     size_t i;
     int printed = 0;
 
     nm_symtab_init(&tab);
     cls = elf_class(obj);
+    machine = elf_machine(obj);
 
     if (opts.dynamic) {
         if (collect_from_dynsym(obj, &tab) != 0) {
@@ -802,7 +876,7 @@ static int process_elf(elfobj_t *obj, const char *display_name_str)
     {
         int has_displayable = 0;
         for (i = 0; i < tab.count; i++) {
-            if (filter_symbol(&tab.syms[i])) {
+            if (filter_symbol(&tab.syms[i], machine)) {
                 has_displayable = 1;
                 break;
             }
@@ -826,7 +900,7 @@ static int process_elf(elfobj_t *obj, const char *display_name_str)
     }
 
     for (i = 0; i < tab.count; i++) {
-        if (!filter_symbol(&tab.syms[i]))
+        if (!filter_symbol(&tab.syms[i], machine))
             continue;
 
         switch (opts.format) {

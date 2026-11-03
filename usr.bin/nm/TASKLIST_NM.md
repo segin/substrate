@@ -61,7 +61,7 @@ Goal: implement `nm` with ELF parsing exclusively via `libelfobj`.
 - [ ] `-C` / `--demangle`: demangle C++ symbol names (defer unless tree needs it).
 - [ ] `-D` / `--dynamic`: use `.dynsym` instead of `.symtab`.
 - [ ] `-t {d,o,x}` / `--radix={d,o,x}`: print values in decimal, octal, or hex.
-- [ ] `--special-syms`: include target‑specific special symbols.
+- [x] `--special-syms`: include target‑specific special symbols (ARM/AArch64/RISC-V mapping symbols, RISC-V local labels; hidden otherwise, even with `-a`).
 
 ### 3d. Multi‑File / Archive Support
 - [ ] Multiple files on command line: print `\n<filename>:\n` banner between each.
