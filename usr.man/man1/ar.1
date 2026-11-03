@@ -153,7 +153,11 @@ host's byte order.
 A damaged archive is not read at all:
 a member header whose trailer is not
 .Dq `\en
-or whose size field is not a decimal number is reported as a
+or whose size field is not a decimal number, and a GNU
+.Dq / Ns Ar offset
+long-name reference with no
+.Dq //
+name table or past the end of it, are reported as a
 .Dq malformed archive ,
 and a member header or member data cut short by the end of the file
 as

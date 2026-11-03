@@ -1,8 +1,9 @@
 #!/bin/sh
 #
 # ar corrupt-archive tests.  A member header with a bad ar_fmag
-# trailer or an unparseable size, a member whose payload runs past the
-# end of the file, and a header cut short by the end of the file all
+# trailer or an unparseable size, a GNU long-name reference outside the
+# "//" name table, a member whose payload runs past the end of the
+# file, and a header cut short by the end of the file all
 # make the archive unreadable: ar must report it and exit non-zero,
 # and an operation that rewrites the archive (r, d, s, ranlib) must
 # leave the file exactly as it was instead of writing back whatever
@@ -115,6 +116,34 @@ main() {
         fail "ar x tpay.a exited 0"
     fi
     pass "ar x rejects tpay.a"
+
+    # A GNU "/<offset>" long-name reference that points at or past the
+    # end of the "//" name table, or that comes with no name table at
+    # all, names nothing: it must not become a member with an empty
+    # name.  GNU calls the first a malformed archive; with no table it
+    # lists an empty name, which ar rejects as well.
+    long=a_member_with_a_rather_long_name.txt
+    printf 'long' > "$long"
+    ar rcU lname.a "$long" b.txt
+    out=$("$AR" t lname.a) || fail "ar t lname.a failed"
+    [ "$out" = "$(printf '%s\nb.txt' "$long")" ] || fail "ar t lname.a: '$out'"
+    pass "ar t lname.a"
+    # "//" is the first member: its size at 56, its data at 68.
+    tsize=$(dd if=lname.a bs=1 skip=56 count=10 2>/dev/null | tr -d ' ')
+    hdr2=$((68 + tsize + tsize % 2))        # the long-named member's
+    cp lname.a lfar.a;  poke lfar.a "$hdr2" '/999999'
+    cp lname.a lend.a;  poke lend.a "$hdr2" "/$tsize"
+    cp good.a lnotab.a; poke lnotab.a 8 '/0    '
+    gnu_rejects lfar.a t
+    gnu_rejects lend.a t
+    for a in lfar.a lend.a lnotab.a; do
+        must_reject "$a" t
+        must_reject "$a" p
+        must_reject "$a" r c.txt
+        must_reject "$a" d a.txt
+        grep -q 'malformed archive' "$TMP/err" ||
+            fail "ar d $a: $(cat "$TMP/err")"
+    done
 
     # ranlib rewrites the archive too.
     ln -s "$AR" "$TMP/ranlib"

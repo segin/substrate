@@ -114,7 +114,8 @@ static bool archive_has_symbol_table(void);
 static void touch_symbol_table_member(void);
 static void free_members(void);
 static bool parse_numeric_field(const char *field, size_t field_len, int base, long long *out);
-static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special);
+static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special,
+                                 bool *malformed);
 static void store_be32(unsigned char *dst, uint32_t value);
 static void store_be64(unsigned char *dst, uint64_t value);
 static time_t archive_timestamp_for(time_t source_mtime);
@@ -581,7 +582,25 @@ static bool name_has_path_components(const char *name) {
     return false;
 }
 
-static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special) {
+/**
+ * Decode the ar_name field of a member header into the member's name.
+ *
+ * In a GNU archive the special members "/", "//" and "/SYM64/" keep
+ * their names, a "/<offset>" reference is resolved against the "//"
+ * extended-name table read earlier, and any other name ends at its
+ * first '/'.
+ *
+ * @param hdr        the member header
+ * @param is_special set to true for a GNU symbol or name table member
+ *                   (may be NULL)
+ * @param malformed  set to true when NULL is returned because the
+ *                   header names an entry of an extended-name table
+ *                   that is absent or too short, false otherwise
+ * @return the name in malloc()ed storage, or NULL if it is malformed
+ *         or memory runs out
+ */
+static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special,
+                                 bool *malformed) {
     char tmp[17];
     char *name;
     char *slash;
@@ -589,6 +608,7 @@ static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special) {
     if (is_special != NULL) {
         *is_special = false;
     }
+    *malformed = false;
 
     memcpy(tmp, hdr->ar_name, 16);
     tmp[16] = '\0';
@@ -612,7 +632,16 @@ static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special) {
         if (tmp[0] == '/' && isdigit((unsigned char)tmp[1])) {
             char *end = NULL;
             unsigned long off = strtoul(tmp + 1, &end, 10);
-            if (end != NULL && *end == '\0' && gnu_name_table != NULL && off < gnu_name_table_size) {
+            if (end != NULL && *end == '\0' &&
+                (gnu_name_table == NULL || off >= gnu_name_table_size)) {
+                /* A reference past the end of the name table, or with
+                 * no table at all, names nothing.  Taking the name
+                 * up to its first '/' would give the member an empty
+                 * name; GNU calls this a malformed archive. */
+                *malformed = true;
+                return NULL;
+            }
+            if (end != NULL && *end == '\0') {
                 const char *start = gnu_name_table + off;
                 const char *p = start;
                 while ((size_t)(p - gnu_name_table) < gnu_name_table_size &&
@@ -862,9 +891,13 @@ static void read_archive(const char *path) {
             }
         } else {
             bool special = false;
-            m->name = parse_ar_name_field(&hdr, &special);
+            bool malformed = false;
+            m->name = parse_ar_name_field(&hdr, &special, &malformed);
             (void)special;
             if (m->name == NULL) {
+                if (malformed) {
+                    errx(1, "%s: malformed archive", path);
+                }
                 errx(1, "out of memory while parsing member name");
             }
             m->name_len = strlen(m->name);
@@ -897,13 +930,12 @@ static void read_archive(const char *path) {
                 if (archive_format == ARFMT_GNU && strcmp(m->name, "//") == 0) {
                     free(gnu_name_table);
                     gnu_name_table = malloc(m->size + 1);
-                    if (gnu_name_table != NULL) {
-                        memcpy(gnu_name_table, m->data, m->size);
-                        gnu_name_table[m->size] = '\0';
-                        gnu_name_table_size = m->size;
-                    } else {
-                        gnu_name_table_size = 0;
+                    if (gnu_name_table == NULL) {
+                        errx(1, "out of memory");
                     }
+                    memcpy(gnu_name_table, m->data, m->size);
+                    gnu_name_table[m->size] = '\0';
+                    gnu_name_table_size = m->size;
                 }
             }
         }
