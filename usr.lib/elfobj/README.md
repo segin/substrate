@@ -56,7 +56,7 @@ Thread-safety and reentrancy:
   - `ELFOBJ_OPEN_LAZY_PARSE`
 - `elf_open()` can still use environment toggles (`ELFOBJ_USE_MMAP`, `ELFOBJ_LAZY_PARSE`).
 - Parser section payloads are referenced directly from backing image buffers (no section payload copy on read path).
-- Optional lazy symbol/relocation parse can be enabled with `ELFOBJ_LAZY_PARSE=1`; data is materialized on first symbol/relocation query.
+- Optional lazy symbol/relocation parse can be enabled with `ELFOBJ_LAZY_PARSE=1`; data is materialized on first symbol/relocation query, and before anything that walks or renumbers them: adding the object to a link plan (`elf_link()`), `elf_link_resolve_symbol()`, `elf_remove_section()` and `elf_reorder_section()`.
 
 ## Performance
 - Benchmark harness: `make -C usr.lib/elfobj/bench`.

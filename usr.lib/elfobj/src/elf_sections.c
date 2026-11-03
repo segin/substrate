@@ -379,15 +379,41 @@ static void segment_compact_on_remove(elfobj_t *obj, size_t rem_index) {
     }
 }
 
+/**
+ * @brief Read a lazily opened object's symbols and relocations before its
+ *        sections are renumbered.
+ *
+ * Read afterwards, they would be taken from the file's tables against the
+ * changed section array: a symbol or relocation would land in whatever
+ * section now holds its old index.
+ *
+ * @param obj The object about to have its sections renumbered.
+ * @return ELF_OK, or why its symbols and relocations could not be read
+ *         (also recorded as the object's error).
+ */
+static elf_err_t materialize_before_renumbering(elfobj_t *obj) {
+    elf_err_t err = elf__ensure_symbols_relocs(obj);
+
+    if (err != ELF_OK) {
+        elf__set_err(obj, err, "cannot read the symbols and relocations of a lazily opened object");
+    }
+    return err;
+}
+
 elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section) {
     size_t idx = (size_t)-1;
     size_t i;
+    elf_err_t err;
 
     if (obj == NULL || section == NULL) {
         return ELF_ERR_STATE;
     }
     if (!is_mutable_obj(obj)) {
         return ELF_ERR_STATE;
+    }
+    err = materialize_before_renumbering(obj);
+    if (err != ELF_OK) {
+        return err;
     }
     /* (Of an object with the empty sections that stand for the reserved
      * indices, a section taken out would bring one past them among
@@ -476,6 +502,7 @@ elf_err_t elf_reorder_section(elfobj_t *obj, elf_section_t *section, size_t new_
     size_t old_index = (size_t)-1;
     size_t i;
     struct elf_section *tmp;
+    elf_err_t err;
 
     if (obj == NULL || section == NULL) {
         return ELF_ERR_STATE;
@@ -485,6 +512,10 @@ elf_err_t elf_reorder_section(elfobj_t *obj, elf_section_t *section, size_t new_
     }
     if (new_index >= obj->section_count) {
         return ELF_ERR_BOUNDS;
+    }
+    err = materialize_before_renumbering(obj);
+    if (err != ELF_OK) {
+        return err;
     }
     /* (As elf_remove_section(): a section moved would move others among
      * the reserved indices.) */

@@ -620,7 +620,14 @@ static elf_err_t replace_section_data(struct elf_section *dst, const struct elf_
 static elf_err_t plan_push_input(elf_link_plan_t *plan, elfobj_t *obj, const char *name) {
     void *next;
     struct elf_link_input *in;
+    elf_err_t err;
 
+    /* the merge walks the input's symbols and relocations: a lazily opened
+     * one has them read now */
+    err = elf__ensure_symbols_relocs(obj);
+    if (err != ELF_OK) {
+        return err;
+    }
     if (plan->input_count == plan->input_cap) {
         size_t new_cap = plan->input_cap == 0 ? 8 : plan->input_cap * 2;
         next = elf__reallocarray(plan->inputs, new_cap, sizeof(plan->inputs[0]));
@@ -2477,6 +2484,7 @@ elf_symbol_t *elf_link_resolve_symbol(elfobj_t **inputs, size_t count, const cha
         if (obj == NULL) {
             continue;
         }
+        (void)elf__ensure_symbols_relocs(obj);
         for (j = 0; j < obj->symbol_count; ++j) {
             struct elf_symbol *sym = obj->symbols[j];
             int rank;

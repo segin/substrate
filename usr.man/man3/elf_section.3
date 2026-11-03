@@ -259,6 +259,12 @@ Configures note metadata and sets section type to
 Removes a section and compacts section indices.
 .It Fn elf_reorder_section "obj" "section" "new_index"
 Moves a section to a new order position.
+.Pp
+Both renumber the sections the object's symbols and relocations refer to,
+so on an object opened with
+.Dv ELFOBJ_OPEN_LAZY_PARSE
+they first read its symbols and relocations, and fail with the error that
+reading gives.
 .It Fn elf_section_count "obj"
 Returns the number of sections in the object.
 .It Fn elf_section_get "obj" "index"

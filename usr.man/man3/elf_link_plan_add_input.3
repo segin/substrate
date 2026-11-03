@@ -19,6 +19,10 @@ to
 with optional display name
 .Fa name
 for diagnostics/map entries.
+.Pp
+An object opened with
+.Dv ELFOBJ_OPEN_LAZY_PARSE
+has its symbols and relocations read here, since the link merges them.
 .Sh RETURN VALUES
 Returns
 .Dv ELF_OK
@@ -31,6 +35,12 @@ Typically
 for invalid arguments and
 .Dv ELF_ERR_OOM
 for allocation failure.
+A lazily opened
+.Fa obj
+whose symbols or relocations cannot be read gives the error reading them
+gives, such as
+.Dv ELF_ERR_FORMAT ,
+and is not added.
 .Sh EXAMPLES
 Add two named inputs to a plan and confirm the input count.
 .Bd -literal -offset indent
