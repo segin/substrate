@@ -53,6 +53,22 @@ static int swide_in_unsigned_bits(elf_swide_t v, int bits) {
     return v <= maxv;
 }
 
+/**
+ * Check a value against a field that may hold either a signed or an
+ * unsigned number of @p bits bits.
+ *
+ * This is BFD's complain_overflow_bitfield: a word-sized absolute
+ * field takes S + A = -4 as 0xfffffffc just as it takes 0xfffffffc,
+ * and only a value that fits neither reading overflows.
+ *
+ * @param v     The computed relocation value.
+ * @param bits  The width of the field, 1 to 64.
+ * @return      Nonzero when @p v fits the field.
+ */
+static int swide_in_bitfield_bits(elf_swide_t v, int bits) {
+    return swide_in_unsigned_bits(v, bits) || swide_in_signed_bits(v, bits);
+}
+
 static uint64_t swide_to_width(elf_swide_t v, int bits) {
     uint64_t uv = (uint64_t)v;
 
@@ -519,7 +535,7 @@ static int mips_apply(const elfobj_reloc_ctx_t *ctx,
         case R_MIPS_GOT_OFST:
         case R_MIPS_RELGOT:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32)) {
+            if (!swide_in_bitfield_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
@@ -692,7 +708,7 @@ static int riscv_apply(const elfobj_reloc_ctx_t *ctx,
         case R_RISCV_ADD32:
         case R_RISCV_SET32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32)) {
+            if (!swide_in_bitfield_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
@@ -910,7 +926,7 @@ static int larch_apply(const elfobj_reloc_ctx_t *ctx,
         case R_LARCH_JUMP_SLOT:
         case R_LARCH_ADD32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32)) {
+            if (!swide_in_bitfield_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
@@ -1117,7 +1133,7 @@ static int m68k_apply(const elfobj_reloc_ctx_t *ctx,
         case R_68K_TLS_DTPREL32:
         case R_68K_TLS_TPREL32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32)) {
+            if (!swide_in_bitfield_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
@@ -1224,7 +1240,7 @@ static int vax_apply(const elfobj_reloc_ctx_t *ctx,
         case R_VAX_JMP_SLOT:
         case R_VAX_RELATIVE:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32)) {
+            if (!swide_in_bitfield_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
@@ -2092,7 +2108,7 @@ static int arm_apply(const elfobj_reloc_ctx_t *ctx,
         case R_ARM_THM_TLS_CALL:
         case R_ARM_SBREL32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32)) {
+            if (!swide_in_bitfield_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
@@ -2190,7 +2206,7 @@ static int arm_apply(const elfobj_reloc_ctx_t *ctx,
             return 0;
         case R_ARM_TARGET1:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32)) {
+            if (!swide_in_bitfield_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
@@ -2411,7 +2427,7 @@ static int aarch64_apply(const elfobj_reloc_ctx_t *ctx,
             return 0;
         case R_AARCH64_ABS32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32) && !swide_in_signed_bits(v, 32)) {
+            if (!swide_in_bitfield_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
