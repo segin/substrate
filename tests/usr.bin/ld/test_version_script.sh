@@ -189,6 +189,28 @@ if ! ./ld -m elf_x86_64 -shared -soname libt.so.1 --version-script ext.map -o ou
 else
     compare "--version-script with extern \"C++\""
 fi
+# extern "C" { } names symbols as they are, as GNU ld matches them: f
+# under it is exported with the node's version.  The block's names were
+# read over as extern "C++" ones are, and f fell to local: *.
+cat > extc.map <<'EOF'
+EXTC_1 {
+    global:
+        extern "C" {
+            f;
+        };
+        h;
+    local: *;
+};
+EOF
+"${GNU_LD:-ld}" -shared -soname libt.so.1 --version-script=extc.map -o gnu.so lib.o || exit 1
+if ! dynsyms gnu.so | grep -q ' f@@EXTC_1$'; then
+    echo "FAIL: GNU ld did not export f@@EXTC_1 from extern \"C\""; fail=1
+fi
+if ! ./ld -m elf_x86_64 -shared -soname libt.so.1 --version-script extc.map -o ours.so lib.o > said 2>&1; then
+    echo "FAIL: ld --version-script with extern \"C\": $(head -1 said)"; fail=1
+else
+    compare "--version-script with extern \"C\""
+fi
 cat > open.map <<'EOF'
 OPEN_1 {
     global:

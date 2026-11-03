@@ -716,8 +716,10 @@ An exact name is taken over a pattern
 and a pattern over
 .Li * ;
 names under
+.Li extern \(dqC\(dq
+are matched as any others, and names under
 .Li extern \(dqC++\(dq
-are read over.
+(or any other language) are read over.
 Every named node is a version defined in
 .Pa .gnu.version_d ,
 in the script's order, with the one it depends on, weak if it names

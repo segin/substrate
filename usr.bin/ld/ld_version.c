@@ -100,7 +100,7 @@ int ld_version_script_parse(ld_version_script_t *vs, const char *text, const cha
     for (;;) {
         ld_version_node_t *node;
         int local = 0;
-        int in_extern = 0;
+        int in_extern = 0;      /* in an extern "LANG" { }: 1 for "C", whose names are names, 2 for another */
 
         p = vs_word(p, w, sizeof(w), &q);
         if (p == NULL) {
@@ -129,12 +129,12 @@ int ld_version_script_parse(ld_version_script_t *vs, const char *text, const cha
             }
             if (!q && strcmp(w, "}") == 0) {
                 if (in_extern) {
-                    in_extern = 0;  /* (the end of an extern "C++" { }) */
+                    in_extern = 0;  /* (the end of an extern "LANG" { }) */
                     continue;
                 }
                 break;
             }
-            if (in_extern) {
+            if (in_extern == 2) {
                 continue;   /* a demangled name, which this linker cannot match */
             }
             if (!q && (strcmp(w, ";") == 0 || strcmp(w, ":") == 0)) {
@@ -148,15 +148,21 @@ int ld_version_script_parse(ld_version_script_t *vs, const char *text, const cha
                 local = 1;
                 continue;
             }
-            if (!q && strcmp(w, "extern") == 0) {
-                /* extern "C++" { demangled names }: names this linker cannot match; read over, to its '}' */
+            if (!q && strcmp(w, "extern") == 0 && !in_extern) {
+                /*
+                 * extern "C" { names }: symbol names as any others, as GNU ld matches them.  extern "C++"
+                 * (or "Java") { demangled names }: names this linker cannot match; read over, to its '}'.
+                 */
+                int lang_c;
+
                 p = vs_word(p, w, sizeof(w), &q);
+                lang_c = p != NULL && strcmp(w, "C") == 0;
                 p = p != NULL ? vs_word(p, w, sizeof(w), &q) : NULL;
                 if (p == NULL || strcmp(w, "{") != 0) {
                     fprintf(stderr, "ld: %s: extern without '{' in a version node\n", where);
                     return -1;
                 }
-                in_extern = 1;
+                in_extern = lang_c ? 1 : 2;
                 continue;
             }
             if (strvec_push(local ? &node->locals : &node->globals, w) != 0) {
