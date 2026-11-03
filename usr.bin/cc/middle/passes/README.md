@@ -119,7 +119,9 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   register's content (`cc_fold_ranges()`, run once the -O1 passes and
   inlining are done, before `resolve_isconst()`): from its definitions
   over the whole function -- constants, narrow loads, extensions, masks,
-  sums that cannot overflow, a variable the union of its definitions' --
+  shifts by a constant (the instruction's or a constant value's), sums
+  that cannot overflow, i386's words of a 64-bit value, a variable the
+  union of its definitions' --
   and along the stream from the branches on a compare with a constant,
   into a label nothing else reaches, until the value is defined again or
   a label another way reaches (a label nothing reaches, whose code does

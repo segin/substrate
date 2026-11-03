@@ -359,6 +359,25 @@ static int is_empty(vrange_t r) {
 }
 
 /**
+ * The count shift @p in shifts by, if it is a constant: its own, or a value's defined once by one (legalization
+ * writes `lshr x, %k` of a constant %k as often as `lshr x, k`).
+ *
+ * @return the count, or -1 when it is not known
+ */
+static long long shift_count(const range_t *s, const cc_ssa_instr_t *in) {
+    const cc_ssa_instr_t *d;
+
+    if (in->rhs < 0) {
+        return in->imm;
+    }
+    if (in->rhs >= s->nv || s->def_at[in->rhs] < 0) {
+        return -1;
+    }
+    d = &s->f->instrs[s->def_at[in->rhs]];
+    return d->op == CC_SSA_CONST ? d->imm : -1;
+}
+
+/**
  * The interval of what instruction @p in defines, from its operands' intervals at the walk's place
  * (@p walking) or anywhere.  @p bits is the result's width.
  */
@@ -366,18 +385,20 @@ static vrange_t eval(range_t *s, const cc_ssa_instr_t *in, int bits, int walking
     vrange_t full = full_range(bits);
     vrange_t a;
     vrange_t b;
+    long long by;
     int n;
 
     /* an operand nothing has defined yet: nothing yet (the whole-function step comes back to it) */
     if ((in->op == CC_SSA_ADD || in->op == CC_SSA_SUB || in->op == CC_SSA_MUL || in->op == CC_SSA_AND ||
-         in->op == CC_SSA_OR || in->op == CC_SSA_XOR || in->op == CC_SSA_DIV) &&
+         in->op == CC_SSA_OR || in->op == CC_SSA_XOR || in->op == CC_SSA_DIV || in->op == CC_SSA_PAIR) &&
         tracked(s, in->lhs) && tracked(s, in->rhs) &&
         (is_empty(current(s, in->lhs, walking)) || is_empty(current(s, in->rhs, walking)))) {
         a.lo = 1;
         a.hi = 0;
         return a;
     }
-    if ((in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) && tracked(s, in->lhs) &&
+    if ((in->op == CC_SSA_SHL || in->op == CC_SSA_SHR || in->op == CC_SSA_LO32 || in->op == CC_SSA_HI32) &&
+        tracked(s, in->lhs) &&
         is_empty(current(s, in->lhs, walking))) {
         a.lo = 1;
         a.hi = 0;
@@ -467,21 +488,23 @@ static vrange_t eval(range_t *s, const cc_ssa_instr_t *in, int bits, int walking
         a.hi = bits_mask(a.hi > b.hi ? a.hi : b.hi);
         return a;
     case CC_SSA_SHL:
-        if (in->rhs >= 0 || in->imm <= 0 || in->imm >= bits || !tracked(s, in->lhs) || s->bits[in->lhs] != bits) {
+        by = shift_count(s, in);
+        if (by <= 0 || by >= bits || !tracked(s, in->lhs) || s->bits[in->lhs] != bits) {
             return full;
         }
         a = current(s, in->lhs, walking);
-        if (a.lo < asr(full.lo, (int)in->imm) || a.hi > (full.hi >> in->imm)) {
+        if (a.lo < asr(full.lo, (int)by) || a.hi > (full.hi >> by)) {
             return full;
         }
-        a.lo = (long long)((unsigned long long)a.lo << in->imm);
-        a.hi = (long long)((unsigned long long)a.hi << in->imm);
+        a.lo = (long long)((unsigned long long)a.lo << by);
+        a.hi = (long long)((unsigned long long)a.hi << by);
         return a;
     case CC_SSA_SHR:
-        if (in->rhs >= 0 || in->imm <= 0 || in->imm >= bits || in->lhs < 0 || in->lhs >= s->nv) {
+        by = shift_count(s, in);
+        if (by <= 0 || by >= bits || in->lhs < 0 || in->lhs >= s->nv) {
             return full;
         }
-        if (ext_of(s, in->lhs, (int)in->imm, &n)) {
+        if (in->rhs < 0 && ext_of(s, in->lhs, (int)in->imm, &n)) {
             /* `shr (shl x, k), k`: x's low bits extended, as the shl read x */
             return in->is_unsigned ? s->shl_z[in->lhs] : s->shl_s[in->lhs];
         }
@@ -490,12 +513,44 @@ static vrange_t eval(range_t *s, const cc_ssa_instr_t *in, int bits, int walking
         }
         a = current(s, in->lhs, walking);
         if (!in->is_unsigned || a.lo >= 0) {
-            a.lo = asr(a.lo, (int)in->imm);
-            a.hi = asr(a.hi, (int)in->imm);
+            a.lo = asr(a.lo, (int)by);
+            a.hi = asr(a.hi, (int)by);
             return a;
         }
         a.lo = 0;
-        a.hi = (long long)((bits >= 64 ? ~0ULL : (1ULL << bits) - 1) >> in->imm);
+        a.hi = (long long)((bits >= 64 ? ~0ULL : (1ULL << bits) - 1) >> by);
+        return a;
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
+        /* i386's words of a 64-bit value: the high one in order, the low one where the value is an int already */
+        if (!tracked(s, in->lhs) || s->bits[in->lhs] != 64 || bits != 32) {
+            return full;
+        }
+        a = current(s, in->lhs, walking);
+        if (in->op == CC_SSA_HI32) {
+            a.lo = asr(a.lo, 32);
+            a.hi = asr(a.hi, 32);
+            return a;
+        }
+        return a.lo >= full.lo && a.hi <= full.hi ? a : full;
+    case CC_SSA_PAIR:
+        /* a 64-bit value of two words, the low one read as unsigned */
+        if (!tracked(s, in->lhs) || !tracked(s, in->rhs) || s->bits[in->lhs] != 32 || s->bits[in->rhs] != 32 ||
+            bits != 64) {
+            return full;
+        }
+        a = current(s, in->lhs, walking);
+        b = current(s, in->rhs, walking);
+        if (a.lo < 0) {
+            a.lo = 0;
+            a.hi = 0xffffffffLL;
+        }
+        if (b.lo != b.hi) {
+            a.lo = 0;
+            a.hi = 0xffffffffLL;
+        }
+        a.lo += (long long)((unsigned long long)b.lo << 32);
+        a.hi += (long long)((unsigned long long)b.hi << 32);
         return a;
     case CC_SSA_DIV:
         /* by a positive constant, truncating: in order */
@@ -1139,14 +1194,8 @@ static int kbits_eval(const range_t *s, const cc_ssa_instr_t *in, unsigned long 
         return 1;
     case CC_SSA_SHL:
     case CC_SSA_SHR: {
-        /* (by a constant: the instruction's, or a value's defined once by one) */
-        long long by = in->imm;
+        long long by = shift_count(s, in);
 
-        if (in->rhs >= 0) {
-            by = in->rhs < s->nv && s->def_at[in->rhs] >= 0 && s->f->instrs[s->def_at[in->rhs]].op == CC_SSA_CONST
-                     ? s->f->instrs[s->def_at[in->rhs]].imm
-                     : -1;
-        }
         if (by <= 0 || by >= bits || !tracked(s, in->lhs) || s->bits[in->lhs] != bits) {
             return 1;
         }
