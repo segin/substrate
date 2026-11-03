@@ -292,6 +292,8 @@ SRC
 "$d":   .byte 0
 "$d.1": .byte 0
 "$m":   .byte 0
+"$f":   .byte 0
+"$p.2": .byte 0
 "$x":   .byte 0
 "$x.foo": .byte 0
 "$xrv64i2p1": .byte 0
@@ -308,7 +310,7 @@ SRC
     printf '\267\000' | dd of="$TMP/special_aarch64.o" bs=1 seek=18 conv=notrunc 2>/dev/null
     printf '\363\000' | dd of="$TMP/special_riscv.o" bs=1 seek=18 conv=notrunc 2>/dev/null
 
-    ALL_SPECIAL='$a $d $d.1 $m $t $x $x.foo $xrv64i2p1 .Lkeep plain'
+    ALL_SPECIAL='$a $d $d.1 $f $m $p.2 $t $x $x.foo $xrv64i2p1 .Lkeep plain'
     special_names() {
         "$NM" "$@" | awk '{ print $NF }' | grep -v '^\.data$' | tr '\n' ' ' | sed 's/ $//'
     }
@@ -329,10 +331,10 @@ SRC
         '$xrv64i2p1 .Lkeep plain' "$TMP/special_arm.o"
     expect_names "-a does not show ARM mapping symbols" \
         '$xrv64i2p1 .Lkeep plain' -a "$TMP/special_arm.o"
-    expect_names "AArch64 hides \$x/\$d mapping symbols" \
-        '$a $m $t $xrv64i2p1 .Lkeep plain' "$TMP/special_aarch64.o"
+    expect_names "AArch64 hides \$x/\$d mapping and \$m/\$f/\$p tag symbols" \
+        '$a $t $xrv64i2p1 .Lkeep plain' "$TMP/special_aarch64.o"
     expect_names "RISC-V hides mapping symbols and local labels" \
-        '$a $d.1 $m $t $x.foo plain' "$TMP/special_riscv.o"
+        '$a $d.1 $f $m $p.2 $t $x.foo plain' "$TMP/special_riscv.o"
     for m in arm aarch64 riscv; do
         expect_names "--special-syms shows $m special symbols" \
             "$ALL_SPECIAL" --special-syms "$TMP/special_$m.o"

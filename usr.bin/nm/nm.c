@@ -331,7 +331,8 @@ static int is_local_label_name(const char *name)
  * These are the symbols GNU nm hides unless --special-syms is given:
  * ARM mapping and tag symbols ("$" followed by a lower-case letter,
  * optionally followed by "." and a suffix, e.g. "$a", "$t", "$d.1"),
- * AArch64 mapping symbols ("$x", "$d", optionally with a "." suffix),
+ * AArch64 mapping symbols ("$x", "$d") and tag symbols ("$m", "$f",
+ * "$p"), each optionally with a "." suffix,
  * and on RISC-V the mapping symbols ("$d", "$x", "$xrv..."), local
  * labels and symbols with empty names.  No other machine has any.
  *
@@ -349,7 +350,8 @@ static int is_target_special_symbol(uint16_t machine, const char *name)
         return name[0] == '$' && name[1] >= 'a' && name[1] <= 'z' &&
                (name[2] == '\0' || name[2] == '.');
     case EM_AARCH64:
-        return name[0] == '$' && (name[1] == 'd' || name[1] == 'x') &&
+        return name[0] == '$' && name[1] != '\0' &&
+               strchr("dxmfp", name[1]) != NULL &&
                (name[2] == '\0' || name[2] == '.');
     case EM_RISCV:
         return name[0] == '\0' || is_local_label_name(name) ||
