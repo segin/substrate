@@ -251,6 +251,15 @@ The ELF symbol table is used only when no subprogram names the address.
 File names and line numbers come from the
 .I .debug_line
 sequence that covers the address.
+As in GNU
+.BR addr2line ,
+a relative file name is joined to its directory entry, and a relative
+directory entry (such as one from a relative
+.BR \-I ),
+or a file with none, is joined to the unit's
+.BR DW_AT_comp_dir ,
+so a name prints as
+.IR comp_dir / dir / file .
 A sequence ends at its
 .B DW_LNE_end_sequence
 row; one whose line program stops without that row ends at the address

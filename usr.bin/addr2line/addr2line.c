@@ -58,6 +58,7 @@
 
 #define DW_AT_name 0x03u
 #define DW_AT_stmt_list 0x10u
+#define DW_AT_comp_dir 0x1bu
 #define DW_AT_low_pc 0x11u
 #define DW_AT_high_pc 0x12u
 #define DW_AT_abstract_origin 0x31u
@@ -158,6 +159,10 @@ typedef struct {
     line_file_t *files;
     size_t file_count;
     size_t file_cap;
+
+    /* DW_AT_comp_dir of the compile unit whose DW_AT_stmt_list names
+     * this table, or NULL; relative file names are joined to it. */
+    char *comp_dir;
 
     const uint8_t *program;
     size_t program_size;
@@ -317,6 +322,10 @@ typedef struct {
     size_t section_cap;
     uint64_t min_load_vaddr;
     int has_min_load_vaddr;
+
+    /* DW_AT_comp_dir of the compile unit being parsed, until its
+     * DW_AT_stmt_list names the line table to give it to. */
+    char *cu_comp_dir;
 } addr2line_image_t;
 
 static const char *g_progname = "addr2line";
@@ -606,6 +615,7 @@ static void line_unit_free(line_unit_t *u) {
         free(u->files[i].name);
     }
     free(u->files);
+    free(u->comp_dir);
     memset(u, 0, sizeof(*u));
 }
 
@@ -2015,6 +2025,7 @@ static void image_reset(addr2line_image_t *img) {
         line_unit_free(&img->line_units[i]);
     }
     free(img->line_units);
+    free(img->cu_comp_dir);
     free(img->path);
 
     if (img->elf != NULL) {
@@ -2071,6 +2082,9 @@ static void image_clear_debug_info_cache(addr2line_image_t *img) {
     img->die_names = NULL;
     img->die_name_count = 0;
     img->die_name_cap = 0;
+
+    free(img->cu_comp_dir);
+    img->cu_comp_dir = NULL;
 }
 
 static int image_append_func_symbol(addr2line_image_t *img,
@@ -2782,6 +2796,8 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
             return -1;
         }
         inline_stack[0] = SIZE_MAX;
+        free(img->cu_comp_dir);
+        img->cu_comp_dir = NULL;
 
         unit_payload = p;
         while (p < unit_end) {
@@ -2848,7 +2864,8 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                 }
 
                 if (attr_name == DW_AT_name || attr_name == DW_AT_linkage_name ||
-                    attr_name == DW_AT_MIPS_linkage_name) {
+                    attr_name == DW_AT_MIPS_linkage_name ||
+                    (attr_name == DW_AT_comp_dir && ab->tag == DW_TAG_compile_unit)) {
                     char *tmp = NULL;
                     uint64_t off = 0;
                     if (implicit) {
@@ -2878,7 +2895,10 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                         continue;
                     }
                     if (tmp != NULL) {
-                        if (attr_name == DW_AT_name) {
+                        if (attr_name == DW_AT_comp_dir) {
+                            free(img->cu_comp_dir);
+                            img->cu_comp_dir = tmp;
+                        } else if (attr_name == DW_AT_name) {
                             free(name);
                             name = tmp;
                         } else {
@@ -3134,6 +3154,12 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
             }
             if (ab->tag == DW_TAG_compile_unit && has_stmt_list) {
                 cu_line_unit_index = find_line_unit_by_stmt_list(img, stmt_list);
+                if (cu_line_unit_index < img->line_unit_count &&
+                    img->line_units[cu_line_unit_index].comp_dir == NULL &&
+                    img->cu_comp_dir != NULL) {
+                    img->line_units[cu_line_unit_index].comp_dir = img->cu_comp_dir;
+                    img->cu_comp_dir = NULL;
+                }
             }
             if (image_add_die_name(img,
                                    die_offset,
@@ -3762,11 +3788,14 @@ static char *line_path_for_unit_file(const addr2line_image_t *img,
                                      uint32_t file_index) {
     const line_unit_t *u;
     const line_file_t *f;
-    const char *dir = NULL;
-    size_t dir_len = 0;
+    const char *dir_name = NULL;
+    const char *subdir_name = NULL;
+    size_t dir_len;
+    size_t subdir_len = 0;
     size_t file_len;
     uint32_t first;
     char *full;
+    char *out;
 
     if (unit_index >= img->line_unit_count) {
         return NULL;
@@ -3787,28 +3816,52 @@ static char *line_path_for_unit_file(const addr2line_image_t *img,
     if (f->name == NULL) {
         return NULL;
     }
-    file_len = strlen(f->name);
-
-    if (f->dir_index >= first &&
-        f->dir_index - first < (uint64_t)u->include_dir_count &&
-        f->name[0] != '/') {
-        dir = u->include_dirs[f->dir_index - first];
-        if (dir != NULL && dir[0] != '\0') {
-            dir_len = strlen(dir);
-        }
-    }
-
-    if (dir_len == 0u) {
+    if (f->name[0] == '/') {
         return strdup(f->name);
     }
 
-    full = (char *)malloc(dir_len + 1u + file_len + 1u);
+    /*
+     * As GNU addr2line (bfd's concat_filename) builds it: a relative
+     * file is joined to its directory entry, and a directory entry
+     * that is itself relative -- or a file with no entry (directory 0
+     * before DWARF 5) -- to the unit's DW_AT_comp_dir, giving
+     * COMP_DIR/DIR/FILE.  Without a comp_dir the directory entry is
+     * used alone.
+     */
+    if (f->dir_index >= first &&
+        f->dir_index - first < (uint64_t)u->include_dir_count) {
+        subdir_name = u->include_dirs[f->dir_index - first];
+    }
+    if (subdir_name == NULL || subdir_name[0] != '/') {
+        dir_name = u->comp_dir;
+    }
+    if (dir_name == NULL) {
+        dir_name = subdir_name;
+        subdir_name = NULL;
+    }
+    if (dir_name == NULL) {
+        return strdup(f->name);
+    }
+
+    dir_len = strlen(dir_name);
+    file_len = strlen(f->name);
+    if (subdir_name != NULL) {
+        subdir_len = strlen(subdir_name) + 1u;
+    }
+    full = (char *)malloc(dir_len + subdir_len + 1u + file_len + 1u);
     if (full == NULL) {
         return NULL;
     }
-    memcpy(full, dir, dir_len);
-    full[dir_len] = '/';
-    memcpy(full + dir_len + 1u, f->name, file_len + 1u);
+    out = full;
+    memcpy(out, dir_name, dir_len);
+    out += dir_len;
+    *out++ = '/';
+    if (subdir_name != NULL) {
+        memcpy(out, subdir_name, subdir_len - 1u);
+        out += subdir_len - 1u;
+        *out++ = '/';
+    }
+    memcpy(out, f->name, file_len + 1u);
     return full;
 }
 

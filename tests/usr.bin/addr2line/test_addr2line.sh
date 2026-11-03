@@ -733,6 +733,32 @@ SRC
         done
     done
 
+    # 10j-3: relative paths are joined to the compilation directory, as
+    # GNU addr2line joins them: a relative -I directory (inc/helper.h
+    # must print as COMP_DIR/inc/helper.h) and, under DWARF 4, a file in
+    # directory 0 (m.c as COMP_DIR/m.c), also with a relative source
+    # path (rel/m.c compiled from the parent directory).
+    mkdir -p "$TMP/relinc/rel/inc"
+    cp "$TMP/hdr/inc/helper.h" "$TMP/relinc/rel/inc/helper.h"
+    cp "$TMP/hdr/other.h" "$TMP/relinc/rel/other.h"
+    cp "$TMP/hdr/hdr_main.c" "$TMP/relinc/rel/m.c"
+    for V in 4 5; do
+        (cd "$TMP/relinc/rel" && cc -O0 -g -gdwarf-$V -no-pie -Iinc -o "m_v$V" m.c)
+        (cd "$TMP/relinc" && cc -O0 -g -gdwarf-$V -no-pie -Irel/inc -o "p_v$V" rel/m.c)
+        for EXE in "rel/m_v$V" "p_v$V"; do
+            for S in helper_one helper_two other_fn main; do
+                HA=$(addr_of "$TMP/relinc/$EXE" "$S")
+                [ -n "$HA" ] || fail "10j-3 $EXE symbol $S not found"
+                HOST_R=$(addr2line -e "$TMP/relinc/$EXE" 0x$HA)
+                case $HOST_R in
+                /*) ;;
+                *) fail "10j-3 $EXE $S: GNU path is not absolute: $HOST_R" ;;
+                esac
+                expect_eq "10j-3 $EXE $S" "$($BIN -e "$TMP/relinc/$EXE" 0x$HA)" "$HOST_R"
+            done
+        done
+    done
+
     # 10j-2: a DWARF 5 line program that names file 0 directly (clang
     # does this for the primary file), and a file under directory 1.
     require_cmd as
