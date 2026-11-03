@@ -2,6 +2,7 @@
 #include "cc_options.h"
 #include "cc_target.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -4042,6 +4043,58 @@ static int refold_function(cc_ssa_function_t *f) {
 typedef enum { ARG_UNSEEN, ARG_CONST, ARG_VARIES } arg_state_t;
 
 /**
+ * Mark in @p only_called the functions of @p m that only direct calls in the module reach, whose parameters
+ * are therefore what those calls pass: static, with parameters, not variadic, an inline-only body, an alias,
+ * weak, used, noinline, a constructor or a destructor, and named by nothing else -- not its address taken, a
+ * global's initializer or an alias.
+ */
+static void mark_only_called(const cc_ssa_module_t *m, unsigned char *only_called) {
+    const cc_attr_flags_t barred =
+        CC_ATTR_USED | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR | CC_ATTR_WEAK | CC_ATTR_NOINLINE;
+    size_t n = m->func_count;
+    size_t i;
+    size_t k;
+
+    for (i = 0; i < n; ++i) {
+        const cc_ssa_function_t *g = &m->funcs[i];
+
+        only_called[i] = (g->storage & CC_STORAGE_STATIC) != 0 && !g->inline_only && (g->attr_flags & barred) == 0 &&
+                         g->attr_alias == NULL && !g->is_variadic && g->param_count > 0;
+    }
+    /* what names a function other than a direct call: its address, a global's initializer, an alias */
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+        long gi;
+
+        if ((gi = function_named(m, g->init_sym)) >= 0) {
+            only_called[gi] = 0;
+        }
+        if ((gi = function_named(m, g->attr_alias)) >= 0) {
+            only_called[gi] = 0;
+        }
+        for (k = 0; k < g->init_item_count; ++k) {
+            if ((gi = function_named(m, g->init_items[k].init_sym)) >= 0) {
+                only_called[gi] = 0;
+            }
+        }
+    }
+    for (i = 0; i < n; ++i) {
+        const cc_ssa_function_t *f = &m->funcs[i];
+        long gi;
+
+        if ((gi = function_named(m, f->attr_alias)) >= 0) {
+            only_called[gi] = 0;
+        }
+        for (k = 0; k < f->instr_count; ++k) {
+            if (f->instrs[k].op != CC_SSA_CALL && f->instrs[k].sym != NULL &&
+                (gi = function_named(m, f->instrs[k].sym)) >= 0) {
+                only_called[gi] = 0;
+            }
+        }
+    }
+}
+
+/**
  * A parameter of a static function that every call of it passes the same integer constant is that
  * constant, as gcc's interprocedural constant propagation makes it, and the function is folded again:
  * only direct calls reach it -- its address is not taken, nor is it named by a global or an alias, nor
@@ -4054,11 +4107,9 @@ typedef enum { ARG_UNSEEN, ARG_CONST, ARG_VARIES } arg_state_t;
  * @return 0, or -1 when out of memory
  */
 static int constant_args(cc_ssa_module_t *m) {
-    const cc_attr_flags_t barred =
-        CC_ATTR_USED | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR | CC_ATTR_WEAK | CC_ATTR_NOINLINE;
     size_t n = m->func_count;
     size_t *base = (size_t *)malloc((n + 1) * sizeof(*base));
-    unsigned char *named = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    unsigned char *only_called = (unsigned char *)calloc(n > 0 ? n : 1, 1);
     unsigned char *redo = (unsigned char *)calloc(n > 0 ? n : 1, 1);
     unsigned char *st = NULL;
     long long *val = NULL;
@@ -4069,7 +4120,7 @@ static int constant_args(cc_ssa_module_t *m) {
     int round;
     int rc = 0;
 
-    if (base == NULL || named == NULL || redo == NULL) {
+    if (base == NULL || only_called == NULL || redo == NULL) {
         rc = -1;
         goto done;
     }
@@ -4083,37 +4134,7 @@ static int constant_args(cc_ssa_module_t *m) {
         rc = -1;
         goto done;
     }
-    /* what names a function other than a direct call: its address, a global's initializer, an alias */
-    for (i = 0; i < m->global_count; ++i) {
-        const cc_ssa_global_t *g = &m->globals[i];
-        long gi;
-
-        if ((gi = function_named(m, g->init_sym)) >= 0) {
-            named[gi] = 1;
-        }
-        if ((gi = function_named(m, g->attr_alias)) >= 0) {
-            named[gi] = 1;
-        }
-        for (k = 0; k < g->init_item_count; ++k) {
-            if ((gi = function_named(m, g->init_items[k].init_sym)) >= 0) {
-                named[gi] = 1;
-            }
-        }
-    }
-    for (i = 0; i < n; ++i) {
-        const cc_ssa_function_t *f = &m->funcs[i];
-        long gi;
-
-        if ((gi = function_named(m, f->attr_alias)) >= 0) {
-            named[gi] = 1;
-        }
-        for (k = 0; k < f->instr_count; ++k) {
-            if (f->instrs[k].op != CC_SSA_CALL && f->instrs[k].sym != NULL &&
-                (gi = function_named(m, f->instrs[k].sym)) >= 0) {
-                named[gi] = 1;
-            }
-        }
-    }
+    mark_only_called(m, only_called);
     for (round = 0; round < 4; ++round) {
         int any = 0;
 
@@ -4175,8 +4196,7 @@ static int constant_args(cc_ssa_module_t *m) {
         for (i = 0; i < n; ++i) {
             cc_ssa_function_t *g = &m->funcs[i];
 
-            if ((g->storage & CC_STORAGE_STATIC) == 0 || g->inline_only || (g->attr_flags & barred) != 0 ||
-                g->attr_alias != NULL || g->is_variadic || named[i] || g->param_count == 0) {
+            if (!only_called[i]) {
                 continue;
             }
             for (k = 0; k < g->instr_count; ++k) {
@@ -4213,12 +4233,184 @@ static int constant_args(cc_ssa_module_t *m) {
     }
 done:
     free(base);
-    free(named);
+    free(only_called);
     free(redo);
     free(st);
     free(val);
     free(ndef);
     free(cval);
+    return rc;
+}
+
+/** What fold_module_ranges() gathers of the calls of the functions only direct calls reach. */
+typedef struct {
+    const cc_ssa_module_t *m;
+    const unsigned char *only_called; /**< per function: mark_only_called()'s */
+    const size_t *base;               /**< per function: the index of its first parameter's entries */
+    cc_range_t *arg;                  /**< per parameter: what the calls seen so far pass, joined */
+    unsigned char *seen;              /**< per parameter: an arg_state_t, ARG_CONST for a range */
+    long long *max;                   /**< per parameter: the largest value of its type, or -1 if it is unused */
+} call_ranges_t;
+
+/**
+ * Note what direct call @p call passes (cc_range_call_fn): for a function only calls reach, each argument's
+ * range joined into what its parameter is passed.  A parameter takes a range only where it is not negative
+ * and within its type, whatever extends it on the way, and the call passes it plainly -- no static chain,
+ * not variadic, by the default convention; else it varies.
+ */
+static void note_call_ranges(void *ctx, const cc_ssa_instr_t *call, const cc_range_t *args) {
+    call_ranges_t *c = (call_ranges_t *)ctx;
+    long gi = function_named(c->m, call->sym);
+    const cc_ssa_function_t *g;
+    size_t a;
+
+    if (gi < 0 || !c->only_called[gi]) {
+        return;
+    }
+    g = &c->m->funcs[gi];
+    for (a = 0; a < g->param_count; ++a) {
+        size_t at = c->base[gi] + a;
+        cc_range_t r;
+
+        if (call->call_chain != 0 || call->call_is_variadic || call->arg_count != g->param_count ||
+            (call->call_arg_abi != NULL &&
+             (call->call_arg_abi[a] & ~CC_ABI_REGPARM_MASK) != CC_CALL_ARG_ABI_DEFAULT)) {
+            c->seen[at] = ARG_VARIES;
+            continue;
+        }
+        r = args[a];
+        if (r.lo < 0 || r.hi > c->max[at]) {
+            c->seen[at] = ARG_VARIES;
+        } else if (c->seen[at] == ARG_UNSEEN) {
+            c->seen[at] = ARG_CONST;
+            c->arg[at] = r;
+        } else if (c->seen[at] == ARG_CONST) {
+            c->arg[at].lo = r.lo < c->arg[at].lo ? r.lo : c->arg[at].lo;
+            c->arg[at].hi = r.hi > c->arg[at].hi ? r.hi : c->arg[at].hi;
+        }
+    }
+}
+
+static int settle_function(cc_ssa_function_t *f);
+
+/**
+ * Fold @p f's compares by ranges (cc_fold_ranges()), with @p params, reporting its calls to @p on_call, and
+ * fold it again after; twice at most, as the first folding may decide more.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int fold_ranges_settled(cc_ssa_function_t *f, const cc_range_t *params, cc_range_call_fn on_call,
+                               void *ctx) {
+    int round;
+
+    for (round = 0; round < 2; ++round) {
+        int rr = cc_fold_ranges(f, params, on_call, ctx);
+
+        if (rr < 0 || (rr > 0 && (refold_function(f) != 0 || settle_function(f) != 0))) {
+            return -1;
+        }
+        if (rr == 0) {
+            break;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Fold the module's compares that the ranges of their operands decide (passes/range.c): each function's on
+ * its own, and then the functions only direct calls reach (mark_only_called()) again with what their calls
+ * pass each parameter, as gcc's interprocedural range propagation knows it.  Linux's mm/vmscan.c has
+ * read_ctrl_pos(), too large to inline, with a min(tier, 3U) whose BUILD_BUG_ON asks that tier is not
+ * negative, called with 0, 4 and a counter in [1, 3]; kernel/bpf/arena.c's arena_alloc_pages() a
+ * min(page_cnt, ...) of a long every call passes a u32: each left a call of an undefined
+ * __compiletime_assert_N.  Run before resolve_isconst(), which decides what is still not known constant.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int fold_module_ranges(cc_ssa_module_t *m) {
+    size_t n = m->func_count;
+    call_ranges_t c;
+    size_t *base = (size_t *)malloc((n + 1) * sizeof(*base));
+    unsigned char *only_called = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    cc_range_t *seeds = NULL;
+    size_t i;
+    size_t k;
+    int rc = 0;
+
+    memset(&c, 0, sizeof(c));
+    if (base == NULL || only_called == NULL) {
+        rc = -1;
+        goto done;
+    }
+    base[0] = 0;
+    for (i = 0; i < n; ++i) {
+        base[i + 1] = base[i] + m->funcs[i].param_count;
+    }
+    c.m = m;
+    c.only_called = only_called;
+    c.base = base;
+    c.arg = (cc_range_t *)malloc((base[n] > 0 ? base[n] : 1) * sizeof(*c.arg));
+    c.seen = (unsigned char *)calloc(base[n] > 0 ? base[n] : 1, 1);
+    c.max = (long long *)malloc((base[n] > 0 ? base[n] : 1) * sizeof(*c.max));
+    seeds = (cc_range_t *)malloc((base[n] > 0 ? base[n] : 1) * sizeof(*seeds));
+    if (c.arg == NULL || c.seen == NULL || c.max == NULL || seeds == NULL) {
+        rc = -1;
+        goto done;
+    }
+    mark_only_called(m, only_called);
+    /* each parameter's type: the largest value it holds as passed (a parameter nothing reads, none) */
+    for (k = 0; k < base[n]; ++k) {
+        c.max[k] = -1;
+    }
+    for (i = 0; i < n; ++i) {
+        const cc_ssa_function_t *g = &m->funcs[i];
+
+        for (k = 0; only_called[i] && k < g->instr_count; ++k) {
+            const cc_ssa_instr_t *in = &g->instrs[k];
+            uint32_t sz;
+
+            if (in->op != CC_SSA_PARAM || in->param_index < 0 || (size_t)in->param_index >= g->param_count ||
+                in->dst < 0 || in->dst >= g->value_count || g->value_ty[in->dst].kind != CC_TY_INT ||
+                (g->param_abi != NULL &&
+                 (g->param_abi[in->param_index] & ~CC_ABI_REGPARM_MASK) != CC_CALL_ARG_ABI_DEFAULT)) {
+                continue;
+            }
+            sz = cc_ssa_value_size(g, in->dst);
+            c.max[base[i] + (size_t)in->param_index] =
+                sz >= 8 ? LLONG_MAX : (long long)((1ULL << (8 * sz - (cc_ssa_value_is_unsigned(g, in->dst) ? 0 : 1))) - 1);
+        }
+    }
+    /* each function on its own, noting what its calls pass */
+    for (i = 0; i < n && rc == 0; ++i) {
+        rc = fold_ranges_settled(&m->funcs[i], NULL, note_call_ranges, &c);
+    }
+    /* then those only calls reach, with what they are passed */
+    for (i = 0; i < n && rc == 0; ++i) {
+        cc_ssa_function_t *g = &m->funcs[i];
+        int any = 0;
+
+        if (!only_called[i]) {
+            continue;
+        }
+        for (k = 0; k < g->param_count; ++k) {
+            seeds[k].lo = LLONG_MIN;
+            seeds[k].hi = LLONG_MAX;
+            if (c.seen[base[i] + k] == ARG_CONST && c.max[base[i] + k] >= 0) {
+                seeds[k] = c.arg[base[i] + k];
+                any = 1;
+            }
+        }
+        if (any) {
+            rc = fold_ranges_settled(g, seeds, NULL, NULL);
+        }
+    }
+done:
+    free(base);
+    free(only_called);
+    free(c.arg);
+    free(c.seen);
+    free(c.max);
+    free(seeds);
     return rc;
 }
 
@@ -4609,22 +4801,11 @@ static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag)
     }
     /*
      * the compares the ranges of their operands decide, before __builtin_constant_p is decided: min()'s
-     * BUILD_BUG_ON asks it of `(long long)x >= 0`, true for an x the code it is in knows is not negative
+     * BUILD_BUG_ON asks it of `(long long)x >= 0`, true for an x the code it is in knows is not negative, or
+     * every call passes so
      */
-    for (i = 0; i < m->func_count && !oom && opt_level > 0; ++i) {
-        int round;
-
-        for (round = 0; round < 2 && !oom; ++round) {
-            int rr = cc_fold_ranges(&m->funcs[i]);
-
-            if (rr > 0) {
-                rr = refold_function(&m->funcs[i]) != 0 || settle_function(&m->funcs[i]) != 0 ? -1 : 1;
-            }
-            oom = rr < 0;
-            if (rr == 0) {
-                break;
-            }
-        }
+    if (!oom && opt_level > 0) {
+        oom = fold_module_ranges(m) != 0;
     }
     /* what is still not known to be constant is not: no pass after this, nor a backend, sees a CC_SSA_ISCONST */
     oom = oom || resolve_isconst(m, opt_level) != 0;

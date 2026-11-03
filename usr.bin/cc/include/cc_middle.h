@@ -145,15 +145,30 @@ int cc_coalesce_moves(cc_ssa_function_t *f);
  */
 int cc_hoist_invariants(cc_ssa_function_t *f);
 
+/** An interval of an integer value's content, read as signed, from lo to hi (passes/range.c). */
+typedef struct {
+    long long lo;
+    long long hi;
+} cc_range_t;
+
+/**
+ * What cc_fold_ranges() reports of each direct call it walks past: the call, and for each of its arguments
+ * (call->arg_count of them) what it can hold there -- every value of 64 bits where nothing is known.
+ */
+typedef void (*cc_range_call_fn)(void *ctx, const cc_ssa_instr_t *call, const cc_range_t *args);
+
 /**
  * Fold each integer compare of @p f whose operands' ranges decide it (passes/range.c): what each value can
  * hold, from its definitions, and where the stream is under a branch on it, from the branch -- Linux's min()
  * asks `(long long)len >= 0` of a `len` inside `while (len > 0)`, in a BUILD_BUG_ON.
  *
- * @param f  the function, rewritten in place
- * @return   1 when a compare was folded, 0 when none was, -1 when out of memory
+ * @param f        the function, rewritten in place
+ * @param params   per parameter index, what every call passes it, or NULL where nothing is known
+ * @param on_call  receives each direct call and its arguments' ranges, or NULL; every call is reported
+ * @param ctx      passed to @p on_call
+ * @return         1 when a compare was folded, 0 when none was, -1 when out of memory
  */
-int cc_fold_ranges(cc_ssa_function_t *f);
+int cc_fold_ranges(cc_ssa_function_t *f, const cc_range_t *params, cc_range_call_fn on_call, void *ctx);
 
 /**
  * Remove each definition of @p f that only makes its result -- a constant, a move, arithmetic, a compare --

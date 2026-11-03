@@ -52,10 +52,7 @@
 #include <string.h>
 
 /** A closed interval of a value's content, read as signed; empty when lo > hi. */
-typedef struct {
-    long long lo;
-    long long hi;
-} vrange_t;
+typedef cc_range_t vrange_t;
 
 /** What a stretch of the stream knows of one value: its content, or its low bits extended, within r. */
 typedef struct {
@@ -81,6 +78,9 @@ typedef struct {
 /** The state of one function's walk. */
 typedef struct {
     cc_ssa_function_t *f;
+    const cc_range_t *params; /**< per parameter index: what every call passes it, or NULL */
+    cc_range_call_fn on_call; /**< receives each direct call, or NULL */
+    void *ctx;                /**< passed to on_call */
     int nv;
     unsigned char *bits;      /**< per value: the width its content is read at, 32 or 64; 0 not an integer */
     unsigned char *pinned;    /**< per value: reached otherwise than by its name -- address taken, an asm's */
@@ -375,6 +375,14 @@ static vrange_t eval(range_t *s, const cc_ssa_instr_t *in, int bits, int walking
     switch (in->op) {
     case CC_SSA_CONST:
         return point_range(sign_word(in->imm, bits));
+    case CC_SSA_PARAM:
+        /* what every call of a static function passes it (fold_module_ranges(), opt.c) */
+        if (s->params != NULL && in->param_index >= 0 && (size_t)in->param_index < s->f->param_count &&
+            s->params[in->param_index].lo >= full.lo && s->params[in->param_index].hi <= full.hi &&
+            !is_empty(s->params[in->param_index])) {
+            return s->params[in->param_index];
+        }
+        return full;
     case CC_SSA_CMP:
     case CC_SSA_ISCONST:
         a.lo = 0;
@@ -1021,6 +1029,35 @@ static int range_settle(range_t *s) {
 }
 
 /**
+ * Report the direct call @p in to s->on_call: each argument's interval where the walk is (@p walking), or
+ * every value where nothing is known.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int report_call(range_t *s, const cc_ssa_instr_t *in, int walking) {
+    cc_range_t *args = (cc_range_t *)malloc((in->arg_count > 0 ? in->arg_count : 1) * sizeof(*args));
+    size_t a;
+
+    if (args == NULL) {
+        return -1;
+    }
+    for (a = 0; a < in->arg_count; ++a) {
+        int v = in->args[a];
+
+        args[a] = full_range(64);
+        if (walking && tracked(s, v)) {
+            args[a] = current(s, v, 1);
+            if (is_empty(args[a])) {
+                args[a] = full_range(64);
+            }
+        }
+    }
+    s->on_call(s->ctx, in, args);
+    free(args);
+    return 0;
+}
+
+/**
  * The walk along the stream: the facts branches teach, the intervals they give what is defined under them,
  * and the compares decided.
  *
@@ -1073,6 +1110,9 @@ static int range_walk(range_t *s) {
                 }
                 kill_facts(s, ov);
             }
+        }
+        if (in->op == CC_SSA_CALL && s->on_call != NULL && report_call(s, in, 1) != 0) {
+            return -1;
         }
         if (d < 0 || d >= s->nv) {
             continue;
@@ -1136,33 +1176,40 @@ static int range_walk(range_t *s) {
 }
 
 /**
- * Fold each compare of @p f that the ranges of its operands decide (see the head of this file).
+ * Fold each compare of @p f that the ranges of its operands decide (see the head of this file), with what
+ * @p params says every call passes each parameter; report each direct call to @p on_call.
  *
- * @param f  the function, rewritten in place
- * @return   1 when a compare was folded, 0 when none was, -1 when out of memory
+ * @return 1 when a compare was folded, 0 when none was, -1 when out of memory
  */
-int cc_fold_ranges(cc_ssa_function_t *f) {
+int cc_fold_ranges(cc_ssa_function_t *f, const cc_range_t *params, cc_range_call_fn on_call, void *ctx) {
     range_t s;
     size_t i;
     int rc = 0;
 
-    if (f->value_count <= 0) {
-        return 0;
-    }
-    /* (a function that compares nothing has nothing to fold) */
+    /* (a function that compares nothing has nothing to fold, unless its calls are asked for) */
     i = 0;
-    while (i < f->instr_count && f->instrs[i].op != CC_SSA_CMP) {
+    while (on_call == NULL && i < f->instr_count && f->instrs[i].op != CC_SSA_CMP) {
         i++;
     }
-    if (i == f->instr_count) {
+    if (on_call == NULL && (i == f->instr_count || f->value_count <= 0)) {
         return 0;
     }
     if (range_init(&s, f) != 0) {
         range_free(&s);
         return -1;
     }
-    if (range_settle(&s)) {
+    s.params = params;
+    s.on_call = on_call;
+    s.ctx = ctx;
+    if (f->value_count > 0 && range_settle(&s)) {
         rc = range_walk(&s);
+    } else if (on_call != NULL) {
+        /* nothing known: every call passes anything */
+        for (i = 0; i < f->instr_count && rc == 0; ++i) {
+            if (f->instrs[i].op == CC_SSA_CALL) {
+                rc = report_call(&s, &f->instrs[i], 0);
+            }
+        }
     }
     range_free(&s);
     return rc;
