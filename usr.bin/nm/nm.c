@@ -95,13 +95,14 @@ static const char *progname = "nm";
 static void usage(FILE *out)
 {
     fprintf(out,
-        "usage: %s [-aABCDglnoPprSsuVv] [-t {d,o,x}] [--format={bsd,sysv,posix}]\n"
-        "       [--radix={d,o,x}] [--demangle] [--defined-only] [--no-weak]\n"
+        "usage: %s [-aABCDglnoPprSsuVv] [-f {bsd,sysv,posix}] [-t {d,o,x}]\n"
+        "       [--format={bsd,sysv,posix}] [--radix={d,o,x}] [--line-numbers]\n"
+        "       [--demangle] [--defined-only] [--no-weak]\n"
         "       [--extern-only] [--undefined-only] [--debug-syms]\n"
         "       [--numeric-sort] [--no-sort] [--reverse-sort] [--size-sort]\n"
         "       [--print-file-name] [--print-size] [--dynamic]\n"
         "       [--print-armap] [--special-syms] [-h|--help] [-V|--version]\n"
-        "       <file>...\n",
+        "       [--] <file>...\n",
         progname);
 }
 
@@ -1599,6 +1600,65 @@ static int starts_with(const char *s, const char *prefix)
     return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
+/**
+ * @brief Set the value radix from the argument of -t or --radix.
+ *
+ * @param r  "d", "o" or "x".
+ * @return 0 on success, -1 (after a diagnostic) for any other value.
+ */
+static int set_radix(const char *r)
+{
+    if (strcmp(r, "d") == 0) opts.radix = 10;
+    else if (strcmp(r, "o") == 0) opts.radix = 8;
+    else if (strcmp(r, "x") == 0) opts.radix = 16;
+    else {
+        fprintf(stderr, "%s: %s: invalid radix\n", progname, r);
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * @brief Set the output format from the argument of -f or --format.
+ *
+ * @param f  "bsd", "posix" or "sysv".
+ * @return 0 on success, -1 (after a diagnostic) for any other value.
+ */
+static int set_format(const char *f)
+{
+    if (strcmp(f, "bsd") == 0) opts.format = FMT_BSD;
+    else if (strcmp(f, "posix") == 0) opts.format = FMT_POSIX;
+    else if (strcmp(f, "sysv") == 0) opts.format = FMT_SYSV;
+    else {
+        fprintf(stderr, "%s: %s: invalid output format\n", progname, f);
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * @brief Fetch the argument of an option that requires one, as getopt
+ *        does: the rest of the current word if any, else the next word.
+ *
+ * @param attached  Text following the option in the same word ("" if none).
+ * @param name      The option, for the diagnostic ("-t", "--format", ...).
+ * @param argc      Argument count.
+ * @param argv      Argument vector.
+ * @param i         Index of the current word; advanced past the next
+ *                  word when that word is consumed.
+ * @return The argument, or NULL (after a diagnostic) when it is missing.
+ */
+static const char *option_arg(const char *attached, const char *name,
+                              int argc, char **argv, int *i)
+{
+    if (*attached)
+        return attached;
+    if (*i + 1 < argc)
+        return argv[++*i];
+    fprintf(stderr, "%s: option '%s' requires an argument\n", progname, name);
+    return NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /* main                                                                */
 /* ------------------------------------------------------------------ */
@@ -1606,8 +1666,10 @@ static int starts_with(const char *s, const char *prefix)
 int main(int argc, char **argv)
 {
     int i;
-    int any_fail = 0;
+    int rc = 0;
     int file_count = 0;
+    int end_of_opts = 0;
+    const char **files;
 
     /* Defaults */
     opts.format = FMT_BSD;
@@ -1617,62 +1679,67 @@ int main(int argc, char **argv)
     if (argc > 0 && argv[0])
         progname = argv[0];
 
-    /* First pass: count files and parse options */
+    /*
+     * Parse the options and collect the file names in one pass, so an
+     * option's argument is consumed exactly once and never mistaken for
+     * a file.  Options and files may be interleaved; "--" ends the
+     * options and a lone "-" is a file name, as with getopt.
+     */
+    files = malloc((size_t)(argc > 0 ? argc : 1) * sizeof(*files));
+    if (!files) {
+        fprintf(stderr, "%s: out of memory\n", progname);
+        return 1;
+    }
+
     for (i = 1; i < argc; i++) {
         const char *arg = argv[i];
+        const char *val;
 
-        if (arg[0] != '-') {
-            file_count++;
+        if (end_of_opts || arg[0] != '-' || arg[1] == '\0') {
+            files[file_count++] = arg;
             continue;
         }
+
+        if (strcmp(arg, "--") == 0) { end_of_opts = 1; continue; }
 
         /* Long options */
-        if (strcmp(arg, "--help") == 0) { usage(stdout); return 0; }
-        if (strcmp(arg, "--version") == 0) { printf("nm %s\n", NM_VERSION); return 0; }
-        if (strcmp(arg, "--format=bsd") == 0) { opts.format = FMT_BSD; continue; }
-        if (strcmp(arg, "--format=posix") == 0) { opts.format = FMT_POSIX; continue; }
-        if (strcmp(arg, "--format=sysv") == 0) { opts.format = FMT_SYSV; continue; }
-        if (strcmp(arg, "--radix=d") == 0) { opts.radix = 10; continue; }
-        if (strcmp(arg, "--radix=o") == 0) { opts.radix = 8; continue; }
-        if (strcmp(arg, "--radix=x") == 0) { opts.radix = 16; continue; }
-        if (strcmp(arg, "--numeric-sort") == 0) { opts.sort_mode = SORT_NUMERIC; continue; }
-        if (strcmp(arg, "--no-sort") == 0) { opts.sort_mode = SORT_NONE; continue; }
-        if (strcmp(arg, "--reverse-sort") == 0) { opts.reverse = 1; continue; }
-        if (strcmp(arg, "--size-sort") == 0) { opts.sort_mode = SORT_SIZE; continue; }
-        if (strcmp(arg, "--undefined-only") == 0) { opts.undefined_only = 1; continue; }
-        if (strcmp(arg, "--extern-only") == 0) { opts.extern_only = 1; continue; }
-        if (strcmp(arg, "--debug-syms") == 0) { opts.debug_syms = 1; continue; }
-        if (strcmp(arg, "--defined-only") == 0) { opts.defined_only = 1; continue; }
-        if (strcmp(arg, "--no-weak") == 0) { opts.no_weak = 1; continue; }
-        if (strcmp(arg, "--print-file-name") == 0) { opts.print_file = 1; continue; }
-        if (strcmp(arg, "--print-size") == 0) { opts.print_size = 1; continue; }
-        if (strcmp(arg, "--dynamic") == 0) { opts.dynamic = 1; continue; }
-        if (strcmp(arg, "--demangle") == 0) { opts.do_demangle = 1; continue; }
-        if (strcmp(arg, "--print-armap") == 0) { opts.print_armap = 1; continue; }
-        if (strcmp(arg, "--special-syms") == 0) { opts.special_syms = 1; continue; }
-        if (strcmp(arg, "--portability") == 0) { opts.format = FMT_POSIX; continue; }
+        if (arg[1] == '-') {
+            if (strcmp(arg, "--help") == 0) { usage(stdout); goto out; }
+            if (strcmp(arg, "--version") == 0) { printf("nm %s\n", NM_VERSION); goto out; }
+            if (strcmp(arg, "--format") == 0 || starts_with(arg, "--format=")) {
+                val = arg[8] ? arg + 9 : option_arg("", "--format", argc, argv, &i);
+                if (!val || set_format(val) != 0) goto bad;
+                continue;
+            }
+            if (strcmp(arg, "--radix") == 0 || starts_with(arg, "--radix=")) {
+                val = arg[7] ? arg + 8 : option_arg("", "--radix", argc, argv, &i);
+                if (!val || set_radix(val) != 0) goto bad;
+                continue;
+            }
+            if (strcmp(arg, "--numeric-sort") == 0) { opts.sort_mode = SORT_NUMERIC; continue; }
+            if (strcmp(arg, "--no-sort") == 0) { opts.sort_mode = SORT_NONE; continue; }
+            if (strcmp(arg, "--reverse-sort") == 0) { opts.reverse = 1; continue; }
+            if (strcmp(arg, "--size-sort") == 0) { opts.sort_mode = SORT_SIZE; continue; }
+            if (strcmp(arg, "--undefined-only") == 0) { opts.undefined_only = 1; continue; }
+            if (strcmp(arg, "--extern-only") == 0) { opts.extern_only = 1; continue; }
+            if (strcmp(arg, "--debug-syms") == 0) { opts.debug_syms = 1; continue; }
+            if (strcmp(arg, "--defined-only") == 0) { opts.defined_only = 1; continue; }
+            if (strcmp(arg, "--no-weak") == 0) { opts.no_weak = 1; continue; }
+            if (strcmp(arg, "--print-file-name") == 0) { opts.print_file = 1; continue; }
+            if (strcmp(arg, "--print-size") == 0) { opts.print_size = 1; continue; }
+            if (strcmp(arg, "--dynamic") == 0) { opts.dynamic = 1; continue; }
+            if (strcmp(arg, "--demangle") == 0) { opts.do_demangle = 1; continue; }
+            if (strcmp(arg, "--print-armap") == 0) { opts.print_armap = 1; continue; }
+            if (strcmp(arg, "--special-syms") == 0) { opts.special_syms = 1; continue; }
+            if (strcmp(arg, "--portability") == 0) { opts.format = FMT_POSIX; continue; }
+            if (strcmp(arg, "--line-numbers") == 0) { opts.print_line = 1; continue; }
 
-        /* -t with argument */
-        if (strcmp(arg, "-t") == 0) {
-            if (i + 1 < argc) {
-                i++;
-                if (strcmp(argv[i], "d") == 0) opts.radix = 10;
-                else if (strcmp(argv[i], "o") == 0) opts.radix = 8;
-                else if (strcmp(argv[i], "x") == 0) opts.radix = 16;
-                else { usage(stderr); return 1; }
-            } else { usage(stderr); return 1; }
-            continue;
-        }
-        if (starts_with(arg, "-t") && strlen(arg) == 3) {
-            if (arg[2] == 'd') opts.radix = 10;
-            else if (arg[2] == 'o') opts.radix = 8;
-            else if (arg[2] == 'x') opts.radix = 16;
-            else { usage(stderr); return 1; }
-            continue;
+            fprintf(stderr, "%s: unrecognized option '%s'\n", progname, arg);
+            goto bad;
         }
 
-        /* Short options (may be combined, e.g. -agn) */
-        if (arg[0] == '-' && arg[1] != '-') {
+        /* Short options (may be combined, e.g. -agn, -at d, -fsysv) */
+        {
             const char *p;
             for (p = arg + 1; *p; p++) {
                 switch (*p) {
@@ -1682,7 +1749,7 @@ int main(int argc, char **argv)
                 case 'C': opts.do_demangle = 1; break;
                 case 'D': opts.dynamic = 1; break;
                 case 'g': opts.extern_only = 1; break;
-                case 'h': usage(stdout); return 0;
+                case 'h': usage(stdout); goto out;
                 case 'l': opts.print_line = 1; break;
                 case 'n': opts.sort_mode = SORT_NUMERIC; break;
                 case 'o': opts.print_file = 1; break;
@@ -1693,63 +1760,44 @@ int main(int argc, char **argv)
                 case 'S': opts.print_size = 1; break;
                 case 'u': opts.undefined_only = 1; break;
                 case 'v': opts.sort_mode = SORT_NUMERIC; break;
-                case 'V': printf("nm %s\n", NM_VERSION); return 0;
+                case 'V': printf("nm %s\n", NM_VERSION); goto out;
+                case 'f':
+                    /* The rest of the word, or the next word, is the format */
+                    val = option_arg(p + 1, "-f", argc, argv, &i);
+                    if (!val || set_format(val) != 0) goto bad;
+                    goto next_arg;
                 case 't':
-                    /* -t requires the next char or next arg */
-                    if (*(p + 1)) {
-                        p++;
-                        if (*p == 'd') opts.radix = 10;
-                        else if (*p == 'o') opts.radix = 8;
-                        else if (*p == 'x') opts.radix = 16;
-                        else { usage(stderr); return 1; }
-                        goto next_arg;
-                    } else if (i + 1 < argc) {
-                        i++;
-                        if (strcmp(argv[i], "d") == 0) opts.radix = 10;
-                        else if (strcmp(argv[i], "o") == 0) opts.radix = 8;
-                        else if (strcmp(argv[i], "x") == 0) opts.radix = 16;
-                        else { usage(stderr); return 1; }
-                        goto next_arg;
-                    } else {
-                        usage(stderr);
-                        return 1;
-                    }
+                    /* The rest of the word, or the next word, is the radix */
+                    val = option_arg(p + 1, "-t", argc, argv, &i);
+                    if (!val || set_radix(val) != 0) goto bad;
+                    goto next_arg;
                 default:
                     fprintf(stderr, "%s: unrecognized option '-%c'\n", progname, *p);
-                    usage(stderr);
-                    return 1;
+                    goto bad;
                 }
             }
-        next_arg:
-            continue;
         }
-
-        /* Unknown long option */
-        if (arg[0] == '-') {
-            fprintf(stderr, "%s: unrecognized option '%s'\n", progname, arg);
-            usage(stderr);
-            return 1;
-        }
+    next_arg:
+        ;
     }
 
     /* Default to a.out if no files given */
     if (file_count == 0) {
         if (process_file("a.out", 0) != 0)
-            any_fail = 1;
-        return any_fail ? 1 : 0;
+            rc = 1;
+        goto out;
     }
 
-    /* Process files */
-    for (i = 1; i < argc; i++) {
-        if (argv[i][0] == '-') {
-            /* Skip options — already parsed */
-            if (strcmp(argv[i], "-t") == 0 && i + 1 < argc)
-                i++;
-            continue;
-        }
-        if (process_file(argv[i], file_count > 1) != 0)
-            any_fail = 1;
+    for (i = 0; i < file_count; i++) {
+        if (process_file(files[i], file_count > 1) != 0)
+            rc = 1;
     }
+    goto out;
 
-    return any_fail ? 1 : 0;
+bad:
+    usage(stderr);
+    rc = 1;
+out:
+    free(files);
+    return rc;
 }

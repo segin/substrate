@@ -8,9 +8,11 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl aABCDglnoPprSsuVv
+.Op Fl f Ar format
 .Op Fl t Ar radix
 .Op Fl -format Ns = Ns Ar format
 .Op Fl -radix Ns = Ns Ar radix
+.Op Fl -line-numbers
 .Op Fl -demangle
 .Op Fl -defined-only
 .Op Fl -no-weak
@@ -26,6 +28,7 @@
 .Op Fl -dynamic
 .Op Fl -print-armap
 .Op Fl -special-syms
+.Op Fl -
 .Op Ar
 .Sh DESCRIPTION
 The
@@ -39,6 +42,21 @@ is used.
 For each symbol, the output includes its value (address), type letter,
 and name.
 The exact format depends on the selected output mode.
+.Pp
+Options and file names may appear in any order.
+Short options may be grouped
+.Pq Fl ag .
+An option that takes an argument
+.Pq Fl f , Fl t , Fl -format , Fl -radix
+takes it from the rest of the same word
+.Pq Fl tx , Fl -radix Ns = Ns Ar x
+or, if there is none, from the next word
+.Pq Fl at Ar x , Fl -radix Ar x .
+The argument
+.Fl -
+ends the options; every argument after it, and a lone
+.Fl ,
+is a file name.
 .Sh OPTIONS
 .Bl -tag -width indent
 .It Fl a , Fl -debug-syms
@@ -61,7 +79,10 @@ instead of the normal symbol table
 .Pq Dv .symtab .
 .It Fl g , Fl -extern-only
 Display only external (global and weak) symbols.
-.It Fl l
+.It Fl f Ar format
+Same as
+.Fl -format Ns = Ns Ar format .
+.It Fl l , Fl -line-numbers
 Display source file name and line number from DWARF debugging
 information (not yet implemented).
 .It Fl n , Fl v , Fl -numeric-sort
@@ -108,14 +129,14 @@ for hexadecimal (default).
 Display only undefined symbols.
 .It Fl V , Fl -version
 Print version information and exit.
-.It Fl -format Ns = Ns Ar fmt
+.It Fl -format Ns = Ns Ar fmt , Fl -format Ar fmt
 Select output format:
 .Sq bsd
 (default),
 .Sq posix ,
 or
 .Sq sysv .
-.It Fl -radix Ns = Ns Ar r
+.It Fl -radix Ns = Ns Ar r , Fl -radix Ar r
 Equivalent to
 .Fl t ;
 .Ar r

@@ -314,6 +314,74 @@ SRC
             "$ALL_SPECIAL" --special-syms "$TMP/special_$m.o"
     done
 
+    # Command-line parsing as GNU getopt does it: "--" ends the
+    # options, --line-numbers is the long -l, and an option argument
+    # given as the next word (-t, -f, --format, --radix, bundled or
+    # not) is consumed as that argument, never taken for a file.
+    cp "$TMP/a.o" "$TMP/-dash.o"
+    OUT_DD=$(cd "$TMP" && $NM -- -dash.o) ||
+        fail "-- ends the options (got: $OUT_DD)"
+    expect_match "-- ends the options" "$OUT_DD" '[[:space:]]T[[:space:]]+alpha$'
+    OUT_DD2=$(cd "$TMP" && $NM -- -dash.o b.o)
+    expect_match "-- with two files names the first" "$OUT_DD2" '^-dash\.o:$'
+    expect_match "-- still lists later files" "$OUT_DD2" '[[:space:]]T[[:space:]]+beta$'
+    OUT_DD3=$(cd "$TMP" && $NM -- -g a.o 2>&1) && fail "-- makes -g a file name"
+    expect_match "-- makes -g a file name" "$OUT_DD3" '[-]g'
+    expect_nomatch "-- makes -g no option" "$OUT_DD3" 'unrecognized'
+
+    OUT_LN=$($NM --line-numbers "$TMP/a.o") ||
+        fail "--line-numbers is accepted (got: $OUT_LN)"
+    [ "$OUT_LN" = "$($NM -l "$TMP/a.o")" ] || fail "--line-numbers matches -l"
+    pass "--line-numbers matches -l"
+
+    same_output() {
+        label=$1
+        want=$2
+        shift 2
+        got=$("$NM" "$@" 2>&1) || {
+            printf 'FAIL: %s (exit status)\n%s\n' "$label" "$got" >&2
+            exit 1
+        }
+        [ "$got" = "$want" ] || {
+            printf 'FAIL: %s\n--- got:\n%s\n--- want:\n%s\n' "$label" "$got" "$want" >&2
+            exit 1
+        }
+        pass "$label"
+    }
+    WANT_TD=$($NM -a -t d "$TMP/a.o" "$TMP/b.o")
+    same_output "-at d takes d as the radix" "$WANT_TD" -at d "$TMP/a.o" "$TMP/b.o"
+    same_output "--radix d takes d as the radix" "$WANT_TD" -a --radix d "$TMP/a.o" "$TMP/b.o"
+    WANT_FS=$($NM -a --format=sysv "$TMP/a.o")
+    same_output "-af sysv takes sysv as the format" "$WANT_FS" -af sysv "$TMP/a.o"
+    same_output "-f sysv takes sysv as the format" "$WANT_FS" -a -f sysv "$TMP/a.o"
+    same_output "-fsysv takes sysv as the format" "$WANT_FS" -a -fsysv "$TMP/a.o"
+    same_output "--format sysv takes sysv as the format" "$WANT_FS" -a --format sysv "$TMP/a.o"
+    WANT_FP=$($NM -P "$TMP/a.o" "$TMP/b.o")
+    same_output "-f posix with two files" "$WANT_FP" -f posix "$TMP/a.o" "$TMP/b.o"
+
+    if nm --version 2>/dev/null | grep -q 'GNU nm'; then
+        GOT=$(cd "$TMP" && $NM -- -dash.o b.o)
+        WANT=$(cd "$TMP" && nm -- -dash.o b.o)
+        [ "$GOT" = "$WANT" ] || {
+            printf 'FAIL: nm -- differs from GNU nm\n--- got:\n%s\n--- want:\n%s\n' \
+                "$GOT" "$WANT" >&2
+            exit 1
+        }
+        pass "nm -- matches GNU nm"
+        for flags in "-gt x" "-g --radix x" "-gf bsd" "-g -f bsd" "-g --format bsd"; do
+            # shellcheck disable=SC2086
+            GOT=$($NM $flags "$TMP/a.o" "$TMP/b.o")
+            # shellcheck disable=SC2086
+            WANT=$(nm $flags "$TMP/a.o" "$TMP/b.o")
+            [ "$GOT" = "$WANT" ] || {
+                printf 'FAIL: nm %s differs from GNU nm\n--- got:\n%s\n--- want:\n%s\n' \
+                    "$flags" "$GOT" "$WANT" >&2
+                exit 1
+            }
+            pass "nm $flags matches GNU nm"
+        done
+    fi
+
     if [ -x /bin/ls ]; then
         OUT_DYN=$($NM -D /bin/ls)
         expect_match "-D dynamic symbols produce output" "$OUT_DYN" '^[[:space:]]*[0-9a-fA-F]*[[:space:]]+[A-Za-z][[:space:]]+'
