@@ -119,6 +119,12 @@ jobs:
       - name: Linker tests
         run: make -C tests/usr.bin/ld
 
+      # The in-tree archiver, built for the host: symbol tables, thin
+      # archives and damaged archives, with GNU ar, nm and ld (binutils)
+      # as the judge of what it writes and reads.
+      - name: Archiver tests
+        run: make -C tests/usr.bin/ar
+
       # The in-tree assembler, built for the host by run-suite.sh: every
       # test under tests/usr.bin/as.  Those known not to pass are listed
       # with their reasons in xfail.list; one that fails outside that
