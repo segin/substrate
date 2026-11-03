@@ -15118,8 +15118,12 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
         }
         field_off = base + (is_nested_designator ? nested_off : m->offset);
         if (field_off < 0 ||
-            field_off + (m->bit_split ? (m->bit_offset + m->bit_width - 1) / 8 + 1 : m->size) > buf_size) {
-            /* (a split bit-field's unit may reach past the object, its bytes not) */
+            field_off + (m->bit_split && m->bit_width > 0 ? (m->bit_offset + m->bit_width - 1) / 8 + 1 : m->size) >
+                buf_size) {
+            /*
+             * (a split bit-field's unit may reach past the object, its bytes not; a member of no bytes -- an empty
+             * structure, Linux's local_lock_t without lock debugging, at a structure's end -- reaches nothing)
+             */
             set_diag(diag, "struct member offset exceeds global initializer object");
             return -1;
         }
