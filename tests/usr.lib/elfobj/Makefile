@@ -6,7 +6,7 @@ TESTS = test_strtab test_roundtrip test_invalid test_link test_reader_writer tes
 	test_section_segment test_symbols_hash test_reloc_backend test_link_services \
 	test_debug_unwind test_validate_hardening test_perf_io test_matrix test_multiarch_api \
 	test_write_to_buffer test_ensure_symbols_relocs test_push_section test_segment_align test_strtab test_layout test_push_symbol test_write_twice \
-	test_write_oom test_reloc_numbers
+	test_write_oom test_reloc_numbers test_reloc_mutate
 
 .PHONY: all clean
 
@@ -19,6 +19,7 @@ all: $(TESTS)
 	./test_write_twice
 	./test_write_oom
 	./test_reloc_numbers
+	./test_reloc_mutate
 	./test_roundtrip
 	./test_invalid
 	./test_link
@@ -97,6 +98,10 @@ test_write_oom: test_write_oom.c ../../../usr.lib/elfobj/libelfobj.a
 # Fails to compile when two relocation constants of one machine collide.
 test_reloc_numbers: test_reloc_numbers.c ../../../usr.lib/elfobj/libelfobj.a
 	$(CC) $(CFLAGS) test_reloc_numbers.c ../../../usr.lib/elfobj/libelfobj.a -o test_reloc_numbers
+
+# Relocation retargeting and clearing refuse a frozen object and mark a changed one dirty.
+test_reloc_mutate: test_reloc_mutate.c ../../../usr.lib/elfobj/libelfobj.a
+	$(CC) $(CFLAGS) test_reloc_mutate.c ../../../usr.lib/elfobj/libelfobj.a -o test_reloc_mutate
 
 test_push_section: test_push_section.c ../../../usr.lib/elfobj/libelfobj.a
 	$(CC) $(CFLAGS) test_push_section.c ../../../usr.lib/elfobj/libelfobj.a -o test_push_section

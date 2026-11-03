@@ -2906,7 +2906,8 @@ elf_err_t elf_register_reloc_backend(const struct elf_reloc_backend *backend) {
  * Forget every relocation against `section`: for a linker that has applied
  * them and is writing an executable, which has no use for them.  The
  * writer makes a .rel section for whatever relocations an object still
- * holds.
+ * holds.  A finalized or read-only object is refused, and a changed one is
+ * marked dirty so the writer does not reuse the image it was read from.
  */
 elf_err_t elf_section_clear_relocations(elf_section_t *section) {
     struct elfobj *obj;
@@ -2916,6 +2917,10 @@ elf_err_t elf_section_clear_relocations(elf_section_t *section) {
         return ELF_ERR_STATE;
     }
     obj = section->obj;
+    if (obj->readonly || obj->finalized) {
+        elf__set_err(obj, ELF_ERR_STATE, "cannot mutate finalized/read-only object");
+        return ELF_ERR_STATE;
+    }
     (void)elf__ensure_symbols_relocs(obj);
     for (i = 0; i < obj->reloc_count; ++i) {
         struct elf_reloc *r = obj->relocs[i];
@@ -2928,6 +2933,7 @@ elf_err_t elf_section_clear_relocations(elf_section_t *section) {
     }
     obj->reloc_count = kept;
     section->reloc_count = 0;
+    obj->dirty = 1;
     return ELF_OK;
 }
 
@@ -2982,9 +2988,18 @@ int64_t elf_reloc_addend(const elf_reloc_t *reloc) {
  * rewrites the instruction a relocation is in, and with it what is to be
  * put there and where.  The addend is kept only by a relocation that has
  * one (RELA); for the others it is in the section, where the caller put it.
+ * Like every other change, it is refused for a finalized or read-only
+ * object and marks the object dirty.
  */
 elf_err_t elf_reloc_retarget(elf_reloc_t *reloc, uint64_t offset, uint32_t type, int64_t addend) {
-    if (reloc == NULL) {
+    struct elfobj *obj;
+
+    if (reloc == NULL || reloc->section == NULL || reloc->section->obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    obj = reloc->section->obj;
+    if (obj->readonly || obj->finalized) {
+        elf__set_err(obj, ELF_ERR_STATE, "cannot mutate finalized/read-only object");
         return ELF_ERR_STATE;
     }
     reloc->offset = offset;
@@ -2992,6 +3007,7 @@ elf_err_t elf_reloc_retarget(elf_reloc_t *reloc, uint64_t offset, uint32_t type,
     if (reloc->has_addend) {
         reloc->addend = addend;
     }
+    obj->dirty = 1;
     return ELF_OK;
 }
 
