@@ -121,6 +121,43 @@ static void check_aarch64_abs16(void) {
     elf_close(obj);
 }
 
+/**
+ * Check that every x86-64 GOT-relative-to-PC relocation is PC-relative.
+ *
+ * The x86-64 psABI computes GOTPC32 and GOTPC64 as GOT + A - P, and
+ * GOTPCREL64, GOTPCRELX, REX_GOTPCRELX and GOTPC32_TLSDESC as
+ * G + GOT + A - P; BFD's HOWTO table marks each of them pc_relative,
+ * as it does GOTPCREL.  A linker asks this to decide whether a REL
+ * input's implicit addend (typically -4) is sign-extended.
+ */
+static void check_x64_gotpc_pc_relative(void) {
+    static const struct {
+        uint32_t type;
+        const char *name;
+    } types[] = {
+        { R_X86_64_GOTPCREL, "R_X86_64_GOTPCREL" },
+        { R_X86_64_GOTPC32, "R_X86_64_GOTPC32" },
+        { R_X86_64_GOTPC64, "R_X86_64_GOTPC64" },
+        { R_X86_64_GOTPCREL64, "R_X86_64_GOTPCREL64" },
+        { R_X86_64_GOTPCRELX, "R_X86_64_GOTPCRELX" },
+        { R_X86_64_REX_GOTPCRELX, "R_X86_64_REX_GOTPCRELX" },
+        { R_X86_64_GOTPC32_TLSDESC, "R_X86_64_GOTPC32_TLSDESC" },
+    };
+    char msg[128];
+    size_t i;
+
+    for (i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
+        if (!elf_reloc_is_pc_relative_for_machine(EM_X86_64, types[i].type)) {
+            snprintf(msg, sizeof(msg), "%s is not PC-relative", types[i].name);
+            fail(msg);
+        }
+    }
+    if (elf_reloc_is_pc_relative_for_machine(EM_X86_64, R_X86_64_GOTOFF64))
+        fail("R_X86_64_GOTOFF64 is PC-relative");
+    if (elf_reloc_is_pc_relative_for_machine(EM_X86_64, R_X86_64_GOT64))
+        fail("R_X86_64_GOT64 is PC-relative");
+}
+
 int main(void) {
     elfobj_t *obj32;
     elfobj_t *obj64;
@@ -143,6 +180,7 @@ int main(void) {
     if (elf_reloc_size_for_machine(EM_X86_64, R_X86_64_64) != 8) fail("x86_64 reloc size");
     if (!elf_reloc_is_pc_relative_for_machine(EM_X86_64, R_X86_64_PC32)) fail("x86_64 pc-relative");
     if (!elf_reloc_is_tls_for_machine(EM_X86_64, R_X86_64_TPOFF32)) fail("x86_64 tls detect");
+    check_x64_gotpc_pc_relative();
 
     if (elf_apply_relocation_value(obj32, R_386_PC32, 0x1004, 0x2000, -4, &out) != ELF_OK)
         fail("apply i386 pc32");

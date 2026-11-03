@@ -308,6 +308,14 @@ static int x64_is_pc_relative(uint32_t type) {
         case R_X86_64_PC64:
         case R_X86_64_PC16:
         case R_X86_64_PC8:
+        /* GOT + A - P and G + GOT + A - P: the psABI's GOT-relative
+         * forms are measured from the place, as BFD marks them. */
+        case R_X86_64_GOTPC32:
+        case R_X86_64_GOTPC64:
+        case R_X86_64_GOTPCREL64:
+        case R_X86_64_GOTPCRELX:
+        case R_X86_64_REX_GOTPCRELX:
+        case R_X86_64_GOTPC32_TLSDESC:
             return 1;
         default:
             return 0;
