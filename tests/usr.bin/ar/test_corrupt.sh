@@ -15,7 +15,8 @@
 # member data on demand, so its "t" lists a truncated archive and it
 # treats a header cut short at the end as the end of the archive; ar
 # reads every member up front, so it rejects both outright.  Non-numeric
-# uid, gid and mode fields GNU ignores, and so does ar.
+# or blank uid, gid and mode fields GNU ignores without a word, and so
+# does ar.
 #
 set -eu
 
@@ -171,12 +172,16 @@ main() {
         pass "ranlib rejects $a"
     done
 
-    # Fields GNU does not validate stay accepted.
-    for a in uid.a mode.a; do
-        ar t "$a" > /dev/null 2>&1 || fail "GNU ar t $a failed"
-        out=$("$AR" t "$a" 2> /dev/null) || fail "ar t $a failed"
-        [ "$out" = "$(printf 'a.txt\nb.txt')" ] || fail "ar t $a: '$out'"
-        pass "ar t accepts $a"
+    # Fields GNU does not validate stay accepted, silently as GNU
+    # accepts them.  GNU ar writes its "//" name table with blank uid,
+    # gid and mode, so a sound GNU archive with long names has them too.
+    for a in uid.a mode.a lname.a; do
+        ar t "$a" > /dev/null 2> "$TMP/gnu.err" || fail "GNU ar t $a failed"
+        [ ! -s "$TMP/gnu.err" ] || fail "GNU ar t $a warned; the test is wrong"
+        out=$("$AR" t "$a" 2> "$TMP/err") || fail "ar t $a failed"
+        [ "$out" = "$(ar t "$a")" ] || fail "ar t $a: '$out'"
+        [ ! -s "$TMP/err" ] || fail "ar t $a warned: $(cat "$TMP/err")"
+        pass "ar t accepts $a silently"
     done
 }
 

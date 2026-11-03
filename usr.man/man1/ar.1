@@ -197,7 +197,12 @@ the offset of a
 reference is the run of digits after the
 .Ql / ,
 and anything after the digits is ignored.
-Non-numeric uid, gid and mode fields are reported but accepted.
+Blank or non-numeric uid, gid and mode fields are not damage and are
+accepted without a diagnostic, as GNU
+.Nm
+accepts them (it writes its own
+.Dq //
+table with those fields blank).
 .Sh ENVIRONMENT
 .Bl -tag -width "SOURCE_DATE_EPOCH"
 .It Ev ZERO_AR_DATE

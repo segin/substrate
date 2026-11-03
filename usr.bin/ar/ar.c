@@ -873,15 +873,12 @@ static void read_archive(const char *path) {
                 errx(1, "%s: file truncated", path);
             }
         }
-        if (!parse_numeric_field(hdr.ar_uid, sizeof(hdr.ar_uid), 10, &parsed_size)) {
-            warnx("%s: non-numeric ar_uid field", path);
-        }
-        if (!parse_numeric_field(hdr.ar_gid, sizeof(hdr.ar_gid), 10, &parsed_size)) {
-            warnx("%s: non-numeric ar_gid field", path);
-        }
-        if (!parse_numeric_field(hdr.ar_mode, sizeof(hdr.ar_mode), 8, &parsed_size)) {
-            warnx("%s: non-numeric ar_mode field", path);
-        }
+        /*
+         * The uid, gid and mode fields are not checked here: GNU ar
+         * leaves them blank in its "//" name table and ignores what is
+         * in them, so a field that does not parse is no damage.  The
+         * readers that use them fall back to defaults.
+         */
 
         struct ar_memb *m = malloc(sizeof(struct ar_memb));
         if (m == NULL) {
