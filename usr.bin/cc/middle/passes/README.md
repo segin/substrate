@@ -38,7 +38,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   asm that clobbers "memory" or has a memory output, the write of a value
   whose address is taken; as gcc's value numbering, so a branch on the
   first read tells range folding of the second -- Linux's
-  fuse_notify_store() reads `outarg.offset` twice); then, from -O1,
+  fuse_notify_store() reads `outarg.offset` twice; and a store of an
+  integer to a slot or a global so too, a load of its bytes a copy of
+  the value stored where that value is what the load reads back,
+  already extended as the load extends it); then, from -O1,
   inlining bottom-up over the call graph (a function is rewritten once
   its callees are, then folded again, with what the module's
   declarations tell, `fold_module_facts()`: a load from a const table at

@@ -3135,6 +3135,7 @@ typedef struct {
     unsigned char *obj;     /**< per value: LD_OBJ_SLOT for the address of a stack slot, one STACKALLOC's, the only
                                  definition of the value; LD_OBJ_GLOBAL for a symbol's, one GADDR's; else 0 */
     unsigned *slot_mem;     /**< per slot value: the version of its memory */
+    int *canon;             /**< per value: for a global's address, the first value made that address; else itself */
     unsigned mem_all;       /**< the version of all memory */
     unsigned mem_glob;      /**< the version of the globals' memory */
     unsigned mem_other;     /**< the version of the memory a pointer of unknown object reaches */
@@ -3163,6 +3164,8 @@ static ld_addr_t ld_addr_of(const ld_state_t *s, int v) {
     if (s->has_dec[v] && s->dec_ver[v] == s->ver[v] && ld_dominates(s->blocks, s->dec_block[v], s->cur)) {
         return s->dec[v];
     }
+    /* (a global's address, made more than once, one address) */
+    v = s->canon[v];
     a.base = v;
     a.bver = s->ver[v];
     a.off = 0;
@@ -3295,6 +3298,79 @@ static unsigned ld_part(const ld_state_t *s, const ld_addr_t *at, unsigned char 
     return s->obj[at->root] == LD_OBJ_SLOT ? s->slot_mem[at->root] : s->mem_glob;
 }
 
+static long long held_as(long long c, uint32_t size, int is_unsigned);
+static long *single_def_at(const cc_ssa_function_t *f);
+static uint64_t fn_name_hash(const char *s, size_t n);
+
+/**
+ * Whether value @p v, stored in @p size bytes, is what a load of them that extends them as @p is_unsigned says
+ * reads back: the whole register a store of its size fills (8 bytes; 4 on i386), or a value already so
+ * extended -- a constant the extension leaves alone, the shift pair or the mask legalization extends with, a load
+ * of that size and extension.  @p def_at is single_def_at()'s.
+ */
+static int stored_as_loaded(const cc_ssa_function_t *f, const long *def_at, int v, long long size, int is_unsigned) {
+    int word = cc_target_pointer_size();
+    int k = 8 * word - 8 * (int)size; /* the bits above the stored ones */
+    const cc_ssa_instr_t *d;
+
+    if (size >= word) {
+        return 1;
+    }
+    if (v < 0 || v >= f->value_count || def_at[v] < 0) {
+        return 0;
+    }
+    d = &f->instrs[def_at[v]];
+    switch (d->op) {
+    case CC_SSA_CONST:
+        return held_as(d->imm, (uint32_t)size, is_unsigned) == held_as(d->imm, (uint32_t)word, 0);
+    case CC_SSA_LOAD:
+        return d->imm == size && !d->is_unsigned == !is_unsigned && d->seg == 0;
+    case CC_SSA_SHR: {
+        const cc_ssa_instr_t *sh;
+        long long by = d->imm;
+
+        if (d->rhs >= 0) {
+            by = d->rhs < f->value_count && def_at[d->rhs] >= 0 && f->instrs[def_at[d->rhs]].op == CC_SSA_CONST
+                     ? f->instrs[def_at[d->rhs]].imm
+                     : -1;
+        }
+        if (by != k || !d->is_unsigned != !is_unsigned || d->lhs < 0 || d->lhs >= f->value_count ||
+            def_at[d->lhs] < 0) {
+            return 0;
+        }
+        sh = &f->instrs[def_at[d->lhs]];
+        if (sh->op != CC_SSA_SHL) {
+            return 0;
+        }
+        by = sh->imm;
+        if (sh->rhs >= 0) {
+            by = sh->rhs < f->value_count && def_at[sh->rhs] >= 0 && f->instrs[def_at[sh->rhs]].op == CC_SSA_CONST
+                     ? f->instrs[def_at[sh->rhs]].imm
+                     : -1;
+        }
+        return by == k;
+    }
+    case CC_SSA_AND: {
+        int m;
+
+        if (!is_unsigned) {
+            return 0;
+        }
+        for (m = 0; m < 2; ++m) {
+            int c = m == 0 ? d->rhs : d->lhs;
+
+            if (c >= 0 && c < f->value_count && def_at[c] >= 0 && f->instrs[def_at[c]].op == CC_SSA_CONST &&
+                held_as(f->instrs[def_at[c]].imm, (uint32_t)word, 1) == (long long)((1ULL << (8 * size)) - 1)) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    default:
+        return 0;
+    }
+}
+
 /**
  * Common loads, across blocks: a plain load (CC_SSA_LOAD's plain -- never a volatile or an atomic one) of an
  * address a plain load read before, along every path to it, with nothing between that may write memory there,
@@ -3314,6 +3390,12 @@ static unsigned ld_part(const ld_state_t *s, const ld_addr_t *at, unsigned char 
  * %gs, a call, an asm that may write memory (ld_writes_memory()), the write of a value whose address is taken
  * (ADDR) or of an aggregate's bytes, writes all memory.
  *
+ * A store of an integer to a stack slot or a global stands for a load of the bytes it wrote, the same way: a
+ * plain load of them, of the store's size, with nothing between that may write them, is a copy of the value
+ * stored, where that value is what the load reads back (stored_as_loaded()) -- Linux's ad7768_get_voltage_sel()
+ * passes &val to regmap_read(), assigns val a FIELD_GET() and clamp()s it, whose BUILD_BUG_ON needs the field's
+ * range.  Two values made one symbol's address are one address (ld_state_t's canon).
+ *
  * @return the loads turned into copies, or -1 when out of memory
  */
 static int cse_loads(cc_ssa_function_t *f) {
@@ -3324,20 +3406,32 @@ static int cse_loads(cc_ssa_function_t *f) {
     unsigned char *other_use = NULL;
     int *ndefs = NULL;
     size_t nv = (size_t)(f->value_count > 0 ? f->value_count : 1);
+    ld_entry_t *stab = NULL; /* the stores seen: what a load of the bytes each wrote reads, while nothing wrote them */
+    long *def_at = NULL;
+    int *gsym = NULL;     /* per slot of a table by symbol: the first value made that symbol's address, or -1 */
+    long *gsym_at = NULL; /* and its instruction */
     size_t cap = 16;
+    size_t gcap = 16;
     size_t nloads = 0;
+    size_t nstores = 0;
+    size_t ngaddrs = 0;
     int changed = 0;
     int rc = -1;
     size_t i;
 
     for (i = 0; i < f->instr_count; ++i) {
         nloads += f->instrs[i].op == CC_SSA_LOAD && f->instrs[i].plain;
+        nstores += f->instrs[i].op == CC_SSA_STORE;
+        ngaddrs += f->instrs[i].op == CC_SSA_GADDR;
     }
-    if (nloads < 2) {
+    if (nloads == 0 || nloads + nstores < 2) {
         return 0;
     }
-    while (cap < 2 * nloads + 2) {
+    while (cap < 2 * (nloads + nstores) + 2) {
         cap *= 2;
+    }
+    while (gcap < 2 * ngaddrs + 2) {
+        gcap *= 2;
     }
     if (ld_blocks_build(f, &blocks) != 0) {
         return -1;
@@ -3353,13 +3447,24 @@ static int cse_loads(cc_ssa_function_t *f) {
     s.obj = (unsigned char *)calloc(nv, 1);
     s.slot_mem = (unsigned *)calloc(nv, sizeof(*s.slot_mem));
     tab = (ld_entry_t *)calloc(cap, sizeof(*tab));
+    stab = (ld_entry_t *)calloc(cap, sizeof(*stab));
+    def_at = single_def_at(f);
+    s.canon = (int *)malloc(nv * sizeof(*s.canon));
+    gsym = (int *)malloc(gcap * sizeof(*gsym));
+    gsym_at = (long *)calloc(gcap, sizeof(*gsym_at));
     pinned = (unsigned char *)calloc(nv, 1);
     other_use = (unsigned char *)calloc(nv, 1);
     ndefs = (int *)calloc(nv, sizeof(*ndefs));
     if (s.ver == NULL || s.has_dec == NULL || s.dec == NULL || s.dec_ver == NULL || s.dec_block == NULL ||
-        s.obj == NULL || s.slot_mem == NULL || tab == NULL || pinned == NULL || other_use == NULL ||
-        ndefs == NULL) {
+        s.obj == NULL || s.slot_mem == NULL || tab == NULL || stab == NULL || pinned == NULL || other_use == NULL ||
+        ndefs == NULL || def_at == NULL || s.canon == NULL || gsym == NULL || gsym_at == NULL) {
         goto out;
+    }
+    for (i = 0; i < nv; ++i) {
+        s.canon[i] = (int)i;
+    }
+    for (i = 0; i < gcap; ++i) {
+        gsym[i] = -1;
     }
     /* the values whose storage an address reaches, and how often each is written: a slot's address once */
     for (i = 0; i < f->instr_count; ++i) {
@@ -3394,13 +3499,26 @@ static int cse_loads(cc_ssa_function_t *f) {
         if (in->op == CC_SSA_STACKALLOC) {
             s.obj[in->dst] = LD_OBJ_SLOT;
         } else if (in->op == CC_SSA_GADDR && in->sym != NULL) {
+            /* the first value made the same symbol's address stands for each (open addressing by its name) */
+            size_t h = (size_t)fn_name_hash(in->sym, strlen(in->sym)) & (gcap - 1);
+
             s.obj[in->dst] = LD_OBJ_GLOBAL;
+            while (gsym[h] >= 0 && strcmp(f->instrs[gsym_at[h]].sym, in->sym) != 0) {
+                h = (h + 1) & (gcap - 1);
+            }
+            if (gsym[h] < 0) {
+                gsym[h] = in->dst;
+                gsym_at[h] = (long)i;
+            }
+            s.canon[in->dst] = gsym[h];
         }
     }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
         ld_entry_t key;
+        ld_entry_t skey;
         int keyed = 0;
+        int stored = 0;
         int writes_all = 0;
         size_t k;
 
@@ -3438,6 +3556,22 @@ static int cse_loads(cc_ssa_function_t *f) {
                     break;
                 }
             }
+            if (hit == NULL && in->seg == 0) {
+                /* the value a store left there, while nothing has written the bytes since */
+                for (h = ld_hash(&key) & (cap - 1); stab[h].used; h = (h + 1) & (cap - 1)) {
+                    ld_entry_t *e = &stab[h];
+
+                    if (e->at.base == key.at.base && e->at.bver == key.at.bver && e->at.off == key.at.off &&
+                        e->size == key.size) {
+                        if (s.ver[e->dst] == e->dver && e->mem_all == s.mem_all && e->mem_part == key.mem_part &&
+                            ld_dominates(&blocks, e->block, s.cur) &&
+                            stored_as_loaded(f, def_at, e->dst, in->imm, in->is_unsigned)) {
+                            hit = e;
+                        }
+                        break;
+                    }
+                }
+            }
             if (hit != NULL) {
                 in->op = CC_SSA_MOV;
                 in->lhs = hit->dst;
@@ -3466,6 +3600,17 @@ static int cse_loads(cc_ssa_function_t *f) {
                     s.mem_glob = ++s.tick;
                 }
                 s.mem_other = ++s.tick;
+                if ((in->imm == 1 || in->imm == 2 || in->imm == 4 || in->imm == 8) && in->rhs >= 0 &&
+                    in->rhs < f->value_count && cc_ssa_value_class(f, in->rhs) == CC_VAL_I64 &&
+                    f->value_ty[in->rhs].kind == CC_TY_INT) {
+                    memset(&skey, 0, sizeof(skey));
+                    skey.used = 1;
+                    skey.at = at;
+                    skey.size = in->imm;
+                    skey.block = s.cur;
+                    skey.dst = in->rhs;
+                    stored = 1;
+                }
             } else {
                 writes_all = 1;
             }
@@ -3503,6 +3648,20 @@ static int cse_loads(cc_ssa_function_t *f) {
         if (writes_all) {
             s.mem_all = ++s.tick;
         }
+        if (stored) {
+            /* (the memory as the store left it; in place of an entry for the same bytes, else in a free one) */
+            size_t h;
+
+            skey.mem_all = s.mem_all;
+            skey.mem_part = ld_part(&s, &skey.at, 0);
+            skey.dver = s.ver[skey.dst];
+            for (h = ld_hash(&skey) & (cap - 1);
+                 stab[h].used && !(stab[h].at.base == skey.at.base && stab[h].at.bver == skey.at.bver &&
+                                   stab[h].at.off == skey.at.off && stab[h].size == skey.size);
+                 h = (h + 1) & (cap - 1)) {
+            }
+            stab[h] = skey;
+        }
         if (keyed) {
             /* (in place of a stale entry of the same key, else in the first free one) */
             size_t h;
@@ -3524,6 +3683,11 @@ out:
     free(s.obj);
     free(s.slot_mem);
     free(tab);
+    free(stab);
+    free(def_at);
+    free(s.canon);
+    free(gsym);
+    free(gsym_at);
     free(pinned);
     free(other_use);
     free(ndefs);
