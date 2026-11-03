@@ -165,6 +165,45 @@ else
     compare "a script's VERSION with ns::fn"
 fi
 
+# extern "C++" { } in a node: its demangled names are read over, and the
+# node's own patterns after it, its '}' and the next node still count.
+# One left open must fail with a word on why: the reader ate the rest of
+# the script looking for its '}' and failed without a message.
+cat > ext.map <<'EOF'
+EXT_1 {
+    global:
+        extern "C++" {
+            "ns::nothing_here()";
+            ns::nor_here*;
+        };
+        f;
+    local: *;
+};
+EXT_2 {
+    global: h;
+} EXT_1;
+EOF
+"${GNU_LD:-ld}" -shared -soname libt.so.1 --version-script=ext.map -o gnu.so lib.o || exit 1
+if ! ./ld -m elf_x86_64 -shared -soname libt.so.1 --version-script ext.map -o ours.so lib.o > said 2>&1; then
+    echo "FAIL: ld --version-script with extern \"C++\": $(head -1 said)"; fail=1
+else
+    compare "--version-script with extern \"C++\""
+fi
+cat > open.map <<'EOF'
+OPEN_1 {
+    global:
+        extern "C++" {
+            "ns::nothing_here()";
+EOF
+if "${GNU_LD:-ld}" -shared --version-script=open.map -o gnu.so lib.o 2>/dev/null; then
+    echo "FAIL: GNU ld took an extern \"C++\" block left open"; fail=1
+fi
+if ./ld -m elf_x86_64 -shared --version-script open.map -o ours.so lib.o > said 2>&1; then
+    echo "FAIL: ld took an extern \"C++\" block left open"; fail=1
+elif ! grep -q 'open.map: .*not closed' said; then
+    echo "FAIL: ld failed on an extern \"C++\" block left open without saying why: $(head -1 said)"; fail=1
+fi
+
 if [ $fail -eq 0 ]; then
     echo "ok   test_version_script"
 fi

@@ -123,7 +123,8 @@ int ld_version_script_parse(ld_version_script_t *vs, const char *text, const cha
         for (;;) {
             p = vs_word(p, w, sizeof(w), &q);
             if (p == NULL) {
-                fprintf(stderr, "ld: %s: version node is not closed\n", where);
+                fprintf(stderr, "ld: %s: %s is not closed\n", where,
+                        in_extern ? "extern block in a version node" : "version node");
                 return -1;
             }
             if (!q && strcmp(w, "}") == 0) {
@@ -132,6 +133,9 @@ int ld_version_script_parse(ld_version_script_t *vs, const char *text, const cha
                     continue;
                 }
                 break;
+            }
+            if (in_extern) {
+                continue;   /* a demangled name, which this linker cannot match */
             }
             if (!q && (strcmp(w, ";") == 0 || strcmp(w, ":") == 0)) {
                 continue;
@@ -145,18 +149,14 @@ int ld_version_script_parse(ld_version_script_t *vs, const char *text, const cha
                 continue;
             }
             if (!q && strcmp(w, "extern") == 0) {
-                /* extern "C++" { demangled names }: names this linker cannot match; read over */
+                /* extern "C++" { demangled names }: names this linker cannot match; read over, to its '}' */
                 p = vs_word(p, w, sizeof(w), &q);
                 p = p != NULL ? vs_word(p, w, sizeof(w), &q) : NULL;
                 if (p == NULL || strcmp(w, "{") != 0) {
                     fprintf(stderr, "ld: %s: extern without '{' in a version node\n", where);
                     return -1;
                 }
-                while ((p = vs_word(p, w, sizeof(w), &q)) != NULL && !(strcmp(w, "}") == 0 && !q)) {
-                }
-                if (p == NULL) {
-                    return -1;
-                }
+                in_extern = 1;
                 continue;
             }
             if (strvec_push(local ? &node->locals : &node->globals, w) != 0) {
