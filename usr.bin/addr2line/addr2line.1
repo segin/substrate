@@ -87,6 +87,18 @@ applies load-bias style correction when absolute runtime addresses are given.
 .SH DWARF SUPPORT
 Supported DWARF versions: v2, v3, v4, v5.
 .PP
+Function names come from the
+.B DW_TAG_subprogram
+that covers the address.
+A subprogram with no name of its own, such as an out-of-line C++ member
+function definition or an out-of-line copy of an inline function, is
+named through its
+.B DW_AT_specification
+or
+.B DW_AT_abstract_origin
+reference.
+The ELF symbol table is used only when no subprogram names the address.
+.PP
 Supported compressed debug formats:
 .I .zdebug_*
 (GNU zlib)

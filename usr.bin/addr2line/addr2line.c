@@ -222,6 +222,11 @@ typedef struct {
 typedef struct {
     char *name;
     char *linkage_name;
+    /* .debug_info offsets of the DIEs this one takes its name from, when
+     * it has none of its own (out-of-line C++ member definitions, concrete
+     * copies of inline functions); 0 when absent. */
+    uint64_t abstract_origin;
+    uint64_t specification;
     addr_range_t *ranges;
     size_t range_count;
     size_t range_cap;
@@ -3193,6 +3198,8 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                 memset(&sp, 0, sizeof(sp));
                 sp.name = name;
                 sp.linkage_name = linkage_name;
+                sp.abstract_origin = has_abstract_origin ? abstract_origin : 0;
+                sp.specification = has_specification ? specification : 0;
                 name = NULL;
                 linkage_name = NULL;
 
@@ -3306,6 +3313,43 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
     return 0;
 }
 
+static const char *resolve_die_name_ref(const addr2line_image_t *img, uint64_t die_offset);
+
+/**
+ * subprogram_name - name a DW_TAG_subprogram the way GNU addr2line does
+ * @img: image whose die_names table holds every named DIE
+ * @sp:  subprogram with code
+ *
+ * Its own DW_AT_linkage_name or DW_AT_name wins.  A subprogram that has
+ * neither (an out-of-line C++ member definition, a concrete copy of an
+ * inline function) takes the name of the DIE its DW_AT_abstract_origin
+ * or DW_AT_specification refers to.
+ *
+ * Return: the name, or NULL when none can be found.
+ */
+static const char *subprogram_name(const addr2line_image_t *img, const dwarf_subprogram_t *sp) {
+    const char *resolved;
+    if (sp->linkage_name != NULL && sp->linkage_name[0] != '\0') {
+        return sp->linkage_name;
+    }
+    if (sp->name != NULL && sp->name[0] != '\0') {
+        return sp->name;
+    }
+    if (sp->abstract_origin != 0) {
+        resolved = resolve_die_name_ref(img, sp->abstract_origin);
+        if (resolved != NULL) {
+            return resolved;
+        }
+    }
+    if (sp->specification != 0) {
+        resolved = resolve_die_name_ref(img, sp->specification);
+        if (resolved != NULL) {
+            return resolved;
+        }
+    }
+    return NULL;
+}
+
 static const char *lookup_function_name(const addr2line_image_t *img, uint64_t addr) {
     size_t i;
     const char *best_name = NULL;
@@ -3317,13 +3361,10 @@ static const char *lookup_function_name(const addr2line_image_t *img, uint64_t a
         for (r = 0; r < sp->range_count; ++r) {
             uint64_t low = sp->ranges[r].low;
             uint64_t high = sp->ranges[r].high;
-            if (addr >= low && addr < high) {
-                uint64_t span = high - low;
-                const char *name = sp->linkage_name != NULL && sp->linkage_name[0] != '\0'
-                                       ? sp->linkage_name
-                                       : sp->name;
-                if (name != NULL && name[0] != '\0' && span <= best_span) {
-                    best_span = span;
+            if (addr >= low && addr < high && high - low <= best_span) {
+                const char *name = subprogram_name(img, sp);
+                if (name != NULL) {
+                    best_span = high - low;
                     best_name = name;
                 }
             }

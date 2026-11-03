@@ -205,6 +205,36 @@ int main(int c, char **v) { (void)v; return a_one(c) + a_two(c) + a_three(c) + b
 SRC
 }
 
+build_fixture_named_by_ref() {
+    dir=$1
+    mkdir -p "$dir"
+    # Out-of-line member definitions: their DW_TAG_subprogram carries
+    # only DW_AT_specification, pointing at the declaration in the class.
+    cat > "$dir/ref_cls.cpp" <<'SRC'
+namespace Geo {
+struct Shape {
+    int scale(int x);
+    static int twice(int x);
+};
+int Shape::scale(int x) { return x * 3; }
+int Shape::twice(int x) { return x * 2; }
+}
+int run_shape(int x) { Geo::Shape s; return s.scale(x) + Geo::Shape::twice(x); }
+SRC
+    # An inline function that is also emitted out of line (its address
+    # escapes): the concrete instance carries only DW_AT_abstract_origin.
+    cat > "$dir/ref_inl.c" <<'SRC'
+static inline int ref_body(volatile int *p) { return *p * 9 + 4; }
+int (*volatile ref_ptr)(volatile int *) = ref_body;
+int ref_user(int x) { volatile int v = x; return ref_body(&v) + ref_ptr(&v); }
+SRC
+    cat > "$dir/ref_main.cpp" <<'SRC'
+int run_shape(int);
+extern "C" int ref_user(int);
+int main(int c, char **) { return run_shape(c) + ref_user(c); }
+SRC
+}
+
 # Function names only (the odd lines) of "-f -i" output.
 inline_names() {
     printf '%s\n' "$1" | awk 'NR % 2 == 1' | tr '\n' ' '
@@ -524,6 +554,39 @@ SRC
         done
         [ "$SEEN_LEAF" -eq 1 ] || fail "10k v$V no address inside inlined b_leaf"
         pass "10k v$V"
+    done
+
+    # 10l: a subprogram with code but no name of its own (an out-of-line
+    # C++ member definition via DW_AT_specification, an out-of-line copy
+    # of an inline function via DW_AT_abstract_origin) is named through
+    # that reference.  The symbol table is removed so nothing but the
+    # DWARF can supply the name; GNU addr2line is the judge.
+    require_cmd c++
+    require_cmd objcopy
+    require_cmd readelf
+    build_fixture_named_by_ref "$TMP/nref"
+    for V in 4 5; do
+        cc -O1 -g -gdwarf-$V -c -o "$TMP/nref/ref_inl_v$V.o" \
+            "$TMP/nref/ref_inl.c"
+        c++ -O0 -g -gdwarf-$V -no-pie -o "$TMP/nref/nref_v$V" \
+            "$TMP/nref/ref_cls.cpp" "$TMP/nref/ref_main.cpp" \
+            "$TMP/nref/ref_inl_v$V.o"
+        objcopy --strip-all --keep-section='.debug_*' "$TMP/nref/nref_v$V" \
+            "$TMP/nref/nref_v${V}_nosym"
+        if readelf -S "$TMP/nref/nref_v${V}_nosym" | grep -F '.symtab' >/dev/null; then
+            fail "10l v$V symbol table survived the strip"
+        fi
+        for S in _ZN3Geo5Shape5scaleEi _ZN3Geo5Shape5twiceEi ref_body; do
+            RA=$(addr_of "$TMP/nref/nref_v$V" "$S")
+            [ -n "$RA" ] || fail "10l v$V symbol $S not found"
+            HOST_R=$(addr2line -f -C -e "$TMP/nref/nref_v${V}_nosym" 0x$RA)
+            case $HOST_R in
+            '??'*) fail "10l v$V host addr2line cannot name $S" ;;
+            esac
+            expect_eq "10l v$V $S" \
+                "$($BIN -f -C -e "$TMP/nref/nref_v${V}_nosym" 0x$RA)" \
+                "$HOST_R"
+        done
     done
 
     pass "all"
