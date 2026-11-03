@@ -327,6 +327,7 @@ static void emit_frame_result(const addr2line_opts_t *opts,
                               const char *path,
                               uint32_t line,
                               uint32_t column);
+static void emit_unresolved_frame(const addr2line_opts_t *opts);
 
 static void usage(FILE *out) {
     fprintf(out,
@@ -3558,7 +3559,7 @@ static void emit_query_address(const addr2line_opts_t *opts, uint64_t query) {
  */
 static void output_unresolved(const addr2line_opts_t *opts) {
     emit_query_address(opts, 0);
-    emit_frame_result(opts, NULL, "??", 0, 0);
+    emit_unresolved_frame(opts);
 }
 
 static const char *path_basename_view(const char *path) {
@@ -3607,18 +3608,13 @@ static void emit_frame_result(const addr2line_opts_t *opts,
     }
     display_path = out_path;
 
-    if (opts->pretty) {
-        printf("%s at %s:%u", display_func, display_path, (unsigned)line);
-        if (opts->show_column) {
-            printf(":%u", (unsigned)column);
-        }
-        putchar('\n');
-        demangle_free(dem);
-        return;
-    }
-
+    /*
+     * As in GNU addr2line, the function is shown only with -f; -p joins
+     * it to the location with " at " instead of a newline.
+     */
     if (opts->show_functions) {
-        puts(display_func);
+        fputs(display_func, stdout);
+        fputs(opts->pretty ? " at " : "\n", stdout);
     }
     printf("%s:%u", display_path, (unsigned)line);
     if (opts->show_column) {
@@ -3627,6 +3623,26 @@ static void emit_frame_result(const addr2line_opts_t *opts,
     putchar('\n');
 
     demangle_free(dem);
+}
+
+/**
+ * @brief Print the frame of an address that resolves to nothing.
+ *
+ * GNU addr2line's form for an address it finds no function or line
+ * for: "??:0", preceded with -f by a "??" function, on a line of its
+ * own or, with -p, followed by a space.  There is no " at ".
+ *
+ * @param opts Output options.
+ */
+static void emit_unresolved_frame(const addr2line_opts_t *opts) {
+    if (opts->show_functions) {
+        fputs(opts->pretty ? "?? " : "??\n", stdout);
+    }
+    fputs("??:0", stdout);
+    if (opts->show_column) {
+        fputs(":0", stdout);
+    }
+    putchar('\n');
 }
 
 static uint64_t adjust_query_address(const addr2line_image_t *img,
@@ -3747,6 +3763,12 @@ static void output_lookup(const addr2line_image_t *img,
     inner = n > 0u ? inline_function_name(img, &img->inlines[chain[0]]) : func;
     if (entry != NULL) {
         path = line_entry_path(img, entry);
+    }
+    if ((path == NULL || path[0] == '\0') && n == 0u && strcmp(inner, "??") == 0) {
+        /* Neither a line nor a function: the address resolves to nothing. */
+        free(path);
+        emit_unresolved_frame(opts);
+        return;
     }
     if (path == NULL || path[0] == '\0') {
         emit_frame_result(opts, inner, "??", 0, 0);

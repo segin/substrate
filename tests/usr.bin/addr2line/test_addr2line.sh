@@ -825,8 +825,8 @@ SRC
     # .debug_line row, every outer frame with the call site recorded on
     # the frame it inlined.  Without -i the innermost function is named.
     # With -a the address is printed once, and in -p mode every later
-    # frame starts with " (inlined by) ".  GNU addr2line is the judge,
-    # over every address of tl_outer.
+    # frame starts with " (inlined by) "; -p names a function only with
+    # -f.  GNU addr2line is the judge, over every address of tl_outer.
     build_fixture_two_level_inline "$TMP/tl"
     for V in 4 5; do
         cc -O2 -g -gdwarf-$V -no-pie -o "$TMP/tl/tl_v$V" "$TMP/tl/two_level.c"
@@ -838,7 +838,7 @@ SRC
         while [ "$OFF" -lt $((0x$TS)) ]; do
             Q=$(printf '%x' $((0x$TO + OFF)))
             for FLAGS in "-f" "-f -i" "-i" "-a -f -i" "-f -i -p" "-f -i -p -a" \
-                         "-f -p -a"; do
+                         "-f -p -a" "-p" "-i -p" "-a -p" "-a -i -p"; do
                 HOST_O=$(norm_a2l "$(addr2line $FLAGS -e "$TMP/tl/tl_v$V" 0x$Q)")
                 OUR_O=$(norm_a2l "$($BIN $FLAGS -e "$TMP/tl/tl_v$V" 0x$Q)")
                 [ "$OUR_O" = "$HOST_O" ] || {
@@ -1034,9 +1034,10 @@ SRC
     # form the options ask for -- the same lines as an address that
     # resolves to nothing (0 here), so every query keeps its line count
     # and -a shows 0 -- from the command line and from standard input.
-    # Without -p and -c GNU addr2line is the judge as well.
-    for FLAGS in "" "-f" "-a" "-a -f" "-f -i" "-p" "-f -p" "-a -f -p" "-c" \
-                 "-f -c" "-a -f -p -c"; do
+    # GNU addr2line is the judge as well, -p included ("?? ??:0" with
+    # -f, "??:0" without it); it has no -c.
+    for FLAGS in "" "-f" "-a" "-a -f" "-f -i" "-p" "-f -p" "-a -p" "-a -f -p" \
+                 "-c" "-f -c" "-a -f -p -c"; do
         WANT=$($BIN $FLAGS -e "$TMP/exec64_v5" 0 0x$A5 2>/dev/null)
         OUR_Q=$($BIN $FLAGS -e "$TMP/exec64_v5" zz 0x$A5 2>"$TMP/q.err")
         expect_eq "10q-3 argv '$FLAGS'" "$OUR_Q" "$WANT"
@@ -1045,7 +1046,7 @@ SRC
         OUR_Q=$(printf 'zz\n0x%s\n' "$A5" | $BIN $FLAGS -e "$TMP/exec64_v5" 2>/dev/null)
         expect_eq "10q-3 stdin '$FLAGS'" "$OUR_Q" "$WANT"
         case $FLAGS in
-        *-p*|*-c*) ;;
+        *-c*) ;;
         *)
             HOST_Q=$(norm_a2l "$(addr2line $FLAGS -e "$TMP/exec64_v5" zz 0x$A5)")
             expect_eq "10q-3 GNU '$FLAGS'" "$(norm_a2l "$OUR_Q")" "$HOST_Q"

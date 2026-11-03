@@ -81,8 +81,12 @@ as they are.
 Any other style is an error.
 .TP
 .BR \-p ", " \-\-pretty\-print
-Print each frame on one line as
-.IR "function at file:line" .
+Print each frame on one line: with
+.B \-f
+as
+.IR "function at file:line" ,
+and without it as just
+.IR file:line .
 With
 .BR \-i ,
 each frame after the first begins with
@@ -126,11 +130,19 @@ enabled, or just:
 .RE
 .PP
 without
-.BR \-f ;
-with
+.BR \-f .
+With
 .B \-p
 the frame is
-.RB \(lq "?? at ??:0" \(rq.
+.RB \(lq "?? ??:0" \(rq
+with
+.B \-f
+and
+.RB \(lq ??:0 \(rq
+without it; there is no
+.RB \(lq " at " \(rq,
+as in GNU
+.BR addr2line .
 .PP
 An address that is not a hexadecimal number is reported on standard
 error, and its result is printed as for an address that resolves to
