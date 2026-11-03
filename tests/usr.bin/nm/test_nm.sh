@@ -529,7 +529,7 @@ SRC
         expect_match "-l $f matches addr2line ($want)" "$OUT_L" \
             "[[:space:]]T[[:space:]]+line_fn	(.*/)?$want\$"
     done
-    MAN_L=$(awk '/^\.It Fl l$/ { on = 1; next } /^\.It / { on = 0 } on' \
+    MAN_L=$(awk '/^\.It Fl l( ,|$)/ { on = 1; next } /^\.It / { on = 0 } on' \
         "$ROOT/usr.man/man1/nm.1")
     [ -n "$MAN_L" ] || fail "nm.1 has no -l entry"
     expect_nomatch "nm.1 does not call -l unimplemented" "$MAN_L" \
