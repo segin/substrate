@@ -1041,9 +1041,16 @@ static int apply_tls_in_program(const elfobj_t *obj, uint16_t machine, uint32_t 
         return 0;
     }
     if (machine == EM_X86_64) {
+        int64_t tpoff;
+
         switch (type) {
             case R_X86_64_TPOFF32:
-                write_uint_bytes(buf + off, 4, e, (uint32_t)tls_tpoff(obj, S + (uint64_t)addend));
+                tpoff = tls_tpoff(obj, S + (uint64_t)addend);
+                if (tpoff < INT32_MIN || tpoff > INT32_MAX) {
+                    *why = "relocation truncated to fit: the distance from the thread pointer does not fit in 32 bits";
+                    return -1;
+                }
+                write_uint_bytes(buf + off, 4, e, (uint32_t)tpoff);
                 return 0;
             case R_X86_64_TPOFF64:
                 write_uint_bytes(buf + off, 8, e, (uint64_t)tls_tpoff(obj, S + (uint64_t)addend));
@@ -1053,6 +1060,13 @@ static int apply_tls_in_program(const elfobj_t *obj, uint16_t machine, uint32_t 
 
                 if (off < 3 || (buf[off - 1] & 0xc7) != 0x05 || (buf[off - 3] != 0x48 && buf[off - 3] != 0x4c)) {
                     *why = "an initial-exec reference in an instruction that is neither mov nor add";
+                    return -1;
+                }
+                /* The distance becomes the instruction's 32-bit immediate,
+                 * sign-extended, so it must fit before anything is rewritten. */
+                tpoff = tls_tpoff(obj, S + (uint64_t)addend + 4);
+                if (tpoff < INT32_MIN || tpoff > INT32_MAX) {
+                    *why = "relocation truncated to fit: the distance from the thread pointer does not fit in 32 bits";
                     return -1;
                 }
                 rex = buf[off - 3];
@@ -1077,7 +1091,7 @@ static int apply_tls_in_program(const elfobj_t *obj, uint16_t machine, uint32_t 
                     *why = "an initial-exec reference in an instruction that is neither mov nor add";
                     return -1;
                 }
-                write_uint_bytes(buf + off, 4, e, (uint32_t)tls_tpoff(obj, S + (uint64_t)addend + 4));
+                write_uint_bytes(buf + off, 4, e, (uint32_t)tpoff);
                 return 0;
             }
             default:

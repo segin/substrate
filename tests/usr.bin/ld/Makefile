@@ -11,6 +11,7 @@ run:
 	./test_dynamic.sh
 	./test_output.sh
 	./test_tls.sh
+	./test_tls_tpoff_range.sh
 	./test_got.sh
 	./test_absolute_reloc.sh
 	./test_narrow_reloc.sh

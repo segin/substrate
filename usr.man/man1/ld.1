@@ -655,6 +655,11 @@ The general-dynamic and local-dynamic sequences, which call
 .Fn __tls_get_addr ,
 are rewritten in place into those forms and the call removed, so a
 program does not need that function.
+On x86-64 the constant is a sign-extended 32-bit field
+.Pq Dv R_X86_64_TPOFF32 , No and Dv R_X86_64_GOTTPOFF No rewritten to it ,
+so a variable more than 2 GiB from the thread pointer is an error
+.Pq Dq relocation truncated to fit ,
+not a distance cut short.
 .Pp
 A shared object cannot know which module it will be or how far its
 storage will be from the thread pointer, so its references to its own
