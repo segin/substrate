@@ -26,16 +26,12 @@ $(O)$(PROG): $(ELFOBJ_LIB)
 $(ELFOBJ_LIB):
 	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
-install: install-ranlib-link install-man
+# ar.1 and ranlib.1 live in usr.man/man1 and are installed by usr.man/Makefile.
+install: install-ranlib-link
 
 install-ranlib-link: $(O)$(PROG)
 	mkdir -p $(BINDIR)
 	ln -sf ar $(BINDIR)/ranlib
-
-install-man:
-	mkdir -p $(DESTDIR)/usr/man/man1
-	install -m 0644 ../../usr.man/man1/ar.1 $(DESTDIR)/usr/man/man1/ar.1
-	install -m 0644 ../../usr.man/man1/ranlib.1 $(DESTDIR)/usr/man/man1/ranlib.1
 
 depend:
 	$(CC) $(USER_CFLAGS) -MM $(SRCS) > .depend

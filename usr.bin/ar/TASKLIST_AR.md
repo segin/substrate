@@ -231,7 +231,7 @@ Goal: implement a full‑featured `ar(1)` archive utility using `libelfobj` for 
 - [ ] `NATIVE_BUILD=1` for host testing.
 - [ ] `install` to `$(DESTDIR)/usr/bin/ar`.
 - [ ] `install-ranlib-link`: symlink `ar` → `ranlib` in `$(DESTDIR)/usr/bin/`.
-- [ ] `install-man`: install `ar.1` and `ranlib.1` to `$(DESTDIR)/usr/man/man1/`.
+- [ ] Man pages: `ar.1` and `ranlib.1` live in `usr.man/man1/`; `usr.man/Makefile` installs them to `$(DESTDIR)/usr/share/man/man1/`.
 - [ ] `libelfobj.a` dependency: auto‑build via recursive make.
 
 ## 11. Testing
@@ -310,4 +310,4 @@ Goal: implement a full‑featured `ar(1)` archive utility using `libelfobj` for 
 ## 12. Man Page
 
 - [ ] Write `ar.1` covering all operations, modifiers, format details, environment, and exit codes.
-- [ ] Install to `$(DESTDIR)/usr/man/man1/ar.1`.
+- [ ] Install to `$(DESTDIR)/usr/share/man/man1/ar.1` (via `usr.man/Makefile`).

@@ -41,10 +41,4 @@ FORCE:
 $(DEMANGLE_LIB): FORCE
 	$(MAKE) -C $(TOP)/usr.lib/demangle $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
-.PHONY: install-man
-
-install: install-man
-
-install-man:
-	mkdir -p $(DESTDIR)/usr/man/man1
-	install -m 0644 c++filt.1 $(DESTDIR)/usr/man/man1/c++filt.1
+# c++filt.1 lives in usr.man/man1 and is installed by usr.man/Makefile.

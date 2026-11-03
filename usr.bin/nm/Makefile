@@ -61,10 +61,4 @@ $(O)$(PROG): ../../usr.lib/elfobj/$(O)libelfobj.so.0 ../../usr.lib/demangle/$(O)
 	$(MAKE) -C ../../usr.lib/demangle
 endif
 
-.PHONY: install-man
-
-install: install-man
-
-install-man:
-	mkdir -p $(DESTDIR)/usr/man/man1
-	install -m 0644 nm.1 $(DESTDIR)/usr/man/man1/nm.1
+# nm.1 lives in usr.man/man1 and is installed by usr.man/Makefile.

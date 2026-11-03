@@ -27,10 +27,4 @@ $(O)$(PROG): ../../usr.lib/elfobj/$(O)libelfobj.so.0 ../../usr.lib/demangle/$(O)
 ../../usr.lib/demangle/$(O)libdemangle.so.0:
 	$(MAKE) -C ../../usr.lib/demangle $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
-.PHONY: install-man
-
-install: install-man
-
-install-man:
-	mkdir -p $(DESTDIR)/usr/man/man1
-	install -m 0644 addr2line.1 $(DESTDIR)/usr/man/man1/addr2line.1
+# addr2line.1 lives in usr.man/man1 and is installed by usr.man/Makefile.

@@ -71,13 +71,13 @@ $(O)%.pic.o: %.c
 clean:
 	rm -f $(OBJS) $(PIC_OBJS) $(O)$(LIBNAME) $(O)$(SHLIB) $(MODE_STAMP)
 
+# The demangle(3) pages live in usr.man/man3 and are installed by
+# usr.man/Makefile.
 install: $(O)$(LIBNAME) $(if $(NATIVE_BUILD),,$(O)$(SHLIB))
 	@mkdir -p $(DESTDIR)/usr/$(LIBDIR) $(DESTDIR)/$(LIBDIR)
 	@mkdir -p $(DESTDIR)/usr/include
-	@mkdir -p $(DESTDIR)/usr/man/man3
 	cp $(O)$(LIBNAME) $(DESTDIR)/usr/$(LIBDIR)/
 	cp ../../include/demangle.h $(DESTDIR)/usr/include/
-	cp man3/*.3 $(DESTDIR)/usr/man/man3/
 ifndef NATIVE_BUILD
 	install -m 755 $(O)$(SHLIB) $(DESTDIR)/$(LIBDIR)/
 	@ln -sf $(SHLIB) $(DESTDIR)/$(LIBDIR)/libdemangle.so
