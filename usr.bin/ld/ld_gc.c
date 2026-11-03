@@ -446,11 +446,20 @@ out:
  * first of each class and puts the rest where it is (elfobj's fold hook).
  *
  * Code is folded in both modes, and read-only data (.rodata) under
- * --icf=all, as lld folds it.  Nothing writable is: two variables that
- * start out alike do not stay so.  Nor is a section of a group, one whose
- * contents the merge rewrites (strings and constants, TLS, compressed),
- * or one ordered by another.  Nor is code with an LSDA, whose FDE says
- * what its handlers catch (icf_note_lsda_sections).
+ * --icf=all, as lld folds it.  A section of a group (COMDAT: a template's
+ * instance, an inline function) is folded as any other; one of a group
+ * the link drops is never laid out, and the first of its class that is
+ * stands for it.  Nothing writable is: two variables that start out alike
+ * do not stay so.  Nor is a section whose contents the merge rewrites
+ * (strings and constants, TLS, compressed), or one ordered by another.
+ * Nor is code with an LSDA, whose FDE says what its handlers catch
+ * (icf_note_lsda_sections).
+ *
+ * Sections are alike when their bytes and the places, kinds and addends
+ * of their relocations are, and each relocation refers to the same thing
+ * -- or to the same place in two sections that are alike, found by
+ * refining the classes until none splits (icf_refine_classes), as gold
+ * iterates: two callers of two identical functions are identical.
  *
  * --icf=safe also leaves out code whose address is taken, as gold does:
  * two functions are two addresses in C, and a program may compare
@@ -468,7 +477,7 @@ static int is_icf_candidate_section(const elf_section_t *sec, int icf_mode) {
     flags = elf_section_flags(sec);
     name = elf_section_name(sec);
     if ((flags & SHF_ALLOC) == 0 ||
-        (flags & (SHF_WRITE | SHF_GROUP | SHF_TLS | SHF_MERGE | SHF_LINK_ORDER | SHF_COMPRESSED)) != 0) {
+        (flags & (SHF_WRITE | SHF_TLS | SHF_MERGE | SHF_LINK_ORDER | SHF_COMPRESSED)) != 0) {
         return 0;
     }
     if ((flags & SHF_EXECINSTR) != 0 && gc_name_is(name, ".text")) {
@@ -477,71 +486,18 @@ static int is_icf_candidate_section(const elf_section_t *sec, int icf_mode) {
     return icf_mode == 2 && gc_name_is(name, ".rodata");
 }
 
-/*
- * Whether the relocations of sections @p a (of input @p ia) and @p b (of
- * input @p ib) are alike: at the same places, of the same kinds and
- * addends, and against the same things.  A global is the same thing by
- * name, the link binding each name once; anything else -- a local, a
- * section's own symbol -- only when it is the same place in the same
- * input.
+/**
+ * Whether sections @p a and @p b are alike but for what their relocations refer to: in kind, flags,
+ * alignment, size and contents, with relocations at the same places, of the same kinds and addends.
+ *
+ * @param a a section
+ * @param b another
+ * @return 1 if they are, 0 if not
  */
-static int sections_reloc_signature_equal(const elf_section_t *a, size_t ia, const elf_section_t *b, size_t ib) {
-    size_t ra_n;
-    size_t rb_n;
-    size_t i;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    ra_n = elf_section_reloc_count(a);
-    rb_n = elf_section_reloc_count(b);
-    if (ra_n != rb_n) {
-        return 0;
-    }
-    for (i = 0; i < ra_n; ++i) {
-        const elf_reloc_t *ra = elf_section_reloc_at((elf_section_t *)a, i);
-        const elf_reloc_t *rb = elf_section_reloc_at((elf_section_t *)b, i);
-        const elf_symbol_t *sa;
-        const elf_symbol_t *sb;
-        const char *na = NULL;
-        const char *nb = NULL;
-
-        if (ra == NULL || rb == NULL) {
-            return 0;
-        }
-        if (elf_reloc_offset(ra) != elf_reloc_offset(rb) || elf_reloc_type(ra) != elf_reloc_type(rb) ||
-            elf_reloc_addend(ra) != elf_reloc_addend(rb) || elf_reloc_has_addend(ra) != elf_reloc_has_addend(rb)) {
-            return 0;
-        }
-        sa = elf_reloc_symbol(ra);
-        sb = elf_reloc_symbol(rb);
-        if ((sa == NULL) != (sb == NULL)) {
-            return 0;
-        }
-        if (sa == NULL || sa == sb) {
-            continue;
-        }
-        na = elf_symbol_name(sa);
-        nb = elf_symbol_name(sb);
-        if (elf_symbol_bind(sa) != STB_LOCAL && elf_symbol_bind(sb) != STB_LOCAL && na != NULL && nb != NULL &&
-            na[0] != '\0' && nb[0] != '\0') {
-            if (strcmp(na, nb) != 0) {
-                return 0;
-            }
-            continue;
-        }
-        if (ia != ib || elf_symbol_bind(sa) != STB_LOCAL || elf_symbol_bind(sb) != STB_LOCAL ||
-            elf_symbol_shndx(sa) != elf_symbol_shndx(sb) || elf_symbol_value(sa) != elf_symbol_value(sb) ||
-            !gc_symbol_is_defined(sa)) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static int sections_icf_equal(const elf_section_t *a, size_t ia, const elf_section_t *b, size_t ib) {
+static int sections_icf_shape_equal(const elf_section_t *a, const elf_section_t *b) {
     size_t asz = 0;
     size_t bsz = 0;
+    size_t n, i;
     const void *ad;
     const void *bd;
 
@@ -560,8 +516,137 @@ static int sections_icf_equal(const elf_section_t *a, size_t ia, const elf_secti
     if (asz != 0 && (ad == NULL || bd == NULL || memcmp(ad, bd, asz) != 0)) {
         return 0;
     }
-    if (!sections_reloc_signature_equal(a, ia, b, ib)) {
+    n = elf_section_reloc_count(a);
+    if (n != elf_section_reloc_count(b)) {
         return 0;
+    }
+    for (i = 0; i < n; ++i) {
+        const elf_reloc_t *ra = elf_section_reloc_at((elf_section_t *)a, i);
+        const elf_reloc_t *rb = elf_section_reloc_at((elf_section_t *)b, i);
+
+        if (ra == NULL || rb == NULL || elf_reloc_offset(ra) != elf_reloc_offset(rb) ||
+            elf_reloc_type(ra) != elf_reloc_type(rb) || elf_reloc_addend(ra) != elf_reloc_addend(rb) ||
+            elf_reloc_has_addend(ra) != elf_reloc_has_addend(rb)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* What the comparison of two candidates' relocations needs, while the classes are being refined. */
+typedef struct {
+    const objvec_t *inputs;
+    const ld_symtab_t *symtab;
+    size_t **cand_at;           /* cand_at[i][s]: 1 + the candidate section s of input i is, 0 if none */
+    const size_t *cls;          /* each candidate's class, as the last round left it */
+    int preempt;                /* a global of default visibility may be bound elsewhere at run time */
+} icf_cmp_t;
+
+/**
+ * Where symbol @p sym, met in input @p obj, is as the link binds it: the input and section it is defined in
+ * and its value there.
+ *
+ * @param c     the comparison
+ * @param obj   the input it was met in
+ * @param sym   the symbol
+ * @param in    set to the input of its definition
+ * @param at    set to the section of that input
+ * @param value set to its value
+ * @return 1, or 0 if it is not defined in a section of an input
+ */
+static int icf_ref_target(const icf_cmp_t *c, size_t obj, const elf_symbol_t *sym, size_t *in, size_t *at,
+                          uint64_t *value) {
+    const char *name = elf_symbol_name(sym);
+    const elf_symbol_t *def = sym;
+
+    if (!gc_symbol_section(c->inputs, c->symtab, obj, sym, in, at) ||
+        *at >= elf_section_count(c->inputs->objs[*in])) {
+        return 0;
+    }
+    if (elf_symbol_bind(sym) != STB_LOCAL && name != NULL && name[0] != '\0') {
+        const ld_sym_t *known = ld_symtab_find(c->symtab, name);
+
+        if (known != NULL && known->def != NULL) {
+            def = known->def;
+        }
+    }
+    *value = elf_symbol_value(def);
+    return 1;
+}
+
+/**
+ * Whether symbol @p sa, referred to from input @p ia, and @p sb, from input @p ib, are the same thing as far
+ * as folding goes.  One global name is one thing, the link binding it once.  A global that may be bound
+ * elsewhere at run time (a shared object's, of default visibility, without -Bsymbolic) is nothing but its
+ * name.  Anything else is the place the link binds it to: the same place in the same section, or the same
+ * place in two sections of one class -- which are taken to be one, so that two functions calling two
+ * identical ones are identical too.
+ *
+ * @param c  the comparison
+ * @param ia the input @p sa was met in
+ * @param sa a symbol
+ * @param ib the input @p sb was met in
+ * @param sb another
+ * @return 1 if they are the same, 0 if not
+ */
+static int icf_refs_equal(const icf_cmp_t *c, size_t ia, const elf_symbol_t *sa, size_t ib,
+                          const elf_symbol_t *sb) {
+    const char *na;
+    const char *nb;
+    int ga, gb;
+    size_t ina, ata, inb, atb, ka, kb;
+    uint64_t va, vb;
+
+    if ((sa == NULL) != (sb == NULL)) {
+        return 0;
+    }
+    if (sa == NULL || sa == sb) {
+        return 1;
+    }
+    na = elf_symbol_name(sa);
+    nb = elf_symbol_name(sb);
+    ga = elf_symbol_bind(sa) != STB_LOCAL && na != NULL && na[0] != '\0';
+    gb = elf_symbol_bind(sb) != STB_LOCAL && nb != NULL && nb[0] != '\0';
+    if (ga && gb && strcmp(na, nb) == 0) {
+        return 1;
+    }
+    if (c->preempt && ((ga && elf_symbol_visibility(sa) == STV_DEFAULT) ||
+                       (gb && elf_symbol_visibility(sb) == STV_DEFAULT))) {
+        return 0;
+    }
+    if (!icf_ref_target(c, ia, sa, &ina, &ata, &va) || !icf_ref_target(c, ib, sb, &inb, &atb, &vb) || va != vb) {
+        return 0;
+    }
+    if (ina == inb && ata == atb) {
+        return 1;
+    }
+    ka = c->cand_at[ina][ata];
+    kb = c->cand_at[inb][atb];
+    return ka != 0 && kb != 0 && c->cls[ka - 1] == c->cls[kb - 1];
+}
+
+/**
+ * Whether candidates @p a (of input @p ia) and @p b (of input @p ib), alike in shape
+ * (sections_icf_shape_equal()), refer to the same things at each of their relocations (icf_refs_equal()).
+ *
+ * @param c  the comparison
+ * @param a  a section
+ * @param ia its input
+ * @param b  another
+ * @param ib its input
+ * @return 1 if they do, 0 if not
+ */
+static int sections_icf_refs_equal(const icf_cmp_t *c, const elf_section_t *a, size_t ia, const elf_section_t *b,
+                                   size_t ib) {
+    size_t n = elf_section_reloc_count(a), i;
+
+    for (i = 0; i < n; ++i) {
+        const elf_reloc_t *ra = elf_section_reloc_at((elf_section_t *)a, i);
+        const elf_reloc_t *rb = elf_section_reloc_at((elf_section_t *)b, i);
+
+        if (ra == NULL || rb == NULL || !icf_refs_equal(c, ia, elf_reloc_symbol(ra), ib, elf_reloc_symbol(rb))) {
+            return 0;
+        }
     }
     return 1;
 }
@@ -790,10 +875,16 @@ static int icf_note_lsda_sections(const objvec_t *inputs, const ld_symtab_t *sym
 typedef struct {
     const elf_section_t *section;
     size_t input;
+    size_t index;       /* its place among its input's sections */
     size_t seq;         /* the order it was met in: inputs, then sections */
-    uint64_t hash;      /* of what sections_icf_equal() compares, but for the relocations' symbols */
-    size_t cls;         /* its class, 0 until it has one */
+    uint64_t hash;      /* of what sections_icf_shape_equal() compares */
 } icf_candidate_t;
+
+/* A candidate and its class in the last round, to be sorted by class. */
+typedef struct {
+    size_t cls;
+    size_t cand;
+} icf_order_t;
 
 /**
  * A hash of what two identical sections have alike: kind, flags, alignment, size, contents, and the places,
@@ -844,6 +935,92 @@ static int icf_candidate_cmp(const void *a, const void *b) {
     return x->seq < y->seq ? -1 : x->seq > y->seq;
 }
 
+/* qsort: by class, then by candidate, the order they were met in after sorting by hash. */
+static int icf_order_cmp(const void *a, const void *b) {
+    const icf_order_t *x = (const icf_order_t *)a;
+    const icf_order_t *y = (const icf_order_t *)b;
+
+    if (x->cls != y->cls) {
+        return x->cls < y->cls ? -1 : 1;
+    }
+    return x->cand < y->cand ? -1 : x->cand > y->cand;
+}
+
+/**
+ * Split the classes of candidates @p cands until no class splits: two of a class stay together only if each
+ * of their relocations refers to the same thing (sections_icf_refs_equal()) as the classes of the last round
+ * have it.  The classes start as those of sections alike in shape, all taken to be one, and only ever split,
+ * so what is left is the largest grouping in which each class's members refer to the same classes: two
+ * callers of two identical functions are one, as are two functions that call themselves.
+ *
+ * @param c      the comparison, whose cls is the snapshot of each round
+ * @param cands  the candidates
+ * @param count  how many
+ * @param cls    each candidate's class, from 1, refined in place
+ * @param nclass the number of classes so far, raised as they split
+ * @return 0, or -1 out of memory
+ */
+static int icf_refine_classes(icf_cmp_t *c, const icf_candidate_t *cands, size_t count, size_t *cls,
+                              size_t *nclass) {
+    icf_order_t *order = (icf_order_t *)malloc((count ? count : 1) * sizeof(order[0]));
+    size_t *old = (size_t *)malloc((count ? count : 1) * sizeof(old[0]));
+    size_t *reps = (size_t *)malloc((count ? count : 1) * sizeof(reps[0]));
+    int changed = 1;
+    size_t k;
+
+    if (order == NULL || old == NULL || reps == NULL) {
+        free(order);
+        free(old);
+        free(reps);
+        return -1;
+    }
+    c->cls = old;
+    while (changed) {
+        size_t b, e;
+
+        changed = 0;
+        memcpy(old, cls, count * sizeof(old[0]));
+        for (k = 0; k < count; ++k) {
+            order[k].cls = old[k];
+            order[k].cand = k;
+        }
+        qsort(order, count, sizeof(order[0]), icf_order_cmp);
+        for (b = 0; b < count; b = e) {
+            size_t nreps = 0;
+
+            for (e = b + 1; e < count && order[e].cls == order[b].cls; ++e) {
+            }
+            if (e - b < 2) {
+                continue;
+            }
+            /* each member joins the first of the class's new parts it is like, or starts one */
+            for (k = b; k < e; ++k) {
+                size_t m = order[k].cand, r;
+
+                for (r = 0; r < nreps; ++r) {
+                    if (sections_icf_refs_equal(c, cands[m].section, cands[m].input, cands[reps[r]].section,
+                                                cands[reps[r]].input)) {
+                        cls[m] = cls[reps[r]];
+                        break;
+                    }
+                }
+                if (r == nreps) {
+                    if (nreps != 0) {
+                        cls[m] = ++*nclass;
+                        changed = 1;
+                    }
+                    reps[nreps++] = m;
+                }
+            }
+        }
+    }
+    c->cls = NULL;
+    free(order);
+    free(old);
+    free(reps);
+    return 0;
+}
+
 /* qsort: by section, for icf_class_of_input_section()'s search. */
 static int icf_member_cmp(const void *a, const void *b) {
     const elf_section_t *x = ((const ld_icf_member_t *)a)->section;
@@ -855,7 +1032,11 @@ static int icf_member_cmp(const void *a, const void *b) {
 int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab) {
     icf_candidate_t *cands = NULL;
     uint8_t **skip = NULL;      /* skip[i][s]: section s of input i is never folded */
-    size_t count = 0, cap = 0, members = 0, i, j, s;
+    size_t **cand_at = NULL;    /* cand_at[i][s]: 1 + the candidate section s of input i is, 0 if none */
+    size_t *cls = NULL;         /* each candidate's class */
+    size_t *size_of = NULL;     /* each class's size, then the number it is folded under */
+    size_t count = 0, cap = 0, members = 0, nclass = 0, i, j, s;
+    icf_cmp_t cmp;
     int rc = -1;
 
     free(ctx->icf_members);
@@ -891,34 +1072,65 @@ int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_s
             }
             cands[count].section = sec;
             cands[count].input = i;
+            cands[count].index = s;
             cands[count].seq = count;
             cands[count].hash = icf_hash_section(sec);
-            cands[count].cls = 0;
             count++;
         }
     }
     if (count > 1) {
         qsort(cands, count, sizeof(cands[0]), icf_candidate_cmp);
     }
-    /* among those of a hash, each not yet in a class starts one, of what is like it after it */
+    cls = (size_t *)calloc(count ? count : 1, sizeof(cls[0]));
+    cand_at = (size_t **)calloc(inputs->count ? inputs->count : 1, sizeof(cand_at[0]));
+    if (cls == NULL || cand_at == NULL) {
+        goto out;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        cand_at[i] = (size_t *)calloc(elf_section_count(inputs->objs[i]) + 1, sizeof(cand_at[i][0]));
+        if (cand_at[i] == NULL) {
+            goto out;
+        }
+    }
     for (i = 0; i < count; ++i) {
-        size_t cls = 0;
-
-        if (cands[i].cls != 0) {
+        cand_at[cands[i].input][cands[i].index] = i + 1;
+    }
+    /* the classes of what is alike but for what its relocations refer to: among those of a hash, each not
+     * yet in a class starts one, of what is like it after it */
+    for (i = 0; i < count; ++i) {
+        if (cls[i] != 0) {
             continue;
         }
+        cls[i] = ++nclass;
         for (j = i + 1; j < count && cands[j].hash == cands[i].hash; ++j) {
-            if (cands[j].cls != 0 ||
-                !sections_icf_equal(cands[i].section, cands[i].input, cands[j].section, cands[j].input)) {
-                continue;
+            if (cls[j] == 0 && sections_icf_shape_equal(cands[i].section, cands[j].section)) {
+                cls[j] = cls[i];
             }
-            if (cls == 0) {
-                cls = ++ctx->icf_class_count;
-                cands[i].cls = cls;
-                members++;
-            }
-            cands[j].cls = cls;
-            members++;
+        }
+    }
+    /* then split until each class's members refer to the same things, or to the same classes */
+    cmp.inputs = inputs;
+    cmp.symtab = symtab;
+    cmp.cand_at = cand_at;
+    cmp.cls = NULL;
+    cmp.preempt = ctx->opt.expect_type == ET_DYN && !ctx->opt.pie && !ctx->opt.bsymbolic;
+    if (icf_refine_classes(&cmp, cands, count, cls, &nclass) != 0) {
+        goto out;
+    }
+    /* what is left in a class of two or more is folded: those classes are numbered from 1 */
+    size_of = (size_t *)calloc(nclass + 1, sizeof(size_of[0]));
+    if (size_of == NULL) {
+        goto out;
+    }
+    for (i = 0; i < count; ++i) {
+        size_of[cls[i]]++;
+    }
+    for (j = 1; j <= nclass; ++j) {
+        if (size_of[j] > 1) {
+            members += size_of[j];
+            size_of[j] = ++ctx->icf_class_count;    /* (now the number it is folded under) */
+        } else {
+            size_of[j] = 0;
         }
     }
     if (members != 0) {
@@ -928,9 +1140,9 @@ int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_s
             goto out;
         }
         for (i = 0; i < count; ++i) {
-            if (cands[i].cls != 0) {
+            if (size_of[cls[i]] != 0) {
                 ctx->icf_members[ctx->icf_member_count].section = cands[i].section;
-                ctx->icf_members[ctx->icf_member_count].cls = cands[i].cls;
+                ctx->icf_members[ctx->icf_member_count].cls = size_of[cls[i]];
                 ctx->icf_member_count++;
             }
         }
@@ -941,7 +1153,13 @@ out:
     for (i = 0; skip != NULL && i < inputs->count; ++i) {
         free(skip[i]);
     }
+    for (i = 0; cand_at != NULL && i < inputs->count; ++i) {
+        free(cand_at[i]);
+    }
     free(skip);
+    free(cand_at);
+    free(cls);
+    free(size_of);
     free(cands);
     return rc;
 }

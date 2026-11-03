@@ -402,6 +402,16 @@ two functions compiled with
 .Fl ffunction-sections
 to the same bytes, with relocations of the same kinds at the same
 places against the same symbols, end up at one address.
+A relocation against a symbol in a section that is itself identical to
+another counts as one against that other, the classes being refined
+until none splits, as gold does: two functions that call two identical
+functions are identical too.
+In a shared object a global symbol of default visibility, which may be
+bound elsewhere when the object is loaded, matches only itself
+(unless
+.Fl Bsymbolic ) .
+Template instances and inline functions, which compilers put in section
+groups (COMDAT), are folded as any other code.
 The inputs' sections are compared before
 .Pa .text.*
 is gathered into
@@ -424,8 +434,8 @@ mode read-only data
 and
 .Pa .rodata.* )
 is folded too.
-Writable sections, sections of a group, mergeable, thread-local and
-compressed sections are never folded, nor is code whose frame in
+Writable sections, mergeable, thread-local and compressed sections are
+never folded, nor is code whose frame in
 .Pa .eh_frame
 names an LSDA (the table of what its exception handlers catch, in
 .Pa .gcc_except_table ) ,
