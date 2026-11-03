@@ -591,7 +591,8 @@ static const cc_ctype_t *parser_usual_arith(const cc_ctype_t *a, const cc_ctype_
  * The type a call of builtin @p name gives, for those the parser can tell
  * without its arguments: the bit counts' int (__builtin_clz, ctz, ffs,
  * popcount, parity and clrsb, with their l and ll forms),
- * __builtin_constant_p's int and __builtin_expect's long.
+ * __builtin_constant_p's int, __builtin_expect's long and
+ * __builtin_object_size's size_t.
  *
  * @return the type, or NULL for another name
  */
@@ -608,6 +609,10 @@ static const cc_ctype_t *parser_builtin_call_ctype(const char *name) {
     }
     if (strcmp(name, "expect") == 0) {
         return cc_ct_basic(CC_CT_LONG);
+    }
+    if (strcmp(name, "object_size") == 0) {
+        /* size_t: Linux's fortified memcpy() takes min() of one and a length, whose signedness check reads it */
+        return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT);
     }
     for (i = 0; i < sizeof(bitops) / sizeof(bitops[0]); ++i) {
         size_t n = strlen(bitops[i]);
