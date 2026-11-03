@@ -225,6 +225,20 @@ static char classify_symbol(elfobj_t *obj, uint32_t shndx, uint8_t bind,
         return (bind == STB_LOCAL) ? 'c' : 'C';
     }
 
+    /*
+     * GNU extensions, checked in the order GNU nm checks them: an
+     * IFUNC is 'i' whatever its binding (local, global or weak), and a
+     * unique global is 'u' whatever section it lives in.
+     */
+    if (stype == STT_GNU_IFUNC || bind == STB_GNU_UNIQUE) {
+        sec = elf_section_get(obj, shndx);
+        if (sec && sec_name_out) {
+            sname = elf_section_name(sec);
+            *sec_name_out = sname ? sname : "";
+        }
+        return (stype == STT_GNU_IFUNC) ? 'i' : 'u';
+    }
+
     /* Weak defined symbols get W/V regardless of section */
     if (bind == STB_WEAK) {
         sec = elf_section_get(obj, shndx);
@@ -541,6 +555,7 @@ static const char *stt_name(uint8_t stype)
     case STT_FUNC:    return "FUNC";
     case STT_SECTION: return "SECTION";
     case STT_FILE:    return "FILE";
+    case STT_COMMON:  return "COMMON";
     case STT_TLS:     return "TLS";
     default:          return "?";
     }

@@ -154,6 +154,54 @@ SRC
         done
     fi
 
+    # GNU symbol classes: an IFUNC is 'i' whatever its binding (even
+    # weak or local), a unique global is 'u', and an STT_COMMON symbol
+    # is typed "COMMON" in the System V format.
+    cat > "$TMP/gnuext.c" <<'SRC'
+static int impl(void) { return 1; }
+static int (*resolve(void))(void) { return impl; }
+int g_ifunc(void) __attribute__((ifunc("resolve")));
+static int l_ifunc(void) __attribute__((ifunc("resolve")));
+int com_var;
+int use_l(void) { return l_ifunc() + com_var; }
+__asm__(".text\n.weak w_ifunc\n.type w_ifunc, @gnu_indirect_function\n"
+        "w_ifunc:\nret\n"
+        ".section .data.u_obj,\"aw\"\n"
+        ".globl u_obj\n.type u_obj, @gnu_unique_object\n"
+        ".size u_obj, 4\nu_obj:\n.long 1\n"
+        ".section .bss.u_bss,\"aw\",@nobits\n"
+        ".globl u_bss\n.type u_bss, @gnu_unique_object\n"
+        ".size u_bss, 4\nu_bss:\n.zero 4\n.text\n");
+SRC
+    cc -c -fcommon -Wa,--elf-stt-common=yes -o "$TMP/gnuext.o" "$TMP/gnuext.c"
+
+    OUT_X=$($NM "$TMP/gnuext.o")
+    expect_match "global IFUNC is i" "$OUT_X" '[[:space:]]i[[:space:]]+g_ifunc$'
+    expect_match "local IFUNC is i" "$OUT_X" '[[:space:]]i[[:space:]]+l_ifunc$'
+    expect_match "weak IFUNC is i" "$OUT_X" '[[:space:]]i[[:space:]]+w_ifunc$'
+    expect_match "unique data is u" "$OUT_X" '[[:space:]]u[[:space:]]+u_obj$'
+    expect_match "unique bss is u" "$OUT_X" '[[:space:]]u[[:space:]]+u_bss$'
+    expect_match "common is C" "$OUT_X" '[[:space:]]C[[:space:]]+com_var$'
+
+    OUT_XS=$($NM --format=sysv "$TMP/gnuext.o")
+    expect_match "sysv types STT_COMMON as COMMON" "$OUT_XS" '^com_var +\|[^|]*\|[^|]*\| *COMMON *\|'
+    expect_match "sysv shows IFUNC class i" "$OUT_XS" '^g_ifunc +\|[^|]*\| *i *\|'
+
+    if nm --version 2>/dev/null | grep -q 'GNU nm'; then
+        for flags in "" "-g"; do
+            # shellcheck disable=SC2086
+            GOT=$($NM $flags "$TMP/gnuext.o")
+            # shellcheck disable=SC2086
+            WANT=$(nm $flags "$TMP/gnuext.o")
+            [ "$GOT" = "$WANT" ] || {
+                printf 'FAIL: nm %s on IFUNC/unique differs from GNU nm\n--- got:\n%s\n--- want:\n%s\n' \
+                    "$flags" "$GOT" "$WANT" >&2
+                exit 1
+            }
+            pass "nm $flags on IFUNC/unique matches GNU nm"
+        done
+    fi
+
     if [ -x /bin/ls ]; then
         OUT_DYN=$($NM -D /bin/ls)
         expect_match "-D dynamic symbols produce output" "$OUT_DYN" '^[[:space:]]*[0-9a-fA-F]*[[:space:]]+[A-Za-z][[:space:]]+'
