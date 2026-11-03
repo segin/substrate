@@ -42,6 +42,17 @@ Extract members.
 Move members within the archive.
 .It Fl s
 Create or update the archive symbol table.
+An archive that already has a symbol table gets a new one whenever
+.Fl r ,
+.Fl q ,
+.Fl d
+or
+.Fl m
+rewrites it, with or without
+.Fl s ,
+unless
+.Fl S
+is given.
 .El
 .Pp
 Common modifiers:

@@ -108,6 +108,7 @@ static void move_members(char **members, int count);
 static void print_members(char **members, int count);
 static void ranlib(void);
 static void drop_symbol_tables(void);
+static bool archive_has_symbol_table(void);
 static void touch_symbol_table_member(void);
 static void free_members(void);
 static bool parse_numeric_field(const char *field, size_t field_len, int base, long long *out);
@@ -320,18 +321,25 @@ int main(int argc, char *argv[])
         }
     }
 
+    /*
+     * An archive that already has a symbol table keeps one: the old
+     * table names the old members at their old offsets, so a write
+     * that changes the members rebuilds it even without -s.
+     */
+    bool rebuild_symtab = (modifiers & AR_TABLE) != 0 || archive_has_symbol_table();
+
     switch (operation) {
     case AR_REPLACE:
     case AR_APPEND:
         append_files(files, file_count);
         if (modifiers & MOD_NOSYMTAB) drop_symbol_tables();
-        else if (modifiers & AR_TABLE) ranlib();
+        else if (rebuild_symtab) ranlib();
         write_archive(archive_name);
         break;
     case AR_DELETE:
         delete_members(files, file_count);
         if (modifiers & MOD_NOSYMTAB) drop_symbol_tables();
-        else if (modifiers & AR_TABLE) ranlib();
+        else if (rebuild_symtab) ranlib();
         write_archive(archive_name);
         break;
     case AR_EXTRACT:
@@ -343,7 +351,7 @@ int main(int argc, char *argv[])
     case AR_MOVE:
         move_members(files, file_count);
         if (modifiers & MOD_NOSYMTAB) drop_symbol_tables();
-        else if (modifiers & AR_TABLE) ranlib();
+        else if (rebuild_symtab) ranlib();
         write_archive(archive_name);
         break;
     case AR_PRINT:
@@ -1472,6 +1480,25 @@ static void drop_symbol_tables(void) {
     }
 }
 
+/**
+ * @brief Report whether the archive as read holds a symbol table.
+ *
+ * Looks for a GNU ("/", "/SYM64/") or BSD ("__.SYMDEF",
+ * "__.SYMDEF SORTED") symbol-table member among the loaded members.
+ *
+ * @return true if such a member is present and not deleted.
+ */
+static bool archive_has_symbol_table(void) {
+    for (struct ar_memb *cur = head; cur != NULL; cur = cur->next) {
+        if (cur->deleted) continue;
+        if (strcmp(cur->name, RANLIBMAG) == 0 || strcmp(cur->name, RANLIBSORT) == 0 ||
+            strcmp(cur->name, "/") == 0 || strcmp(cur->name, "/SYM64/") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void free_members(void) {
     struct ar_memb *cur = head;
     while (cur != NULL) {
@@ -1736,6 +1763,20 @@ static void write_archive(const char *path) {
                     wide = true;
                     table_size = sizeof(uint64_t) + (uint64_t)count * sizeof(uint64_t) + strsize;
                 }
+            } else {
+                /*
+                 * The table member may have been read from the archive
+                 * and sized for its old contents: size it, and its
+                 * buffer, for these symbols before any offset is taken.
+                 */
+                table_size = sizeof(uint32_t) + (uint64_t)count * RANLIB_ENTRY_SIZE +
+                             sizeof(uint32_t) + strsize;
+                void *grown = realloc(symdef->data, (size_t)table_size);
+                if (grown == NULL) {
+                    errx(1, "out of memory building BSD symbol table");
+                }
+                symdef->data = grown;
+                symdef->size = (size_t)table_size;
             }
             /*
              * A BSD table whose name does not fit the header

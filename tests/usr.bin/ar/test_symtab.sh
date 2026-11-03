@@ -4,7 +4,9 @@
 # file offset of the member header that defines the symbol, as GNU ar
 # writes it.  GNU binutils (ar, nm, ld) is the judge.  The BSD
 # "__.SYMDEF SORTED" table must be filled in the same way; BFD does not
-# read BSD tables in ELF archives, so llvm-nm reads that one.
+# read BSD tables in ELF archives, so llvm-nm reads that one.  An
+# archive that already has a table must get a new one when r, m or d
+# rewrites it without s, as GNU ar does.
 #
 set -eu
 
@@ -187,6 +189,57 @@ SRC
     else
         printf 'skip: llvm-nm not found, BSD armap not cross-checked\n'
     fi
+
+    # 7. Writing an archive that has a symbol table rebuilds it without
+    #    -s, as GNU ar does: after r, d and m the table must still name
+    #    the right members at their new offsets.
+    "$AR" rcs upd.a foo.o
+    "$AR" r upd.a averyveryverylongmembername.o baz.o
+    ar rcs gupd.a foo.o
+    ar r gupd.a averyveryverylongmembername.o baz.o
+    check_armap upd.a "r without s"
+    nm --print-armap gupd.a 2>&1 | grep ' in ' | sort > gupd.map
+    nm --print-armap upd.a 2>&1 | grep ' in ' | sort > upd.map
+    cmp -s gupd.map upd.map ||
+        fail "armap after r differs from GNU ar's: $(diff gupd.map upd.map | head -5)"
+    cc -o prog2 main.o upd.a || fail "GNU ld could not link after r without s"
+    pass "r without s rebuilds the symbol table"
+
+    "$AR" m upd.a foo.o
+    ar m gupd.a foo.o
+    check_armap upd.a "m without s"
+    nm --print-armap gupd.a 2>&1 | grep ' in ' | sort > gupd.map
+    nm --print-armap upd.a 2>&1 | grep ' in ' | sort > upd.map
+    cmp -s gupd.map upd.map ||
+        fail "armap after m differs from GNU ar's: $(diff gupd.map upd.map | head -5)"
+    pass "m without s rebuilds the symbol table"
+
+    # Deleting every member that defines a symbol leaves no stale
+    # entries behind.
+    printf 'not an object\n' > note.txt
+    "$AR" rcs del.a foo.o note.txt
+    "$AR" d del.a foo.o
+    ar rcs gdel.a foo.o note.txt
+    ar d gdel.a foo.o
+    nm --print-armap gdel.a 2>&1 | grep ' in ' | sort > gdel.map || :
+    nm --print-armap del.a 2>&1 | grep ' in ' | sort > del.map || :
+    cmp -s gdel.map del.map ||
+        fail "armap after d differs from GNU ar's: $(diff gdel.map del.map | head -5)"
+    pass "d without s rebuilds the symbol table"
+
+    # 8. BSD format: the table read from the archive is rebuilt at its
+    #    new size, not written over its old buffer.
+    "$AR" --format=bsd rcs bsdupd.a foo.o
+    "$AR" --format=bsd r bsdupd.a averyveryverylongmembername.o baz.o ||
+        fail "BSD r without s failed"
+    check_bsd_armap bsdupd.a "BSD r without s"
+    if command -v llvm-nm >/dev/null 2>&1; then
+        llvm-nm --print-armap bsdupd.a 2>&1 | grep ' in ' | sort > bsdupd.map
+        nm --print-armap gupd.a 2>&1 | grep ' in ' | sort > gupd.map
+        cmp -s gupd.map bsdupd.map ||
+            fail "BSD armap after r differs from GNU ar's: $(diff gupd.map bsdupd.map | head -5)"
+    fi
+    pass "BSD r without s rebuilds __.SYMDEF SORTED"
 }
 
 main "$@"
