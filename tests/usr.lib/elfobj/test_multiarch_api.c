@@ -17,7 +17,14 @@ int main(void) {
     static const unsigned char arm_attrs[] = {
         'A', 19, 0, 0, 0, 'a', 'e', 'a', 'b', 'i', 0, 1, 9, 0, 0, 0, 4, 'A', '7', 0
     };
+    /* The same layout with Tag_CPU_name "B9" */
+    static const unsigned char arm_attrs2[] = {
+        'A', 19, 0, 0, 0, 'a', 'e', 'a', 'b', 'i', 0, 1, 9, 0, 0, 0, 4, 'B', '9', 0
+    };
     elfobj_t *arm = NULL;
+    elfobj_t *arm2 = NULL;
+    const char *arm_str1;
+    const char *arm_str2;
     elfobj_t *x64 = NULL;
     elfobj_t *aa64 = NULL;
     elfobj_t *mips32 = NULL;
@@ -78,6 +85,23 @@ int main(void) {
     CHECK(elf_arm_attribute_count(arm) >= 1);
     CHECK(elf_arm_attribute_tag_at(arm, 0) == 4);
     CHECK(elf_arm_attribute_string_at(arm, 0) != NULL);
+
+    /* An attribute string belongs to its object: reading one from a second object, or the next
+     * one from the same object, must leave a string read earlier intact. */
+    arm2 = elf_init_arm();
+    CHECK(arm2 != NULL);
+    CHECK(elf_add_arm_attributes(arm2, arm_attrs2, sizeof(arm_attrs2)) == ELF_OK);
+    arm_str1 = elf_arm_attribute_string_at(arm, 0);
+    CHECK(arm_str1 != NULL && strcmp(arm_str1, "A7") == 0);
+    arm_str2 = elf_arm_attribute_string_at(arm2, 0);
+    CHECK(arm_str2 != NULL && strcmp(arm_str2, "B9") == 0);
+    CHECK(strcmp(arm_str1, "A7") == 0);
+    arm_str2 = elf_arm_attribute_string_at(arm, 0);
+    CHECK(arm_str2 != NULL && strcmp(arm_str2, "A7") == 0);
+    CHECK(strcmp(arm_str1, "A7") == 0);
+    elf_close(arm2);
+
+    CHECK(strcmp(elf_reloc_name_for_machine(EM_AARCH64, R_AARCH64_NONE), "R_AARCH64_NONE") == 0);
 
     aa64 = elf_init_aarch64();
     CHECK(aa64 != NULL);

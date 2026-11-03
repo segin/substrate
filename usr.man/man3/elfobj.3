@@ -271,6 +271,18 @@ and
 .Fn elf_riscv_attribute_value_at
 for .riscv.attributes inspection.
 .Pp
+.Fn elf_arm_attribute_count ,
+.Fn elf_arm_attribute_tag_at ,
+.Fn elf_arm_attribute_value_at ,
+and
+.Fn elf_arm_attribute_string_at
+inspect .ARM.attributes.
+.Fn elf_arm_attribute_string_at
+returns a pointer into the section's own data, or NULL when the entry does
+not exist or holds an integer; the string stays valid until that section's
+data is replaced or the object is closed, and later calls on this or any
+other object do not disturb it.
+.Pp
 High-level counters expose section/symbol/relocation/segment totals and parsed
 program-header count for reader-side inspection.
 .Sh RETURN VALUES

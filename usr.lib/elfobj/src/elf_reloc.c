@@ -3618,6 +3618,9 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
             }
             break;
         case EM_AARCH64:
+            if (type == R_AARCH64_NONE) {
+                return "R_AARCH64_NONE";
+            }
             if (type >= 257 && type <= 1032) {
                 return "R_AARCH64_*";
             }

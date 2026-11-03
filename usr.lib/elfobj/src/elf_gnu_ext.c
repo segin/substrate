@@ -6,8 +6,6 @@ typedef struct {
     const char *str;
 } arm_attr_item_t;
 
-static char *g_last_attr_string;
-
 static uint64_t read_uleb128(const uint8_t *p, size_t size, size_t *off, int *ok) {
     uint64_t v = 0;
     unsigned shift = 0;
@@ -459,15 +457,26 @@ uint64_t elf_arm_attribute_value_at(const elfobj_t *obj, size_t index) {
     return item.value;
 }
 
+/**
+ * Return the string value of the index'th .ARM.attributes entry.
+ *
+ * The string is returned in place: parse_arm_attrs() only yields a string
+ * whose terminating NUL lies inside the section, so the pointer stays valid
+ * for as long as the section's data does (until the section is rewritten or
+ * the object is closed), and nothing is shared between objects or threads.
+ *
+ * @param obj   object to inspect
+ * @param index entry index, as counted by elf_arm_attribute_count()
+ * @return the NUL-terminated string, or NULL if the entry does not exist or
+ *         carries an integer value
+ */
 const char *elf_arm_attribute_string_at(const elfobj_t *obj, size_t index) {
     arm_attr_item_t item;
     size_t n = parse_arm_attrs(obj, &item, index);
-    if (n <= index || item.str == NULL) {
+    if (n <= index) {
         return NULL;
     }
-    free(g_last_attr_string);
-    g_last_attr_string = elf__strdup(item.str);
-    return g_last_attr_string;
+    return item.str;
 }
 
 static size_t parse_riscv_attrs(const elfobj_t *obj, arm_attr_item_t *out, size_t want_index) {
