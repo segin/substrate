@@ -1369,12 +1369,133 @@ static void list_members(char **members, int count) {
     free(seen);
 }
 
+/**
+ * @brief Build the path under which a thin member's file can be opened.
+ *
+ * A member added on this command line names its file as the user gave
+ * it, relative to the current directory.  A member read from a thin
+ * archive names its file relative to the directory holding the archive,
+ * so a relative name is joined onto that directory.
+ *
+ * @param m Thin archive member (thin_ref set, thin_path non-NULL).
+ * @return Newly allocated path, or NULL when out of memory.
+ */
+static char *thin_member_file(const struct ar_memb *m) {
+    const char *slash;
+    size_t dir_len;
+    size_t path_len;
+    char *full;
+
+    slash = archive_name != NULL ? strrchr(archive_name, '/') : NULL;
+    if (m->dirty || m->thin_path[0] == '/' || slash == NULL) {
+        return strdup(m->thin_path);
+    }
+
+    dir_len = (size_t)(slash - archive_name) + 1;
+    path_len = strlen(m->thin_path);
+    full = malloc(dir_len + path_len + 1);
+    if (full == NULL) {
+        return NULL;
+    }
+    memcpy(full, archive_name, dir_len);
+    memcpy(full + dir_len, m->thin_path, path_len + 1);
+    return full;
+}
+
+/**
+ * @brief Read the whole external file a thin archive member refers to.
+ *
+ * @param m Thin archive member.
+ * @param out_data Receives a malloc'd buffer with the file's contents.
+ * @param out_size Receives the file's size.
+ * @return true on success; false (after a warning) when the file cannot
+ *         be read, leaving *out_data NULL.
+ */
+static bool load_thin_member(const struct ar_memb *m, void **out_data, size_t *out_size) {
+    char *path;
+    struct stat st;
+    void *data = NULL;
+    size_t done = 0;
+    int fd;
+
+    *out_data = NULL;
+    *out_size = 0;
+    path = thin_member_file(m);
+    if (path == NULL) {
+        warnx("%s: out of memory", m->thin_path);
+        return false;
+    }
+    fd = open(path, O_RDONLY);
+    if (fd < 0 || fstat(fd, &st) != 0) {
+        warn("%s", path);
+        if (fd >= 0) close(fd);
+        free(path);
+        return false;
+    }
+    if (st.st_size > 0) {
+        data = malloc((size_t)st.st_size);
+        if (data == NULL) {
+            warnx("%s: out of memory", path);
+            close(fd);
+            free(path);
+            return false;
+        }
+    }
+    while (done < (size_t)st.st_size) {
+        ssize_t nr = read(fd, (char *)data + done, (size_t)st.st_size - done);
+        if (nr <= 0) {
+            if (nr < 0) {
+                warn("%s", path);
+            } else {
+                warnx("%s: file shrank while being read", path);
+            }
+            free(data);
+            close(fd);
+            free(path);
+            return false;
+        }
+        done += (size_t)nr;
+    }
+    close(fd);
+    free(path);
+    *out_data = data;
+    *out_size = done;
+    return true;
+}
+
+/**
+ * @brief Collect the global and weak defined symbols of one member.
+ *
+ * The member's ELF image is its stored data, or for a thin member the
+ * external file it refers to.  Members that are not ELF objects, and
+ * thin members whose file cannot be read, contribute nothing.
+ *
+ * @param m Archive member.
+ * @param sym_head List the member's symbols are pushed onto.
+ */
 static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
     elfobj_t *obj = NULL;
     elf_err_t open_err;
     size_t symbol_count;
+    void *image;
+    size_t image_size;
+    void *thin_data = NULL;
 
-    if (m == NULL || m->thin_ref || m->data == NULL || m->size == 0) {
+    if (m == NULL) {
+        return;
+    }
+    if (m->thin_ref) {
+        if (m->thin_path == NULL ||
+            !load_thin_member(m, &thin_data, &image_size)) {
+            return;
+        }
+        image = thin_data;
+    } else {
+        image = m->data;
+        image_size = m->size;
+    }
+    if (image == NULL || image_size == 0) {
+        free(thin_data);
         return;
     }
 
@@ -1382,8 +1503,9 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
      * Non-ELF archive members are legal. If parsing fails, skip symbol
      * extraction without failing the archive operation.
      */
-    open_err = elf_open_memory_with_options(m->data, m->size, ELFOBJ_OPEN_NOCOPY, &obj);
+    open_err = elf_open_memory_with_options(image, image_size, ELFOBJ_OPEN_NOCOPY, &obj);
     if (open_err != ELF_OK || obj == NULL) {
+        free(thin_data);
         return;
     }
 
@@ -1438,6 +1560,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
     }
 
     elf_close(obj);
+    free(thin_data);
 }
 
 static int compare_syms(const void *a, const void *b) {
@@ -1532,9 +1655,6 @@ static void touch_symbol_table_member(void) {
 static void ranlib(void) {
     struct ar_memb *cur = head;
     drop_symbol_tables();
-    if (archive_is_thin || (modifiers & MOD_THIN)) {
-        return;
-    }
 
     struct sym_entry *list = NULL;
     int count = 0;

@@ -29,7 +29,7 @@ Goal: implement a full‑featured `ar(1)` archive utility using `libelfobj` for 
 - [ ] Store member path as payload instead of member data.
 - [ ] On extract/print: open external file via stored path.
 - [ ] On read: set `thin_ref` flag, store `thin_path`.
-- [ ] Symbol table generation skipped for thin archives.
+- [x] Symbol table built from the external member files (stored paths resolved against the archive's directory).
 
 ## 2. Operations
 
@@ -135,7 +135,7 @@ Goal: implement a full‑featured `ar(1)` archive utility using `libelfobj` for 
 - [ ] `drop_symbol_tables()`: remove all existing symtab/nametable members.
 - [ ] `ranlib()`: drop old tables, collect symbols, allocate new table, insert as first member.
 - [ ] `touch_symbol_table_member()`: update timestamp of existing symbol table without rebuild.
-- [ ] Symbol table skipped for thin archives.
+- [x] Thin archives get a symbol table read from their external member files.
 
 ## 5. Modifiers
 
@@ -271,7 +271,7 @@ Goal: implement a full‑featured `ar(1)` archive utility using `libelfobj` for 
 - [ ] `ar rcTs thin.a a.o b.o`: creates `!<thin>\n` archive.
 - [ ] `ar t thin.a`: lists members.
 - [ ] `ar x thin.a a.o`: extracts from external file.
-- [ ] No symbol table generated for thin archives.
+- [x] `ar rcsT thin.a a.o b.o` and `ar s dir/thin.a`: `/` table maps the same symbols to the same members as GNU ar (tests/usr.bin/ar/test_symtab.sh).
 
 ### 11f. Modifier Tests
 - [ ] `-v` on each operation: appropriate prefix printed (a/r/d/m/x/p).

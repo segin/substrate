@@ -6,7 +6,8 @@
 # "__.SYMDEF SORTED" table must be filled in the same way; BFD does not
 # read BSD tables in ELF archives, so llvm-nm reads that one.  An
 # archive that already has a table must get a new one when r, m or d
-# rewrites it without s, as GNU ar does.
+# rewrites it without s, as GNU ar does.  A thin archive gets a "/" table
+# built from its external member files, as GNU ar builds one.
 #
 set -eu
 
@@ -68,6 +69,25 @@ check_armap() {
         esac
         i=$((i + 1))
     done
+}
+
+# Print the GNU "/" table of archive $1 as sorted "symbol in member"
+# lines, the form nm --print-armap uses, reading the member names from
+# the headers the offsets point at (short names only).
+armap_pairs() {
+    a=$1
+    size=$(dd if="$a" bs=1 skip=56 count=10 2>/dev/null | tr -d ' ')
+    count=$(be32_at "$a" 68)
+    strbytes=$((size - 4 - 4 * count))
+    dd if="$a" bs=1 skip=$((72 + 4 * count)) count="$strbytes" 2>/dev/null |
+        tr '\000' '\n' > "$a.syms"
+    i=0
+    while [ "$i" -lt "$count" ]; do
+        off=$(be32_at "$a" $((72 + 4 * i)))
+        sym=$(sed -n "$((i + 1))p" "$a.syms")
+        printf '%s in %s\n' "$sym" "$(name_at "$a" "$off" | sed 's,/$,,')"
+        i=$((i + 1))
+    done | sort
 }
 
 # Print the unsigned little-endian 32-bit word at byte offset $2 of file $1.
@@ -240,6 +260,39 @@ SRC
             fail "BSD armap after r differs from GNU ar's: $(diff gupd.map bsdupd.map | head -5)"
     fi
     pass "BSD r without s rebuilds __.SYMDEF SORTED"
+
+    # 9. Thin archives get a "/" table too, built from the external
+    #    member files, as GNU ar builds one: it must map the same
+    #    symbols to the same members as GNU ar's thin archive.
+    "$AR" rcsT thin.a foo.o baz.o
+    ar rcsT gthin.a foo.o baz.o
+    [ "$(dd if=thin.a bs=1 count=8 2>/dev/null)" = '!<thin>' ] ||
+        fail "rcsT did not write a thin archive"
+    check_armap thin.a "thin"
+    nm --print-armap gthin.a 2>&1 | grep ' in ' | sort > gthin.map
+    armap_pairs thin.a > thin.map
+    [ -s gthin.map ] || fail "GNU nm printed no armap for GNU's thin archive"
+    cmp -s gthin.map thin.map ||
+        fail "thin armap differs from GNU ar's: $(diff gthin.map thin.map | head -5)"
+    pass "rcsT writes a / table for a thin archive"
+
+    # 10. s on a thin archive in another directory reads each member
+    #     relative to the archive's directory, not the current one.
+    mkdir -p lib obj
+    cp foo.o baz.o obj/
+    (cd lib && "$AR" rcT thin.a ../obj/foo.o ../obj/baz.o) ||
+        fail "rcT in a subdirectory failed"
+    (cd lib && ar rcT gthin.a ../obj/foo.o ../obj/baz.o)
+    "$AR" s lib/thin.a || fail "s on a thin archive in a subdirectory failed"
+    ar s lib/gthin.a
+    check_armap lib/thin.a "thin s from parent"
+    nm --print-armap lib/gthin.a 2>&1 | grep ' in ' | sed 's/ in .*//' |
+        sort > gthin2.syms
+    armap_pairs lib/thin.a | sed 's/ in .*//' > thin2.syms
+    [ -s gthin2.syms ] || fail "GNU nm printed no armap for lib/gthin.a"
+    cmp -s gthin2.syms thin2.syms ||
+        fail "thin s armap differs from GNU ar's: $(diff gthin2.syms thin2.syms | head -5)"
+    pass "s on a thin archive resolves members against the archive's directory"
 }
 
 main "$@"

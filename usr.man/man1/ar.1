@@ -122,6 +122,9 @@ name references.
 Thin archives
 .Pq Dq !<thin>\\n
 that store member paths instead of member payloads.
+Their symbol table is built from the member files the paths name: a
+path stored in the archive is relative to the archive's directory, a
+file named on the command line is opened as given.
 .El
 .Pp
 GNU symbol tables use
