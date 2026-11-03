@@ -146,6 +146,16 @@ int cc_coalesce_moves(cc_ssa_function_t *f);
 int cc_hoist_invariants(cc_ssa_function_t *f);
 
 /**
+ * Fold each integer compare of @p f whose operands' ranges decide it (passes/range.c): what each value can
+ * hold, from its definitions, and where the stream is under a branch on it, from the branch -- Linux's min()
+ * asks `(long long)len >= 0` of a `len` inside `while (len > 0)`, in a BUILD_BUG_ON.
+ *
+ * @param f  the function, rewritten in place
+ * @return   1 when a compare was folded, 0 when none was, -1 when out of memory
+ */
+int cc_fold_ranges(cc_ssa_function_t *f);
+
+/**
  * Remove each definition of @p f that only makes its result -- a constant, a move, arithmetic, a compare --
  * where nothing reads the result before it is defined again or the function returns: a variable's
  * initializer overwritten before use (passes/mem.c).  Liveness over the blocks; nothing is removed in a

@@ -4607,6 +4607,25 @@ static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag)
     if (!oom && opt_level > 0) {
         oom = constant_args(m) != 0;
     }
+    /*
+     * the compares the ranges of their operands decide, before __builtin_constant_p is decided: min()'s
+     * BUILD_BUG_ON asks it of `(long long)x >= 0`, true for an x the code it is in knows is not negative
+     */
+    for (i = 0; i < m->func_count && !oom && opt_level > 0; ++i) {
+        int round;
+
+        for (round = 0; round < 2 && !oom; ++round) {
+            int rr = cc_fold_ranges(&m->funcs[i]);
+
+            if (rr > 0) {
+                rr = refold_function(&m->funcs[i]) != 0 || settle_function(&m->funcs[i]) != 0 ? -1 : 1;
+            }
+            oom = rr < 0;
+            if (rr == 0) {
+                break;
+            }
+        }
+    }
     /* what is still not known to be constant is not: no pass after this, nor a backend, sees a CC_SSA_ISCONST */
     oom = oom || resolve_isconst(m, opt_level) != 0;
     for (i = 0; i < m->func_count && !oom && opt_level > 0; ++i) {

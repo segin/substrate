@@ -80,5 +80,14 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   hands the caller the callee's `keep_syms` too: the static locals
   marked `used` that the object keeps while some function still holds
   them, whether or not its code names them.
+- `range.c`: what each integer value can hold, as an interval of its
+  register's content (`cc_fold_ranges()`, run once the -O1 passes and
+  inlining are done, before `resolve_isconst()`): from its definitions
+  over the whole function -- constants, narrow loads, extensions, masks,
+  sums that cannot overflow, a variable the union of its definitions' --
+  and along the stream from the branches on a compare with a constant,
+  into a label nothing else reaches, until the value is defined again or
+  a label another way reaches; a compare both operands' intervals answer
+  one way folds to that answer.
 
 Not here yet: mem2reg, CSE across blocks (GVN), LICM and loop transforms.
