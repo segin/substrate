@@ -42,7 +42,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   inlining bottom-up over the call graph (a function is rewritten once
   its callees are, then folded again, with what the module's
   declarations tell, `fold_module_facts()`: a load from a const table at
-  a constant offset its initializer's bytes, and a compare of two
+  a constant offset its initializer's bytes, and so a load from a stack
+  slot one memcpy fills from such a table and nothing else writes or
+  lets escape (`fold_const_copies()`: Linux's pack_fields() checks a
+  copy of each element of its field table), and a compare of two
   constant offsets from one object's address the compare of the
   offsets, the address of a stack slot or of an object or a function
   the module defines, not weak, not null; and a loop computing only from
