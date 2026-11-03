@@ -128,6 +128,19 @@ name references.
 Thin archives
 .Pq Dq !<thin>\\n
 that store member paths instead of member payloads.
+The layout is GNU
+.Nm Ns 's ,
+so either reads the other's thin archives and GNU
+.Xr ld 1
+and
+.Xr nm 1
+read ours: in GNU format each member is a header alone, whose
+.Dq / Ns Ar offset
+name refers to the member's path in the
+.Dq //
+table and whose size is the size of the member's file; no member data
+follows it.
+In BSD format the path is stored as the member's data.
 As GNU
 .Nm
 does, a thin archive stores each member's path relative to the

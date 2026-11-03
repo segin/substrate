@@ -71,25 +71,6 @@ check_armap() {
     done
 }
 
-# Print the GNU "/" table of archive $1 as sorted "symbol in member"
-# lines, the form nm --print-armap uses, reading the member names from
-# the headers the offsets point at (short names only).
-armap_pairs() {
-    a=$1
-    size=$(dd if="$a" bs=1 skip=56 count=10 2>/dev/null | tr -d ' ')
-    count=$(be32_at "$a" 68)
-    strbytes=$((size - 4 - 4 * count))
-    dd if="$a" bs=1 skip=$((72 + 4 * count)) count="$strbytes" 2>/dev/null |
-        tr '\000' '\n' > "$a.syms"
-    i=0
-    while [ "$i" -lt "$count" ]; do
-        off=$(be32_at "$a" $((72 + 4 * i)))
-        sym=$(sed -n "$((i + 1))p" "$a.syms")
-        printf '%s in %s\n' "$sym" "$(name_at "$a" "$off" | sed 's,/$,,')"
-        i=$((i + 1))
-    done | sort
-}
-
 # Print the unsigned little-endian 32-bit word at byte offset $2 of file $1.
 le32_at() {
     od -An -tu1 -j "$2" -N 4 "$1" |
@@ -270,7 +251,7 @@ SRC
         fail "rcsT did not write a thin archive"
     check_armap thin.a "thin"
     nm --print-armap gthin.a 2>&1 | grep ' in ' | sort > gthin.map
-    armap_pairs thin.a > thin.map
+    nm --print-armap thin.a 2>&1 | grep ' in ' | sort > thin.map || :
     [ -s gthin.map ] || fail "GNU nm printed no armap for GNU's thin archive"
     cmp -s gthin.map thin.map ||
         fail "thin armap differs from GNU ar's: $(diff gthin.map thin.map | head -5)"
@@ -286,15 +267,37 @@ SRC
     "$AR" s lib/thin.a || fail "s on a thin archive in a subdirectory failed"
     ar s lib/gthin.a
     check_armap lib/thin.a "thin s from parent"
-    nm --print-armap lib/gthin.a 2>&1 | grep ' in ' | sed 's/ in .*//' |
-        sort > gthin2.syms
-    armap_pairs lib/thin.a | sed 's/ in .*//' > thin2.syms
-    [ -s gthin2.syms ] || fail "GNU nm printed no armap for lib/gthin.a"
-    cmp -s gthin2.syms thin2.syms ||
-        fail "thin s armap differs from GNU ar's: $(diff gthin2.syms thin2.syms | head -5)"
+    nm --print-armap lib/gthin.a 2>&1 | grep ' in ' | sort > gthin2.map
+    nm --print-armap lib/thin.a 2>&1 | grep ' in ' | sort > thin2.map || :
+    [ -s gthin2.map ] || fail "GNU nm printed no armap for lib/gthin.a"
+    cmp -s gthin2.map thin2.map ||
+        fail "thin s armap differs from GNU ar's: $(diff gthin2.map thin2.map | head -5)"
     pass "s on a thin archive resolves members against the archive's directory"
 
-    # 11. p and x pass over the symbol and name tables, as GNU ar does:
+    # 11. GNU ld links through our thin archive in another directory,
+    #     whose stored paths differ from the members' names, and our s
+    #     indexes GNU's thin archive as GNU ar does.
+    cp averyveryverylongmembername.o obj/
+    (cd lib && "$AR" rcsT all.a ../obj/foo.o \
+        ../obj/averyveryverylongmembername.o ../obj/baz.o) ||
+        fail "rcsT lib/all.a failed"
+    (cd lib && ar rcsT gall.a ../obj/foo.o \
+        ../obj/averyveryverylongmembername.o ../obj/baz.o)
+    nm --print-armap lib/gall.a 2>&1 | grep ' in ' | sort > gall.map
+    nm --print-armap lib/all.a 2>&1 | grep ' in ' | sort > all.map || :
+    cmp -s gall.map all.map ||
+        fail "thin armap with paths differs from GNU ar's: $(diff gall.map all.map | head -5)"
+    cc -o prog3 main.o lib/all.a || fail "GNU ld could not link against our thin archive"
+    ./prog3 || fail "program linked against our thin archive returned $?"
+    (cd lib && ar rcT gidx.a ../obj/foo.o ../obj/averyveryverylongmembername.o ../obj/baz.o)
+    "$AR" s lib/gidx.a || fail "s on GNU's thin archive failed"
+    nm --print-armap lib/gidx.a 2>&1 | grep ' in ' | sort > gidx.map || :
+    sed 's,gall\.a,gidx.a,' gall.map > gall2.map
+    cmp -s gall2.map gidx.map ||
+        fail "s on GNU's thin archive: $(diff gall2.map gidx.map | head -5)"
+    pass "GNU nm and ld read our thin archive; our s indexes GNU's"
+
+    # 12. p and x pass over the symbol and name tables, as GNU ar does:
     #     p prints only the members' bytes and x writes only the members.
     cat foo.o averyveryverylongmembername.o baz.o > members.cat
     ar p gnu.a > gnu.p

@@ -4,8 +4,10 @@
 # member file relative to the directory holding the archive, as GNU ar
 # stores it, and every reader (p, x, tv) opens a relative path against
 # that directory, so the archive works from any current directory.
-# GNU ar is the judge of the stored paths: run in the archive's own
-# directory, "ar t" on GNU's thin archive prints the path it stored.
+# GNU ar is the judge of the stored paths and of the layout: each path
+# is in the "//" name table where GNU ar puts it, GNU ar reads the same
+# member list from our archive as from its own, and each ar reads the
+# other's thin archives.
 #
 set -eu
 
@@ -25,27 +27,36 @@ require_cmd() {
     command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"
 }
 
-# Print the path stored as the payload of the first member of our thin
-# archive $1 (no symbol table: the member header is at offset 8).
-our_path() {
+# Print the path stored for the first member of thin archive $1, which
+# has no symbol table: GNU ar keeps it in the "//" name table, the first
+# member (header at offset 8, data at 68), as "path/\n".
+stored_path() {
+    [ "$(dd if="$1" bs=1 skip=8 count=16 2>/dev/null | tr -d ' ')" = "//" ] ||
+        { printf '(no // table)'; return; }
     size=$(dd if="$1" bs=1 skip=56 count=10 2>/dev/null | tr -d ' ')
-    dd if="$1" bs=1 skip=68 count="$size" 2>/dev/null
+    dd if="$1" bs=1 skip=68 count="$size" 2>/dev/null | head -n 1 | sed 's,/$,,'
 }
 
-# Print the path GNU ar stored for the first member of its thin archive
-# $1, as "ar t" prints it from the archive's own directory.
-gnu_path() {
-    (cd "$(dirname -- "$1")" && ar t "$(basename -- "$1")" | head -n 1)
+# Print the paths GNU ar reads from thin archive $1, as "ar t" prints
+# them from the archive's own directory.
+gnu_list() {
+    (cd "$(dirname -- "$1")" && ar t "$(basename -- "$1")")
 }
 
 # Check that our archive $1 and GNU's archive $2, built the same way,
-# store the same path.
+# store the same path in the same place, and that GNU ar reads the same
+# member list from both.
 same_path() {
-    ours=$(our_path "$1")
-    gnus=$(gnu_path "$2")
+    ours=$(stored_path "$1")
+    gnus=$(stored_path "$2")
     [ -n "$gnus" ] || fail "$3: GNU ar stored no path"
     [ "$ours" = "$gnus" ] ||
         fail "$3: stored path '$ours', GNU ar stores '$gnus'"
+    gnu_list "$2" > "$TMP/gnu.t"
+    gnu_list "$1" > "$TMP/ours.t" 2>&1 ||
+        fail "$3: GNU ar t cannot read our archive: $(cat "$TMP/ours.t")"
+    cmp -s "$TMP/gnu.t" "$TMP/ours.t" ||
+        fail "$3: GNU ar t lists '$(cat "$TMP/ours.t")', not '$(cat "$TMP/gnu.t")'"
 }
 
 main() {
@@ -121,6 +132,31 @@ main() {
     [ ! -e elsewhere/gone.o ] ||
         fail "x of a missing thin member created an empty file"
     pass "x of a missing thin member creates nothing"
+
+    # 6. The layout is GNU's, so each ar reads the other's thin archive:
+    #    a member is a header alone giving the file's size, with its
+    #    path in the "//" table and no data after the header.
+    printf 'odd' > obj/odd.o
+    "$AR" rcT lib/two.a obj/foo.o obj/odd.o || fail "rcT lib/two.a failed"
+    ar rcT lib/gtwo.a obj/foo.o obj/odd.o
+    hdr=$((68 + $(dd if=lib/two.a bs=1 skip=56 count=10 2>/dev/null | tr -d ' ')))
+    hdr=$((hdr + hdr % 2))
+    want=$(wc -c < obj/foo.o | tr -d ' ')
+    got=$(dd if=lib/two.a bs=1 skip=$((hdr + 48)) count=10 2>/dev/null | tr -d ' ')
+    [ "$got" = "$want" ] || fail "thin member header gives size '$got', not $want"
+    [ "$(wc -c < lib/two.a | tr -d ' ')" -eq $((hdr + 120)) ] ||
+        fail "thin members are followed by data"
+    ar p lib/two.a > gp.out 2>&1 || fail "GNU ar p cannot read our archive: $(cat gp.out)"
+    cat obj/foo.o obj/odd.o | cmp -s - gp.out || fail "GNU ar p of our archive differs"
+    "$AR" p lib/gtwo.a > op.out 2> op.err || fail "p of GNU's archive failed: $(cat op.err)"
+    cat obj/foo.o obj/odd.o | cmp -s - op.out || fail "p of GNU's archive differs"
+    [ "$("$AR" t lib/gtwo.a)" = "$(printf 'foo.o\nodd.o')" ] ||
+        fail "t of GNU's archive lists '$("$AR" t lib/gtwo.a)'"
+    cp obj/foo.o obj/bar.o
+    "$AR" r lib/gtwo.a obj/bar.o || fail "r into GNU's archive failed"
+    [ "$(gnu_list lib/gtwo.a)" = "$(printf '../obj/foo.o\n../obj/odd.o\n../obj/bar.o')" ] ||
+        fail "GNU ar t after r lists '$(gnu_list lib/gtwo.a)'"
+    pass "each ar reads the other's thin archive"
 }
 
 main "$@"

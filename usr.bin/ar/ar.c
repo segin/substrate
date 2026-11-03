@@ -738,6 +738,53 @@ static size_t member_position(const struct ar_memb *m) {
 }
 
 /**
+ * @brief Report whether a member header of a GNU thin archive names an
+ *        external file.
+ *
+ * In a GNU thin archive every member but the symbol and name tables is
+ * a header alone: its name, normally a "/<offset>" reference into the
+ * "//" table, is the file's path, and its size is the file's size, with
+ * no member data after the header.
+ *
+ * @param hdr Member header read from the archive.
+ * @return true when the header is followed by no data.
+ */
+static bool gnu_thin_external(const struct ar_hdr *hdr) {
+    char tmp[17];
+    int i;
+
+    if (!archive_is_thin || archive_format != ARFMT_GNU ||
+        memcmp(hdr->ar_name, "#1/", 3) == 0) {
+        return false;
+    }
+    memcpy(tmp, hdr->ar_name, 16);
+    tmp[16] = '\0';
+    for (i = 15; i >= 0 && tmp[i] == ' '; i--) {
+        tmp[i] = '\0';
+    }
+    return strcmp(tmp, "/") != 0 && strcmp(tmp, "//") != 0 &&
+           strcmp(tmp, "/SYM64/") != 0 &&
+           strncmp(tmp, RANLIBMAG, strlen(RANLIBMAG)) != 0;
+}
+
+/**
+ * @brief Count the bytes that follow a member's header when it is written.
+ *
+ * A thin member in GNU format has none (its path is in the "//" table);
+ * in BSD format its path is stored as its data.  Any other member's data
+ * is its contents.
+ *
+ * @param m Archive member.
+ * @return Number of data bytes after the header, before any padding.
+ */
+static size_t member_disk_payload(const struct ar_memb *m) {
+    if (m->thin_ref && m->thin_path != NULL) {
+        return archive_format == ARFMT_GNU ? 0 : strlen(m->thin_path);
+    }
+    return m->size;
+}
+
+/**
  * Read the archive at path into the member list.  A damaged archive is
  * fatal, as it is to GNU ar: a header with a bad trailer or size field
  * is a "malformed archive", and a header or member cut short by the end
@@ -817,7 +864,10 @@ static void read_archive(const char *path) {
             errx(1, "%s: malformed archive", path);
         }
         long size = (long)parsed_size;
-        if (archive_size >= 0) {
+        /* A GNU thin member's size is its external file's: nothing of
+         * it is in this file. */
+        bool external = gnu_thin_external(&hdr);
+        if (archive_size >= 0 && !external) {
             off_t cur_pos = lseek(fd, 0, SEEK_CUR);
             if (cur_pos >= 0 && (off_t)size > archive_size - cur_pos) {
                 errx(1, "%s: file truncated", path);
@@ -909,7 +959,20 @@ static void read_archive(const char *path) {
                 errx(1, "out of memory while parsing member name");
             }
             m->name_len = strlen(m->name);
-            if (archive_is_thin &&
+            if (external) {
+                /* The name is the file's path; the member is known by
+                 * the path's last component, as a file added to the
+                 * archive is. */
+                m->thin_ref = true;
+                m->thin_path = m->name;
+                m->name = strdup(get_basename(m->thin_path));
+                if (m->name == NULL) {
+                    errx(1, "out of memory");
+                }
+                m->name_len = strlen(m->name);
+                m->size = (size_t)size;
+                m->data = NULL;
+            } else if (archive_is_thin &&
                 strcmp(m->name, RANLIBMAG) != 0 &&
                 strcmp(m->name, RANLIBSORT) != 0 &&
                 strcmp(m->name, "/") != 0 &&
@@ -948,7 +1011,7 @@ static void read_archive(const char *path) {
             }
         }
 
-        if (size % 2 != 0) lseek(fd, 1, SEEK_CUR);
+        if (!external && size % 2 != 0) lseek(fd, 1, SEEK_CUR);
 
         if (head == NULL) head = m;
         else {
@@ -1919,8 +1982,13 @@ static void write_archive(const char *path) {
                 strcmp(m->name, "//") != 0 &&
                 strcmp(m->name, RANLIBMAG) != 0 &&
                 strcmp(m->name, RANLIBSORT) != 0) {
-                size_t nlen = strlen(m->name);
-                if (nlen > 15 || strchr(m->name, ' ') != NULL) {
+                /* A thin member's path always goes in the table, as
+                 * GNU ar puts it there: its header has no room for it
+                 * and no data to hold it. */
+                bool thin = m->thin_ref && m->thin_path != NULL;
+                const char *tname = thin ? m->thin_path : m->name;
+                size_t nlen = strlen(tname);
+                if (thin || nlen > 15 || strchr(tname, ' ') != NULL) {
                     size_t entry_len = nlen + 2; /* name + '/' + '\n' */
                     char *next = realloc(gnu_table, gnu_table_len + entry_len);
                     if (next == NULL) {
@@ -1928,7 +1996,7 @@ static void write_archive(const char *path) {
                         errx(1, "out of memory building GNU longname table");
                     }
                     gnu_table = next;
-                    memcpy(gnu_table + gnu_table_len, m->name, nlen);
+                    memcpy(gnu_table + gnu_table_len, tname, nlen);
                     gnu_table[gnu_table_len + nlen] = '/';
                     gnu_table[gnu_table_len + nlen + 1] = '\n';
                     m->gnu_name_ref = true;
@@ -1996,7 +2064,7 @@ static void write_archive(const char *path) {
                 }
 
                 int name_len = m->name_len;
-                size_t payload_size = m->thin_ref && m->thin_path != NULL ? strlen(m->thin_path) : m->size;
+                size_t payload_size = member_disk_payload(m);
                 bool extended = (name_len > 15 || strchr(m->name, ' '));
                 long m_size = (long)payload_size;
                 if (archive_format != ARFMT_GNU && extended) {
@@ -2216,14 +2284,17 @@ static void write_archive(const char *path) {
         }
 
         int name_len = cur->name_len;
-        size_t payload_size = cur->thin_ref && cur->thin_path != NULL ? strlen(cur->thin_path) : cur->size;
+        size_t payload_size = member_disk_payload(cur);
         bool extended = (name_len > 15 || strchr(cur->name, ' '));
         bool gnu_special = strcmp(cur->name, "/") == 0 || strcmp(cur->name, "/SYM64/") == 0;
 
         if (archive_format == ARFMT_GNU) {
             char buf[32];
             char namebuf[32];
-            snprintf(buf, sizeof(buf), "%-10ld", (long)payload_size);
+            /* A GNU thin member's header gives its file's size. */
+            snprintf(buf, sizeof(buf), "%-10ld",
+                     (long)(cur->thin_ref && cur->thin_path != NULL ?
+                            cur->size : payload_size));
             memcpy(cur->hdr.ar_size, buf, 10);
             if (gnu_special) {
                 snprintf(namebuf, sizeof(namebuf), "%s", cur->name);
@@ -2254,7 +2325,9 @@ static void write_archive(const char *path) {
         fwrite(&cur->hdr, sizeof(struct ar_hdr), 1, fp);
         if (archive_format != ARFMT_GNU && extended) fwrite(cur->name, name_len, 1, fp);
         if (cur->thin_ref && cur->thin_path != NULL) {
-            fwrite(cur->thin_path, payload_size, 1, fp);
+            if (payload_size > 0) {
+                fwrite(cur->thin_path, payload_size, 1, fp);
+            }
         } else {
             fwrite(cur->data, cur->size, 1, fp);
         }
