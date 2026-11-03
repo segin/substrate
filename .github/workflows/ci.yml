@@ -132,6 +132,19 @@ jobs:
       - name: Assembler tests
         run: make -C tests/usr.bin/as
 
+      # nm and c++filt, built for the host by each suite and checked
+      # against the host's GNU binutils (nm -l against addr2line, c++filt
+      # output against GNU c++filt's), and the check that their manual
+      # pages install under usr/share/man.
+      - name: nm tests
+        run: make -C tests/usr.bin/nm run
+
+      - name: c++filt tests
+        run: make -C tests/usr.bin/cxxfilt run
+
+      - name: Toolchain manual page install
+        run: make -C tests/usr.man run
+
   userland:
     name: userland libs and utils
     runs-on: ubuntu-latest
