@@ -112,25 +112,51 @@ static int gc_mark(gc_state_t *st, size_t obj, size_t sec_index) {
     return 0;
 }
 
-/* The section a symbol met in input `obj` is in, as the link will bind it. */
-static int gc_mark_symbol(gc_state_t *st, size_t obj, const elf_symbol_t *sym) {
+/**
+ * The section a symbol met in input @p obj is in, as the link will bind it: a global's in whichever input
+ * the link takes its definition from, anything else's in @p obj.
+ *
+ * @param inputs  the inputs
+ * @param symtab  which definition of a name the link takes
+ * @param obj     the input the symbol was met in
+ * @param sym     the symbol
+ * @param in      set to the input the section is of
+ * @param sec     set to the section's position in that input
+ * @return 1 if the symbol is in a section of an input, 0 if not (undefined, absolute, common, or a
+ *         shared object's)
+ */
+static int gc_symbol_section(const objvec_t *inputs, const ld_symtab_t *symtab, size_t obj,
+                             const elf_symbol_t *sym, size_t *in, size_t *sec) {
     const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
 
     if (sym == NULL) {
         return 0;
     }
     if (elf_symbol_bind(sym) != STB_LOCAL && name != NULL && name[0] != '\0') {
-        const ld_sym_t *known = ld_symtab_find(st->symtab, name);
+        const ld_sym_t *known = ld_symtab_find(symtab, name);
 
         if (known != NULL && known->def != NULL) {
-            return gc_symbol_is_defined(known->def)
-                       ? gc_mark(st, known->def_input,
-                                 gc_section_of(st->inputs->objs[known->def_input], elf_symbol_shndx(known->def)))
-                       : 0;
+            if (!gc_symbol_is_defined(known->def)) {
+                return 0;
+            }
+            *in = known->def_input;
+            *sec = gc_section_of(inputs->objs[known->def_input], elf_symbol_shndx(known->def));
+            return 1;
         }
     }
-    return gc_symbol_is_defined(sym)
-               ? gc_mark(st, obj, gc_section_of(st->inputs->objs[obj], elf_symbol_shndx(sym))) : 0;
+    if (!gc_symbol_is_defined(sym)) {
+        return 0;
+    }
+    *in = obj;
+    *sec = gc_section_of(inputs->objs[obj], elf_symbol_shndx(sym));
+    return 1;
+}
+
+/* The section a symbol met in input `obj` is in, as the link will bind it. */
+static int gc_mark_symbol(gc_state_t *st, size_t obj, const elf_symbol_t *sym) {
+    size_t in, sec;
+
+    return gc_symbol_section(st->inputs, st->symtab, obj, sym, &in, &sec) ? gc_mark(st, in, sec) : 0;
 }
 
 /* A section group stands or falls together. */
@@ -424,6 +450,12 @@ out:
  * start out alike do not stay so.  Nor is a section of a group, one whose
  * contents the merge rewrites (strings and constants, TLS, compressed),
  * or one ordered by another.
+ *
+ * --icf=safe also leaves out code whose address is taken, as gold does:
+ * two functions are two addresses in C, and a program may compare
+ * pointers to them.  What only calls a function, or jumps to it, cannot
+ * tell where it is; every other reference to it might be the making of a
+ * pointer (icf_note_taken_addresses).
  */
 static int is_icf_candidate_section(const elf_section_t *sec, int icf_mode) {
     uint64_t flags;
@@ -533,6 +565,86 @@ static int sections_icf_equal(const elf_section_t *a, size_t ia, const elf_secti
     return 1;
 }
 
+/**
+ * Whether relocation @p r, of section @p sec of an input for @p machine, is the target of a call or a
+ * jump: pc-relative (PC32 or PLT32), in code, and the 32-bit displacement of a `call`, `jmp` or `jcc`
+ * instruction, by the opcode bytes before it.  Such a reference uses a function without being able to
+ * tell its address from another's.
+ *
+ * @param machine the inputs' e_machine
+ * @param sec     the section the relocation applies to
+ * @param r       the relocation
+ * @return 1 if it is a branch's, 0 if it may take the address of what it names
+ */
+static int icf_reloc_is_branch(uint16_t machine, const elf_section_t *sec, const elf_reloc_t *r) {
+    uint32_t type = elf_reloc_type(r);
+    uint64_t off = elf_reloc_offset(r);
+    const uint8_t *data;
+    size_t size = 0;
+
+    if (machine == EM_386) {
+        if (type != R_386_PC32 && type != R_386_PLT32) {
+            return 0;
+        }
+    } else if (machine == EM_X86_64) {
+        if (type != R_X86_64_PC32 && type != R_X86_64_PLT32) {
+            return 0;
+        }
+    } else {
+        return 0;
+    }
+    if ((elf_section_flags(sec) & SHF_EXECINSTR) == 0 || off < 1) {
+        return 0;
+    }
+    data = (const uint8_t *)elf_section_data(sec, &size);
+    if (data == NULL || off > size) {
+        return 0;
+    }
+    if (data[off - 1] == 0xe8 || data[off - 1] == 0xe9) {
+        return 1;               /* call rel32, jmp rel32 */
+    }
+    return off >= 2 && data[off - 2] == 0x0f && (data[off - 1] & 0xf0) == 0x80;    /* jcc rel32 */
+}
+
+/**
+ * --icf=safe: mark each input section whose address a relocation of a loaded section may take -- any
+ * reference but a call's or a jump's (icf_reloc_is_branch).  .eh_frame's references to the functions it
+ * describes take no address a program can see, and are passed over; so are the references of sections that
+ * are not loaded (debugging information).
+ *
+ * @param inputs the inputs
+ * @param symtab which definition of a name the link takes
+ * @param taken  taken[i][s] set for section s of input i
+ */
+static void icf_note_taken_addresses(const objvec_t *inputs, const ld_symtab_t *symtab, uint8_t **taken) {
+    size_t i, s, ri;
+
+    for (i = 0; i < inputs->count; ++i) {
+        elfobj_t *o = inputs->objs[i];
+
+        for (s = 0; s < elf_section_count(o); ++s) {
+            elf_section_t *sec = elf_section_get(o, s);
+
+            if (sec == NULL || (elf_section_flags(sec) & SHF_ALLOC) == 0 ||
+                gc_name_is(elf_section_name(sec), ".eh_frame")) {
+                continue;
+            }
+            for (ri = 0; ri < elf_section_reloc_count(sec); ++ri) {
+                const elf_reloc_t *r = elf_section_reloc_at(sec, ri);
+                size_t in, at;
+
+                if (r == NULL || icf_reloc_is_branch(elf_machine(o), sec, r) ||
+                    !gc_symbol_section(inputs, symtab, i, elf_reloc_symbol(r), &in, &at)) {
+                    continue;
+                }
+                if (at < elf_section_count(inputs->objs[in])) {
+                    taken[in][at] = 1;
+                }
+            }
+        }
+    }
+}
+
 /* A section that may be folded, while the classes are being found. */
 typedef struct {
     const elf_section_t *section;
@@ -599,8 +711,9 @@ static int icf_member_cmp(const void *a, const void *b) {
     return x < y ? -1 : x > y;
 }
 
-int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs) {
+int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab) {
     icf_candidate_t *cands = NULL;
+    uint8_t **taken = NULL;
     size_t count = 0, cap = 0, members = 0, i, j, s;
     int rc = -1;
 
@@ -608,12 +721,26 @@ int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs) {
     ctx->icf_members = NULL;
     ctx->icf_member_count = 0;
     ctx->icf_class_count = 0;
+    if (ctx->opt.icf_mode == 1) {
+        taken = (uint8_t **)calloc(inputs->count ? inputs->count : 1, sizeof(taken[0]));
+        if (taken == NULL) {
+            goto out;
+        }
+        for (i = 0; i < inputs->count; ++i) {
+            taken[i] = (uint8_t *)calloc(elf_section_count(inputs->objs[i]) + 1, 1);
+            if (taken[i] == NULL) {
+                goto out;
+            }
+        }
+        icf_note_taken_addresses(inputs, symtab, taken);
+    }
     for (i = 0; i < inputs->count; ++i) {
         for (s = 0; s < elf_section_count(inputs->objs[i]); ++s) {
             const elf_section_t *sec = elf_section_get(inputs->objs[i], s);
 
             if (!is_icf_candidate_section(sec, ctx->opt.icf_mode) ||
-                (ctx->opt.gc_sections && !gc_keep_input_section(sec, ctx))) {
+                (ctx->opt.gc_sections && !gc_keep_input_section(sec, ctx)) ||
+                (taken != NULL && taken[i][s])) {
                 continue;
             }
             if (ld_vec_room(&cands, &cap, count, sizeof(cands[0])) != 0) {
@@ -668,6 +795,10 @@ int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs) {
     }
     rc = 0;
 out:
+    for (i = 0; taken != NULL && i < inputs->count; ++i) {
+        free(taken[i]);
+    }
+    free(taken);
     free(cands);
     return rc;
 }

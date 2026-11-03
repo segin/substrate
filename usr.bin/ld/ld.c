@@ -405,7 +405,7 @@ static int phase_merge(ld_link_t *l) {
      * still a section of its own, and the merge places one of each kind
      * (after --gc-sections, which decides what is left to fold) */
     if (err == ELF_OK && ctx->opt.icf_mode != 0 && ctx->opt.expect_type != ET_REL) {
-        if (icf_collect_input_sections(ctx, &l->inputs) != 0) {
+        if (icf_collect_input_sections(ctx, &l->inputs, &l->symtab) != 0) {
             err = ELF_ERR_OOM;
         } else {
             err = elf_link_plan_set_fold_hook(plan, icf_class_of_input_section, ctx->icf_class_count, ctx);

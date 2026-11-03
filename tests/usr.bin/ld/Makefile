@@ -50,5 +50,6 @@ run:
 	./test_script_symbol_alias.sh
 	./test_script_symbol_home.sh
 	./test_icf_input_sections.sh
+	./test_icf_safe_address_taken.sh
 
 clean:

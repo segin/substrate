@@ -1055,11 +1055,15 @@ int gc_keep_input_section(const elf_section_t *section, void *user);
  * --icf: sort the inputs' sections into classes of identical ones, before the merge gathers .text.* into
  * .text, for icf_class_of_input_section() to tell the merge.
  *
+ * Under --icf=safe a function whose address is taken -- referred to other than by a call or a jump --
+ * is in no class.
+ *
  * @param ctx    the link; its icf_members and icf_class_count are set
  * @param inputs the inputs, as they go to the merge
+ * @param symtab which definition of a name the link takes
  * @return 0, or -1 out of memory
  */
-int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs);
+int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab);
 /**
  * The elfobj fold hook: the class of identical sections an input section is in, or 0 if it has no twin.
  *

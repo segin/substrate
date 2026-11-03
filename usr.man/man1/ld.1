@@ -412,7 +412,12 @@ mode only code
 .Pf ( Pa .text
 and
 .Pa .text.* )
-is folded; in
+is folded, and only a function whose address is not taken, as gold
+decides it: a function that something does no more than call or jump
+to keeps the one address its twins share, but one referred to in any
+other way (a pointer to it in data, an address loaded by code, a GOT
+or GOT-relative reference) keeps an address of its own, so pointers to
+two functions still compare unequal; in
 .Ar all
 mode read-only data
 .Pf ( Pa .rodata
