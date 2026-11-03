@@ -1439,6 +1439,8 @@ static int process_archive(const char *archive_path, const uint8_t *buf, size_t 
                 char *raw_name = dup_member_name_simple(hdr->name);
                 if (raw_name && (strcmp(raw_name, "/") == 0 ||
                     strcmp(raw_name, "//") == 0 ||
+                    strcmp(raw_name, "/SYM64") == 0 ||
+                    strcmp(raw_name, "/SYM64/") == 0 ||
                     strcmp(raw_name, "__.SYMDEF") == 0 ||
                     strcmp(raw_name, "__.SYMDEF SORTED") == 0))
                     payload_size = msize;
@@ -1457,7 +1459,17 @@ static int process_archive(const char *archive_path, const uint8_t *buf, size_t 
         }
         member_data = buf + payload_off;
         member_size = payload_size;
-        next_off = payload_off + msize + (msize & 1u);
+        /*
+         * Advance past the data actually stored in this archive.  A thin
+         * archive member's size field is the external file's size and no
+         * data follows its header, so skipping by that field would land
+         * past the next header (or wrap on ILP32).  payload_size is
+         * bounded by size - payload_off above, so the sum cannot wrap;
+         * the pad byte only matters when room for it remains.
+         */
+        next_off = payload_off + payload_size;
+        if ((payload_size & 1u) != 0 && next_off < size)
+            next_off++;
 
         /* Parse member name */
         if (memcmp(hdr->name, "#1/", 3) == 0) {

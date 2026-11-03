@@ -134,6 +134,19 @@ SRC
     OUT_ST=$($NM -s "$TMP/libthin.a")
     expect_match "-s on thin archive indexes alpha" "$OUT_ST" '^alpha in .*a\.o$'
 
+    # A thin archive stores no member data: each header's size field is
+    # the external file's size, and the next header follows directly.
+    # Every member must be listed, not just the first.
+    cat > "$TMP/c.c" <<'SRC'
+int gamma_fn(void) { return 3; }
+SRC
+    cc -c -o "$TMP/c.o" "$TMP/c.c"
+    ar rcT "$TMP/libthin3.a" "$TMP/a.o" "$TMP/b.o" "$TMP/c.o"
+    OUT_T3=$($NM "$TMP/libthin3.a") || fail "nm on thin archive exits 0"
+    expect_match "thin archive lists first member" "$OUT_T3" '[[:space:]]T[[:space:]]+alpha$'
+    expect_match "thin archive lists second member" "$OUT_T3" '[[:space:]]T[[:space:]]+beta$'
+    expect_match "thin archive lists third member" "$OUT_T3" '[[:space:]]T[[:space:]]+gamma_fn$'
+
     if nm --version 2>/dev/null | grep -q 'GNU nm'; then
         armap_index() {
             awk '/^Archive index:$/ { on = 1 } on && /^$/ { exit } on { print }'
@@ -158,6 +171,16 @@ SRC
             exit 1
         }
         pass "nm -s thin archive index matches GNU nm"
+        # Symbol lines only: the member headings name thin members
+        # differently and are not what this checks.
+        GOT=$($NM "$TMP/libthin3.a" | grep -v ':$')
+        WANT=$(nm "$TMP/libthin3.a" | grep -v ':$')
+        [ "$GOT" = "$WANT" ] || {
+            printf 'FAIL: nm thin archive listing differs from GNU nm\n--- got:\n%s\n--- want:\n%s\n' \
+                "$GOT" "$WANT" >&2
+            exit 1
+        }
+        pass "nm thin archive listing matches GNU nm"
     fi
 
     # --size-sort: ascending by size, undefined and size-0 symbols are
