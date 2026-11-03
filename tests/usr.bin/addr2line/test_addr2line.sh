@@ -1030,29 +1030,47 @@ SRC
         expect_eq "10q-2 $FLAGS" "$RC" "1"
     done
 
-    # 10q-3: an address that does not parse is still answered in the
-    # form the options ask for -- the same lines as an address that
-    # resolves to nothing (0 here), so every query keeps its line count
-    # and -a shows 0 -- from the command line and from standard input.
-    # GNU addr2line is the judge as well, -p included ("?? ??:0" with
-    # -f, "??:0" without it); it has no -c.
-    for FLAGS in "" "-f" "-a" "-a -f" "-f -i" "-p" "-f -p" "-a -p" "-a -f -p" \
-                 "-c" "-f -c" "-a -f -p -c"; do
+    # 10q-3: an address that is not a plain hex number is still answered
+    # in the form the options ask for, as an address that resolves to
+    # nothing (0 here), so every query keeps its line count; -c (which
+    # GNU lacks) gives the same lines as address 0.
+    for FLAGS in "-c" "-f -c" "-a -f -p -c"; do
         WANT=$($BIN $FLAGS -e "$TMP/exec64_v5" 0 0x$A5 2>/dev/null)
         OUR_Q=$($BIN $FLAGS -e "$TMP/exec64_v5" zz 0x$A5 2>"$TMP/q.err")
         expect_eq "10q-3 argv '$FLAGS'" "$OUR_Q" "$WANT"
-        grep 'invalid address: zz' "$TMP/q.err" >/dev/null ||
-            fail "10q-3 argv '$FLAGS' no warning"
         OUR_Q=$(printf 'zz\n0x%s\n' "$A5" | $BIN $FLAGS -e "$TMP/exec64_v5" 2>/dev/null)
         expect_eq "10q-3 stdin '$FLAGS'" "$OUR_Q" "$WANT"
-        case $FLAGS in
-        *-c*) ;;
-        *)
-            HOST_Q=$(norm_a2l "$(addr2line $FLAGS -e "$TMP/exec64_v5" zz 0x$A5)")
-            expect_eq "10q-3 GNU '$FLAGS'" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
-            ;;
-        esac
     done
+
+    # 10q-6: every address is read as GNU addr2line reads it, never
+    # rejected and never warned about: the leading hex digits of
+    # "10zz", strtoull's sign, "0x" and overflow, and SYMBOL[+OFFSET]
+    # for anything that does not start like a hex number ("zz", "-5" and
+    # "-" name no symbol, so they are 0; "f1+4" is f1's address plus 4;
+    # a C++ symbol is found by its demangled name too).  An ELF32
+    # address is cut to 32 bits.  GNU addr2line is the judge, from the
+    # command line and from standard input, under each output form.
+    Q6_ADDRS="zz 10zz 0x10 0X10 -5 - f1 f1+4 f1+0x8 main 0x$A5 ffffffffffffffffff"
+    for FLAGS in "-a" "-a -f" "-a -f -p" "-p" "-f -p" "-f -i"; do
+        HOST_Q=$(norm_a2l "$(addr2line $FLAGS -e "$TMP/exec64_v5" -- $Q6_ADDRS 2>&1)")
+        OUR_Q=$($BIN $FLAGS -e "$TMP/exec64_v5" -- $Q6_ADDRS 2>"$TMP/q.err")
+        expect_eq "10q-6 argv '$FLAGS'" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+        expect_eq "10q-6 argv '$FLAGS' stderr" "$(cat "$TMP/q.err")" ""
+        HOST_Q=$(printf '%s\n' $Q6_ADDRS "  0x$A5" " f1 + 2" | \
+            addr2line $FLAGS -e "$TMP/exec64_v5" 2>&1)
+        OUR_Q=$(printf '%s\n' $Q6_ADDRS "  0x$A5" " f1 + 2" | \
+            $BIN $FLAGS -e "$TMP/exec64_v5" 2>"$TMP/q.err")
+        expect_eq "10q-6 stdin '$FLAGS'" "$(norm_a2l "$OUR_Q")" "$(norm_a2l "$HOST_Q")"
+        expect_eq "10q-6 stdin '$FLAGS' stderr" "$(cat "$TMP/q.err")" ""
+    done
+    HOST_Q=$(norm_a2l "$(addr2line -a -f -C -e "$QF" 'Ns::FooBar(int)' _ZN2Ns6FooBarEi+1)")
+    OUR_Q=$($BIN -a -f -C -e "$QF" 'Ns::FooBar(int)' _ZN2Ns6FooBarEi+1)
+    expect_eq "10q-6 demangled symbol" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+    if [ -f "$TMP/exec32_v4" ]; then
+        HOST_Q=$(norm_a2l "$(addr2line -a -e "$TMP/exec32_v4" -- 100000010 -1 f1)")
+        OUR_Q=$($BIN -a -e "$TMP/exec32_v4" -- 100000010 -1 f1)
+        expect_eq "10q-6 elf32" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+    fi
 
     # 10q-4: options may follow the addresses, as getopt_long(3) permutes
     # them (unless POSIXLY_CORRECT is set), and every option GNU

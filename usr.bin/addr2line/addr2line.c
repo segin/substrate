@@ -323,7 +323,6 @@ static char *line_path_for_unit_file(const addr2line_image_t *img,
                                      size_t unit_index,
                                      uint32_t file_index);
 static const char *path_basename_view(const char *path);
-static void output_unresolved(const addr2line_opts_t *opts);
 static void emit_frame_result(const addr2line_opts_t *opts,
                               const char *function_name,
                               const char *path,
@@ -3503,36 +3502,108 @@ static int image_open(addr2line_image_t *img, const char *path) {
     return 0;
 }
 
-static int parse_hex_address(const char *text, uint64_t *out) {
-    char *end = NULL;
-    unsigned long long v;
+/**
+ * @brief Find the value of the symbol named @p name.
+ *
+ * As GNU addr2line's lookup_symbol(): the first symbol whose name is
+ * @p name, or failing that the first whose demangled name is.
+ *
+ * @param img  Open image.
+ * @param name Symbol name, mangled or demangled.
+ * @param out  Set to the symbol's value when one is found.
+ * @return 0 when found, -1 when no symbol has that name.
+ */
+static int lookup_symbol_value(const addr2line_image_t *img, const char *name, uint64_t *out) {
+    size_t count = elf_symbol_count(img->elf);
+    size_t i;
+    int pass;
 
-    if (text == NULL || out == NULL) {
-        return -1;
-    }
+    for (pass = 0; pass < 2; ++pass) {
+        for (i = 0; i < count; ++i) {
+            elf_symbol_t *sym = elf_symbol_at(img->elf, i);
+            const char *sym_name = sym != NULL ? elf_symbol_name(sym) : NULL;
+            char *dem;
+            int match;
 
-    while (*text != '\0' && isspace((unsigned char)*text)) {
-        text++;
-    }
-
-    if (*text == '\0') {
-        return -1;
-    }
-
-    errno = 0;
-    v = strtoull(text, &end, 16);
-    if (errno != 0 || end == text) {
-        return -1;
-    }
-    while (*end != '\0') {
-        if (!isspace((unsigned char)*end)) {
-            return -1;
+            if (sym_name == NULL || sym_name[0] == '\0') {
+                continue;
+            }
+            if (pass == 0) {
+                match = strcmp(sym_name, name) == 0;
+            } else {
+                dem = demangle(sym_name, DEMANGLE_AUTO);
+                match = dem != NULL && strcmp(dem, name) == 0;
+                demangle_free(dem);
+            }
+            if (match) {
+                *out = elf_symbol_value(sym);
+                return 0;
+            }
         }
-        end++;
+    }
+    return -1;
+}
+
+/**
+ * @brief Read one address, from the command line or standard input, as
+ *        GNU addr2line reads it.
+ *
+ * GNU addr2line never rejects an address.  Leading white space is
+ * skipped.  Text that starts with a digit, or with a hex letter and has
+ * no '+', is a hex number read as strtoull(3) reads it: an optional
+ * sign and "0x", the leading hex digits (so "10zz" is 0x10), and the
+ * all-ones value on overflow.  Anything else is SYMBOL[+OFFSET]: the
+ * symbol's value plus OFFSET (in C notation), or 0 when there is no
+ * such symbol -- so "zz", "-5" and "-" are all 0.  The result is cut to
+ * the width of the file's addresses.
+ *
+ * @param img  Open image.
+ * @param text Address text; it may end in a newline.
+ * @return The address.
+ */
+static uint64_t read_address(const addr2line_image_t *img, const char *text) {
+    const char *p = text;
+    uint64_t addr = 0;
+
+    while (isspace((unsigned char)*p)) {
+        p++;
     }
 
-    *out = (uint64_t)v;
-    return 0;
+    if (*p == '\0' || isdigit((unsigned char)*p) ||
+        (isxdigit((unsigned char)*p) && strchr(p, '+') == NULL)) {
+        addr = (uint64_t)strtoull(p, NULL, 16);
+    } else {
+        size_t len = 0;
+        char *name;
+        uint64_t value;
+
+        while (p[len] != '\0' && !isspace((unsigned char)p[len]) && p[len] != '+') {
+            len++;
+        }
+        name = (char *)malloc(len + 1u);
+        if (name != NULL) {
+            const char *rest = p + len;
+            uint64_t offset = 0;
+
+            memcpy(name, p, len);
+            name[len] = '\0';
+            while (isspace((unsigned char)*rest)) {
+                rest++;
+            }
+            if (*rest == '+') {
+                offset = (uint64_t)strtoul(rest + 1, NULL, 0);
+            }
+            if (lookup_symbol_value(img, name, &value) == 0) {
+                addr = value + offset;
+            }
+            free(name);
+        }
+    }
+
+    if (img->elf_class == ELFOBJ_CLASS_32) {
+        addr &= 0xffffffffu;
+    }
+    return addr;
 }
 
 /**
@@ -3548,20 +3619,6 @@ static void emit_query_address(const addr2line_opts_t *opts, uint64_t query) {
     if (opts->show_addresses) {
         printf(opts->pretty ? "0x%llx: " : "0x%llx\n", (unsigned long long)query);
     }
-}
-
-/**
- * @brief Print the result for an address argument that does not parse.
- *
- * The output is that of an address that resolves to nothing, in the
- * form the options ask for, so every query still produces the same
- * number of lines.  As GNU addr2line does, the address -a shows is 0.
- *
- * @param opts Output options.
- */
-static void output_unresolved(const addr2line_opts_t *opts) {
-    emit_query_address(opts, 0);
-    emit_unresolved_frame(opts);
 }
 
 static const char *path_basename_view(const char *path) {
@@ -3806,13 +3863,7 @@ static int resolve_stdin(const addr2line_image_t *img, const addr2line_opts_t *o
     char line[256];
 
     while (fgets(line, sizeof(line), stdin) != NULL) {
-        uint64_t query;
-        if (parse_hex_address(line, &query) != 0) {
-            warnf("invalid address: %s", line);
-            output_unresolved(opts);
-            continue;
-        }
-        output_lookup(img, adjust_query_address(img, opts, query), opts);
+        output_lookup(img, adjust_query_address(img, opts, read_address(img, line)), opts);
     }
 
     return 0;
@@ -3825,13 +3876,7 @@ static int resolve_argv(const addr2line_image_t *img,
     size_t i;
 
     for (i = 0; i < n; ++i) {
-        uint64_t query;
-        if (parse_hex_address(args[i], &query) != 0) {
-            warnf("invalid address: %s", args[i]);
-            output_unresolved(opts);
-            continue;
-        }
-        output_lookup(img, adjust_query_address(img, opts, query), opts);
+        output_lookup(img, adjust_query_address(img, opts, read_address(img, args[i])), opts);
     }
 
     return 0;

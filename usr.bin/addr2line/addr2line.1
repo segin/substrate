@@ -185,15 +185,30 @@ without it; there is no
 as in GNU
 .BR addr2line .
 .PP
-An address that is not a hexadecimal number is reported on standard
-error, and its result is printed as for an address that resolves to
-nothing, in the form the options ask for, so every query produces the
-same number of lines.
-As with GNU
+As in GNU
 .BR addr2line ,
-the address
-.B \-a
-shows for it is 0.
+no address is rejected.
+Text that starts with a digit, or with a hex letter and has no
+.BR + ,
+is read as
+.BR strtoull (3)
+reads a hexadecimal number: an optional sign and
+.BR 0x ,
+then the leading hex digits, so
+.B 10zz
+is 0x10.
+Anything else is
+.IR symbol [\fB+\fP offset ]:
+the value of that symbol, found by its name or its demangled name,
+plus
+.I offset
+(in C notation), or 0 when there is no such symbol, so
+.BR zz ,
+.B \-5
+and
+.B \-
+are all 0.
+An ELF32 address is cut to 32 bits.
 .SH ADDRESS ADJUSTMENT
 For
 .B ET_DYN
