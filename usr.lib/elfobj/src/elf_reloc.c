@@ -1788,7 +1788,28 @@ static int ia64_is_pc_relative(uint32_t type) {
 }
 
 static int ia64_is_tls(uint32_t type) {
-    return type >= R_IA64_LTOFF_DTPMOD22 && type <= R_IA64_TPREL64LSB;
+    switch (type) {
+        case R_IA64_TPREL14:
+        case R_IA64_TPREL22:
+        case R_IA64_TPREL64I:
+        case R_IA64_TPREL64MSB:
+        case R_IA64_TPREL64LSB:
+        case R_IA64_LTOFF_TPREL22:
+        case R_IA64_DTPMOD64MSB:
+        case R_IA64_DTPMOD64LSB:
+        case R_IA64_LTOFF_DTPMOD22:
+        case R_IA64_DTPREL14:
+        case R_IA64_DTPREL22:
+        case R_IA64_DTPREL64I:
+        case R_IA64_DTPREL32MSB:
+        case R_IA64_DTPREL32LSB:
+        case R_IA64_DTPREL64MSB:
+        case R_IA64_DTPREL64LSB:
+        case R_IA64_LTOFF_DTPREL22:
+            return 1;
+        default:
+            return 0;
+    }
 }
 
 static int ia64_apply(const elfobj_reloc_ctx_t *ctx,
@@ -1870,6 +1891,7 @@ static int ia64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_IA64_LTOFF_FPTR22:
         case R_IA64_LTOFF_DTPMOD22:
         case R_IA64_LTOFF_DTPREL22:
+        case R_IA64_DTPREL22:
         case R_IA64_LTOFF_TPREL22:
         case R_IA64_TPREL22:
             if (!swide_in_signed_bits(v, 22)) {
@@ -3555,6 +3577,7 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
                 case R_IA64_DTPMOD64MSB: return "R_IA64_DTPMOD64MSB";
                 case R_IA64_DTPMOD64LSB: return "R_IA64_DTPMOD64LSB";
                 case R_IA64_DTPREL14: return "R_IA64_DTPREL14";
+                case R_IA64_DTPREL22: return "R_IA64_DTPREL22";
                 case R_IA64_LTOFF_DTPREL22: return "R_IA64_LTOFF_DTPREL22";
                 case R_IA64_DTPREL64I: return "R_IA64_DTPREL64I";
                 case R_IA64_DTPREL32MSB: return "R_IA64_DTPREL32MSB";
