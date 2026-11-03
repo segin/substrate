@@ -2637,16 +2637,225 @@ long cc_ssa_memory_slot_bytes(const cc_ssa_function_t *f) {
     return total;
 }
 
+/** The largest slot whose bytes forward_const_bytes() follows one by one. */
+#define CONST_BYTES_MAX 256
+/** The most rounds forward_const_bytes() follows copies between slots in before it gives the function up. */
+#define CONST_BYTES_ROUNDS 6
+
+/**
+ * Read each integer load from a slot whose address does not escape as the constant its bytes hold, where every
+ * byte it reads is written only with one constant byte -- by stores of constants, a zeroing memset, a whole copy
+ * of another such slot whose bytes are so known, the same byte however often -- and nothing else writes it
+ * (Linux's cpuid_entry_get_reg() copies x86_feature_cpuid()'s result to its own local): a load after those
+ * writes reads them, and one before reads
+ * nothing defined.  The writes may be of other sizes than the load: a structure an inlined function returns from
+ * a const table is stored as its words, 8 bytes at a time, and its fields read 4 at a time -- Linux's
+ * BUILD_BUG_ON(x86_feature_cpuid(X86_FEATURE_PERFMON_V2).function != 0x80000022), whose call of an undefined
+ * __compiletime_assert_N stayed in kvm-amd.ko.  The stores, read by nothing then, go with the slot.
+ *
+ * @return 1 if anything changed, 0 if not, -1 when out of memory
+ */
+static int forward_const_bytes(cc_ssa_function_t *f) {
+    addr_info_t a;
+    unsigned char **state = NULL; /* per slot: per byte 0 not written, 1 known, 2 not known */
+    unsigned char **byte = NULL;  /* per slot: per byte its value where known */
+    unsigned char **prev_state = NULL; /* the same, as the round before found them */
+    unsigned char **prev_byte = NULL;
+    size_t i;
+    int v;
+    int round;
+    int changed = 0;
+
+    if (f->value_count <= 0) {
+        return 0;
+    }
+    /* (a function with no slot has nothing to follow) */
+    for (i = 0; i < f->instr_count && f->instrs[i].op != CC_SSA_STACKALLOC; ++i) {
+    }
+    if (i == f->instr_count) {
+        return 0;
+    }
+    if (addr_info_build(&a, f, 3, 1) != 0) {
+        return -1;
+    }
+    state = (unsigned char **)calloc((size_t)f->value_count, sizeof(*state));
+    byte = (unsigned char **)calloc((size_t)f->value_count, sizeof(*byte));
+    prev_state = (unsigned char **)calloc((size_t)f->value_count, sizeof(*prev_state));
+    prev_byte = (unsigned char **)calloc((size_t)f->value_count, sizeof(*prev_byte));
+    if (state == NULL || byte == NULL || prev_state == NULL || prev_byte == NULL) {
+        changed = -1;
+        goto out;
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        long sz;
+
+        if (a.slot[v] != v || a.escapes[v] || (sz = slot_size(&a, v)) <= 0 || sz > CONST_BYTES_MAX) {
+            continue;
+        }
+        state[v] = (unsigned char *)calloc((size_t)sz, 1);
+        byte[v] = (unsigned char *)calloc((size_t)sz, 1);
+        prev_state[v] = (unsigned char *)calloc((size_t)sz, 1);
+        prev_byte[v] = (unsigned char *)calloc((size_t)sz, 1);
+        if (state[v] == NULL || byte[v] == NULL || prev_state[v] == NULL || prev_byte[v] == NULL) {
+            changed = -1;
+            goto out;
+        }
+    }
+    /*
+     * what each byte is written with; a copy from another such slot writes what that slot's bytes hold, as the
+     * round before found them, in rounds until nothing changes (a structure built in one local and copied whole
+     * into another, as an inlined function's result is)
+     */
+    for (round = 0;; ++round) {
+        int same = round > 0;
+
+        if (round == CONST_BYTES_ROUNDS) {
+            goto out;
+        }
+        for (v = 0; v < f->value_count; ++v) {
+            if (state[v] != NULL) {
+                long sz = slot_size(&a, v);
+
+                memcpy(prev_state[v], state[v], (size_t)sz);
+                memcpy(prev_byte[v], byte[v], (size_t)sz);
+                memset(state[v], 0, (size_t)sz);
+                memset(byte[v], 0, (size_t)sz);
+            }
+        }
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            long long n = 0;
+            long long c = 0;
+            long long off;
+            long sz;
+            int known;
+            int p;
+            int s;
+            int from = -1; /* a copy's source slot, whose bytes it writes */
+            long long k;
+
+            if (in->op == CC_SSA_STORE) {
+                p = in->lhs;
+                n = in->imm;
+                known = (n == 1 || n == 2 || n == 4 || n == 8) && single_const(f, a.defs, a.def_at, in->rhs, &c);
+            } else if (is_zeroing_memset(&a, in, &n)) {
+                p = in->args[0];
+                known = 1;
+                c = 0;
+            } else if (is_plain_memcpy(&a, in, &n)) {
+                p = in->args[0];
+                known = 0;
+                if (round > 0 && is_value(f, in->args[1]) && a.slot[in->args[1]] >= 0 &&
+                    a.slot[in->args[1]] != a.slot[p] && prev_state[a.slot[in->args[1]]] != NULL &&
+                    a.off[in->args[1]] >= 0 && a.off[in->args[1]] + n <= slot_size(&a, a.slot[in->args[1]])) {
+                    from = a.slot[in->args[1]];
+                    known = 1;
+                }
+            } else {
+                continue;
+            }
+            if (!is_value(f, p) || (s = a.slot[p]) < 0 || state[s] == NULL) {
+                continue;
+            }
+            sz = slot_size(&a, s);
+            off = a.off[p];
+            if (off < 0 || n <= 0 || off + n > sz) {
+                /* (outside the slot: nothing is known of it) */
+                memset(state[s], 2, (size_t)sz);
+                continue;
+            }
+            for (k = 0; k < n; ++k) {
+                unsigned char b = in->op == CC_SSA_STORE ? (unsigned char)((unsigned long long)c >> (8 * (k & 7))) : 0;
+                unsigned char *st = &state[s][off + k];
+                int kb = known;
+
+                if (from >= 0) {
+                    /* (a byte the source never had written is not known either) */
+                    kb = prev_state[from][a.off[in->args[1]] + k] == 1;
+                    b = prev_byte[from][a.off[in->args[1]] + k];
+                }
+                if (!kb) {
+                    *st = 2;
+                } else if (*st == 0) {
+                    *st = 1;
+                    byte[s][off + k] = b;
+                } else if (*st == 1 && byte[s][off + k] != b) {
+                    *st = 2;
+                }
+            }
+        }
+        for (v = 0; same && v < f->value_count; ++v) {
+            if (state[v] != NULL && (memcmp(prev_state[v], state[v], (size_t)slot_size(&a, v)) != 0 ||
+                                     memcmp(prev_byte[v], byte[v], (size_t)slot_size(&a, v)) != 0)) {
+                same = 0;
+            }
+        }
+        if (same) {
+            break;
+        }
+    }
+    /* the loads they decide */
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        unsigned long long val = 0;
+        long long off;
+        long long k;
+        int s;
+
+        if (in->op != CC_SSA_LOAD || in->seg != 0 || !is_value(f, in->lhs) || (s = a.slot[in->lhs]) < 0 ||
+            state[s] == NULL || !is_value(f, in->dst) || cc_ssa_value_class(f, in->dst) != CC_VAL_I64 ||
+            f->value_ty[in->dst].kind != CC_TY_INT || (in->imm != 1 && in->imm != 2 && in->imm != 4 && in->imm != 8) ||
+            (long long)cc_ssa_value_size(f, in->dst) < in->imm) {
+            continue;
+        }
+        off = a.off[in->lhs];
+        if (off < 0 || off + in->imm > slot_size(&a, s)) {
+            continue;
+        }
+        for (k = in->imm - 1; k >= 0; --k) {
+            if (state[s][off + k] != 1) {
+                break;
+            }
+            val = (val << 8) | byte[s][off + k];
+        }
+        if (k >= 0) {
+            continue;
+        }
+        if (in->imm < 8 && !in->is_unsigned && (val & (1ULL << (in->imm * 8 - 1))) != 0) {
+            val |= ~((1ULL << (in->imm * 8)) - 1);
+        }
+        in->op = CC_SSA_CONST;
+        in->imm = (long long)val;
+        in->lhs = -1;
+        in->rhs = -1;
+        changed = 1;
+    }
+out:
+    for (v = 0; state != NULL && byte != NULL && prev_state != NULL && prev_byte != NULL && v < f->value_count; ++v) {
+        free(state[v]);
+        free(byte[v]);
+        free(prev_state[v]);
+        free(prev_byte[v]);
+    }
+    free(state);
+    free(byte);
+    free(prev_state);
+    free(prev_byte);
+    addr_info_free(&a);
+    return changed;
+}
+
 int cc_optimize_slots(cc_ssa_function_t *f) {
-    int r0 = drop_unread_slots(f);
+    int rb = forward_const_bytes(f);
+    int r0 = rb < 0 ? -1 : drop_unread_slots(f);
     int rc = r0 < 0 ? -1 : coalesce_copied_slots(f);
     int rm = rc < 0 ? -1 : forward_memcpy_slots(f);
     int r1 = rm < 0 ? -1 : forward_slot_copies(f);
     int r2 = r1 < 0 ? -1 : scalarize_slots(f);
     int r3 = r2 < 0 ? -1 : slot_value_sets(f);
 
-    if (r0 < 0 || rc < 0 || rm < 0 || r1 < 0 || r2 < 0 || r3 < 0) {
+    if (rb < 0 || r0 < 0 || rc < 0 || rm < 0 || r1 < 0 || r2 < 0 || r3 < 0) {
         return -1;
     }
-    return r0 > 0 || rc > 0 || rm > 0 || r1 > 0 || r2 > 0 || r3 > 0;
+    return rb > 0 || r0 > 0 || rc > 0 || rm > 0 || r1 > 0 || r2 > 0 || r3 > 0;
 }

@@ -74,7 +74,11 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   fills whole and that is only read after it, in
   the same straight run with nothing between that may write the source,
   read from the source (`forward_memcpy_slots()`: an inlined function's
-  structure argument), a slot stored once read as the value stored, a structure slot split
+  structure argument), a load whose every byte only ever one constant
+  is written to, by stores of any size or a zeroing memset, that
+  constant (`forward_const_bytes()`: a structure an inlined function
+  returns from a const table, stored as words and read as fields), a
+  slot stored once read as the value stored, a structure slot split
   into one slot per field (its zeroing memset into stores of 0), and a
   compare of a slot only stored constants folded where the set of them
   it can hold, followed over the blocks and narrowed by branches on it,
