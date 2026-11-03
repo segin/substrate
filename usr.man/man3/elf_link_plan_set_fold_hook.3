@@ -1,0 +1,95 @@
+.Dd November 2, 2026
+.Dt ELF_LINK_PLAN_SET_FOLD_HOOK 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_set_fold_hook
+.Nd fold identical input sections in a link plan
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Bd -literal
+typedef size_t (*elf_link_fold_hook_t)(const elf_section_t *section,
+    void *user);
+.Ed
+.Ft elf_err_t
+.Fn elf_link_plan_set_fold_hook "elf_link_plan_t *plan" "elf_link_fold_hook_t hook" "size_t class_count" "void *user"
+.Sh DESCRIPTION
+.Fn elf_link_plan_set_fold_hook
+tells
+.Xr elf_link_plan_link 3
+which input sections of
+.Fa plan
+are identical, so that each set of them takes the room of one.
+This is identical code folding, as a linker's
+.Fl -icf
+does it: on the inputs' sections, before
+.Pa .text.*
+is gathered into
+.Pa .text .
+.Pp
+For each input section it merges, the link calls
+.Fa hook
+with the section and
+.Fa user .
+The hook returns the number of the class of identical sections the
+section is in, from 1 to
+.Fa class_count ,
+or 0 if it is in none; a number above
+.Fa class_count
+is taken as 0.
+.Pp
+The first section of a class that the link merges into an output
+section is laid out as any other.
+Each later section of the class going to the same output section takes
+no room of its own: its symbols, and the relocations of other sections
+against it, are given the place of the first, and its own relocations
+are left out, the first's standing for them.
+A section of the class that goes to a different output section is laid
+out as any other.
+.Pp
+What makes sections identical is the caller's to decide; the link does
+not compare them.
+A
+.Dv NULL
+.Fa hook
+folds nothing.
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, otherwise
+.Dv ELF_ERR_STATE
+for a
+.Dv NULL
+.Fa plan .
+.Sh ERRORS
+.Fn elf_link_plan_set_fold_hook
+does not set
+.Va errno .
+.Sh EXAMPLE
+Fold two input sections known to be identical.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+static const elf_section_t *twins[2];
+
+static size_t
+class_of(const elf_section_t *section, void *user)
+{
+    (void)user;
+    return section == twins[0] || section == twins[1] ? 1 : 0;
+}
+
+int
+link_folded(elf_link_plan_t *plan, elfobj_t **out)
+{
+    if (elf_link_plan_set_fold_hook(plan, class_of, 1, NULL) != ELF_OK)
+        return -1;
+    return elf_link_plan_link(plan, out) == ELF_OK ? 0 : -1;
+}
+.Ed
+.Sh SEE ALSO
+.Xr ld 1 ,
+.Xr elf_link_plan 3 ,
+.Xr elf_link_plan_link 3 ,
+.Xr elf_link_plan_set_gc_hook 3

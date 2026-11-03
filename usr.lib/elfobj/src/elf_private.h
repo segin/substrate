@@ -290,6 +290,11 @@ struct elf_link_plan {
     void *archive_user;
     elf_link_gc_hook_t gc_hook;
     void *gc_user;
+    elf_link_fold_hook_t fold_hook;     /* identical sections: elf_link_plan_set_fold_hook */
+    void *fold_user;
+    size_t fold_class_count;
+    struct elf_section **fold_dst;      /* for one link: where each class's first went, NULL if not yet */
+    uint64_t *fold_base;                /* and where in it */
     elf_link_incremental_hook_t incremental_hook;
     void *incremental_user;
     elf_link_version_hook_t version_hook;

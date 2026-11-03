@@ -911,6 +911,65 @@ static elf_err_t rank_begin(elf_link_plan_t *plan, struct elf_section *dst, cons
     return ELF_OK;
 }
 
+/*
+ * What sec_included says of an input section that went into the output
+ * folded into an identical one already there: 1 says it went in on its
+ * own, 0 that it did not go in.  A folded section is where the other is,
+ * and the other's relocations stand for its own.
+ */
+enum {
+    SEC_FOLDED = 2
+};
+
+/**
+ * @brief Forget where the classes of identical sections went, for a link about to start or a plan going away.
+ *
+ * @param plan the link
+ */
+static void fold_free(elf_link_plan_t *plan) {
+    free(plan->fold_dst);
+    free(plan->fold_base);
+    plan->fold_dst = NULL;
+    plan->fold_base = NULL;
+}
+
+/**
+ * @brief Make room to note where each class of identical sections goes, none placed yet.
+ *
+ * @param plan the link
+ * @return ELF_OK, or ELF_ERR_OOM
+ */
+static elf_err_t fold_begin(elf_link_plan_t *plan) {
+    fold_free(plan);
+    if (plan->fold_hook == NULL || plan->fold_class_count == 0) {
+        return ELF_OK;
+    }
+    plan->fold_dst = (struct elf_section **)elf__calloc(plan->fold_class_count, sizeof(plan->fold_dst[0]));
+    plan->fold_base = (uint64_t *)elf__calloc(plan->fold_class_count, sizeof(plan->fold_base[0]));
+    if (plan->fold_dst == NULL || plan->fold_base == NULL) {
+        fold_free(plan);
+        return ELF_ERR_OOM;
+    }
+    return ELF_OK;
+}
+
+/**
+ * @brief The class of identical sections input section @p src is in, as the fold hook says, or 0 for none.
+ *
+ * @param plan the link
+ * @param src  the input section
+ * @return the class, 1 to the plan's class count, or 0
+ */
+static size_t fold_class_of(const elf_link_plan_t *plan, const struct elf_section *src) {
+    size_t cls;
+
+    if (plan->fold_dst == NULL) {
+        return 0;
+    }
+    cls = plan->fold_hook(src, plan->fold_user);
+    return cls <= plan->fold_class_count ? cls : 0;
+}
+
 static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const struct elf_link_input *input,
                                    size_t j, uint64_t *sec_bases, uint8_t *sec_included,
                                    const uint8_t *sec_discard);
@@ -1008,6 +1067,7 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
         const uint8_t *src_data;
         size_t src_size;
         uint64_t src_align, src_flags;
+        size_t fold_class;              /* the class of identical sections it is in, 0 for none */
 
         if (src == NULL || src->name == NULL || src->name[0] == '\0') {
             return ELF_OK;
@@ -1036,6 +1096,13 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
             action = plan->section_merge_hook(out_name, dst, src, plan->section_merge_user);
         }
         if (action == ELF_LINK_MERGE_SKIP) {
+            return ELF_OK;
+        }
+        /* one of a class of identical sections: where the first of them went, if that is where this goes */
+        fold_class = action == ELF_LINK_MERGE_APPEND ? fold_class_of(plan, src) : 0;
+        if (fold_class != 0 && dst != NULL && plan->fold_dst[fold_class - 1] == dst) {
+            sec_bases[j] = plan->fold_base[fold_class - 1];
+            sec_included[j] = SEC_FOLDED;
             return ELF_OK;
         }
 
@@ -1223,6 +1290,10 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
             }
             if (merge_base != NULL) {
                 *merge_base = sec_bases[j];
+            }
+            if (fold_class != 0 && plan->fold_dst[fold_class - 1] == NULL) {
+                plan->fold_dst[fold_class - 1] = dst;
+                plan->fold_base[fold_class - 1] = sec_bases[j];
             }
         }
         free(inflated);
@@ -1486,7 +1557,9 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
             continue;
         }
         src_sec_index = r->section->index;
-        if (src_sec_index >= input->obj->section_count || !sec_included[src_sec_index]) {
+        /* (a folded section's are the identical section's, already in) */
+        if (src_sec_index >= input->obj->section_count || !sec_included[src_sec_index] ||
+            sec_included[src_sec_index] == SEC_FOLDED) {
             continue;
         }
         dst_sec = output_section_of(plan, out, input, r->section);
@@ -1695,6 +1768,7 @@ void elf_link_plan_destroy(elf_link_plan_t *plan) {
     }
     free(plan->extents);
     elf__merge_free(plan);
+    fold_free(plan);
     free(plan);
 }
 
@@ -2150,6 +2224,17 @@ elf_err_t elf_link_plan_set_gc_hook(elf_link_plan_t *plan, elf_link_gc_hook_t ho
     return ELF_OK;
 }
 
+elf_err_t elf_link_plan_set_fold_hook(elf_link_plan_t *plan, elf_link_fold_hook_t hook, size_t class_count,
+                                      void *user) {
+    if (plan == NULL) {
+        return ELF_ERR_STATE;
+    }
+    plan->fold_hook = hook;
+    plan->fold_user = user;
+    plan->fold_class_count = hook != NULL ? class_count : 0;
+    return ELF_OK;
+}
+
 elf_err_t elf_link_plan_set_incremental_hook(elf_link_plan_t *plan,
                                              elf_link_incremental_hook_t hook, void *user) {
     if (plan == NULL) {
@@ -2217,6 +2302,9 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
     {
         elf_err_t err = prepare_merge(plan);
 
+        if (err == ELF_OK) {
+            err = fold_begin(plan);
+        }
         if (err != ELF_OK) {
             elf__merge_free(plan);
             elf_close(out);

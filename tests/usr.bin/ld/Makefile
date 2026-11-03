@@ -49,5 +49,6 @@ run:
 	./test_code_fill_late.sh
 	./test_script_symbol_alias.sh
 	./test_script_symbol_home.sh
+	./test_icf_input_sections.sh
 
 clean:

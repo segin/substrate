@@ -11,6 +11,7 @@
 .Nm elf_link_plan_rank_extent ,
 .Nm elf_link_plan_set_archive_hook ,
 .Nm elf_link_plan_set_gc_hook ,
+.Nm elf_link_plan_set_fold_hook ,
 .Nm elf_link_plan_set_incremental_hook ,
 .Nm elf_link_plan_set_version_hook ,
 .Nm elf_link_plan_consider_archive_member ,
@@ -42,6 +43,8 @@ libelfobj
 .Ft elf_err_t
 .Fn elf_link_plan_set_gc_hook "elf_link_plan_t *plan" "elf_link_gc_hook_t hook" "void *user"
 .Ft elf_err_t
+.Fn elf_link_plan_set_fold_hook "elf_link_plan_t *plan" "elf_link_fold_hook_t hook" "size_t class_count" "void *user"
+.Ft elf_err_t
 .Fn elf_link_plan_set_incremental_hook "elf_link_plan_t *plan" "elf_link_incremental_hook_t hook" "void *user"
 .Ft elf_err_t
 .Fn elf_link_plan_set_version_hook "elf_link_plan_t *plan" "elf_link_version_hook_t hook" "void *user"
@@ -58,7 +61,8 @@ libelfobj
 .Sh DESCRIPTION
 The link-plan API provides explicit control over input ordering and policy hooks
 for section merge, archive extraction, garbage collection roots,
-incremental metadata, and symbol version handling.
+folding of identical sections, incremental metadata, and symbol version
+handling.
 .Pp
 After inputs and hooks are configured, call
 .Fn elf_link_plan_link
@@ -119,6 +123,7 @@ main(void)
 .Ed
 .Sh SEE ALSO
 .Xr elf_link 3 ,
+.Xr elf_link_plan_set_fold_hook 3 ,
 .Xr elf_link_plan_set_section_rank_hooks 3 ,
 .Xr elf_link_utils 3 ,
 .Xr elf_reloc 3 ,

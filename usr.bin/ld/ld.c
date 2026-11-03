@@ -401,6 +401,16 @@ static int phase_merge(ld_link_t *l) {
             err = elf_link_plan_set_gc_hook(plan, gc_keep_input_section, ctx);
         }
     }
+    /* --icf: identical sections are found among the inputs', each function
+     * still a section of its own, and the merge places one of each kind
+     * (after --gc-sections, which decides what is left to fold) */
+    if (err == ELF_OK && ctx->opt.icf_mode != 0 && ctx->opt.expect_type != ET_REL) {
+        if (icf_collect_input_sections(ctx, &l->inputs) != 0) {
+            err = ELF_ERR_OOM;
+        } else {
+            err = elf_link_plan_set_fold_hook(plan, icf_class_of_input_section, ctx->icf_class_count, ctx);
+        }
+    }
     if (err == ELF_OK) {
         err = elf_link_plan_link(plan, &l->out);
     }
@@ -487,10 +497,6 @@ static int phase_order_sections(ld_link_t *l) {
 
 static int phase_script_sections(ld_link_t *l) {
     return script_apply_sections(l->ctx, l->out);
-}
-
-static int phase_icf(ld_link_t *l) {
-    return l->ctx->opt.icf_mode != 0 ? apply_identical_code_folding(l->out, l->ctx) : 0;
 }
 
 static int phase_ld_note(ld_link_t *l) {
@@ -688,7 +694,6 @@ static const ld_phase_t link_phases[] = {
     { "order-sections", phase_order_sections, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0,
       "failed to apply default section placement policy" },
     { "script-sections", phase_script_sections, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0, NULL },
-    { "icf", phase_icf, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0, "--icf fold pass failed" },
 
     { "ld-note", phase_ld_note, LD_FOR_PROGRAM, DID(MERGE), DID(LAYOUT), 0,
       "failed to emit .note.substrate_ld metadata" },
@@ -854,6 +859,7 @@ static void ctx_free(ld_ctx_t *ctx) {
     free((void *)ctx->local_got);
     free(ctx->tls_got);
     free((void *)ctx->gc_dead);
+    free(ctx->icf_members);
     free((void *)ctx->ifuncs);
     lds_script_free(ctx->script);
     ld_version_script_free(&ctx->version_script);

@@ -78,6 +78,7 @@ elf_link_plan_map_entry
 elf_link_plan_note_incremental
 elf_link_plan_rank_extent
 elf_link_plan_set_archive_hook
+elf_link_plan_set_fold_hook
 elf_link_plan_set_gc_hook
 elf_link_plan_set_incremental_hook
 elf_link_plan_set_merge_sections

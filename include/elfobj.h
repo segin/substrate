@@ -1355,6 +1355,10 @@ typedef int (*elf_link_section_sort_hook_t)(const char *section_name, const char
                                             void *user);
 typedef int (*elf_link_archive_hook_t)(const char *archive_path, const char *member_name, void *user);
 typedef int (*elf_link_gc_hook_t)(const elf_section_t *section, void *user);
+/* Which class of identical sections an input section is in, 1 to the class
+ * count elf_link_plan_set_fold_hook() was given, or 0 for none: the first
+ * of a class the link places stands for the rest. */
+typedef size_t (*elf_link_fold_hook_t)(const elf_section_t *section, void *user);
 typedef void (*elf_link_incremental_hook_t)(const char *key, const char *value, void *user);
 typedef int (*elf_link_version_hook_t)(const char *symbol_name, const char *version_name, void *user);
 
@@ -1569,6 +1573,23 @@ int elf_link_plan_rank_extent(const elf_link_plan_t *plan, const char *output_na
 elf_err_t elf_link_plan_set_archive_hook(elf_link_plan_t *plan, elf_link_archive_hook_t hook,
                                          void *user);
 elf_err_t elf_link_plan_set_gc_hook(elf_link_plan_t *plan, elf_link_gc_hook_t hook, void *user);
+/**
+ * @brief Fold identical input sections: the link places one of each class and puts the rest where it is.
+ *
+ * The first section of a class merged into an output section is laid out as any other.  Each later one going
+ * to the same output section takes no room of its own: its symbols, and whatever refers to it, are given the
+ * place of the first, and its own relocations are left out, the first's standing for them.  One going to a
+ * different output section is laid out as any other.  This is identical code folding (--icf) done on the
+ * inputs' sections, before .text.* is gathered into .text.
+ *
+ * @param plan        the link
+ * @param hook        the class of each input section, or NULL to fold nothing
+ * @param class_count how many classes @p hook numbers
+ * @param user        passed to @p hook
+ * @return ELF_OK, or ELF_ERR_STATE for no plan
+ */
+elf_err_t elf_link_plan_set_fold_hook(elf_link_plan_t *plan, elf_link_fold_hook_t hook, size_t class_count,
+                                      void *user);
 elf_err_t elf_link_plan_set_incremental_hook(elf_link_plan_t *plan,
                                               elf_link_incremental_hook_t hook, void *user);
 elf_err_t elf_link_plan_set_version_hook(elf_link_plan_t *plan, elf_link_version_hook_t hook,

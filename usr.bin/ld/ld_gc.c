@@ -408,42 +408,51 @@ out:
     return rc;
 }
 
-static int is_icf_special_name(const char *name) {
-    if (name == NULL) {
-        return 0;
-    }
-    return strcmp(name, ".init_array") == 0 || strcmp(name, ".fini_array") == 0 ||
-           strcmp(name, ".preinit_array") == 0 || strcmp(name, ".dynamic") == 0 ||
-           strcmp(name, ".dynsym") == 0 || strcmp(name, ".dynstr") == 0;
-}
-
+/*
+ * --icf: identical code folding.
+ *
+ * What is folded is an input section: a compiler given -ffunction-sections
+ * puts each function in one of its own, and two functions compiled to the
+ * same bytes, referring to the same things, can be one.  Once the inputs
+ * are merged every .text.NAME is part of one .text and there is nothing
+ * left to compare, so this runs before the merge, as --gc-sections does,
+ * and tells the merge which sections are alike; the merge lays out the
+ * first of each class and puts the rest where it is (elfobj's fold hook).
+ *
+ * Code is folded in both modes, and read-only data (.rodata) under
+ * --icf=all, as lld folds it.  Nothing writable is: two variables that
+ * start out alike do not stay so.  Nor is a section of a group, one whose
+ * contents the merge rewrites (strings and constants, TLS, compressed),
+ * or one ordered by another.
+ */
 static int is_icf_candidate_section(const elf_section_t *sec, int icf_mode) {
     uint64_t flags;
-    uint32_t type;
     const char *name;
 
-    if (sec == NULL || icf_mode == 0) {
+    if (sec == NULL || icf_mode == 0 || elf_section_type(sec) != SHT_PROGBITS || elf_section_size(sec) == 0) {
         return 0;
     }
-    type = elf_section_type(sec);
     flags = elf_section_flags(sec);
     name = elf_section_name(sec);
-    if (type != SHT_PROGBITS || (flags & SHF_ALLOC) == 0) {
+    if ((flags & SHF_ALLOC) == 0 ||
+        (flags & (SHF_WRITE | SHF_GROUP | SHF_TLS | SHF_MERGE | SHF_LINK_ORDER | SHF_COMPRESSED)) != 0) {
         return 0;
     }
-    if ((flags & SHF_GROUP) != 0) {
-        return 0;
+    if ((flags & SHF_EXECINSTR) != 0 && gc_name_is(name, ".text")) {
+        return 1;
     }
-    if (is_icf_special_name(name)) {
-        return 0;
-    }
-    if (icf_mode == 1 && (flags & SHF_WRITE) != 0) {
-        return 0;
-    }
-    return 1;
+    return icf_mode == 2 && gc_name_is(name, ".rodata");
 }
 
-static int sections_reloc_signature_equal(const elf_section_t *a, const elf_section_t *b) {
+/*
+ * Whether the relocations of sections @p a (of input @p ia) and @p b (of
+ * input @p ib) are alike: at the same places, of the same kinds and
+ * addends, and against the same things.  A global is the same thing by
+ * name, the link binding each name once; anything else -- a local, a
+ * section's own symbol -- only when it is the same place in the same
+ * input.
+ */
+static int sections_reloc_signature_equal(const elf_section_t *a, size_t ia, const elf_section_t *b, size_t ib) {
     size_t ra_n;
     size_t rb_n;
     size_t i;
@@ -473,19 +482,31 @@ static int sections_reloc_signature_equal(const elf_section_t *a, const elf_sect
         }
         sa = elf_reloc_symbol(ra);
         sb = elf_reloc_symbol(rb);
-        na = sa != NULL ? elf_symbol_name(sa) : NULL;
-        nb = sb != NULL ? elf_symbol_name(sb) : NULL;
-        if ((na == NULL) != (nb == NULL)) {
+        if ((sa == NULL) != (sb == NULL)) {
             return 0;
         }
-        if (na != NULL && strcmp(na, nb) != 0) {
+        if (sa == NULL || sa == sb) {
+            continue;
+        }
+        na = elf_symbol_name(sa);
+        nb = elf_symbol_name(sb);
+        if (elf_symbol_bind(sa) != STB_LOCAL && elf_symbol_bind(sb) != STB_LOCAL && na != NULL && nb != NULL &&
+            na[0] != '\0' && nb[0] != '\0') {
+            if (strcmp(na, nb) != 0) {
+                return 0;
+            }
+            continue;
+        }
+        if (ia != ib || elf_symbol_bind(sa) != STB_LOCAL || elf_symbol_bind(sb) != STB_LOCAL ||
+            elf_symbol_shndx(sa) != elf_symbol_shndx(sb) || elf_symbol_value(sa) != elf_symbol_value(sb) ||
+            !gc_symbol_is_defined(sa)) {
             return 0;
         }
     }
     return 1;
 }
 
-static int sections_icf_equal(const elf_section_t *a, const elf_section_t *b) {
+static int sections_icf_equal(const elf_section_t *a, size_t ia, const elf_section_t *b, size_t ib) {
     size_t asz = 0;
     size_t bsz = 0;
     const void *ad;
@@ -506,67 +527,163 @@ static int sections_icf_equal(const elf_section_t *a, const elf_section_t *b) {
     if (asz != 0 && (ad == NULL || bd == NULL || memcmp(ad, bd, asz) != 0)) {
         return 0;
     }
-    if (!sections_reloc_signature_equal(a, b)) {
+    if (!sections_reloc_signature_equal(a, ia, b, ib)) {
         return 0;
     }
     return 1;
 }
 
-static int icf_fold_section(elfobj_t *obj, size_t leader_idx, size_t dupe_idx) {
-    size_t i;
-    elf_section_t *dupe;
-    uint32_t dupe_shndx;
-    uint32_t leader_shndx;
+/* A section that may be folded, while the classes are being found. */
+typedef struct {
+    const elf_section_t *section;
+    size_t input;
+    size_t seq;         /* the order it was met in: inputs, then sections */
+    uint64_t hash;      /* of what sections_icf_equal() compares, but for the relocations' symbols */
+    size_t cls;         /* its class, 0 until it has one */
+} icf_candidate_t;
 
-    if (obj == NULL || leader_idx >= elf_section_count(obj) || dupe_idx >= elf_section_count(obj)) {
-        return -1;
-    }
-    dupe = elf_section_get(obj, dupe_idx);
-    if (dupe == NULL) {
-        return -1;
-    }
-    dupe_shndx = (uint16_t)(dupe_idx + 1);
-    leader_shndx = (uint16_t)(leader_idx + 1);
-    for (i = 0; i < elf_symbol_count(obj); ++i) {
-        elf_symbol_t *sym = elf_symbol_at(obj, i);
-        if (sym == NULL) {
-            continue;
+/**
+ * A hash of what two identical sections have alike: kind, flags, alignment, size, contents, and the places,
+ * kinds and addends of their relocations.  Two sections with different hashes differ.
+ *
+ * @param sec the section
+ * @return the hash (FNV-1a)
+ */
+static uint64_t icf_hash_section(const elf_section_t *sec) {
+    uint64_t h = 1469598103934665603ULL;
+    uint64_t words[4];
+    const uint8_t *data;
+    size_t size = 0, i, w;
+
+    words[0] = elf_section_type(sec);
+    words[1] = elf_section_flags(sec);
+    words[2] = elf_section_align(sec);
+    words[3] = elf_section_size(sec);
+    for (w = 0; w < 4; ++w) {
+        for (i = 0; i < 8; ++i) {
+            h = (h ^ ((words[w] >> (8 * i)) & 0xffu)) * 1099511628211ULL;
         }
-        if (elf_symbol_shndx(sym) == dupe_shndx) {
-            if (elf_symbol_set_shndx(sym, leader_shndx) != ELF_OK) {
-                return -1;
-            }
+    }
+    data = (const uint8_t *)elf_section_data(sec, &size);
+    for (i = 0; data != NULL && i < size; ++i) {
+        h = (h ^ data[i]) * 1099511628211ULL;
+    }
+    for (i = 0; i < elf_section_reloc_count(sec); ++i) {
+        const elf_reloc_t *r = elf_section_reloc_at((elf_section_t *)sec, i);
+
+        if (r != NULL) {
+            h = (h ^ elf_reloc_offset(r)) * 1099511628211ULL;
+            h = (h ^ elf_reloc_type(r)) * 1099511628211ULL;
+            h = (h ^ (uint64_t)elf_reloc_addend(r)) * 1099511628211ULL;
         }
     }
-    if (elf_remove_section(obj, dupe) != ELF_OK) {
-        return -1;
-    }
-    return 0;
+    return h;
 }
 
-int apply_identical_code_folding(elfobj_t *obj, const ld_ctx_t *ctx) {
-    size_t i;
+/* qsort: by hash, then in the order met. */
+static int icf_candidate_cmp(const void *a, const void *b) {
+    const icf_candidate_t *x = (const icf_candidate_t *)a;
+    const icf_candidate_t *y = (const icf_candidate_t *)b;
 
-    if (obj == NULL || ctx == NULL || ctx->opt.icf_mode == 0) {
-        return 0;
+    if (x->hash != y->hash) {
+        return x->hash < y->hash ? -1 : 1;
     }
-    for (i = 0; i < elf_section_count(obj); ++i) {
-        elf_section_t *leader = elf_section_get(obj, i);
-        size_t j;
+    return x->seq < y->seq ? -1 : x->seq > y->seq;
+}
 
-        if (!is_icf_candidate_section(leader, ctx->opt.icf_mode)) {
-            continue;
-        }
-        for (j = i + 1; j < elf_section_count(obj);) {
-            elf_section_t *dupe = elf_section_get(obj, j);
-            if (!is_icf_candidate_section(dupe, ctx->opt.icf_mode) || !sections_icf_equal(leader, dupe)) {
-                j++;
+/* qsort: by section, for icf_class_of_input_section()'s search. */
+static int icf_member_cmp(const void *a, const void *b) {
+    const elf_section_t *x = ((const ld_icf_member_t *)a)->section;
+    const elf_section_t *y = ((const ld_icf_member_t *)b)->section;
+
+    return x < y ? -1 : x > y;
+}
+
+int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs) {
+    icf_candidate_t *cands = NULL;
+    size_t count = 0, cap = 0, members = 0, i, j, s;
+    int rc = -1;
+
+    free(ctx->icf_members);
+    ctx->icf_members = NULL;
+    ctx->icf_member_count = 0;
+    ctx->icf_class_count = 0;
+    for (i = 0; i < inputs->count; ++i) {
+        for (s = 0; s < elf_section_count(inputs->objs[i]); ++s) {
+            const elf_section_t *sec = elf_section_get(inputs->objs[i], s);
+
+            if (!is_icf_candidate_section(sec, ctx->opt.icf_mode) ||
+                (ctx->opt.gc_sections && !gc_keep_input_section(sec, ctx))) {
                 continue;
             }
-            if (icf_fold_section(obj, i, j) != 0) {
-                return -1;
+            if (ld_vec_room(&cands, &cap, count, sizeof(cands[0])) != 0) {
+                goto out;
             }
+            cands[count].section = sec;
+            cands[count].input = i;
+            cands[count].seq = count;
+            cands[count].hash = icf_hash_section(sec);
+            cands[count].cls = 0;
+            count++;
         }
     }
-    return 0;
+    if (count > 1) {
+        qsort(cands, count, sizeof(cands[0]), icf_candidate_cmp);
+    }
+    /* among those of a hash, each not yet in a class starts one, of what is like it after it */
+    for (i = 0; i < count; ++i) {
+        size_t cls = 0;
+
+        if (cands[i].cls != 0) {
+            continue;
+        }
+        for (j = i + 1; j < count && cands[j].hash == cands[i].hash; ++j) {
+            if (cands[j].cls != 0 ||
+                !sections_icf_equal(cands[i].section, cands[i].input, cands[j].section, cands[j].input)) {
+                continue;
+            }
+            if (cls == 0) {
+                cls = ++ctx->icf_class_count;
+                cands[i].cls = cls;
+                members++;
+            }
+            cands[j].cls = cls;
+            members++;
+        }
+    }
+    if (members != 0) {
+        ctx->icf_members = (ld_icf_member_t *)calloc(members, sizeof(ctx->icf_members[0]));
+        if (ctx->icf_members == NULL) {
+            ctx->icf_class_count = 0;
+            goto out;
+        }
+        for (i = 0; i < count; ++i) {
+            if (cands[i].cls != 0) {
+                ctx->icf_members[ctx->icf_member_count].section = cands[i].section;
+                ctx->icf_members[ctx->icf_member_count].cls = cands[i].cls;
+                ctx->icf_member_count++;
+            }
+        }
+        qsort(ctx->icf_members, ctx->icf_member_count, sizeof(ctx->icf_members[0]), icf_member_cmp);
+    }
+    rc = 0;
+out:
+    free(cands);
+    return rc;
+}
+
+size_t icf_class_of_input_section(const elf_section_t *section, void *user) {
+    const ld_ctx_t *ctx = (const ld_ctx_t *)user;
+    size_t lo = 0, hi = ctx->icf_member_count;
+
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+
+        if (ctx->icf_members[mid].section < section) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo < ctx->icf_member_count && ctx->icf_members[lo].section == section ? ctx->icf_members[lo].cls : 0;
 }

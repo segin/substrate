@@ -161,6 +161,12 @@ typedef struct {
     size_t word;                /* first entry, counted from the first of these */
 } ld_tls_got_t;
 
+/* --icf: an input section with an identical one, and the class they are in, from 1. */
+typedef struct {
+    const elf_section_t *section;
+    size_t cls;
+} ld_icf_member_t;
+
 typedef struct {
     elfobj_t **objs;
     char **names;
@@ -323,6 +329,11 @@ typedef struct {
      * order of address (gc_collect_input_sections). */
     const elf_section_t **gc_dead;
     size_t gc_dead_count;
+    /* --icf: the input sections that have an identical one, each with the
+     * number of its class, in order of address (icf_collect_input_sections). */
+    ld_icf_member_t *icf_members;
+    size_t icf_member_count;
+    size_t icf_class_count;
     /* The indirect functions bound in this output, each with a stub in
      * .iplt and a GOT entry after those: see collect_local_got(). */
     const elf_symbol_t **ifuncs;
@@ -1040,6 +1051,22 @@ int apply_version_script(const ld_ctx_t *ctx, elfobj_t *out);
 /* ld_gc.c */
 int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab);
 int gc_keep_input_section(const elf_section_t *section, void *user);
-int apply_identical_code_folding(elfobj_t *obj, const ld_ctx_t *ctx);
+/**
+ * --icf: sort the inputs' sections into classes of identical ones, before the merge gathers .text.* into
+ * .text, for icf_class_of_input_section() to tell the merge.
+ *
+ * @param ctx    the link; its icf_members and icf_class_count are set
+ * @param inputs the inputs, as they go to the merge
+ * @return 0, or -1 out of memory
+ */
+int icf_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs);
+/**
+ * The elfobj fold hook: the class of identical sections an input section is in, or 0 if it has no twin.
+ *
+ * @param section an input section
+ * @param user    the ld_ctx_t
+ * @return its class, from 1, or 0
+ */
+size_t icf_class_of_input_section(const elf_section_t *section, void *user);
 
 #endif /* LD_H */

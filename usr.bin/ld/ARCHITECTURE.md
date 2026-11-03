@@ -58,9 +58,11 @@ ELF Objects / Archives / DSOs / Linker Scripts
 	-> input loaders and parsers
 	-> global symbol resolution
 	-> --gc-sections: which input sections are used (before the merge)
+	-> --icf: which input sections are identical (before the merge)
 	-> merge by libelfobj: input sections into output sections, by name
-	   or by the script, passing over what was collected
-	-> rewriting of thread-local sequences (programs), ICF
+	   or by the script, passing over what was collected and placing one
+	   of each class of identical sections
+	-> rewriting of thread-local sequences (programs)
 	-> planning: imports, PLT, GOT slots (imports, then the output's own,
 	   then thread-local entries and indirect functions), .dynsym, .dynamic
 	-> section order, segments, addresses
@@ -88,7 +90,7 @@ Deployment: Installed as `usr/bin/ld` with architecture alias symlinks
 
 Name: Global symbol state, archive extraction, GC, and ICF
 
-Description: The linker tracks global symbol ownership, resolves weak/strong precedence, and determines when additional archive members must be materialized. Garbage collection (`ld_gc.c`) is decided on the input objects' sections before they are merged: from the entry, what the output exports, what runs unasked and what a script keeps, it follows relocations to the sections they name, and the merge is told which sections to pass over. Identical code folding works on the merged output.
+Description: The linker tracks global symbol ownership, resolves weak/strong precedence, and determines when additional archive members must be materialized. Garbage collection (`ld_gc.c`) is decided on the input objects' sections before they are merged: from the entry, what the output exports, what runs unasked and what a script keeps, it follows relocations to the sections they name, and the merge is told which sections to pass over. Identical code folding (`--icf`) is decided on the input sections too, while each function compiled with -ffunction-sections is still a section of its own: sections alike in contents and in what their relocations refer to are put in classes, and the merge (libelfobj's fold hook) lays out the first of each class and gives the rest its place.  Code is folded in both modes, read-only data under `--icf=all`, nothing writable.
 
 Once the inputs are chosen their global symbols are read into one table (`ld_symtab_t`, `ld_symtab.c`): for each name, the definition the link takes (the first strong one, else the first weak), who else defines it, and who first refers to it. Two strong definitions are reported there; the undefined-reference message, the map's "source", and the collector's question "where is this defined" are all answered from it. While inputs are still being chosen the questions are of sets of names (defined so far, still wanted), which are `symset_t` on the same index of names. `libelfobj`'s merge decides what goes into the output by the same rule, in its own code; the tests link each ordering of weak, strong and reference to check that the two agree.
 

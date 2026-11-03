@@ -397,11 +397,34 @@ Name each section left out by
 .Fl -gc-sections ,
 and the input it was in.
 .It Fl -icf Ns = Ns Ar mode
-Enable identical code/data folding in
+Fold identical input sections into one, as gold and lld do:
+two functions compiled with
+.Fl ffunction-sections
+to the same bytes, with relocations of the same kinds at the same
+places against the same symbols, end up at one address.
+The inputs' sections are compared before
+.Pa .text.*
+is gathered into
+.Pa .text .
+In
 .Ar safe
-or
+mode only code
+.Pf ( Pa .text
+and
+.Pa .text.* )
+is folded; in
 .Ar all
-mode.
+mode read-only data
+.Pf ( Pa .rodata
+and
+.Pa .rodata.* )
+is folded too.
+Writable sections, sections of a group, mergeable, thread-local and
+compressed sections are never folded.
+.Ar none ,
+the default, folds nothing.
+Not with
+.Fl r .
 .It Fl -hash-style Ns = Ns Ar style
 Select dynamic symbol hash style.
 .It Fl -defsym Ar name=value
