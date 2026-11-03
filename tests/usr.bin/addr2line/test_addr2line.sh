@@ -1054,6 +1054,70 @@ SRC
         esac
     done
 
+    # 10q-4: options may follow the addresses, as getopt_long(3) permutes
+    # them (unless POSIXLY_CORRECT is set), and every option GNU
+    # addr2line accepts is accepted: -v/-H, -r/-R and their long names,
+    # -b/--target, and an abbreviation (--rec) of two names for the same
+    # option.  GNU addr2line is the judge of the output and the status.
+    for ARGS in "-e $QF 0x$QA -f" "0x$QA -e $QF -f -C" "-e $QF 0x$QA -a -f 0x$QA" \
+                "-r -f -C -e $QF 0x$QA" "-R -f -C -e $QF 0x$QA" \
+                "--recurse-limit -e $QF 0x$QA" "--recursion-limit -e $QF 0x$QA" \
+                "--no-recurse-limit -e $QF 0x$QA" "--no-recursion-limit -e $QF 0x$QA" \
+                "--rec -e $QF 0x$QA" "-b elf64-x86-64 -e $QF 0x$QA" \
+                "-belf64-x86-64 -e $QF 0x$QA" "--target=elf64-x86-64 -e $QF 0x$QA" \
+                "--tar elf64-little -e $QF 0x$QA" "-b default -e $QF 0x$QA"; do
+        HOST_Q=$(norm_a2l "$(addr2line $ARGS 2>&1)")
+        OUR_Q=$($BIN $ARGS 2>"$TMP/q.err") ||
+            { cat "$TMP/q.err" >&2; fail "10q-4 '$ARGS' rejected"; }
+        expect_eq "10q-4 '$ARGS'" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+    done
+    HOST_Q=$(POSIXLY_CORRECT=1 addr2line -e "$QF" 0x$QA -f 2>/dev/null)
+    OUR_Q=$(POSIXLY_CORRECT=1 $BIN -e "$QF" 0x$QA -f 2>/dev/null)
+    expect_eq "10q-4 POSIXLY_CORRECT" "$OUR_Q" "$HOST_Q"
+    for FLAGS in "-v" "-H" "-V" "-h"; do
+        OUR_Q=$($BIN $FLAGS 2>/dev/null) || fail "10q-4 $FLAGS status"
+        [ -n "$OUR_Q" ] || fail "10q-4 $FLAGS printed nothing"
+        pass "10q-4 $FLAGS"
+    done
+    for T in elf32-i386:"file format not recognized" \
+             elf64-big:"file format not recognized" \
+             bogus:"invalid bfd target"; do
+        RC=0
+        addr2line -b "${T%%:*}" -e "$QF" 0x$QA >/dev/null 2>"$TMP/qg.err" || RC=$?
+        expect_eq "10q-4 GNU -b ${T%%:*} status" "$RC" "1"
+        grep -F "${T#*:}" "$TMP/qg.err" >/dev/null ||
+            fail "10q-4 GNU -b ${T%%:*} message"
+        RC=0
+        $BIN -b "${T%%:*}" -e "$QF" 0x$QA >/dev/null 2>"$TMP/q.err" || RC=$?
+        expect_eq "10q-4 -b ${T%%:*} status" "$RC" "1"
+        grep -F "$QF: ${T#*:}" "$TMP/q.err" >/dev/null ||
+            fail "10q-4 -b ${T%%:*} message"
+    done
+
+    # 10q-5: -r lifts the demangler's nesting bound.  A C++ function
+    # whose parameter is 300 pointers deep is past the bound -R keeps, so
+    # only -r names it in full; GNU addr2line -r is the judge.
+    mkdir -p "$TMP/deep"
+    {
+        printf 'void deep(int '
+        I=0
+        while [ $I -lt 300 ]; do printf '*'; I=$((I + 1)); done
+        printf ' p) { (void)p; }\nint main() { deep(0); return 0; }\n'
+    } > "$TMP/deep/deep.cpp"
+    c++ -O0 -g -no-pie -o "$TMP/deep/deep" "$TMP/deep/deep.cpp"
+    DA=$(nm "$TMP/deep/deep" | awk '$3 ~ /^_Z4deep/ {print $1; exit}')
+    [ -n "$DA" ] || fail "10q-5 symbol deep not found"
+    HOST_Q=$(addr2line -r -f -C -e "$TMP/deep/deep" 0x$DA | sed -n 1p)
+    case $HOST_Q in
+    'deep(int****'*) ;;
+    *) fail "10q-5 GNU addr2line -r does not demangle deep" ;;
+    esac
+    expect_eq "10q-5 -r" "$($BIN -r -f -C -e "$TMP/deep/deep" 0x$DA | sed -n 1p)" "$HOST_Q"
+    case $($BIN -R -f -C -e "$TMP/deep/deep" 0x$DA | sed -n 1p) in
+    _Z4deep*) pass "10q-5 -R keeps the bound" ;;
+    *) fail "10q-5 -R demangled past the bound" ;;
+    esac
+
     pass "all"
 }
 

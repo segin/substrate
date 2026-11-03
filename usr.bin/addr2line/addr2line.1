@@ -16,13 +16,21 @@ result per query.
 If no addresses are provided on the command line, addresses are read from
 standard input, one per line.
 .SH OPTIONS
-Options come before the addresses; the first argument that is not an
-option, or the argument after
-.BR \-\- ,
-starts them.
+As with
+.BR getopt_long (3),
+options and addresses may come in any order
+.RB ( "\-e a.out 0x401000 \-f" ):
+every argument that is not an option is an address.
+.B \-\-
+ends the options, and so does the first address when
+.B POSIXLY_CORRECT
+is set; a lone
+.B \-
+is an address.
 Short options may be bundled
 .RB ( "\-fpCe a.out" ).
 The value of
+.BR \-b ,
 .B \-e
 or
 .B \-j
@@ -35,7 +43,27 @@ or be the next argument
 .RB ( "\-\-exe a.out" ),
 and a long option may be abbreviated to any prefix that names it
 alone
-.RB ( \-\-func ).
+.RB ( \-\-func ),
+or that names only spellings of the same option
+.RB ( \-\-rec ).
+.TP
+.BI \-b " TARGET\fR,\fP " \-\-target= TARGET
+Require the input to be in the format GNU
+.B addr2line
+calls
+.IR TARGET :
+.BR elf64\-x86\-64 ,
+.BR elf32\-x86\-64 ,
+.BR elf32\-i386 ,
+.BR elf64\-little ,
+.BR elf64\-big ,
+.BR elf32\-little ,
+.BR elf32\-big ,
+or
+.BR default ,
+which takes any file.
+A file in another format is an error (\(lqfile format not
+recognized\(rq), as is any other name (\(lqinvalid bfd target\(rq).
 .TP
 .BI \-e " FILE\fR,\fP " \-\-exe= FILE
 Use
@@ -80,6 +108,19 @@ which is accepted but, there being no Ada demangler, also leaves names
 as they are.
 Any other style is an error.
 .TP
+.BR \-r ", " \-\-no\-recurse\-limit ", " \-\-no\-recursion\-limit
+Let
+.B \-C
+demangle names nested however deeply
+.RB ( DEMANGLE_NO_RECURSE_LIMIT
+in
+.BR demangle (3)).
+.TP
+.BR \-R ", " \-\-recurse\-limit ", " \-\-recursion\-limit
+Keep the demangler's bound on nesting (the default); undoes an
+earlier
+.BR \-r .
+.TP
 .BR \-p ", " \-\-pretty\-print
 Print each frame on one line: with
 .B \-f
@@ -105,10 +146,10 @@ Print
 .IR file:line:column
 when column data is available.
 .TP
-.BR \-h ", " \-\-help
+.BR \-h ", " \-H ", " \-\-help
 Print usage and exit with status 0.
 .TP
-.BR \-V ", " \-\-version
+.BR \-V ", " \-v ", " \-\-version
 Print version information and exit with status 0.
 .SH OUTPUT
 If a lookup fails,

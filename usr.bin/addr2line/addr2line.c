@@ -100,6 +100,8 @@ typedef struct {
     const char *section_name;
     int basenames;
     int demangle;   /* demangle(3) style flags; 0 leaves names as they are */
+    int no_recurse_limit;   /* -r: lift the demangler's nesting bound */
+    const char *target;     /* -b: BFD target name the file must match */
     int pretty;
     int show_addresses;
 } addr2line_opts_t;
@@ -331,7 +333,7 @@ static void emit_unresolved_frame(const addr2line_opts_t *opts);
 
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-afiCpcs] [-e file] [-j section] [addr ...]\n"
+            "usage: %s [-afiCpcsrR] [-b target] [-e file] [-j section] [addr ...]\n"
             "       %s --help\n"
             "       %s --version\n",
             g_progname, g_progname, g_progname);
@@ -3601,7 +3603,8 @@ static void emit_frame_result(const addr2line_opts_t *opts,
         out_path = path_basename_view(out_path);
     }
     if (opts->demangle != 0 && strcmp(func, "??") != 0) {
-        dem = demangle(func, opts->demangle);
+        dem = demangle(func, opts->demangle |
+                                 (opts->no_recurse_limit ? DEMANGLE_NO_RECURSE_LIMIT : 0));
         if (dem != NULL && dem[0] != '\0') {
             display_func = dem;
         }
@@ -3857,10 +3860,18 @@ static const a2l_longopt_t g_longopts[] = {
     { "help", A2L_ARG_NONE, 'h' },
     { "inlines", A2L_ARG_NONE, 'i' },
     { "pretty-print", A2L_ARG_NONE, 'p' },
+    { "recurse-limit", A2L_ARG_NONE, 'R' },
+    { "recursion-limit", A2L_ARG_NONE, 'R' },
+    { "no-recurse-limit", A2L_ARG_NONE, 'r' },
+    { "no-recursion-limit", A2L_ARG_NONE, 'r' },
     { "section", A2L_ARG_REQUIRED, 'j' },
+    { "target", A2L_ARG_REQUIRED, 'b' },
     { "version", A2L_ARG_NONE, 'V' },
     { NULL, A2L_ARG_NONE, 0 }
 };
+
+/* Short options; a ':' follows each that takes an argument. */
+static const char g_shortopts[] = "ab:cCe:fhHij:prRsvV";
 
 /**
  * @brief Map a --demangle=STYLE name to demangle(3) flags.
@@ -3912,6 +3923,9 @@ static int apply_option(addr2line_opts_t *opts, int key, const char *value) {
     case 'a':
         opts->show_addresses = 1;
         break;
+    case 'b':
+        opts->target = value;
+        break;
     case 'c':
         opts->show_column = 1;
         break;
@@ -3930,6 +3944,7 @@ static int apply_option(addr2line_opts_t *opts, int key, const char *value) {
         opts->show_functions = 1;
         break;
     case 'h':
+    case 'H':
         usage(stdout);
         exit(0);
     case 'i':
@@ -3941,9 +3956,16 @@ static int apply_option(addr2line_opts_t *opts, int key, const char *value) {
     case 'p':
         opts->pretty = 1;
         break;
+    case 'r':
+        opts->no_recurse_limit = 1;
+        break;
+    case 'R':
+        opts->no_recurse_limit = 0;
+        break;
     case 's':
         opts->basenames = 1;
         break;
+    case 'v':
     case 'V':
         print_version();
         exit(0);
@@ -3956,8 +3978,10 @@ static int apply_option(addr2line_opts_t *opts, int key, const char *value) {
 /**
  * @brief Parse one "--name[=value]" argument.
  *
- * A name may be abbreviated to any prefix that names one option only.
- * An option that requires an argument takes it after '=' or, failing
+ * A name may be abbreviated to any prefix that names one option only;
+ * as with getopt_long(3), a prefix of several names that all mean the
+ * same option (--rec for --recurse-limit and --recursion-limit) is not
+ * ambiguous.  An option that requires an argument takes it after '=' or, failing
  * that, from the next argument; an optional argument is only taken
  * after '='.
  *
@@ -3975,7 +3999,7 @@ static int parse_long_option(int argc, char **argv, int *i, addr2line_opts_t *op
     const a2l_longopt_t *match = NULL;
     const char *value = NULL;
     size_t k;
-    int matches = 0;
+    int ambiguous = 0;
 
     for (k = 0; g_longopts[k].name != NULL; ++k) {
         if (strncmp(g_longopts[k].name, name, len) != 0) {
@@ -3983,17 +4007,21 @@ static int parse_long_option(int argc, char **argv, int *i, addr2line_opts_t *op
         }
         if (g_longopts[k].name[len] == '\0') {
             match = &g_longopts[k];
-            matches = 1;
+            ambiguous = 0;
             break;
         }
-        match = &g_longopts[k];
-        matches++;
+        if (match == NULL) {
+            match = &g_longopts[k];
+        } else if (match->key != g_longopts[k].key ||
+                   match->has_arg != g_longopts[k].has_arg) {
+            ambiguous = 1;
+        }
     }
-    if (matches == 0 || len == 0u) {
+    if (match == NULL || len == 0u) {
         fprintf(stderr, "%s: unknown option: %s\n", g_progname, arg);
         return -1;
     }
-    if (matches > 1) {
+    if (ambiguous) {
         fprintf(stderr, "%s: option '%.*s' is ambiguous\n", g_progname,
                 (int)(len + 2u), arg);
         return -1;
@@ -4021,7 +4049,7 @@ static int parse_long_option(int argc, char **argv, int *i, addr2line_opts_t *op
 /**
  * @brief Parse one argument of bundled short options, such as "-fpCe".
  *
- * -e and -j take the rest of the argument as their value ("-ea.out")
+ * -b, -e and -j take the rest of the argument as their value ("-ea.out")
  * or, when nothing follows them, the next argument.
  *
  * @param argc Argument count.
@@ -4034,22 +4062,24 @@ static int parse_short_options(int argc, char **argv, int *i, addr2line_opts_t *
     const char *p;
 
     for (p = argv[*i] + 1; *p != '\0'; ++p) {
-        if (*p == 'e' || *p == 'j') {
+        const char *spec = *p != ':' ? strchr(g_shortopts, *p) : NULL;
+
+        if (spec == NULL) {
+            fprintf(stderr, "%s: unknown option: -%c\n", g_progname, *p);
+            return -1;
+        }
+        if (spec[1] == ':') {
             const char *value = p + 1;
             if (*value == '\0') {
                 if (*i + 1 >= argc) {
-                    fprintf(stderr, "%s: -%c requires %s\n", g_progname, *p,
-                            *p == 'e' ? "a file path" : "a section name");
+                    fprintf(stderr, "%s: option requires an argument -- '%c'\n",
+                            g_progname, *p);
                     return -1;
                 }
                 (*i)++;
                 value = argv[*i];
             }
             return apply_option(opts, *p, value);
-        }
-        if (strchr("acCfhipsV", *p) == NULL) {
-            fprintf(stderr, "%s: unknown option: -%c\n", g_progname, *p);
-            return -1;
         }
         if (apply_option(opts, *p, NULL) != 0) {
             return -1;
@@ -4061,19 +4091,32 @@ static int parse_short_options(int argc, char **argv, int *i, addr2line_opts_t *
 /**
  * @brief Parse the command line into @p opts.
  *
- * Options come first: the first argument that is not an option, or
- * the one after "--", starts the addresses.
+ * As GNU getopt_long(3) does, options and addresses may be mixed in
+ * any order ("-e a.out 0x401000 -f"): every argument that is not an
+ * option is an address, in the order given.  "--" ends the options,
+ * and so, when POSIXLY_CORRECT is set, does the first address.  A lone
+ * "-" is an address, not an option.
  *
  * @param argc Argument count.
  * @param argv Argument vector.
- * @param opts Filled in.
- * @return 0 on success, -1 on a bad option (already reported).
+ * @param opts Filled in; @c addr_args is allocated and must be freed.
+ * @return 0 on success, -1 on a bad option or no memory (already
+ *         reported).
  */
 static int parse_options(int argc, char **argv, addr2line_opts_t *opts) {
+    const char **addrs;
+    size_t n = 0;
+    int posix = getenv("POSIXLY_CORRECT") != NULL;
     int i;
 
     memset(opts, 0, sizeof(*opts));
     opts->exe_path = "a.out";
+
+    addrs = (const char **)calloc(argc > 0 ? (size_t)argc : 1u, sizeof(*addrs));
+    if (addrs == NULL) {
+        fprintf(stderr, "%s: out of memory\n", g_progname);
+        return -1;
+    }
 
     for (i = 1; i < argc; ++i) {
         const char *arg = argv[i];
@@ -4082,25 +4125,79 @@ static int parse_options(int argc, char **argv, addr2line_opts_t *opts) {
             i++;
             break;
         }
-        if (arg[0] != '-') {
-            break;
-        }
-        if (arg[1] == '\0') {
-            fprintf(stderr, "%s: unknown option: %s\n", g_progname, arg);
-            return -1;
+        if (arg[0] != '-' || arg[1] == '\0') {
+            if (posix) {
+                break;
+            }
+            addrs[n++] = arg;
+            continue;
         }
         if (arg[1] == '-') {
             if (parse_long_option(argc, argv, &i, opts) != 0) {
+                free(addrs);
                 return -1;
             }
         } else if (parse_short_options(argc, argv, &i, opts) != 0) {
+            free(addrs);
             return -1;
         }
     }
+    for (; i < argc; ++i) {
+        addrs[n++] = argv[i];
+    }
 
-    opts->addr_args = (const char **)&argv[i];
-    opts->addr_argc = (size_t)(argc - i);
+    opts->addr_args = addrs;
+    opts->addr_argc = n;
     return 0;
+}
+
+/**
+ * @brief Check the file against the format named with -b.
+ *
+ * The names are GNU's BFD target names for ELF: a named machine must
+ * match e_machine, and every name fixes the class and byte order.
+ * "default" accepts any file.  A name that is not an ELF target this
+ * tool reads is reported as GNU reports an unknown one.
+ *
+ * @param img    Open image.
+ * @param target Target name from -b or --target.
+ * @return 0 if the file is in that format, -1 if not (already
+ *         reported).
+ */
+static int check_target(const addr2line_image_t *img, const char *target) {
+    static const struct {
+        const char *name;
+        elfobj_class_t elf_class;
+        elfobj_endian_t endian;
+        uint16_t machine;   /* 0: any machine */
+    } targets[] = {
+        { "elf64-x86-64", ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE, EM_X86_64 },
+        { "elf32-x86-64", ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE, EM_X86_64 },
+        { "elf32-i386", ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE, EM_386 },
+        { "elf64-little", ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE, 0 },
+        { "elf64-big", ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_BE, 0 },
+        { "elf32-little", ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE, 0 },
+        { "elf32-big", ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_BE, 0 },
+    };
+    size_t k;
+
+    if (strcmp(target, "default") == 0) {
+        return 0;
+    }
+    for (k = 0; k < sizeof(targets) / sizeof(targets[0]); ++k) {
+        if (strcmp(target, targets[k].name) != 0) {
+            continue;
+        }
+        if (img->elf_class != targets[k].elf_class ||
+            img->elf_endian != targets[k].endian ||
+            (targets[k].machine != 0 && elf_machine(img->elf) != targets[k].machine)) {
+            fprintf(stderr, "%s: %s: file format not recognized\n", g_progname, img->path);
+            return -1;
+        }
+        return 0;
+    }
+    fprintf(stderr, "%s: %s: invalid bfd target\n", g_progname, img->path);
+    return -1;
 }
 
 int main(int argc, char **argv) {
@@ -4118,6 +4215,12 @@ int main(int argc, char **argv) {
     }
 
     if (image_open(&img, opts.exe_path) != 0) {
+        free(opts.addr_args);
+        return 1;
+    }
+    if (opts.target != NULL && check_target(&img, opts.target) != 0) {
+        image_reset(&img);
+        free(opts.addr_args);
         return 1;
     }
     if (opts.section_name != NULL) {
@@ -4125,6 +4228,7 @@ int main(int argc, char **argv) {
         if (find_section_addr(&img, opts.section_name, &sec_addr) != 0) {
             fprintf(stderr, "%s: unknown section: %s\n", g_progname, opts.section_name);
             image_reset(&img);
+            free(opts.addr_args);
             return 1;
         }
     }
@@ -4136,5 +4240,6 @@ int main(int argc, char **argv) {
     }
 
     image_reset(&img);
+    free(opts.addr_args);
     return rc;
 }
