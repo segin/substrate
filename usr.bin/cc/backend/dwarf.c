@@ -398,6 +398,10 @@ static struct {
     unsigned *file_nos;
     size_t file_nos_cap;
     unsigned next_file_no;
+    /* the last .loc row printed in the function being written */
+    unsigned loc_line;
+    unsigned loc_col;
+    int loc_file;
     /* the output */
     dbuf_t types;              /**< type DIEs */
     dbuf_t main;               /**< variable and subprogram DIEs */
@@ -1638,18 +1642,64 @@ int cc_dwarf_active(void) {
 }
 
 /**
- * Print the label a function's code starts at (see cc_dwarf.h).
+ * Print the code's first line-table row, at its label: the line of the
+ * function's name, as gcc's first row is (see cc_dwarf.h).
  *
  * @param fp  the assembly
  * @param f   the function
  */
 void cc_dwarf_func_begin(FILE *fp, const cc_ssa_function_t *f) {
-    (void)f;
+    const cc_function_t *af;
+
     if (!g_dw.active) {
         return;
     }
     g_dw.slot_count = 0;
+    g_dw.loc_line = 0;
+    g_dw.loc_col = 0;
+    g_dw.loc_file = 0;
     fprintf(fp, ".Ldfb%d:\n", g_dw.next_label + 1);
+    af = f->src_fn;
+    if (af != NULL) {
+        cc_dwarf_loc_at(fp, (unsigned)(af->name_line != 0 ? af->name_line : af->line),
+                        (unsigned)(af->name_line != 0 ? af->name_col : af->col), af->src_file);
+    } else if (f->src_line != 0) {
+        cc_dwarf_loc_at(fp, (unsigned)f->src_line, (unsigned)f->src_col, 0);
+    }
+}
+
+/**
+ * Print a .loc row for a source position, unless it is the last one's
+ * (see cc_dwarf.h).
+ *
+ * @param fp    the assembly
+ * @param line  the line; 0 for none
+ * @param col   the column
+ * @param file  the file (one more than its index); 0 the source file
+ */
+void cc_dwarf_loc_at(FILE *fp, unsigned line, unsigned col, int file) {
+    unsigned n;
+
+    if (!g_dw.active || line == 0 || (line == g_dw.loc_line && col == g_dw.loc_col && file == g_dw.loc_file)) {
+        return;
+    }
+    n = cc_dwarf_file_number(fp, file);
+    fprintf(fp, "\t.loc %u %u %u\n", n, line, col);
+    g_dw.loc_line = line;
+    g_dw.loc_col = col;
+    g_dw.loc_file = file;
+}
+
+/**
+ * Print the .loc row of an IR instruction's position (see cc_dwarf.h).
+ *
+ * @param fp  the assembly
+ * @param in  the instruction
+ */
+void cc_dwarf_loc(FILE *fp, const cc_ssa_instr_t *in) {
+    if (in != NULL) {
+        cc_dwarf_loc_at(fp, in->dbg_line, in->dbg_col, in->dbg_file);
+    }
 }
 
 /** Note where a stack allocation of the function being written is (see cc_dwarf.h). */

@@ -68,6 +68,27 @@ int cc_dwarf_active(void);
 void cc_dwarf_func_begin(FILE *fp, const cc_ssa_function_t *f);
 
 /**
+ * The code that follows is from source position @p in carries
+ * (cc_ssa_instr_t.dbg_line): print a .loc row when it is a new one.  An
+ * instruction with no position (one a pass made) belongs to the row
+ * before.
+ *
+ * @param fp  the assembly being written
+ * @param in  the IR instruction whose code follows
+ */
+void cc_dwarf_loc(FILE *fp, const cc_ssa_instr_t *in);
+
+/**
+ * The same, for a position the caller holds (the machine IR's copy of it).
+ *
+ * @param fp    the assembly being written
+ * @param line  the line; 0 for none
+ * @param col   the column
+ * @param file  one more than the file's index in the unit's files; 0 the source file
+ */
+void cc_dwarf_loc_at(FILE *fp, unsigned line, unsigned col, int file);
+
+/**
  * Stack allocation @p value of the function being written lives at
  * @p cfa_off from the canonical frame address (the CFA its CFI
  * describes), for the whole of the function's body.

@@ -201,6 +201,11 @@ typedef struct {
     int aux;            /**< XI_ASM: the selector's own */
     const int *targets; /**< XI_ASM: the labels an asm goto may jump to, besides falling through; XI_JMPT: its table */
     int ntargets;
+    /** -g: the source position of the IR instruction it was selected from (cc_ssa_instr_t.dbg_line), for the
+     *  line table; line 0 for none (the allocator's spills and reloads: the row before's) */
+    unsigned dbg_line;
+    unsigned dbg_col;
+    int dbg_file;
 } xinst_t;
 
 /** A frame object's kind. */

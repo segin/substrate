@@ -1347,9 +1347,6 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         x86_emit_profile_call(fp, f, 1);
         if (emit_debug) {
             fprintf(fp, "\t.cfi_def_cfa_register %%rbp\n");
-            if (src_path != NULL) {
-                fprintf(fp, "\t.loc 1 1 0\n");
-            }
         }
         if (frame > 0) {
             fprintf(fp, "\tsubq $%d, %%rsp\n", frame);
@@ -1407,6 +1404,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             }
             int_regs_flush(fp, f, &lay, &ist);
             x86_diag_at(f, in);
+            cc_dwarf_loc(fp, in);
             if (half_param_count > 0 && in->op != CC_SSA_PARAM) {
                 /* the _Float16 parameters' bits, kept in their slots: to the doubles they are, once every
                  * parameter is out of its register (__extendhfdf2 is a call) */

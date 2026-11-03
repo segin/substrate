@@ -3510,9 +3510,6 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         x86_emit_profile_call(fp, f, 1);
         if (emit_debug) {
             fprintf(fp, "\t.cfi_def_cfa_register %%ebp\n");
-            if (src_path != NULL) {
-                fprintf(fp, "\t.loc 1 1 0\n");
-            }
         }
         /* the caller's %ebx, %esi, %edi that values have their homes in, pushed: the frame's first bytes */
         emit_i386_home_saves(fp, home_used, emit_debug, 0);
@@ -3591,6 +3588,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 i386_store_home_uses(fp, f, &lay, &ist, in);
             }
             x86_diag_at(f, in);
+            cc_dwarf_loc(fp, in);
 
             switch (in->op) {
             case CC_SSA_PARAM: {

@@ -252,6 +252,11 @@ typedef struct {
      *  it is, for debug information; 0 for none.  A pass that copies the instruction copies it; one that makes
      *  storage of its own leaves it 0 */
     int dbg_var;
+    /** -g: the source line of the statement the instruction was lowered from, for the line table (.loc); 0 for
+     *  none (one a pass made: it belongs to the row before).  A pass that copies the instruction copies it */
+    unsigned dbg_line;
+    unsigned dbg_col;  /**< and its column */
+    int dbg_file;      /**< and its file: one more than its index in the unit's files; 0 the source file */
 } cc_ssa_instr_t;
 
 typedef struct {

@@ -12856,10 +12856,42 @@ static int read_register_into(cc_ssa_function_t *sf, const var_entry_t *v, cc_di
     return 0;
 }
 
+static int lower_stmt_at(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
+                         size_t *var_count, const lower_ctx_t *ctx, int depth, int break_label, int continue_label,
+                         const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag);
+
+/**
+ * Lower a statement; under -g, its instructions marked as its line's (cc_ir_set_pos()), the enclosing
+ * statement's position put back after it -- a loop's step and its jump back are the loop's line again.
+ *
+ * @return 0, or -1 on error
+ */
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
-                      int *saw_ret,
-                      cc_diag_t *diag) {
+                      int *saw_ret, cc_diag_t *diag) {
+    cc_ir_pos_t saved;
+    int rc;
+
+    if (!cc_options_current()->debug || s->line == 0 || s->kind == CC_STMT_BLOCK) {
+        return lower_stmt_at(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s, saw_ret, diag);
+    }
+    {
+        cc_ir_pos_t pos;
+
+        pos.line = (unsigned)s->line;
+        pos.col = (unsigned)s->col;
+        pos.file = s->src_file;
+        saved = cc_ir_set_pos(pos);
+    }
+    rc = lower_stmt_at(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s, saw_ret, diag);
+    cc_ir_set_pos(saved);
+    return rc;
+}
+
+/** Lower a statement (lower_stmt() without the line bookkeeping). */
+static int lower_stmt_at(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
+                         size_t *var_count, const lower_ctx_t *ctx, int depth, int break_label, int continue_label,
+                         const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag) {
     size_t j;
 
     if (s->kind == CC_STMT_DECL) {
@@ -16131,6 +16163,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
     cc_ssa_module_init(out);
     out->src_tu = tu;
+    {
+        cc_ir_pos_t none = {0, 0, 0};
+
+        cc_ir_set_pos(none);
+    }
     if (diag != NULL) {
         diag->path[0] = '\0';
         diag->line = 0;
@@ -16992,6 +17029,17 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         sf->src_col = af->name_line != 0 ? af->name_col : af->col;
         sf->src_fn = af;
         {
+            /* -g: the prologue's instructions, the parameters stored, are the line of the function's name */
+            cc_ir_pos_t pos = {0, 0, 0};
+
+            if (cc_options_current()->debug) {
+                pos.line = (unsigned)(af->name_line != 0 ? af->name_line : af->line);
+                pos.col = (unsigned)(af->name_line != 0 ? af->name_col : af->col);
+                pos.file = af->src_file;
+            }
+            cc_ir_set_pos(pos);
+        }
+        {
             cc_ctype_kind_t rk = fn_ret_ctype(af) != NULL ? fn_ret_ctype(af)->kind : CC_CT_VOID;
             /* a _Float16 result is its bits in %xmm0, as gcc returns it */
             int half = rk == CC_CT_FLOAT16;
@@ -17357,6 +17405,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
         vars_pop_to(vars, &var_count, 0);
         free(vars);
+        {
+            cc_ir_pos_t none = {0, 0, 0};
+
+            cc_ir_set_pos(none);
+        }
         for (j = 0; j < lctx.label_count; ++j) {
             free(lctx.labels[j].name);
             free(lctx.labels[j].cleanups);

@@ -10,7 +10,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* where the instructions being appended come from (cc_ir_set_pos()) */
+static cc_ir_pos_t g_pos;
+
+/**
+ * Say where the instructions appended from now on come from (see cc_irbuild.h).
+ *
+ * @param pos  the position
+ * @return     the one it replaces
+ */
+cc_ir_pos_t cc_ir_set_pos(cc_ir_pos_t pos) {
+    cc_ir_pos_t old = g_pos;
+
+    g_pos = pos;
+    return old;
+}
+
 int cc_ir_push(cc_ssa_function_t *f, cc_ssa_instr_t in) {
+    if (in.dbg_line == 0 && g_pos.line != 0) {
+        in.dbg_line = g_pos.line;
+        in.dbg_col = g_pos.col;
+        in.dbg_file = g_pos.file;
+    }
     switch (in.op) {
     case CC_SSA_STORE:
     case CC_SSA_LABEL:

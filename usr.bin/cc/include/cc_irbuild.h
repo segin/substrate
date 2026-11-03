@@ -24,6 +24,24 @@
  */
 int cc_ir_push(cc_ssa_function_t *f, cc_ssa_instr_t in);
 
+/** Where in the source the instructions being appended come from, for -g's line table. */
+typedef struct {
+    unsigned line; /**< the line; 0 for none */
+    unsigned col;  /**< the column */
+    int file;      /**< one more than the file's index in the unit's files; 0 the source file */
+} cc_ir_pos_t;
+
+/**
+ * Say where the instructions appended from now on come from: cc_ir_push()
+ * gives each without a position of its own (cc_ssa_instr_t.dbg_line) this
+ * one.  Lowering sets it per statement under -g only, so that without -g
+ * the IR is the same.
+ *
+ * @param pos  the position; line 0 for none
+ * @return     the position it replaces, to put back
+ */
+cc_ir_pos_t cc_ir_set_pos(cc_ir_pos_t pos);
+
 /**
  * Add a value to @p f.
  *

@@ -4281,7 +4281,7 @@ static int label_address_taken(const cc_ssa_function_t *f, int label) {
     return 0;
 }
 
-static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_debug, cc_diag_t *diag) {
+static int print_function(FILE *fp, xsel_t *s, int emit_debug, cc_diag_t *diag) {
     const cc_ssa_function_t *f = s->f;
     const xsel_target_t *t = s->t;
     int w = t->word;
@@ -4379,9 +4379,6 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     x86_emit_profile_call(fp, f, 1);
     if (emit_debug) {
         fprintf(fp, "\t.cfi_def_cfa_register %s\n", xr_name(XR_BP, w));
-        if (src_path != NULL) {
-            fputs("\t.loc 1 1 0\n", fp);
-        }
     }
     {
         int off = -2 * w;
@@ -4442,6 +4439,9 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     for (i = 0; i < s->xf.nins; ++i) {
         const xinst_t *in = &s->xf.ins[i];
 
+        if (in->op != XI_LABEL) {
+            cc_dwarf_loc_at(fp, in->dbg_line, in->dbg_col, in->dbg_file);
+        }
         if (in->op == XI_LABEL) {
             emit_local_label(fp, f->name, in->label);
             fputs(":\n", fp);
@@ -4735,6 +4735,7 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
     size_t j;
     int rc;
 
+    (void)src_path; /* (the line table's rows come from the instructions: cc_dwarf_loc()) */
     if (env != NULL && env[0] == '1') {
         return 1;
     }
@@ -4759,9 +4760,24 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
     }
     taken++;
     rc = sel_init(&s);
+    for (j = 0; rc == 0 && j < (size_t)s.xf.nins; ++j) {
+        /* (the entry's own: the function's first row) */
+        s.xf.ins[j].dbg_line = 0;
+        s.xf.ins[j].dbg_col = 0;
+        s.xf.ins[j].dbg_file = 0;
+    }
     for (j = 0; rc == 0 && j < f->instr_count && !s.unsupported && !s.xf.oom; ++j) {
+        int first = s.xf.nins;
+        int k;
+
         sel_instr(&s, j);
         s.mem_seg = 0;
+        /* -g: the machine instructions are the IR instruction's source line (none: the row before's) */
+        for (k = first; k < s.xf.nins; ++k) {
+            s.xf.ins[k].dbg_line = f->instrs[j].dbg_line;
+            s.xf.ins[k].dbg_col = f->instrs[j].dbg_col;
+            s.xf.ins[k].dbg_file = f->instrs[j].dbg_file;
+        }
     }
     for (j = 0; rc == 0 && j < (size_t)s.xf.nins; ++j) {
         /* (the tables grow as they are made: a jump through one points into it now) */
@@ -4837,7 +4853,7 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
     }
     if (rc == 0) {
         peephole(&s.xf, t->word, takes_label_address(f));
-        if (print_function(out, &s, src_path, emit_debug, diag) != 0) {
+        if (print_function(out, &s, emit_debug, diag) != 0) {
             rc = -1;
         }
     }
