@@ -16,7 +16,8 @@ static long eh_frame_count_fdes(const uint8_t *data, size_t size, elfobj_endian_
             off += 4;           /* a terminator: one input's, or the last */
             continue;
         }
-        if (len == 0xffffffffu || len < 4 || off + 4 + (size_t)len > size) {
+        /* off + 4 <= size here, so this cannot wrap as off + 4 + len can. */
+        if (len == 0xffffffffu || len < 4 || (size_t)len > size - off - 4) {
             return -1;
         }
         if (read_u32_endian(data + off + 4, e) != 0) {
@@ -159,7 +160,7 @@ int fill_eh_frame_hdr(elfobj_t *out) {
             off += 4;
             continue;
         }
-        if (len == 0xffffffffu || len < 4 || off + 4 + (size_t)len > size) {
+        if (len == 0xffffffffu || len < 4 || (size_t)len > size - off - 4) {
             usable = 0;
             break;
         }
