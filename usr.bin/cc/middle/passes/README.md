@@ -59,7 +59,11 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
 - `mem.c`: what is known of the function's own stack slots whose
   addresses do not escape (`cc_optimize_slots()`, run in the -O1 loop):
   a slot nothing loads from dropped with its stores and its zeroing
-  memset, a slot a memcpy fills whole and that is only read after it, in
+  memset, a slot a memcpy fills whole from another slot zeroed and
+  stored into for nothing but that copy made that slot itself
+  (`coalesce_copied_slots()`: a structure an inlined function returns
+  by value, copied out to the local that takes it), a slot a memcpy
+  fills whole and that is only read after it, in
   the same straight run with nothing between that may write the source,
   read from the source (`forward_memcpy_slots()`: an inlined function's
   structure argument), a slot stored once read as the value stored, a structure slot split

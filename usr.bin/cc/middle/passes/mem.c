@@ -4,8 +4,12 @@
  * A local is a stack slot (STACKALLOC), and a value kept in one is out of
  * the folder's sight.  When a slot's address does not escape -- it is used
  * only as the address of loads and stores, directly or through moves and
- * constant offsets -- four things are safe here:
+ * constant offsets -- five things are safe here:
  *
+ *  - a slot a memcpy fills whole from another, which was zeroed and stored
+ *    into just before for nothing but that copy, is that other slot
+ *    (coalesce_copied_slots()): a structure an inlined function returns
+ *    by value is built in a buffer and copied to the local that takes it;
  *  - a slot nothing loads from loses its stores and its zeroing memset,
  *    whatever their sizes and offsets (drop_unread_slots()), and then the
  *    slot itself: -ftrivial-auto-var-init=zero zeroes every local, and
@@ -558,7 +562,9 @@ static int private_slots(const addr_info_t *a, unsigned char **priv) {
         if ((in->op == CC_SSA_MOV || in->op == CC_SSA_ADD) && is_value(f, in->dst) && a->slot[in->dst] >= 0) {
             continue;
         }
-        if (in->op == CC_SSA_LOAD) {
+        if (in->op == CC_SSA_LOAD || in->op == CC_SSA_STACKALLOC || in->op == CC_SSA_CONST || in->op == CC_SSA_PARAM) {
+            /* (no operands: what an allocation's unused lhs and rhs hold, 0 from its building and renumbered when
+               it is inlined, names no value) */
             continue;
         }
         if (in->op == CC_SSA_STORE) {
@@ -817,6 +823,149 @@ static int forward_memcpy_slots(cc_ssa_function_t *f) {
     free(taken);
     free(repl);
     free(drop);
+    free(priv);
+    addr_info_free(&a);
+    return changed;
+}
+
+/**
+ * Whether slot @p src, copied whole into slot @p s by the memcpy at @p m, is only filled before the copy -- a
+ * zeroing memset of the whole of it first, then stores into it, all in the straight run that ends with the copy --
+ * and nothing names @p s before the copy: then @p s may be @p src itself, the copy gone.
+ */
+static int copy_from_filled_slot(const addr_info_t *a, size_t m, int s, int src) {
+    const cc_ssa_function_t *f = a->f;
+    size_t start = m;
+    size_t i;
+    long long n;
+
+    /* the straight run the copy ends, back to the zeroing memset that begins src's filling */
+    while (start > 0 && !ends_run(f->instrs[start - 1].op)) {
+        start--;
+        if (is_zeroing_memset(a, &f->instrs[start], &n) && points_into(a, f->instrs[start].args[0], src) &&
+            f->instrs[start].args[0] == src && n == slot_size(a, src)) {
+            break;
+        }
+    }
+    if (start == m || !is_zeroing_memset(a, &f->instrs[start], &n) || f->instrs[start].args[0] != src) {
+        return 0;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (i == m || i == start) {
+            continue;
+        }
+        if (names_slot(a, in, s) && i < m) {
+            return 0;
+        }
+        if (!names_slot(a, in, src)) {
+            continue;
+        }
+        if (i < start || i > m) {
+            return 0;
+        }
+        if ((in->op == CC_SSA_MOV || in->op == CC_SSA_ADD) && points_into(a, in->dst, src)) {
+            continue; /* the address of a field it is filled through */
+        }
+        if (in->op != CC_SSA_STORE || !points_into(a, in->lhs, src) || points_into(a, in->rhs, src)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * Make each slot filled whole by a memcpy from another slot, which was zeroed and stored into just before for
+ * nothing but that copy, that other slot itself: a structure an inlined function returns by value, built in its
+ * buffer and copied out to the variable that takes it -- Linux's `struct pt_state pts = pt_init(range, level,
+ * table)` -- is then one slot, its fields the stores that built it, which the passes after follow as a local's.
+ *
+ * @return 1 if anything changed, 0 if not, -1 when out of memory
+ */
+static int coalesce_copied_slots(cc_ssa_function_t *f) {
+    addr_info_t a;
+    unsigned char *priv;
+    unsigned char *taken;
+    int *repl;
+    size_t i;
+    size_t w;
+    int changed = 0;
+
+    if (f->value_count <= 0 || f->instr_count == 0) {
+        return 0;
+    }
+    if (addr_info_build(&a, f, 1, 1) != 0) {
+        return -1;
+    }
+    if (private_slots(&a, &priv) != 0) {
+        addr_info_free(&a);
+        return -1;
+    }
+    taken = (unsigned char *)calloc((size_t)f->value_count, 1);
+    repl = (int *)malloc((size_t)f->value_count * sizeof(*repl));
+    if (taken == NULL || repl == NULL) {
+        free(taken);
+        free(repl);
+        free(priv);
+        addr_info_free(&a);
+        return -1;
+    }
+    for (i = 0; i < (size_t)f->value_count; ++i) {
+        repl[i] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        long long n;
+        int s;
+        int src;
+
+        if (!is_plain_memcpy(&a, in, &n) || !is_value(f, in->args[0]) || a.slot[in->args[0]] != in->args[0] ||
+            !is_value(f, in->args[1]) || a.slot[in->args[1]] != in->args[1]) {
+            continue;
+        }
+        s = in->args[0];
+        src = in->args[1];
+        if (s == src || !priv[s] || !priv[src] || taken[s] || taken[src] || n != slot_size(&a, s) ||
+            n != slot_size(&a, src) || !copy_from_filled_slot(&a, i, s, src)) {
+            continue;
+        }
+        taken[s] = 1;
+        taken[src] = 1;
+        repl[s] = src;
+    }
+    w = 0;
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+        long long n;
+
+        if (is_plain_memcpy(&a, in, &n) && is_value(f, in->args[0]) && repl[in->args[0]] == in->args[1]) {
+            cc_ssa_instr_free(in);
+            changed = 1;
+            continue;
+        }
+        if (in->op != CC_SSA_STACKALLOC) {
+            if (is_value(f, in->lhs) && repl[in->lhs] >= 0) {
+                in->lhs = repl[in->lhs];
+            }
+            if (in->op != CC_SSA_CALL && is_value(f, in->rhs) && repl[in->rhs] >= 0) {
+                in->rhs = repl[in->rhs];
+            }
+            for (k = 0; k < in->arg_count; ++k) {
+                if (is_value(f, in->args[k]) && repl[in->args[k]] >= 0) {
+                    in->args[k] = repl[in->args[k]];
+                }
+            }
+        }
+        if (w != i) {
+            f->instrs[w] = f->instrs[i];
+        }
+        w++;
+    }
+    f->instr_count = w;
+    free(taken);
+    free(repl);
     free(priv);
     addr_info_free(&a);
     return changed;
@@ -2490,13 +2639,14 @@ long cc_ssa_memory_slot_bytes(const cc_ssa_function_t *f) {
 
 int cc_optimize_slots(cc_ssa_function_t *f) {
     int r0 = drop_unread_slots(f);
-    int rm = r0 < 0 ? -1 : forward_memcpy_slots(f);
+    int rc = r0 < 0 ? -1 : coalesce_copied_slots(f);
+    int rm = rc < 0 ? -1 : forward_memcpy_slots(f);
     int r1 = rm < 0 ? -1 : forward_slot_copies(f);
     int r2 = r1 < 0 ? -1 : scalarize_slots(f);
     int r3 = r2 < 0 ? -1 : slot_value_sets(f);
 
-    if (r0 < 0 || rm < 0 || r1 < 0 || r2 < 0 || r3 < 0) {
+    if (r0 < 0 || rc < 0 || rm < 0 || r1 < 0 || r2 < 0 || r3 < 0) {
         return -1;
     }
-    return r0 > 0 || rm > 0 || r1 > 0 || r2 > 0 || r3 > 0;
+    return r0 > 0 || rc > 0 || rm > 0 || r1 > 0 || r2 > 0 || r3 > 0;
 }
