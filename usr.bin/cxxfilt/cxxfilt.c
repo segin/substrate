@@ -448,13 +448,6 @@ demangle_with_cfg(const char *sym, const cxxfilt_cfg_t *cfg)
         }
     }
 
-    if (sym[0] == '_' && is_mangled_prefix(sym + 1)) {
-        out = demangle(sym + 1, options);
-        if (out != NULL) {
-            return out;
-        }
-    }
-
     return xstrdup(sym);
 }
 

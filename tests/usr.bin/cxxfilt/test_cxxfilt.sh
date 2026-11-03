@@ -39,7 +39,12 @@ Foo::bar()"
 
 # 8d flags
 expect_eq "8d-1" "$("$BIN" -p _Z3fooi)" "foo"
-expect_eq "8d-2" "$("$BIN" -n __Z3fooi)" "foo(int)"
+# Only -_ strips a leading underscore; -n and the default leave
+# "__Z..." alone, as GNU c++filt does.
+expect_eq "8d-2" "$("$BIN" -n __Z3fooi)" "__Z3fooi"
+expect_eq "8d-2b" "$("$BIN" __Z3fooi)" "__Z3fooi"
+expect_eq "8d-2c" "$("$BIN" -_ __Z3fooi)" "foo(int)"
+expect_eq "8d-2d" "$("$BIN" --no-strip-underscore __Z3fooi)" "__Z3fooi"
 expect_eq "8d-3" "$("$BIN" -s none _Z3fooi)" "_Z3fooi"
 expect_eq "8d-4" "$("$BIN" -s rust _RNvCshgxSpmajvKg_7mycrate3foo)" "{s14492079435488262969}mycrate::{foo}"
 expect_eq "8d-5" "$("$BIN" -s dlang _D3foo3barFiZi)" "foo.bar: int function(int)"
