@@ -65,6 +65,7 @@ typedef struct {
   int pedantic;
   int pedantic_errors;
   int debug;
+  int dwarf_version; /* -gdwarf-4: 4; else 0, gcc's default (5) */
   int shared;
   int pic;
   int fpie; /**< -fPIE or -fpie */
@@ -222,6 +223,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->code16 = o->code16;
   out->opt_level = opt_level_num(o);
   out->debug = o->debug;
+  out->dwarf_version = o->dwarf_version == 4 ? 4 : 5;
   out->pic = o->pic || o->fpie || o->shared;
   out->pie = o->fpie && !o->pic && !o->shared;
   out->warn_all = o->wall;
@@ -926,7 +928,7 @@ static void usage(const char *prog) {
           "  -mavx/-mno-avx     x86 AVX feature macro enable/disable\n"
           "  -mavx2/-mno-avx2   x86 AVX2 feature macro enable/disable\n"
           "  -mfpmath=sse|387   i386 scalar FP lowering mode\n"
-          "  -g                 debug info\n"
+          "  -g                 DWARF debug info (-gdwarf-4, -gdwarf-5; -g0 none)\n"
           "  -Wall -Werror      warnings\n"
           "  -pedantic          warn on non-C99 extensions\n"
           "  -pedantic-errors   reject non-C99 extensions\n"
@@ -997,6 +999,44 @@ static int opt_int(cc_opts_t *o, const driver_opt_t *d, const char *as, const ch
   (void)as;
   (void)val;
   *(int *)((char *)o + d->field) = d->n;
+  return 0;
+}
+
+/**
+ * -g0: no debug information, whatever -g came before -- nor the assembler's own for a source without any, which
+ * a -g before had asked of it.
+ *
+ * @return 0
+ */
+static int opt_g0(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  size_t i;
+  size_t k = 0;
+
+  (void)d;
+  (void)as;
+  (void)val;
+  o->debug = 0;
+  for (i = 0; i < o->as_flags.count; ++i) {
+    if (strcmp(o->as_flags.items[i], "-g") == 0) {
+      free(o->as_flags.items[i]);
+    } else {
+      o->as_flags.items[k++] = o->as_flags.items[i];
+    }
+  }
+  o->as_flags.count = k;
+  return 0;
+}
+
+/**
+ * -gdwarf, -gdwarf-4, -gdwarf-5: debug information, of that DWARF version (gcc's -gdwarf is 5), as -g gives it.
+ *
+ * @return 0
+ */
+static int opt_gdwarf(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  (void)val;
+  o->debug = 1;
+  o->dwarf_version = strcmp(as, "-gdwarf-4") == 0 ? 4 : 5;
   return 0;
 }
 
@@ -1636,6 +1676,10 @@ static const driver_opt_t options[] = {
     {"-ansi", OPT_FLAG, FWD_C, opt_ansi, 0, 0},
     {"-O", OPT_PREFIX, FWD_C, opt_str, F(opt_level), 0},
     {"-g", OPT_FLAG, FWD_C | FWD_AS, opt_int, F(debug), 1},
+    /* the levels gcc tells apart: cc's -g is them all (no macro information); -g0 none */
+    {"-g1 -g2 -g3 -ggdb -ggdb2 -ggdb3", OPT_FLAG, FWD_C, opt_int, F(debug), 1},
+    {"-g0 -ggdb0", OPT_FLAG, FWD_C, opt_g0, 0, 0},
+    {"-gdwarf-4 -gdwarf-5 -gdwarf", OPT_FLAG, FWD_C, opt_gdwarf, 0, 0},
     {"-Wall", OPT_FLAG, FWD_C, opt_int, F(wall), 1},
     {"-Werror", OPT_FLAG, FWD_C | FWD_CPP, opt_int, F(werror), 1},
     {"-pedantic", OPT_FLAG, FWD_C, opt_int, F(pedantic), 1},

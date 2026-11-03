@@ -67,7 +67,7 @@ The compiler shall accept `-m32` and `-m64` to select the i386 and x86-64 target
 The compiler shall accept optimization level flags: `-O0`, `-O1`, `-O2`, `-O3`, `-Os`.
 
 **REQ-CC-019** *(Ubiquitous)*
-The compiler shall accept `-g` to emit debug information (DWARF `.file`/`.loc`/`.cfi_*` directives).
+The compiler shall accept `-g` (and `-g1`..`-g3`, `-ggdb`) to emit DWARF debug information, `-gdwarf-4` and `-gdwarf-5` (`-gdwarf`) to choose its version (5 by default, as gcc), and `-g0` to emit none whatever came before.
 
 **REQ-CC-020** *(Ubiquitous)*
 The compiler shall accept `-Wall`, `-Wextra`, `-Werror`, `-Wpedantic`, and `-pedantic-errors`.
@@ -312,7 +312,7 @@ The backend shall emit correct aggregate return handling: hidden first parameter
 The backend shall emit `long double` operations using x87 `%st` registers and correct 80-bit or 96-bit stack alignment.
 
 **REQ-CC-147** *(Event-driven)*
-When `-g` is specified, the backend shall emit `.file`, `.loc`, and `.cfi_*` directives for DWARF debug and unwind information.
+When `-g` is specified, the backend shall emit `.file`, `.loc`, and `.cfi_*` directives for DWARF line and unwind information, and a DWARF compile unit (`.debug_info`, `.debug_abbrev`, `.debug_str`; `.debug_rnglists` or `.debug_ranges` for code in more than one section) describing the unit's types as declared, its objects with their addresses, its functions with their code ranges, parameters and locals, and the functions inlined into them as abstract instances.  A variable's location shall be given only where it is right for the whole function (a stack slot at a constant offset from the CFA); one with none is described without a location.  For every structure and union, `pahole`'s layout of cc's object shall be gcc's, and `pahole -J` shall make BTF of it.
 
 **REQ-CC-148** *(Ubiquitous)*
 The backend shall perform stack-slot compaction (linear-scan style) to minimize frame size.

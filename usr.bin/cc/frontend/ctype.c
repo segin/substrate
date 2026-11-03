@@ -3,6 +3,7 @@
  */
 
 #include "cc_ctype.h"
+#include "cc_dtype.h"
 #include "cc_options.h"
 #include "cc_target.h"
 #include "cc_types.h"
@@ -160,6 +161,8 @@ static int ct_complex_records[4] = {-1, -1, -1, -1};
 void cc_ct_reset(void) {
     size_t i;
 
+    /* the debug types are built on these */
+    cc_dt_reset();
     for (i = 0; i < g_cap; ++i) {
         free(g_table[i]);
     }

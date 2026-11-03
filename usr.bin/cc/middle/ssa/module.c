@@ -61,7 +61,34 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
     }
     free(m->asm_label_names);
     free(m->asm_labels);
+    for (i = 0; i < m->dbg_var_count; ++i) {
+        free(m->dbg_vars[i].sym);
+    }
+    free(m->dbg_vars);
     memset(m, 0, sizeof(*m));
+}
+
+/**
+ * Record a variable a function declares, for debug information.
+ *
+ * @param m  the module
+ * @param v  the variable; its sym, if any, now belongs to @p m
+ * @return   one more than its index (what cc_ssa_instr_t.dbg_var holds), or 0 when out of memory (sym freed)
+ */
+int cc_ssa_module_add_dbg_var(cc_ssa_module_t *m, const cc_ssa_dbg_var_t *v) {
+    if (m->dbg_var_count == m->dbg_var_cap) {
+        size_t ncap = m->dbg_var_cap == 0 ? 64 : m->dbg_var_cap * 2;
+        cc_ssa_dbg_var_t *next = (cc_ssa_dbg_var_t *)realloc(m->dbg_vars, ncap * sizeof(*next));
+
+        if (next == NULL) {
+            free(v->sym);
+            return 0;
+        }
+        m->dbg_vars = next;
+        m->dbg_var_cap = ncap;
+    }
+    m->dbg_vars[m->dbg_var_count++] = *v;
+    return (int)m->dbg_var_count;
 }
 
 /** The label @p m gives the name of @p n characters at @p name, or NULL when it gives it none. */

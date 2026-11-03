@@ -1,6 +1,7 @@
 #include "cc_backend.h"
 #include "cc_ctype.h"
 #include "cc_diag.h"
+#include "cc_dwarf.h"
 #include "cc_frontend.h"
 #include "cc_middle.h"
 #include "cc_pipeline.h"
@@ -178,6 +179,15 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     }
     if (debug_counts) {
         fprintf(stderr, "cc: debug: lowered funcs=%zu globals=%zu\n", ssa.func_count, ssa.global_count);
+    }
+    if (opts->debug && cc_dwarf_note_calls(&ssa) != 0) {
+        /* (-g: the calls before inlining, for the inlined functions' debug information) */
+        if (diag != NULL) {
+            snprintf(diag->message, sizeof(diag->message), "out of memory recording calls for debug information");
+        }
+        cc_ssa_module_free(&ssa);
+        cc_tu_free(&tu);
+        return -1;
     }
     if (cc_run_middle_passes(&ssa, opts->opt_level, diag) != 0) {
         if (diag != NULL && diag->message[0] == '\0') {

@@ -28,6 +28,7 @@ typedef struct {
     char *name;              /**< its name */
     int depth;               /**< the scope depth it was declared at */
     const cc_ctype_t *ctype; /**< the type it names */
+    const struct cc_dtype *dtype; /**< the typedef name itself, for debug information (cc_dtype.h); may be NULL */
     long align;              /**< the alignment its declaration's `aligned` gives the type, or 0 (gcc) */
 } typedef_entry_t;
 
@@ -57,6 +58,7 @@ typedef struct {
     char *tag;               /**< the tag */
     const cc_ctype_t *ctype; /**< the type its specifiers give */
     int complete;            /**< its enumerator list has been seen */
+    int def;                 /**< its definition, for debug information (cc_dt_enum_def()), or -1 */
 } enum_tag_entry_t;
 
 /** A GNU local label (`__label__`). */
@@ -105,6 +107,7 @@ typedef struct {
     int parse_depth;
     int last_storage;
     const cc_ctype_t *last_spec_ctype;  /**< the type the last declaration specifiers named */
+    const struct cc_dtype *last_spec_dtype; /**< as they spelled it, for debug information (cc_dtype.h) */
     long last_spec_align; /**< the alignment of the typedef name they used (typedef_entry_t.align), or 0 */
 } parser_t;
 

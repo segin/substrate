@@ -586,4 +586,31 @@ int lower_atomic_store_bits(cc_ssa_function_t *sf, int p, long size, int v, cc_d
  */
 int lower_atomic_cas_bits(cc_ssa_function_t *sf, int p, long size, int expect, int desired, cc_diag_t *diag);
 
+/* dbgvar.c */
+
+/**
+ * Under -g, record a variable function @p fn declares, for debug
+ * information (cc_ssa_module_t.dbg_vars), and mark the stack allocation
+ * that is its storage -- the STACKALLOC defining @p v's address value, if
+ * that is one -- as the variable's (cc_ssa_instr_t.dbg_var).  Without -g
+ * it does nothing.
+ *
+ * @param m          the module
+ * @param fn         the function declaring it
+ * @param sf         the function being lowered
+ * @param v          the variable as lowering has it, or NULL for one with no storage here
+ * @param name       its name
+ * @param ctype      its type
+ * @param dtype      its type as spelled, or NULL
+ * @param line       where it is declared
+ * @param src_file   one more than its file's index; 0 unknown
+ * @param is_param   it is a parameter
+ * @param is_extern  it is a block-scope extern declaration
+ * @param sym        a static local's symbol, or NULL
+ * @return           0, or -1 when out of memory
+ */
+int lower_dbg_note_var(cc_ssa_module_t *m, const cc_function_t *fn, cc_ssa_function_t *sf, const var_entry_t *v,
+                       const char *name, const cc_ctype_t *ctype, const struct cc_dtype *dtype, size_t line,
+                       int src_file, int is_param, int is_extern, const char *sym);
+
 #endif

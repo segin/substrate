@@ -608,8 +608,47 @@ is reached relative to
 .Li %rip
 as any other is, not through the GOT, which a kernel has none of; the
 others change nothing.
-.It Fl g
-Emit debug information.
+.It Fl g , Fl g1 , Fl g2 , Fl g3 , Fl ggdb
+Emit DWARF debug information, as gcc does: a compile unit in
+.Li .debug_info ,
+.Li .debug_abbrev
+and
+.Li .debug_str
+describing the unit's types as declared (typedef names, enumerations,
+structures and unions with their members' offsets, bit-fields and
+alignments, arrays, pointers, qualifiers, function types), its objects
+with their addresses, and its functions with their code ranges,
+parameters and local variables; a line table
+.Pq Li .debug_line ,
+made by the assembler of the
+.Li .loc
+directives cc writes; and the frame descriptions (see below).
+A local variable or parameter is described where it is: at a constant
+offset from the frame's canonical address while it lives in its stack
+slot, as it always does at
+.Fl O0 ;
+one the optimizer keeps in registers only has no location, rather than a
+wrong one.
+The functions inlined into those written are described as gcc's abstract
+instances, so that their types are the unit's too.
+The levels gcc tells apart are one in cc; there is no macro information.
+The unit is DWARF 5 unless
+.Fl gdwarf-4
+says otherwise.
+.Xr pahole 1
+makes BTF of the information, as a Linux built with
+.Dv CONFIG_DEBUG_INFO_BTF
+has it.
+.It Fl gdwarf-4 , Fl gdwarf-5 , Fl gdwarf
+Emit debug information, as
+.Fl g ,
+of that DWARF version;
+.Fl gdwarf
+is DWARF 5.
+.It Fl g0 , Fl ggdb0
+No debug information, whatever
+.Fl g
+option came before.
 .It Fl fasynchronous-unwind-tables , Fl funwind-tables
 .It Fl fno-asynchronous-unwind-tables , Fl fno-unwind-tables
 Whether the frame descriptions

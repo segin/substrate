@@ -113,6 +113,7 @@ typedef struct {
     int data_sections;       /**< -fdata-sections: each object in one of its own, .data.<name>, .bss.<name> */
     int no_sibling_calls;    /**< -fno-optimize-sibling-calls: no tail call, a call and a return, so that each
                                   caller is on the stack (Linux keeps some for its stack traces) */
+    int dwarf_version;       /**< -gdwarf-4, -gdwarf-5: the DWARF version of -g's debug information (5, gcc's) */
 } cc_options_t;
 
 /**

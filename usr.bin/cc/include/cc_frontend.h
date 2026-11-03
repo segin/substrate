@@ -250,6 +250,7 @@ struct cc_stmt {
     size_t col;
     int src_file; /**< one more than its file's index in the unit's files (cc_src_files_t); 0 unknown */
     const struct cc_ctype *ctype; /**< a declaration's type (cc_ctype.h) */
+    const struct cc_dtype *dtype; /**< as the declaration spelled it, for debug information (cc_dtype.h); may be NULL */
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;
@@ -293,6 +294,7 @@ typedef struct {
     char *name;
     int storage;
     const struct cc_ctype *ctype; /**< its type as adjusted (arrays and functions as pointers) */
+    const struct cc_dtype *dtype; /**< as its declaration spelled it, adjusted, for debug information; may be NULL */
     /** for a pointer to a variable-length array (as `int a[n][m]` is adjusted to be): the bounds of what it
      *  points to */
     cc_bounds_t vla_bounds;
@@ -313,6 +315,8 @@ typedef struct {
                         reaches past the object's end, no unit fitting in it, so a read takes only those bytes
                         too (2) */
     const struct cc_ctype *ctype; /**< its type, where its declaration recorded one; else NULL */
+    const struct cc_dtype *dtype; /**< as its declaration spelled it, for debug information; may be NULL */
+    size_t line;                  /**< where its declarator is; 0 unknown */
     char *counted_by; /**< gcc's `counted_by(m)` on a flexible array member or a pointer: the member m holding its
                            element count, as __builtin_counted_by_ref() gives it (owned); else NULL */
 } cc_struct_member_t;
@@ -411,6 +415,7 @@ typedef struct {
     size_t name_col;
     int src_file; /**< one more than its file's index in the unit's files (cc_src_files_t); 0 unknown */
     const struct cc_ctype *ret_ctype; /**< the return type */
+    const struct cc_dtype *ret_dtype; /**< as the declaration spelled it, for debug information; may be NULL */
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;
@@ -450,6 +455,7 @@ typedef struct {
     cc_expr_t *init;
     const struct cc_ctype *ctype; /**< its type (cc_ctype.h): as declared, completed by a later declaration or,
                                        by sema, from its initializer */
+    const struct cc_dtype *dtype; /**< as a declaration spelled it, for debug information; may be NULL */
 } cc_global_t;
 
 typedef struct cc_translation_unit {

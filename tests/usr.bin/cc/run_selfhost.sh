@@ -4,8 +4,8 @@
 # Stage 2 is cc built by the cc under test (a host build, CC_BIN); it
 # must pass the codegen, ABI and random-arithmetic checks.  Stage 3 is cc
 # built by stage 2; for every one of cc's sources it must write the same
-# assembly as stage 2, so that a miscompilation cannot hide by being
-# consistent.  The objects are linked by the host's cc against its libc,
+# assembly as stage 2, with -g and without, so that a miscompilation
+# cannot hide by being consistent.  The objects are linked by the host's cc against its libc,
 # as a host build of cc is.
 set -u
 
@@ -55,6 +55,14 @@ for f in $srcs; do
 	    "$tmp/stage3/cc" -O1 -Iinclude -S "$f" -o "$tmp/s3/$n.s") || { echo "FAIL: -S $f"; fail=1; continue; }
 	if ! cmp -s "$tmp/s2/$n.s" "$tmp/s3/$n.s"; then
 		echo "FAIL: stage 2 and stage 3 write different assembly for $f"
+		differ=$((differ + 1))
+		fail=1
+	fi
+	# and with -g, its debug information too: the types, variables and lines cc describes
+	(cd "$CCDIR" && "$tmp/stage2/cc" -O1 -g -Iinclude -S "$f" -o "$tmp/s2/$n.g.s" &&
+	    "$tmp/stage3/cc" -O1 -g -Iinclude -S "$f" -o "$tmp/s3/$n.g.s") || { echo "FAIL: -g -S $f"; fail=1; continue; }
+	if ! cmp -s "$tmp/s2/$n.g.s" "$tmp/s3/$n.g.s"; then
+		echo "FAIL: stage 2 and stage 3 write different -g assembly for $f"
 		differ=$((differ + 1))
 		fail=1
 	fi

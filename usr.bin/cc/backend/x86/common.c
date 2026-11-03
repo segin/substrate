@@ -8,6 +8,7 @@
 #include "cc_asm.h"
 #include "cc_backend.h"
 #include "cc_diag.h"
+#include "cc_dwarf.h"
 #include "cc_options.h"
 #include "cc_types.h"
 #include "cc_util.h"
@@ -3157,6 +3158,37 @@ int stackalloc_off(const slot_layout_t *lay, int v) {
     return lay->stackalloc_off[v];
 }
 
+/**
+ * Under -g, report a slot-layout function's variables' stack slots and end its code (see cc_x86.h).
+ *
+ * @param fp       the assembly
+ * @param f        the function
+ * @param lay      its frame layout
+ * @param section  the section its code is in
+ */
+void x86_dwarf_slot_func_end(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const char *section) {
+    size_t i;
+    long word = (long)cc_target_pointer_size();
+
+    if (!cc_dwarf_active()) {
+        return;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int off;
+
+        if (in->op != CC_SSA_STACKALLOC || in->dbg_var <= 0) {
+            continue;
+        }
+        off = stackalloc_off(lay, in->dst);
+        if (off != 0) {
+            /* (the frame pointer is where the prologue pushed it: the return address and it above) */
+            cc_dwarf_func_slot(in->dst, (long)off - 2 * word);
+        }
+    }
+    cc_dwarf_func_end(fp, f, section);
+}
+
 long value_size_bytes(const cc_ssa_function_t *f, int v, long fallback) {
     size_t i;
     if (fallback <= 0) {
@@ -6039,8 +6071,11 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         return -1;
     }
 
-    if (emit_debug && src_path != NULL) {
-        fprintf(fp, ".file 1 \"%s\"\n", src_path);
+    if (emit_debug && src_path != NULL &&
+        cc_dwarf_begin(fp, m, src_path, cc_options_current() != NULL ? cc_options_current()->dwarf_version : 5) != 0) {
+        set_diag(diag, "out of memory starting debug information");
+        fclose(fp);
+        return -1;
     }
     if (emit_debug && cc_options_current() != NULL && !cc_options_current()->unwind_tables) {
         /*
@@ -6053,6 +6088,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         if (diag != NULL && diag->message[0] == '\0') {
             set_diag(diag, "global emission failed");
         }
+        cc_dwarf_abort();
         fclose(fp);
         return -1;
     }
@@ -6070,6 +6106,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "i386 emission failed");
             }
+            cc_dwarf_abort();
             fclose(fp);
             return -1;
         }
@@ -6079,9 +6116,15 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "x86_64 emission failed");
             }
+            cc_dwarf_abort();
             fclose(fp);
             return -1;
         }
+    }
+    /* -g: the debug information, of the functions written above */
+    if (cc_dwarf_active() && cc_dwarf_finish(fp, diag) != 0) {
+        fclose(fp);
+        return -1;
     }
 
     emit_weak_references(fp, m);

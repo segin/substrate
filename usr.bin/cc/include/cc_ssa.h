@@ -248,6 +248,10 @@ typedef struct {
     int *asm_goto_labels;
     char **asm_goto_names;
     size_t asm_goto_count;
+    /** STACKALLOC: one more than the index in cc_ssa_module_t.dbg_vars of the declared variable whose storage
+     *  it is, for debug information; 0 for none.  A pass that copies the instruction copies it; one that makes
+     *  storage of its own leaves it 0 */
+    int dbg_var;
 } cc_ssa_instr_t;
 
 typedef struct {
@@ -341,7 +345,23 @@ typedef struct cc_ssa_function {
      *  marked used, and those of the functions inlined into it (owned) */
     char **keep_syms;
     size_t keep_sym_count;
+
+    /** its definition in the translation unit, for debug information; NULL for none */
+    const cc_function_t *src_fn;
 } cc_ssa_function_t;
+
+/** A variable a function declares -- a parameter, a local, a static or extern one -- for debug information. */
+typedef struct {
+    const cc_function_t *fn;       /**< the function it is declared in */
+    const char *name;              /**< its name (the translation unit's) */
+    const struct cc_ctype *ctype;  /**< its type */
+    const struct cc_dtype *dtype;  /**< as spelled; may be NULL */
+    size_t line;                   /**< where it is declared; 0 unknown */
+    int src_file;                  /**< one more than its file's index in the unit's files; 0 unknown */
+    unsigned char is_param;        /**< a parameter */
+    unsigned char is_extern;       /**< a block-scope extern declaration: no storage of its own */
+    char *sym;                     /**< a static local: its symbol (owned); else NULL */
+} cc_ssa_dbg_var_t;
 
 typedef struct {
     cc_ssa_global_t *globals;
@@ -367,6 +387,11 @@ typedef struct {
     char **asm_label_names;
     char **asm_labels;          /**< each one's label, as written (owned) */
     size_t asm_label_count;     /**< the number of them */
+    /** the translation unit lowered, which debug information describes (not owned); NULL for none */
+    const cc_translation_unit_t *src_tu;
+    cc_ssa_dbg_var_t *dbg_vars; /**< the variables the functions declare, as lowering met them (owned) */
+    size_t dbg_var_count;       /**< the number of them */
+    size_t dbg_var_cap;         /**< room for */
 } cc_ssa_module_t;
 
 /** The register class value @p v lives in: CC_VAL_F64 for a floating value, else CC_VAL_I64. */
@@ -416,6 +441,15 @@ void cc_ssa_function_free(cc_ssa_function_t *f);
 
 /** Free what global @p g owns, and clear it. */
 void cc_ssa_global_free(cc_ssa_global_t *g);
+
+/**
+ * Record a variable a function declares, for debug information.
+ *
+ * @param m  the module
+ * @param v  the variable; its sym, if any, now belongs to @p m
+ * @return   one more than its index (what cc_ssa_instr_t.dbg_var holds), or 0 when out of memory (sym freed)
+ */
+int cc_ssa_module_add_dbg_var(cc_ssa_module_t *m, const cc_ssa_dbg_var_t *v);
 
 /**
  * Note that the file-scope function or object @p name has asm label @p label, unless it has one already.

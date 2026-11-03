@@ -34,6 +34,7 @@
 
 #include "cc_x86_mir.h"
 
+#include "cc_dwarf.h"
 #include "cc_options.h"
 #include "cc_target.h"
 #include "cc_x86.h"
@@ -4357,6 +4358,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     x86_emit_patchable_entry(fp, f, 0);
     fprintf(fp, ".type %s, @function\n", f->name);
     fprintf(fp, "%s:\n", f->name);
+    cc_dwarf_func_begin(fp, f);
     if (emit_debug) {
         fprintf(fp, "\t.cfi_startproc\n\t.cfi_def_cfa_offset %d\n\t.cfi_offset %s, -%d\n", 2 * w,
                 xr_name(XR_BP, w), 2 * w);
@@ -4495,6 +4497,26 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     }
     if (emit_debug) {
         fputs("\t.cfi_endproc\n", fp);
+    }
+    if (cc_dwarf_active()) {
+        /*
+         * the declared variables' stack slots, off the frame pointer -- the CFA less the return address and the
+         * saved frame pointer; one the prologue's realignment placed (off the stack pointer), or a frame without
+         * a frame pointer, has no constant offset to tell
+         */
+        for (i = 0; i < (int)f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int o;
+
+            if (in->op != CC_SSA_STACKALLOC || in->dbg_var <= 0 || in->dst < 0 || in->dst >= f->value_count) {
+                continue;
+            }
+            o = s->obj[in->dst];
+            if (o >= 0 && o < s->xf.nobj && !s->xf.obj[o].sp_based && !s->fpo) {
+                cc_dwarf_func_slot(in->dst, s->xf.obj[o].off - 2 * w);
+            }
+        }
+        cc_dwarf_func_end(fp, f, func_sec);
     }
     fprintf(fp, ".size %s, .-%s\n", f->name, f->name);
     for (i = 0; i < s->xf.nins; ++i) {

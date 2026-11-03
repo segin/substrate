@@ -10193,7 +10193,9 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             set_diag(diag, "extern local declaration cannot have an initializer");
             return -1;
         }
-        if (var_define(vars, var_count, s->decl_name, stmt_decl_ctype(s), -1, depth, 1, 0, s->decl_name) != 0) {
+        if (var_define(vars, var_count, s->decl_name, stmt_decl_ctype(s), -1, depth, 1, 0, s->decl_name) != 0 ||
+            lower_dbg_note_var(ctx != NULL ? ctx->mod : NULL, ctx != NULL ? ctx->fn : NULL, sf, NULL, s->decl_name,
+                               stmt_decl_ctype(s), s->dtype, s->line, s->src_file, 0, 1, NULL) != 0) {
             set_diag(diag, "out of memory defining extern local declaration");
             return -1;
         }
@@ -10233,7 +10235,9 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
          * `static struct nmiaction` whose list head points at itself, and
          * that address was a global of the bare name, which nothing defines.
          */
-        if (var_define(vars, var_count, s->decl_name, decl_ct, -1, depth, 1, 0, sym) != 0) {
+        if (var_define(vars, var_count, s->decl_name, decl_ct, -1, depth, 1, 0, sym) != 0 ||
+            lower_dbg_note_var(ctx->mod, ctx->fn, sf, NULL, s->decl_name, decl_ct, s->dtype, s->line, s->src_file, 0,
+                               0, sym) != 0) {
             set_diag(diag, "out of memory defining static local variable");
             return -1;
         }
@@ -10818,6 +10822,12 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
             return -1;
         }
+        if (lower_dbg_note_var(ctx != NULL ? ctx->mod : NULL, ctx != NULL ? ctx->fn : NULL, sf,
+                               &(*vars)[*var_count - 1], s->decl_name, dct, s->dtype, s->line, s->src_file, 0, 0,
+                               NULL) != 0) {
+            set_diag(diag, "out of memory recording a local for debug information");
+            return -1;
+        }
         if (s->expr != NULL) {
             if (s->expr->kind == CC_EXPR_INIT_LIST) {
                 if (emit_memset_instr(sf, varv, 0, sz, diag) != 0) {
@@ -10917,6 +10927,12 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         (*vars)[*var_count - 1].vla_strides = vla_strides;
         (*vars)[*var_count - 1].vla_rank = is_runtime_vla ? vla_rank : 0;
         if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
+            return -1;
+        }
+        if (lower_dbg_note_var(ctx != NULL ? ctx->mod : NULL, ctx != NULL ? ctx->fn : NULL, sf,
+                               &(*vars)[*var_count - 1], s->decl_name, dct, s->dtype, s->line, s->src_file, 0, 0,
+                               NULL) != 0) {
+            set_diag(diag, "out of memory recording a local for debug information");
             return -1;
         }
 
@@ -11258,6 +11274,11 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         }
     }
     if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
+        return -1;
+    }
+    if (lower_dbg_note_var(ctx != NULL ? ctx->mod : NULL, ctx != NULL ? ctx->fn : NULL, sf, &(*vars)[*var_count - 1],
+                           s->decl_name, dct, s->dtype, s->line, s->src_file, 0, 0, NULL) != 0) {
+        set_diag(diag, "out of memory recording a local for debug information");
         return -1;
     }
     return 0;
@@ -16109,6 +16130,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
     size_t out_i = 0;
 
     cc_ssa_module_init(out);
+    out->src_tu = tu;
     if (diag != NULL) {
         diag->path[0] = '\0';
         diag->line = 0;
@@ -16968,6 +16990,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
         sf->src_line = af->name_line != 0 ? af->name_line : af->line;
         sf->src_col = af->name_line != 0 ? af->name_col : af->col;
+        sf->src_fn = af;
         {
             cc_ctype_kind_t rk = fn_ret_ctype(af) != NULL ? fn_ret_ctype(af)->kind : CC_CT_VOID;
             /* a _Float16 result is its bits in %xmm0, as gcc returns it */
@@ -17225,6 +17248,13 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 return -1;
             }
             if (ensure_local_var_addressable(tu, sf, &vars[var_count - 1], diag) < 0) {
+                cc_ssa_module_free(out);
+                return -1;
+            }
+            if (lower_dbg_note_var(out, af, sf, &vars[var_count - 1], af->params[j].name,
+                                   lower_param_ctype(&af->params[j]), af->params[j].dtype, af->line, af->src_file, 1,
+                                   0, NULL) != 0) {
+                set_diag(diag, "out of memory recording a parameter for debug information");
                 cc_ssa_module_free(out);
                 return -1;
             }

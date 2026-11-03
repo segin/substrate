@@ -208,6 +208,17 @@ void slot_layout_free(slot_layout_t *lay);
 /** The frame offset of value @p v's slot, and of stack allocation @p v. */
 int slot_off(const slot_layout_t *lay, int v);
 int stackalloc_off(const slot_layout_t *lay, int v);
+/**
+ * Under -g, the end of a function the slot-layout emitters (x86_64.c, i386.c) wrote: tell the debug
+ * information where each declared variable's stack allocation is -- off the frame pointer, which is the
+ * CFA less two words -- and print the label that ends the function's code.
+ *
+ * @param fp       the assembly
+ * @param f        the function
+ * @param lay      its frame layout
+ * @param section  the section its code is in
+ */
+void x86_dwarf_slot_func_end(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const char *section);
 /** Whether @p v is a stack allocation, whose value is its address. */
 int is_stackalloc_value(const slot_layout_t *lay, int v);
 /** The size of value @p v, or @p fallback. */

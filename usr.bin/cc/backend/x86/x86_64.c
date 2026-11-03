@@ -7,6 +7,7 @@
 #include "cc_asm.h"
 #include "cc_backend.h"
 #include "cc_diag.h"
+#include "cc_dwarf.h"
 #include "cc_options.h"
 #include "cc_types.h"
 #include "cc_x86.h"
@@ -1326,6 +1327,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         x86_emit_patchable_entry(fp, f, 0);
         fprintf(fp, ".type %s, @function\n", f->name);
         fprintf(fp, "%s:\n", f->name);
+        cc_dwarf_func_begin(fp, f);
 
         if (emit_debug) {
             fprintf(fp, "\t.cfi_startproc\n");
@@ -2208,6 +2210,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         if (emit_debug) {
             fprintf(fp, "\t.cfi_endproc\n");
         }
+        x86_dwarf_slot_func_end(fp, f, &lay, func_sec);
         fprintf(fp, ".size %s, .-%s\n", f->name, f->name);
         if ((f->attr_flags & CC_ATTR_CONSTRUCTOR) != 0) {
             emit_lifecycle_attr(fp, ".init_array", "init_array", f->name, 1);
