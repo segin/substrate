@@ -22,6 +22,12 @@ struct ar_hdr {
 #define RANLIBMAG   "__.SYMDEF"
 #define RANLIBSORT  "__.SYMDEF SORTED"
 
+/*
+ * On disk a BSD symbol-table entry is two 32-bit words, ran_strx then
+ * ran_off, whatever the size of struct ranlib on the host.
+ */
+#define RANLIB_ENTRY_SIZE   8
+
 struct ranlib {
     union {
         uint32_t ran_strx;

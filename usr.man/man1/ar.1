@@ -121,7 +121,13 @@ or
 .Pq 64-bit offsets
 when needed.
 BSD symbol tables use
-.Dq __.SYMDEF SORTED .
+.Dq __.SYMDEF SORTED ,
+stored under a
+.Dq #1/16
+extended name: a 32-bit byte count of the entry array, entries of two
+32-bit words (string-table index, then the file offset of the defining
+member's header), a 32-bit string-table size, and the names, in the
+host's byte order.
 .Sh ENVIRONMENT
 .Bl -tag -width "SOURCE_DATE_EPOCH"
 .It Ev ZERO_AR_DATE

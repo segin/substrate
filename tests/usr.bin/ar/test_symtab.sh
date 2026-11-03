@@ -2,7 +2,9 @@
 #
 # ar symbol-table tests: every offset in the GNU "/" member must name the
 # file offset of the member header that defines the symbol, as GNU ar
-# writes it.  GNU binutils (ar, nm, ld) is the judge.
+# writes it.  GNU binutils (ar, nm, ld) is the judge.  The BSD
+# "__.SYMDEF SORTED" table must be filled in the same way; BFD does not
+# read BSD tables in ELF archives, so llvm-nm reads that one.
 #
 set -eu
 
@@ -66,6 +68,50 @@ check_armap() {
     done
 }
 
+# Print the unsigned little-endian 32-bit word at byte offset $2 of file $1.
+le32_at() {
+    od -An -tu1 -j "$2" -N 4 "$1" |
+        awk '{ print (($4 * 256 + $3) * 256 + $2) * 256 + $1 }'
+}
+
+# Check the BSD "__.SYMDEF SORTED" table of archive $1: it is the first
+# member, named "#1/16" with the 16-byte name in front of its data, it
+# holds at least one 8-byte (ran_strx, ran_off) entry, and every ran_off
+# lands on a member header.
+check_bsd_armap() {
+    a=$1
+    label=$2
+    [ "$(od -An -tx1 -j 8 -N 16 "$a" | tr -s ' \n' ' ')" = \
+        " 23 31 2f 31 36 20 20 20 20 20 20 20 20 20 20 20 " ] ||
+        fail "$label: first ar_name is not '#1/16' padded with spaces"
+    [ "$(name_at "$a" 8)" = "#1/16" ] ||
+        fail "$label: first member is '$(name_at "$a" 8)', not #1/16"
+    [ "$(dd if="$a" bs=1 skip=68 count=16 2>/dev/null)" = "__.SYMDEF SORTED" ] ||
+        fail "$label: first member is not __.SYMDEF SORTED"
+    ransize=$(le32_at "$a" 84)
+    [ "$ransize" -gt 0 ] || fail "$label: empty symbol table"
+    [ $((ransize % 8)) -eq 0 ] ||
+        fail "$label: ranlib array is $ransize bytes, not a multiple of 8"
+    count=$((ransize / 8))
+    strsize=$(le32_at "$a" $((88 + ransize)))
+    [ "$strsize" -gt 0 ] || fail "$label: empty string table"
+    i=0
+    while [ "$i" -lt "$count" ]; do
+        strx=$(le32_at "$a" $((88 + 8 * i)))
+        [ "$strx" -lt "$strsize" ] ||
+            fail "$label: symbol $i string index $strx past $strsize"
+        off=$(le32_at "$a" $((92 + 8 * i)))
+        [ "$(fmag_at "$a" "$off")" = "600a" ] ||
+            fail "$label: symbol $i offset $off is not a member header"
+        n=$(name_at "$a" "$off")
+        case "$n" in
+        foo.o|baz.o|'#1/'[0-9]*) ;;
+        *) fail "$label: symbol $i offset $off names member '$n'" ;;
+        esac
+        i=$((i + 1))
+    done
+}
+
 main() {
     require_cmd cc
     require_cmd ar
@@ -123,6 +169,24 @@ SRC
     cc -o prog main.o ourslong.a || fail "GNU ld could not link against our archive"
     ./prog || fail "program linked against our archive returned $?"
     pass "GNU ld links through the armap"
+
+    # 5. BSD format: the "__.SYMDEF SORTED" table is filled in, and its
+    #    offsets account for the "#1/16" name in front of the table.
+    "$AR" --format=bsd rcs oursbsd.a foo.o averyveryverylongmembername.o baz.o
+    check_bsd_armap oursbsd.a "BSD"
+    pass "__.SYMDEF SORTED offsets name member headers"
+
+    # 6. LLVM reads BSD symbol tables (GNU BFD does not, for ELF):
+    #    llvm-nm must see the same symbol -> member map in our BSD
+    #    archive as GNU nm sees in GNU ar's archive.
+    if command -v llvm-nm >/dev/null 2>&1; then
+        llvm-nm --print-armap oursbsd.a 2>&1 | grep ' in ' | sort > bsd.map
+        cmp -s gnu.map bsd.map ||
+            fail "BSD armap differs from GNU ar's: $(diff gnu.map bsd.map | head -5)"
+        pass "llvm-nm --print-armap of the BSD archive agrees with GNU ar"
+    else
+        printf 'skip: llvm-nm not found, BSD armap not cross-checked\n'
+    fi
 }
 
 main "$@"

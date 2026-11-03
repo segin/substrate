@@ -1540,7 +1540,7 @@ static void ranlib(void) {
         /* Reserve for potential /SYM64/ payload (count + 64-bit offsets + strings). */
         total_size = sizeof(uint64_t) + (size_t)count * sizeof(uint64_t) + strsize;
     } else {
-        uint32_t array_size = count * sizeof(struct ranlib);
+        uint32_t array_size = count * RANLIB_ENTRY_SIZE;
         total_size = sizeof(uint32_t) + array_size + sizeof(uint32_t) + strsize;
     }
 
@@ -1647,6 +1647,7 @@ static void write_archive(const char *path) {
     struct ar_memb *symdef = NULL;
     if (head &&
         (strcmp(head->name, RANLIBMAG) == 0 ||
+         strcmp(head->name, RANLIBSORT) == 0 ||
          strcmp(head->name, "/") == 0 ||
          strcmp(head->name, "/SYM64/") == 0)) {
         symdef = head;
@@ -1736,7 +1737,18 @@ static void write_archive(const char *path) {
                     table_size = sizeof(uint64_t) + (uint64_t)count * sizeof(uint64_t) + strsize;
                 }
             }
-            uint64_t base = offset + sizeof(struct ar_hdr) + table_size + (table_size % 2);
+            /*
+             * A BSD table whose name does not fit the header
+             * ("__.SYMDEF SORTED" is 16 bytes and has a space) is
+             * written as "#1/len" with the name in front of its data,
+             * so the members start that many bytes later.
+             */
+            uint64_t table_disk = table_size;
+            if (archive_format != ARFMT_GNU &&
+                (symdef->name_len > 15 || strchr(symdef->name, ' ') != NULL)) {
+                table_disk += symdef->name_len;
+            }
+            uint64_t base = offset + sizeof(struct ar_hdr) + table_disk + (table_disk % 2);
             for (int i = 0; i < count; i++) {
                 arr[i]->offset += base;
             }
@@ -1796,19 +1808,23 @@ static void write_archive(const char *path) {
                 }
             } else {
                 char *p = (char *)symdef->data;
-                uint32_t array_size = count * sizeof(struct ranlib);
-                *(uint32_t *)p = array_size;
+                uint32_t array_size = count * RANLIB_ENTRY_SIZE;
+                uint32_t word = array_size;
+                memcpy(p, &word, sizeof(word));
                 p += 4;
-                struct ranlib *ra = (struct ranlib *)p;
+                char *ra = p;
                 p += array_size;
-                *(uint32_t *)p = strsize;
+                word = (uint32_t)strsize;
+                memcpy(p, &word, sizeof(word));
                 p += 4;
                 char *strp = p;
 
                 int stroff = 0;
                 for (int i = 0; i < count; i++) {
-                    ra[i].ran_un.ran_strx = stroff;
-                    ra[i].ran_off = (uint32_t)arr[i]->offset;
+                    word = (uint32_t)stroff;
+                    memcpy(ra + (size_t)i * RANLIB_ENTRY_SIZE, &word, sizeof(word));
+                    word = (uint32_t)arr[i]->offset;
+                    memcpy(ra + (size_t)i * RANLIB_ENTRY_SIZE + 4, &word, sizeof(word));
                     memcpy(strp + stroff, arr[i]->name, arr[i]->name_len + 1);
                     stroff += arr[i]->name_len + 1;
                 }
@@ -1912,7 +1928,7 @@ static void write_archive(const char *path) {
             memcpy(cur->hdr.ar_size, buf, 10);
 
             char tmp[32];
-            snprintf(tmp, sizeof(tmp), "#1/%-12d", name_len);
+            snprintf(tmp, sizeof(tmp), "#1/%-13d", name_len);
             memcpy(cur->hdr.ar_name, tmp, 16);
         } else {
             char buf[32];
