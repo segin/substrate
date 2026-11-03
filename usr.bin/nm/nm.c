@@ -1073,6 +1073,235 @@ static int process_elf_memory(const uint8_t *buf, size_t sz, const char *display
     return rc;
 }
 
+/**
+ * @brief Name the archive member whose header starts at @p hoff.
+ *
+ * Resolves the three spellings an ar header can use: a GNU "/N"
+ * reference into the long-name table, a BSD "#1/N" name stored in
+ * front of the member's data, and a plain name in the 16-byte field.
+ *
+ * @param buf           The whole archive.
+ * @param size          Size of @p buf in bytes.
+ * @param hoff          Offset of the member's ar header in @p buf.
+ * @param nametab       The GNU "//" long-name table, or NULL.
+ * @param nametab_size  Size of @p nametab in bytes.
+ * @return A malloc'd name, or NULL when @p hoff is not a valid header
+ *         or memory runs out.
+ */
+static char *archive_member_name_at(const uint8_t *buf, size_t size, size_t hoff,
+                                    const uint8_t *nametab, size_t nametab_size)
+{
+    const struct ar_raw_header *hdr;
+    char *name;
+
+    if (hoff < AR_MAGIC_LEN || hoff > size || size - hoff < AR_HDR_LEN)
+        return NULL;
+    hdr = (const struct ar_raw_header *)(const void *)(buf + hoff);
+    if (memcmp(hdr->fmag, AR_FMAG, 2) != 0)
+        return NULL;
+
+    if (memcmp(hdr->name, "#1/", 3) == 0) {
+        uint64_t extlen = 0;
+        size_t n;
+
+        if (parse_decimal_field(hdr->name + 3, 13, &extlen) != 0 ||
+            extlen > size - hoff - AR_HDR_LEN)
+            return NULL;
+        n = (size_t)extlen;
+        while (n > 0 && buf[hoff + AR_HDR_LEN + n - 1] == '\0')
+            n--;
+        name = malloc(n + 1);
+        if (name == NULL)
+            return NULL;
+        memcpy(name, buf + hoff + AR_HDR_LEN, n);
+        name[n] = '\0';
+        return name;
+    }
+
+    name = dup_member_name_simple(hdr->name);
+    if (name != NULL && name[0] == '/' && name[1] >= '0' && name[1] <= '9') {
+        uint64_t noff = 0;
+        char *long_name = NULL;
+
+        if (parse_decimal_field(name + 1, strlen(name) - 1, &noff) == 0)
+            long_name = dup_gnu_long_name(nametab, nametab_size, noff);
+        free(name);
+        name = long_name;
+    }
+    return name;
+}
+
+/**
+ * @brief Print one "<symbol> in <member>" line of the archive index.
+ *
+ * The first call for an archive also prints the "Archive index:"
+ * heading, so an archive whose index is empty prints nothing, as GNU
+ * nm does.  The symbol is demangled under -C.
+ *
+ * @param sym       Symbol name from the index (NUL-terminated).
+ * @param member    Name of the member defining it.
+ * @param printed   In/out: whether the heading has been printed.
+ */
+static void print_armap_entry(const char *sym, const char *member, int *printed)
+{
+    char *dem = NULL;
+
+    if (!*printed) {
+        printf("\nArchive index:\n");
+        *printed = 1;
+    }
+    if (opts.do_demangle)
+        dem = demangle(sym, DEMANGLE_AUTO);
+    printf("%s in %s\n", dem ? dem : sym, member);
+    if (dem)
+        demangle_free(dem);
+}
+
+/**
+ * @brief Print an archive's symbol index, as GNU nm -s does.
+ *
+ * Reads the GNU "/" (32-bit offsets) or "/SYM64/" (64-bit offsets)
+ * table, both big-endian, or a BSD "__.SYMDEF" ranlib table in
+ * little-endian order, and prints "Archive index:" followed by one
+ * "<symbol> in <member>" line per entry, in index order.  The index and
+ * the GNU long-name table always precede the ordinary members, so only
+ * the leading special members are scanned.  An archive without an
+ * index prints nothing.
+ *
+ * @param archive_path  Archive name, for diagnostics.
+ * @param buf           The whole archive.
+ * @param size          Size of @p buf in bytes.
+ * @return 0 on success, -1 when the index is malformed.
+ */
+static int print_archive_index(const char *archive_path, const uint8_t *buf, size_t size)
+{
+    const uint8_t *map = NULL, *nametab = NULL;
+    size_t map_size = 0, nametab_size = 0;
+    int map_kind = 0;           /* 1 = GNU 32-bit, 2 = GNU 64-bit, 3 = BSD */
+    size_t off = AR_MAGIC_LEN;
+    int printed = 0;
+
+    while (off <= size && size - off >= AR_HDR_LEN) {
+        const struct ar_raw_header *hdr =
+            (const struct ar_raw_header *)(const void *)(buf + off);
+        uint64_t msize = 0, extlen = 0;
+        char *name;
+        int special = 1;
+
+        if (memcmp(hdr->fmag, AR_FMAG, 2) != 0 ||
+            parse_decimal_field(hdr->size, sizeof(hdr->size), &msize) != 0 ||
+            msize > size - off - AR_HDR_LEN)
+            break;
+        if (memcmp(hdr->name, "#1/", 3) == 0) {
+            /* 4.4BSD: the name sits in front of the data. */
+            if (parse_decimal_field(hdr->name + 3, 13, &extlen) != 0 ||
+                extlen > msize)
+                break;
+            name = archive_member_name_at(buf, size, off, NULL, 0);
+        } else {
+            name = dup_member_name_simple(hdr->name);
+        }
+        if (name == NULL)
+            return -1;
+        if (strcmp(name, "/") == 0 && map == NULL)
+            map_kind = 1;
+        else if ((strcmp(name, "/SYM64") == 0 || strcmp(name, "/SYM64/") == 0) &&
+                 map == NULL)
+            map_kind = 2;
+        else if ((strcmp(name, "__.SYMDEF") == 0 ||
+                  strcmp(name, "__.SYMDEF SORTED") == 0) && map == NULL)
+            map_kind = 3;
+        else if (strcmp(name, "//") == 0) {
+            nametab = buf + off + AR_HDR_LEN;
+            nametab_size = (size_t)msize;
+        } else
+            special = 0;
+        if (special && map == NULL && map_kind != 0) {
+            map = buf + off + AR_HDR_LEN + (size_t)extlen;
+            map_size = (size_t)(msize - extlen);
+        }
+        free(name);
+        if (!special)
+            break;
+        off += AR_HDR_LEN + (size_t)msize + (size_t)(msize & 1u);
+    }
+
+    if (map == NULL)
+        return 0;
+
+    if (map_kind == 1 || map_kind == 2) {
+        size_t w = map_kind == 2 ? 8 : 4;
+        uint64_t count;
+        size_t i, strpos;
+
+        if (map_size < w)
+            goto bad;
+        count = w == 8 ? rd64(map, 1) : rd32(map, 1);
+        if (count > (map_size - w) / w)
+            goto bad;
+        strpos = w + (size_t)count * w;
+        for (i = 0; i < (size_t)count; i++) {
+            const uint8_t *p = map + w + i * w;
+            uint64_t moff = w == 8 ? rd64(p, 1) : rd32(p, 1);
+            const char *sym = (const char *)(map + strpos);
+            const uint8_t *nul;
+            char *member;
+
+            if (strpos >= map_size)
+                goto bad;
+            nul = memchr(map + strpos, '\0', map_size - strpos);
+            if (nul == NULL)
+                goto bad;
+            member = moff <= SIZE_MAX ?
+                archive_member_name_at(buf, size, (size_t)moff, nametab, nametab_size) :
+                NULL;
+            if (member == NULL)
+                goto bad;
+            print_armap_entry(sym, member, &printed);
+            free(member);
+            strpos = (size_t)(nul - map) + 1;
+        }
+        return 0;
+    }
+
+    /* BSD: ranlib array byte count, {strx, off} pairs, string size, strings. */
+    {
+        uint32_t ranlib_bytes, strsize;
+        const uint8_t *strs;
+        size_t i, n;
+
+        if (map_size < 4)
+            goto bad;
+        ranlib_bytes = rd32(map, 0);
+        if (ranlib_bytes % 8 != 0 || ranlib_bytes > map_size - 4 ||
+            map_size - 4 - ranlib_bytes < 4)
+            goto bad;
+        strsize = rd32(map + 4 + ranlib_bytes, 0);
+        if (strsize > map_size - 8 - ranlib_bytes)
+            goto bad;
+        strs = map + 8 + ranlib_bytes;
+        n = ranlib_bytes / 8;
+        for (i = 0; i < n; i++) {
+            uint32_t strx = rd32(map + 4 + i * 8, 0);
+            uint32_t moff = rd32(map + 8 + i * 8, 0);
+            char *member;
+
+            if (strx >= strsize || memchr(strs + strx, '\0', strsize - strx) == NULL)
+                goto bad;
+            member = archive_member_name_at(buf, size, moff, nametab, nametab_size);
+            if (member == NULL)
+                goto bad;
+            print_armap_entry((const char *)(strs + strx), member, &printed);
+            free(member);
+        }
+        return 0;
+    }
+
+bad:
+    fprintf(stderr, "%s: %s: malformed archive index\n", progname, archive_path);
+    return -1;
+}
+
 static int process_archive(const char *archive_path, const uint8_t *buf, size_t size,
                            int is_thin, int *any_fail)
 {
@@ -1080,6 +1309,9 @@ static int process_archive(const char *archive_path, const uint8_t *buf, size_t 
     const uint8_t *gnu_name_table = NULL;
     size_t gnu_name_table_size = 0;
     char *archive_dir = NULL;
+
+    if (opts.print_armap && print_archive_index(archive_path, buf, size) != 0)
+        *any_fail = 1;
 
     if (is_thin) {
         archive_dir = path_dirname_dup(archive_path);

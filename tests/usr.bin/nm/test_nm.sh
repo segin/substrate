@@ -106,6 +106,59 @@ SRC
     expect_match "archive shows second member" "$OUT_AR" 'libab\.a\[b\.o\]:'
     expect_match "archive member symbol alpha" "$OUT_AR" '[[:space:]]T[[:space:]]+alpha$'
     expect_match "archive member symbol beta" "$OUT_AR" '[[:space:]]T[[:space:]]+beta$'
+    expect_nomatch "no archive index without -s" "$OUT_AR" '^Archive index:$'
+
+    # -s / --print-armap: the archive's symbol index comes first, one
+    # "<symbol> in <member>" line per entry, members named through the
+    # long-name table too, symbols demangled under -C.
+    cat > "$TMP/a_rather_long_member_name.cpp" <<'SRC'
+namespace Ns { int Indexed(int x) { return x * 2; } }
+int gamma_var = 4;
+SRC
+    c++ -c -o "$TMP/a_rather_long_member_name.o" "$TMP/a_rather_long_member_name.cpp"
+    ar rcs "$TMP/libidx.a" "$TMP/a.o" "$TMP/b.o" "$TMP/a_rather_long_member_name.o"
+
+    OUT_S=$($NM -s "$TMP/libidx.a")
+    expect_match "-s prints archive index header" "$OUT_S" '^Archive index:$'
+    expect_match "-s indexes alpha in a.o" "$OUT_S" '^alpha in a\.o$'
+    expect_match "-s indexes beta in b.o" "$OUT_S" '^beta in b\.o$'
+    expect_match "-s names long members" "$OUT_S" '^gamma_var in a_rather_long_member_name\.o$'
+    expect_match "-s keeps member listing" "$OUT_S" '[[:space:]]T[[:space:]]+beta$'
+    OUT_S2=$($NM --print-armap "$TMP/libidx.a")
+    [ "$OUT_S" = "$OUT_S2" ] || fail "--print-armap matches -s"
+    pass "--print-armap matches -s"
+    OUT_SC=$($NM -s -C "$TMP/libidx.a")
+    expect_match "-s -C demangles index" "$OUT_SC" '^Ns::Indexed\(int\) in a_rather_long_member_name\.o$'
+
+    ar rcsT "$TMP/libthin.a" "$TMP/a.o" "$TMP/a_rather_long_member_name.o"
+    OUT_ST=$($NM -s "$TMP/libthin.a")
+    expect_match "-s on thin archive indexes alpha" "$OUT_ST" '^alpha in .*a\.o$'
+
+    if nm --version 2>/dev/null | grep -q 'GNU nm'; then
+        armap_index() {
+            awk '/^Archive index:$/ { on = 1 } on && /^$/ { exit } on { print }'
+        }
+        for flags in "-s" "-s -C"; do
+            # shellcheck disable=SC2086
+            GOT=$($NM $flags "$TMP/libidx.a" | armap_index)
+            # shellcheck disable=SC2086
+            WANT=$(nm $flags "$TMP/libidx.a" | armap_index)
+            [ -n "$WANT" ] && [ "$GOT" = "$WANT" ] || {
+                printf 'FAIL: nm %s archive index differs from GNU nm\n--- got:\n%s\n--- want:\n%s\n' \
+                    "$flags" "$GOT" "$WANT" >&2
+                exit 1
+            }
+            pass "nm $flags archive index matches GNU nm"
+        done
+        GOT=$($NM -s "$TMP/libthin.a" | armap_index)
+        WANT=$(nm -s "$TMP/libthin.a" | armap_index)
+        [ "$GOT" = "$WANT" ] || {
+            printf 'FAIL: nm -s thin archive index differs from GNU nm\n--- got:\n%s\n--- want:\n%s\n' \
+                "$GOT" "$WANT" >&2
+            exit 1
+        }
+        pass "nm -s thin archive index matches GNU nm"
+    fi
 
     # --size-sort: ascending by size, undefined and size-0 symbols are
     # dropped, and without -S the BSD value column carries the size.

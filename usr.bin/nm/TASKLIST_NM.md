@@ -56,7 +56,7 @@ Goal: implement `nm` with ELF parsing exclusively via `libelfobj`.
 - [ ] `-P` / `--portability`: POSIX format: `name type value size`.
 - [ ] `--format={bsd,sysv,posix}`: select output format explicitly.
 - [ ] `-S` / `--print-size`: print symbol size alongside value.
-- [ ] `-s` / `--print-armap`: print archive symbol index before members.
+- [x] `-s` / `--print-armap`: print archive symbol index before members.
 - [ ] `-l` / `--line-numbers`: use DWARF info to print source file and line (defer — requires `libelfobj` DWARF support).
 - [ ] `-C` / `--demangle`: demangle C++ symbol names (defer unless tree needs it).
 - [ ] `-D` / `--dynamic`: use `.dynsym` instead of `.symtab`.

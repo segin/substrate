@@ -77,7 +77,21 @@ Reverse the sort order.
 .It Fl S , Fl -print-size
 Print the size of defined symbols in BSD format.
 .It Fl s , Fl -print-armap
-Print the archive index (symbol map) when processing archives.
+When processing an archive, first print its symbol index: the line
+.Dq Archive index:
+followed by one
+.Dq Ar symbol No in Ar member
+line per index entry, in index order.
+GNU
+.Pa /
+and
+.Pa /SYM64/
+indexes and BSD
+.Pa __.SYMDEF
+indexes are read; an archive without an index prints none.
+With
+.Fl C
+the symbol names are demangled.
 .It Fl t Ar radix
 Use
 .Ar radix
