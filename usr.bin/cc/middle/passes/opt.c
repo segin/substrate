@@ -3570,6 +3570,43 @@ static const cc_ssa_global_t *foldable_global(const cc_ssa_module_t *m, const ch
 }
 
 /**
+ * Each value's one definition in @p f: the index of the instruction that defines it, -1 for none, -2 for one
+ * defined more than once (an asm's output among them).
+ *
+ * @return an array of f->value_count indexes (free it), or NULL when out of memory
+ */
+static long *single_def_at(const cc_ssa_function_t *f) {
+    long *def_at = (long *)malloc((size_t)(f->value_count > 0 ? f->value_count : 1) * sizeof(*def_at));
+    size_t i;
+
+    if (def_at == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < (size_t)f->value_count; ++i) {
+        def_at[i] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t a;
+
+        if (in->dst >= 0 && in->dst < f->value_count) {
+            def_at[in->dst] = def_at[in->dst] == -1 ? (long)i : -2;
+        }
+        for (a = 0; in->op == CC_SSA_ASM && in->asm_out_values != NULL && a < in->asm_out_count; ++a) {
+            int v = in->asm_out_values[a];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+                v = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
+            }
+            if (v >= 0 && v < f->value_count) {
+                def_at[v] = -2;
+            }
+        }
+    }
+    return def_at;
+}
+
+/**
  * Where value @p v of @p f points, if it is a constant offset from a symbol: a GADDR (`sym+off` too), and
  * moves, additions and subtractions of constants on one, each value defined once.
  *
@@ -3674,33 +3711,11 @@ static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     if (i == f->instr_count) {
         return 0;
     }
-    def_at = (long *)malloc((size_t)f->value_count * sizeof(*def_at));
+    def_at = single_def_at(f);
     k = def_at != NULL ? single_def_consts(f) : NULL;
     if (k == NULL) {
         free(def_at);
         return -1;
-    }
-    for (i = 0; i < (size_t)f->value_count; ++i) {
-        def_at[i] = -1;
-    }
-    /* each value's one definition; -2 for one defined more than once, an asm's output among them */
-    for (i = 0; i < f->instr_count; ++i) {
-        const cc_ssa_instr_t *in = &f->instrs[i];
-        size_t a;
-
-        if (in->dst >= 0 && in->dst < f->value_count) {
-            def_at[in->dst] = def_at[in->dst] == -1 ? (long)i : -2;
-        }
-        for (a = 0; in->op == CC_SSA_ASM && in->asm_out_values != NULL && a < in->asm_out_count; ++a) {
-            int v = in->asm_out_values[a];
-
-            if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
-                v = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
-            }
-            if (v >= 0 && v < f->value_count) {
-                def_at[v] = -2;
-            }
-        }
     }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
@@ -3746,6 +3761,250 @@ static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     free(def_at);
     free(k);
     return changed;
+}
+
+/** The largest constant offset from an object's address that fold_address_compares() reasons about. */
+#define ADDR_OFF_MAX (1LL << 16)
+
+/** What address_ref() finds a value to be: an offset from a symbol's address or from a stack slot's. */
+typedef struct {
+    const char *sym; /**< the symbol reference, an offset perhaps after its name; NULL for a stack slot */
+    int slot;        /**< the STACKALLOC value whose slot it points into; -1 for a symbol */
+    long long off;   /**< the offset from it */
+} addr_ref_t;
+
+/**
+ * Where value @p v of @p f points, if it is a constant offset from a symbol (symbol_address()) or from one of
+ * the function's stack slots: a STACKALLOC, and moves, additions and subtractions of constants on one, each
+ * value defined once.
+ *
+ * @param f       the function
+ * @param def_at  per value: the instruction that defines it, its only definition, or < 0 (single_def_at())
+ * @param k       the values constant on every path (single_def_consts())
+ * @param v       the value
+ * @param r       receives where it points
+ * @param depth   how many definitions the walk is in, which ends it at 16
+ * @return 1, or 0 when it is not known so
+ */
+static int address_ref(const cc_ssa_function_t *f, const long *def_at, const const_state_t *k, int v, addr_ref_t *r,
+                       int depth) {
+    const cc_ssa_instr_t *in;
+
+    if (v < 0 || v >= f->value_count || def_at[v] < 0 || depth > 16) {
+        return 0;
+    }
+    in = &f->instrs[def_at[v]];
+    switch (in->op) {
+    case CC_SSA_GADDR:
+        r->slot = -1;
+        return symbol_address(f, def_at, k, v, &r->sym, &r->off, depth);
+    case CC_SSA_STACKALLOC:
+        r->sym = NULL;
+        r->slot = v;
+        r->off = 0;
+        return 1;
+    case CC_SSA_MOV:
+        return address_ref(f, def_at, k, in->lhs, r, depth + 1);
+    case CC_SSA_ADD:
+    case CC_SSA_SUB: {
+        int base = in->lhs;
+        long long c;
+
+        if (in->rhs >= 0 && in->rhs < f->value_count && k[in->rhs].known && k[in->rhs].type == CC_VAL_I64) {
+            c = k[in->rhs].i;
+        } else if (in->op == CC_SSA_ADD && in->lhs >= 0 && in->lhs < f->value_count && k[in->lhs].known &&
+                   k[in->lhs].type == CC_VAL_I64) {
+            c = k[in->lhs].i;
+            base = in->rhs;
+        } else {
+            return 0;
+        }
+        if (c < -ADDR_OFF_MAX || c > ADDR_OFF_MAX || !address_ref(f, def_at, k, base, r, depth + 1)) {
+            return 0;
+        }
+        r->off += in->op == CC_SSA_SUB ? -c : c;
+        return 1;
+    }
+    default:
+        return 0;
+    }
+}
+
+/** Whether the @p n bytes at @p name appear in @p text as a whole word, as a symbol in an assembler line would. */
+static int text_names(const char *text, const char *name, size_t n) {
+    const char *p = text;
+
+    while (p != NULL && (p = strstr(p, name)) != NULL) {
+        int before = p > text && (p[-1] == '_' || p[-1] == '.' || p[-1] == '$' || (p[-1] >= '0' && p[-1] <= '9') ||
+                                  ((p[-1] | 0x20) >= 'a' && (p[-1] | 0x20) <= 'z'));
+        char c = p[n];
+        int after = c == '_' || c == '.' || c == '$' || (c >= '0' && c <= '9') || ((c | 0x20) >= 'a' && (c | 0x20) <= 'z');
+
+        if (strncmp(p, name, n) == 0 && !before && !after) {
+            return 1;
+        }
+        p++;
+    }
+    return 0;
+}
+
+/**
+ * Whether the address of the symbol @p sym names cannot be null, as gcc knows it even under
+ * -fno-delete-null-pointer-checks: an object or a function this module defines, not weak, not an alias, not
+ * thread-local, and named by no file-scope asm (which may make it weak).  A symbol only declared here is not
+ * known so: another object may define it weak, or not at all.
+ */
+static int symbol_nonnull(const cc_ssa_module_t *m, const char *sym) {
+    size_t n = sym_name_len(sym);
+    char *name;
+    int defined = 0;
+    size_t i;
+
+    if (n == 0) {
+        return 0;
+    }
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+
+        if (g->name == NULL || strncmp(g->name, sym, n) != 0 || g->name[n] != '\0') {
+            continue;
+        }
+        if ((g->attr_flags & (CC_ATTR_WEAK | CC_ATTR_ALIAS)) != 0 || g->attr_alias != NULL ||
+            (g->storage & CC_STORAGE_THREAD_LOCAL) != 0) {
+            return 0;
+        }
+        if ((g->storage & CC_STORAGE_EXTERN) == 0 || g->has_init) {
+            defined = 1;
+        }
+    }
+    for (i = 0; i < m->func_count; ++i) {
+        const cc_ssa_function_t *fn = &m->funcs[i];
+
+        if (fn->name == NULL || strncmp(fn->name, sym, n) != 0 || fn->name[n] != '\0') {
+            continue;
+        }
+        if ((fn->attr_flags & (CC_ATTR_WEAK | CC_ATTR_ALIAS)) != 0 || fn->attr_alias != NULL) {
+            return 0;
+        }
+        /* (an inline-only body is not the definition: its address is the external function's) */
+        if (!fn->inline_only) {
+            defined = 1;
+        }
+    }
+    if (!defined || m->toplevel_asm_count == 0) {
+        return defined;
+    }
+    name = (char *)malloc(n + 1);
+    if (name == NULL) {
+        return 0;
+    }
+    memcpy(name, sym, n);
+    name[n] = '\0';
+    for (i = 0; i < m->toplevel_asm_count && defined; ++i) {
+        if (m->toplevel_asm[i] != NULL && text_names(m->toplevel_asm[i], name, n)) {
+            defined = 0;
+        }
+    }
+    free(name);
+    return defined;
+}
+
+/**
+ * Fold the compares of @p f between addresses whose relation is known, as gcc folds them: two constant offsets
+ * from one object's address compare as the offsets do -- for an ordering, an unsigned compare of offsets from
+ * 0 to ADDR_OFF_MAX, which no object's address can wrap past -- and the address of a stack slot, or of an
+ * object or a function the module defines (symbol_nonnull()), at such an offset, is not null.  Linux's ksm.c
+ * has BUILD_BUG_ON(&migrate_nodes.prev <= &migrate_nodes) of its own static list head, and landlock's
+ * copy_min_struct_from_user(), always_inline, BUILD_BUG_ON(!dst) of the address of its caller's local: each
+ * left a call of an undefined __compiletime_assert_N.  Never folded: an address that may be null -- a weak
+ * symbol's, one only declared, an arbitrary pointer's -- and two different objects' addresses.
+ *
+ * @return 1 when a compare was folded, 0 when none was, or -1 when out of memory
+ */
+static int fold_address_compares(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
+    long *def_at;
+    const_state_t *k;
+    size_t i;
+    int changed = 0;
+
+    if (f->value_count <= 0) {
+        return 0;
+    }
+    /* (a function that compares nothing has nothing to fold) */
+    i = 0;
+    while (i < f->instr_count && f->instrs[i].op != CC_SSA_CMP) {
+        i++;
+    }
+    if (i == f->instr_count) {
+        return 0;
+    }
+    def_at = single_def_at(f);
+    k = def_at != NULL ? single_def_consts(f) : NULL;
+    if (k == NULL) {
+        free(def_at);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        int eq = in->cmp_kind == CC_CMP_EQ || in->cmp_kind == CC_CMP_NE;
+        addr_ref_t a;
+        addr_ref_t b;
+        int ha;
+        int hb;
+        long long out;
+
+        if (in->op != CC_SSA_CMP || in->dst < 0 || in->lhs < 0 || in->rhs < 0 || in->lhs >= f->value_count ||
+            in->rhs >= f->value_count || cc_ssa_value_class(f, in->lhs) != CC_VAL_I64 ||
+            cc_ssa_value_class(f, in->rhs) != CC_VAL_I64 ||
+            cc_ssa_value_size(f, in->lhs) != (uint32_t)cc_target_pointer_size() ||
+            cc_ssa_value_size(f, in->rhs) != (uint32_t)cc_target_pointer_size()) {
+            continue;
+        }
+        ha = address_ref(f, def_at, k, in->lhs, &a, 0);
+        hb = address_ref(f, def_at, k, in->rhs, &b, 0);
+        if (ha && hb &&
+            ((a.slot >= 0 && a.slot == b.slot) ||
+             (a.sym != NULL && b.sym != NULL && sym_name_len(a.sym) == sym_name_len(b.sym) &&
+              strncmp(a.sym, b.sym, sym_name_len(a.sym)) == 0))) {
+            /* one object: as its offsets compare */
+            if (!eq && (!in->is_unsigned || a.off < 0 || a.off > ADDR_OFF_MAX || b.off < 0 || b.off > ADDR_OFF_MAX)) {
+                continue;
+            }
+            out = fold_int_cmp(in->cmp_kind, 1, cc_target_pointer_size() == 4, a.off, b.off);
+        } else if (eq && ((ha && k[in->rhs].known && k[in->rhs].i == 0) ||
+                          (hb && k[in->lhs].known && k[in->lhs].i == 0))) {
+            /* an object's address against null */
+            const addr_ref_t *r = ha ? &a : &b;
+
+            if (r->off < 0 || r->off > ADDR_OFF_MAX || (r->slot < 0 && !symbol_nonnull(m, r->sym))) {
+                continue;
+            }
+            out = in->cmp_kind == CC_CMP_NE;
+        } else {
+            continue;
+        }
+        in->op = CC_SSA_CONST;
+        in->imm = out;
+        in->lhs = -1;
+        in->rhs = -1;
+        changed = 1;
+    }
+    free(def_at);
+    free(k);
+    return changed;
+}
+
+/**
+ * The folds of @p f that read what module @p m declares: loads from its const tables (fold_const_loads()) and
+ * compares of addresses (fold_address_compares()).
+ *
+ * @return 1 when anything was folded, 0 when nothing was, or -1 when out of memory
+ */
+static int fold_module_facts(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
+    int rl = fold_const_loads(m, f);
+    int ra = rl < 0 ? -1 : fold_address_compares(m, f);
+
+    return ra < 0 ? -1 : (rl > 0 || ra > 0);
 }
 
 /**
@@ -4025,10 +4284,11 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
             }
             /*
              * a load from a const table at an offset the inlined constants made known, as its initializer
-             * has it, and what that folds in turn: a branch to a call that must go
+             * has it, or a compare of addresses an inlined argument made known, and what that folds in
+             * turn: a branch to a call that must go
              */
             if (rc == 0 && opt_level > 0) {
-                rc = fold_const_loads(m, &m->funcs[fi]);
+                rc = fold_module_facts(m, &m->funcs[fi]);
                 if (rc > 0) {
                     rc = optimize_function(&m->funcs[fi], opt_level);
                 }
@@ -4332,10 +4592,10 @@ static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag)
         /*
          * a const table's load at an offset only the promoted values made constant: Linux's
          * reverse_cpuid_check() is passed what __feature_translate()'s switch returns, a variable of two
-         * definitions until its dead arms went
+         * definitions until its dead arms went; and a compare of addresses the promoted values made known
          */
         if (!oom) {
-            int rl = fold_const_loads(m, &m->funcs[i]);
+            int rl = fold_module_facts(m, &m->funcs[i]);
 
             if (rl > 0) {
                 rl = settle_function(&m->funcs[i]) < 0 ? -1 : 1;

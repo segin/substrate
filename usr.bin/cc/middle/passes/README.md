@@ -30,7 +30,12 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   IR does not mark the volatile ones; it runs again once slots are
   values); then, from -O1,
   inlining bottom-up over the call graph (a function is rewritten once
-  its callees are, then folded again); at the end of a function's
+  its callees are, then folded again, with what the module's
+  declarations tell, `fold_module_facts()`: a load from a const table at
+  a constant offset its initializer's bytes, and a compare of two
+  constant offsets from one object's address the compare of the
+  offsets, the address of a stack slot or of an object or a function
+  the module defines, not weak, not null); at the end of a function's
   passes, the target's legalization once more, for what it split before
   the constants were known (on i386, a 64-bit division by a local that
   holds a power of two), after a parameter of a static function that
