@@ -59,6 +59,28 @@ static int eh_entry_cmp(const void *a, const void *b) {
     return x->start < y->start ? -1 : x->start > y->start;
 }
 
+/**
+ * eh_encoded_size - bytes a value of a DW_EH_PE_* encoding takes.
+ * @enc: the encoding; only its low four bits, the format, count
+ * @ptr_size: the size of an address, for DW_EH_PE_absptr
+ *
+ * Return: the size, or 0 for a format this does not read.
+ */
+static int eh_encoded_size(int enc, int ptr_size) {
+    switch (enc & 0x0f) {
+    case DW_EH_PE_absptr:
+        return ptr_size;
+    case DW_EH_PE_udata4:
+    case DW_EH_PE_sdata4:
+        return 4;
+    case DW_EH_PE_udata8:
+    case DW_EH_PE_sdata8:
+        return 8;
+    default:
+        return 0;
+    }
+}
+
 /* The encoding a CIE gives the addresses in its FDEs (its 'R'
  * augmentation); absolute pointers if it says nothing; -1 if the CIE is
  * not one this can read. */
@@ -106,15 +128,12 @@ static int eh_cie_fde_encoding(const uint8_t *cie, size_t len, int ptr_size) {
         if (*aug == 'L') {
             p++;
         } else if (*aug == 'P') {
-            int enc = *p++ & 0x0f;
+            int width = eh_encoded_size(*p++, ptr_size);
 
-            p += enc == DW_EH_PE_absptr ? ptr_size
-               : enc == DW_EH_PE_udata4 || enc == DW_EH_PE_sdata4 ? 4
-               : enc == DW_EH_PE_udata8 || enc == DW_EH_PE_sdata8 ? 8 : 0;
-            if (enc != DW_EH_PE_absptr && enc != DW_EH_PE_udata4 && enc != DW_EH_PE_sdata4 &&
-                enc != DW_EH_PE_udata8 && enc != DW_EH_PE_sdata8) {
+            if (width == 0) {
                 return -1;
             }
+            p += width;
         } else if (*aug != 'S' && *aug != 'B') {
             return -1;
         }
@@ -180,6 +199,12 @@ int fill_eh_frame_hdr(elfobj_t *out) {
         cie_len = read_u32_endian(data + cie_off, e);
         if ((size_t)cie_len > size - cie_off - 4 ||
             (enc = eh_cie_fde_encoding(data + cie_off, cie_len, ptr_size)) < 0) {
+            usable = 0;
+            break;
+        }
+        /* The FDE's length must also cover its initial location, or that
+         * would be read from the next record or past the section's end. */
+        if ((size_t)len < 4 + (size_t)eh_encoded_size(enc, ptr_size)) {
             usable = 0;
             break;
         }
