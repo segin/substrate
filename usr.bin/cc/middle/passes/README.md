@@ -51,7 +51,9 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   a compare of two
   constant offsets from one object's address the compare of the
   offsets, the address of a stack slot or of an object or a function
-  the module defines, not weak, not null; and a loop computing only from
+  the module defines, not weak, not null, and so a pointer to one, or
+  to a string literal, that a const table holds at a constant offset
+  (`table_pointer_nonnull()`); and a loop computing only from
   constants and const tables, entered once, run to its end and replaced
   by the constants it leaves and a jump out, `eval_const_loops()`, as
   gcc unrolls and folds it); at the end of a function's

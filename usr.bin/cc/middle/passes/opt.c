@@ -4826,6 +4826,75 @@ static int symbol_nonnull(const cc_ssa_module_t *m, const char *sym) {
 }
 
 /**
+ * The item of global @p g's initializer that lays out exactly the @p size bytes at offset @p off, as
+ * global_window() lays the items out: a stream of items each of its own size, or an item per element of an
+ * array.
+ *
+ * @return the item, or NULL when no one item is those bytes
+ */
+static const cc_ssa_global_init_item_t *global_item_at(const cc_ssa_global_t *g, long long off, long size) {
+    long long at = 0;
+    size_t j;
+
+    if (g->init_item_count == 0) {
+        return NULL;
+    }
+    if (g->init_items[0].init_size > 0 || g->init_items[0].init_is_zero_fill) {
+        for (j = 0; j < g->init_item_count && at <= off; ++j) {
+            const cc_ssa_global_init_item_t *it = &g->init_items[j];
+            long isz = it->init_size > 0 ? it->init_size : 1;
+
+            if (at == off) {
+                return isz == size && !it->init_is_zero_fill ? it : NULL;
+            }
+            at += isz;
+        }
+        return NULL;
+    }
+    /* an item per element; a string of chars is not an element of pointer size */
+    if (!g->is_array || g->elem_size != size || g->data_kind == CC_SSA_DATA_CHAR || off % size != 0 ||
+        (unsigned long long)(off / size) >= g->init_item_count) {
+        return NULL;
+    }
+    return &g->init_items[off / size];
+}
+
+/**
+ * Whether value @p v of @p f is a load, of a pointer's size, from a read-only global of @p m (foldable_global())
+ * at a constant offset where its initializer puts the address of a string literal, or of an object or a function
+ * the module defines (symbol_nonnull()): it is not null, as gcc folds such a load to that address.  Linux's
+ * rtw89 BUILD_BUG_ON(!rtw89_sar_handlers[src].descr_sar_source) of its static const table of handlers.
+ */
+static int table_pointer_nonnull(const cc_ssa_module_t *m, const cc_ssa_function_t *f, const long *def_at,
+                                 const const_state_t *k, int v) {
+    const cc_ssa_instr_t *in;
+    const cc_ssa_global_t *g;
+    const cc_ssa_global_init_item_t *it;
+    const char *sym = NULL;
+    long long off = 0;
+    long psize = (long)cc_target_pointer_size();
+    long sz;
+
+    if (v < 0 || v >= f->value_count || def_at[v] < 0) {
+        return 0;
+    }
+    in = &f->instrs[def_at[v]];
+    if (in->op != CC_SSA_LOAD || in->seg != 0 || in->imm != psize ||
+        !symbol_address(f, def_at, k, in->lhs, &sym, &off, 0) ||
+        (g = foldable_global(m, sym, sym_name_len(sym))) == NULL) {
+        return 0;
+    }
+    sz = global_data_size(g);
+    if (off < 0 || sz <= 0 || off + psize > sz || (it = global_item_at(g, off, psize)) == NULL) {
+        return 0;
+    }
+    /* (a symbol's address, or one past it into the object: `.quad sym+8`, never `sym-8`) */
+    return (it->init_is_string && it->init_str != NULL) ||
+           (it->init_is_symbol && it->init_sym != NULL && it->init_sym[sym_name_len(it->init_sym)] != '-' &&
+            symbol_nonnull(m, it->init_sym));
+}
+
+/**
  * Fold the compares of @p f between addresses whose relation is known, as gcc folds them: two constant offsets
  * from one object's address compare as the offsets do -- for an ordering, an unsigned compare of offsets from
  * 0 to ADDR_OFF_MAX, which no object's address can wrap past -- and the address of a stack slot, or of an
@@ -4895,6 +4964,10 @@ static int fold_address_compares(const cc_ssa_module_t *m, cc_ssa_function_t *f)
             if (r->off < 0 || r->off > ADDR_OFF_MAX || (r->slot < 0 && !symbol_nonnull(m, r->sym))) {
                 continue;
             }
+            out = in->cmp_kind == CC_CMP_NE;
+        } else if (eq && ((k[in->rhs].known && k[in->rhs].i == 0 && table_pointer_nonnull(m, f, def_at, k, in->lhs)) ||
+                          (k[in->lhs].known && k[in->lhs].i == 0 && table_pointer_nonnull(m, f, def_at, k, in->rhs)))) {
+            /* a pointer a const table holds, to an object or a function, against null */
             out = in->cmp_kind == CC_CMP_NE;
         } else {
             continue;
