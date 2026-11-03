@@ -1588,7 +1588,8 @@ elf_err_t elf_link_plan_set_gc_hook(elf_link_plan_t *plan, elf_link_gc_hook_t ho
  *
  * The first section of a class merged into an output section is laid out as any other.  Each later one going
  * to the same output section takes no room of its own: its symbols, and whatever refers to it, are given the
- * place of the first, and its own relocations are left out, the first's standing for them.  One going to a
+ * place of the first, and its own relocations are left out, the first's standing for them, as are those of
+ * its input's .eh_frame against it: its FDE describes no code, the first's describing the place.  One going to a
  * different output section is laid out as any other.  This is identical code folding (--icf) done on the
  * inputs' sections, before .text.* is gathered into .text.
  *

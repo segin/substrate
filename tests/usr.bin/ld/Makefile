@@ -57,6 +57,7 @@ run:
 	./test_icf_input_sections.sh
 	./test_icf_safe_address_taken.sh
 	./test_icf_exceptions.sh
+	./test_icf_eh_frame_hdr.sh
 	./test_eh_frame_length.sh
 	./test_eh_frame_cie_length.sh
 	./test_eh_frame_fde_short.sh

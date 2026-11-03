@@ -45,6 +45,13 @@ Each later section of the class going to the same output section takes
 no room of its own: its symbols, and the relocations of other sections
 against it, are given the place of the first, and its own relocations
 are left out, the first's standing for them.
+So are the relocations of an input's
+.Pa .eh_frame
+against it: its FDE, left unrelocated as one of a section left out is,
+describes no code of the output, and the first's FDE alone describes the
+place, which
+.Pa .eh_frame_hdr
+lists once.
 A section of the class that goes to a different output section is laid
 out as any other.
 .Pp

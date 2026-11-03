@@ -1544,6 +1544,28 @@ static int add_to_implicit_addend(struct elf_section *sec, uint64_t off, int wid
     return 1;
 }
 
+/**
+ * @brief Whether relocation @p r, of an input's .eh_frame, refers to code of that input that was folded
+ * into an identical section (SEC_FOLDED).
+ *
+ * Such a relocation is an FDE's: of code that is not there, the first of its class's own FDE describing the
+ * place it was given.  It is left out, as one against a section left out is, and the FDE describes no code
+ * of the output: else two FDEs would cover one address and .eh_frame_hdr list the place more than once.
+ *
+ * @param input        the input
+ * @param sec_included what went into the output of each of its sections
+ * @param r            a relocation of its sections
+ * @return 1 to leave it out, 0 to apply it
+ */
+static int reloc_is_folded_frame(const struct elf_link_input *input, const uint8_t *sec_included,
+                                 const struct elf_reloc *r) {
+    size_t ss = 0;
+
+    return r->section->name != NULL && strcmp(r->section->name, ".eh_frame") == 0 && r->symbol != NULL &&
+           resolve_src_sec_index(input->obj, r->symbol->shndx, &ss) && ss < input->obj->section_count &&
+           sec_included[ss] == SEC_FOLDED;
+}
+
 static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                                    const struct elf_link_input *input,
                                    const uint64_t *sec_bases, const uint8_t *sec_included,
@@ -1577,7 +1599,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
             return ELF_ERR_BOUNDS;
         }
 
-        if (r->symbol == NULL) {
+        if (r->symbol == NULL || reloc_is_folded_frame(input, sec_included, r)) {
             continue;
         }
         addend = r->addend;
