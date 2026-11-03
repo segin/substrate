@@ -704,6 +704,37 @@ static int symvec_push(elf_symbol_t ***items, size_t *count, size_t *cap, elf_sy
     return 0;
 }
 
+/**
+ * The name a shared object's symbol @p name gives the program's copy of a variable, as one of its other
+ * names: a name read from the object's full symbol table may carry its version, and "sym@@VER", the
+ * default version, is the dynamic symbol "sym" by another spelling, which the copy takes as "sym" (its
+ * version is the definition's, given it with the copy's).  "sym@VER", a version that is not the default,
+ * is not a name a plain reference reaches, and gives the copy none.
+ *
+ * @param name  the shared object's symbol name
+ * @param out   set to the bare name, which the caller frees, or to NULL when @p name gives the copy none
+ * @return 0, or -1 out of memory
+ */
+static int copy_alias_bare_name(const char *name, char **out) {
+    const char *base;
+    size_t base_len;
+    const char *ver_name;
+    int is_default;
+
+    *out = NULL;
+    split_symbol_version(name, &base, &base_len, &ver_name, &is_default);
+    if (base == NULL || base_len == 0 || (base_len != strlen(name) && !is_default)) {
+        return 0;
+    }
+    *out = (char *)malloc(base_len + 1);
+    if (*out == NULL) {
+        return -1;
+    }
+    memcpy(*out, base, base_len);
+    (*out)[base_len] = '\0';
+    return 0;
+}
+
 static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t *imports) {
     uint16_t machine = elf_machine(out);
     /* A PIE's code is position-independent but reaches data it does not define pc-relatively, as gcc
@@ -783,22 +814,33 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
             for (k = 0; k < elf_symbol_count(dso); ++k) {
                 const elf_symbol_t *other = elf_symbol_at(dso, k);
                 const char *oname = other != NULL ? elf_symbol_name(other) : NULL;
+                char *bare = NULL;
                 elf_symbol_t *alias;
 
-                if (oname == NULL || oname[0] == '\0' || strcmp(oname, elf_symbol_name(sym)) == 0 ||
+                if (oname == NULL || oname[0] == '\0' ||
                     elf_symbol_shndx(other) != def.shndx || elf_symbol_value(other) != def.value ||
                     elf_symbol_type(other) != STT_OBJECT ||
                     (elf_symbol_bind(other) != STB_GLOBAL && elf_symbol_bind(other) != STB_WEAK) ||
                     (elf_symbol_bind(other) == STB_WEAK) == own_weak) {
                     continue;
                 }
-                alias = elf_find_symbol(out, oname);
+                if (copy_alias_bare_name(oname, &bare) != 0) {
+                    ld_dso_close(dso);
+                    return -1;
+                }
+                if (bare == NULL || strcmp(bare, elf_symbol_name(sym)) == 0) {
+                    free(bare);
+                    continue;
+                }
+                alias = elf_find_symbol(out, bare);
                 if (alias != NULL && elf_symbol_shndx(alias) != SHN_UNDEF) {
-                    continue;   /* the program has one of its own by that name */
+                    free(bare);
+                    continue;   /* the program has one of its own by that name, or has it already */
                 }
                 if (alias == NULL) {
-                    alias = elf_add_symbol(out, oname, 0, 0, elf_symbol_bind(other), STT_OBJECT);
+                    alias = elf_add_symbol(out, bare, 0, 0, elf_symbol_bind(other), STT_OBJECT);
                 }
+                free(bare);
                 if (alias == NULL || elf_symbol_define(alias, dynbss, off) != ELF_OK ||
                     elf_symbol_set_type(alias, STT_OBJECT) != ELF_OK || elf_symbol_set_size(alias, def.size) != ELF_OK ||
                     symvec_push(&imports->copy_aliases, &imports->alias_count, &imports->alias_cap, alias) != 0) {

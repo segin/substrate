@@ -22,6 +22,7 @@ run:
 	./test_library_script.sh
 	./test_pie_copy.sh
 	./test_copy_alias.sh
+	./test_copy_alias_versioned.sh
 	./test_execstack_rwx.sh
 	./test_link_order.sh
 	./test_local_symbols.sh
