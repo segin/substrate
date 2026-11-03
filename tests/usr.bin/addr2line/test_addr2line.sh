@@ -919,6 +919,48 @@ SRC
         pass "10m-2 elf$M"
     done
 
+    # 10m-3: an inlined subroutine with no DW_AT_call_file names no file
+    # for the frame it was inlined into -- GNU addr2line prints "??" --
+    # even under DWARF 5, where file 0 is the primary source file and so
+    # cannot stand for "none".  The two-level fixture is compiled to
+    # assembly with -dA and every abbreviation's DW_AT_call_file (0x58)
+    # is renamed DW_AT_description (0x5a), which neither tool reads; the
+    # sizes and DIE offsets stay as they were.
+    for V in 4 5; do
+        cc -O2 -g -gdwarf-$V -dA -S -o "$TMP/tl/nocf_v$V.s" "$TMP/tl/two_level.c"
+        sed -e 's/\.uleb128[[:space:]]*0x58\([[:space:]]*# (DW_AT_call_file)\)/.uleb128 0x5a\1/' \
+            "$TMP/tl/nocf_v$V.s" > "$TMP/tl/nocf_v$V.cut.s"
+        if grep '\.uleb128[[:space:]]*0x58[[:space:]]*# (DW_AT_call_file)' \
+                "$TMP/tl/nocf_v$V.cut.s" >/dev/null ||
+           ! grep '0x5a[[:space:]]*# (DW_AT_call_file)' "$TMP/tl/nocf_v$V.cut.s" >/dev/null; then
+            fail "10m-3 v$V DW_AT_call_file was not renamed"
+        fi
+        cc -no-pie -o "$TMP/tl/nocf_v$V" "$TMP/tl/nocf_v$V.cut.s"
+        TO=$(addr_of "$TMP/tl/nocf_v$V" tl_outer)
+        TS=$(nm -S "$TMP/tl/nocf_v$V" | awk '$4=="tl_outer" {print $2; exit}')
+        [ -n "$TO" ] && [ -n "$TS" ] || fail "10m-3 v$V symbol tl_outer not found"
+        SEEN_NOFILE=0
+        OFF=0
+        while [ "$OFF" -lt $((0x$TS)) ]; do
+            Q=$(printf '%x' $((0x$TO + OFF)))
+            for FLAGS in "-f -i" "-i -p"; do
+                HOST_O=$(addr2line $FLAGS -e "$TMP/tl/nocf_v$V" 0x$Q)
+                OUR_O=$($BIN $FLAGS -e "$TMP/tl/nocf_v$V" 0x$Q)
+                [ "$OUR_O" = "$HOST_O" ] || {
+                    printf 'FAIL: 10m-3 v%s +%s %s\n  got :\n%s\n  want:\n%s\n' \
+                        "$V" "$OFF" "$FLAGS" "$OUR_O" "$HOST_O" >&2
+                    exit 1
+                }
+            done
+            case $HOST_O in
+            *"(inlined by) ??:"*) SEEN_NOFILE=1 ;;
+            esac
+            OFF=$((OFF + 1))
+        done
+        [ "$SEEN_NOFILE" -eq 1 ] || fail "10m-3 v$V no inlined frame without a call file"
+        pass "10m-3 v$V"
+    done
+
     # 10n: line-number sequences bound the addresses they resolve.  A
     # sequence the program never ends ends at its last row, so its last
     # row and every address above it (main here) resolve to nothing, not

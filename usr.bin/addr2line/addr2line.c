@@ -263,6 +263,9 @@ typedef struct {
     uint32_t call_file;
     uint32_t call_line;
     uint32_t call_column;
+    /* Whether DW_AT_call_file was given: under DWARF 5, file 0 is a
+     * real file, so call_file 0 cannot also mean "none". */
+    int has_call_file;
     size_t parent_inline;
     size_t line_unit_index;
 } dwarf_inline_t;
@@ -3217,6 +3220,7 @@ static int parse_debug_info_subprograms(addr2line_image_t *img) {
                 inl.name = name;
                 inl.linkage_name = linkage_name;
                 inl.call_file = has_call_file ? call_file : 0;
+                inl.has_call_file = has_call_file;
                 inl.call_line = has_call_line ? call_line : 0;
                 inl.call_column = has_call_column ? call_column : 0;
                 inl.parent_inline = parent_inline;
@@ -3930,7 +3934,10 @@ static void output_lookup(const addr2line_image_t *img,
         const dwarf_inline_t *callee = &img->inlines[chain[k - 1u]];
         const char *name = k < n ? inline_function_name(img, &img->inlines[chain[k]]) : func;
 
-        path = line_path_for_unit_file(img, callee->line_unit_index, callee->call_file);
+        /* No DW_AT_call_file: GNU addr2line names no file ("??"). */
+        path = callee->has_call_file
+                   ? line_path_for_unit_file(img, callee->line_unit_index, callee->call_file)
+                   : NULL;
         if (opts->pretty) {
             fputs(" (inlined by) ", stdout);
         }
