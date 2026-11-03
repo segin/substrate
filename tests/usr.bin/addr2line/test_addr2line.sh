@@ -990,6 +990,69 @@ SRC
     expect_eq "10p-2 header-only elf32 stderr" "$(cat "$TMP/xnum/h.err")" \
         "$(cat "$TMP/xnum/hgnu.err")"
 
+    # 10q-1: options are parsed as GNU addr2line parses them: short
+    # options bundle (-fpCe FILE), -e and -j take an attached value
+    # (-eFILE, -j.text), --exe and --section take the next argument,
+    # long names abbreviate (--func, --dem), and --demangle takes an
+    # optional =STYLE.  GNU addr2line is the judge.
+    QF="$TMP/cpp_v4"
+    QA=$CPP_MANGLED
+    for FLAGS in "-fpCe $QF" "-fpCiae $QF" "-fCe$QF" "-f -C --exe $QF" \
+                 "-f -C --exe=$QF" "-f --demangle=gnu-v3 -e $QF" \
+                 "-f --demangle=auto -e $QF" "-f --demangle=none -e $QF" \
+                 "-f --dem -e $QF" "--func --demangle --exe $QF" \
+                 "-asfe $QF" "--addr --basenames --pretty -f --inl -e $QF"; do
+        HOST_Q=$(norm_a2l "$(addr2line $FLAGS 0x$QA)")
+        OUR_Q=$($BIN $FLAGS 0x$QA 2>"$TMP/q.err") ||
+            { cat "$TMP/q.err" >&2; fail "10q-1 $FLAGS rejected"; }
+        expect_eq "10q-1 $FLAGS" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+    done
+    QT=$(readelf -SW "$TMP/exec64_v5" | \
+        awk '$2==".text" {print $4; exit} $3==".text" {print $5; exit}')
+    [ -n "$QT" ] || fail "10q-1 .text address not found"
+    QOFF=$(printf '%x' $((0x$A5 - 0x$QT)))
+    for FLAGS in "-j.text" "-fj.text" "-fj .text" "--section .text" \
+                 "--section=.text" "--sec .text"; do
+        HOST_Q=$(addr2line $FLAGS -e "$TMP/exec64_v5" 0x$QOFF)
+        OUR_Q=$($BIN $FLAGS -e "$TMP/exec64_v5" 0x$QOFF 2>"$TMP/q.err") ||
+            { cat "$TMP/q.err" >&2; fail "10q-1 $FLAGS rejected"; }
+        expect_eq "10q-1 $FLAGS" "$OUR_Q" "$HOST_Q"
+    done
+
+    # 10q-2: what GNU addr2line rejects is rejected, with status 1.
+    for FLAGS in "--demangle=bogus" "--demangle=" "-fz" "--functions=x" \
+                 "--nosuch"; do
+        if addr2line $FLAGS -e "$QF" 0x$QA >/dev/null 2>&1; then
+            fail "10q-2 GNU addr2line accepts $FLAGS"
+        fi
+        RC=0
+        $BIN $FLAGS -e "$QF" 0x$QA >/dev/null 2>&1 || RC=$?
+        expect_eq "10q-2 $FLAGS" "$RC" "1"
+    done
+
+    # 10q-3: an address that does not parse is still answered in the
+    # form the options ask for -- the same lines as an address that
+    # resolves to nothing (0 here), so every query keeps its line count
+    # and -a shows 0 -- from the command line and from standard input.
+    # Without -p and -c GNU addr2line is the judge as well.
+    for FLAGS in "" "-f" "-a" "-a -f" "-f -i" "-p" "-f -p" "-a -f -p" "-c" \
+                 "-f -c" "-a -f -p -c"; do
+        WANT=$($BIN $FLAGS -e "$TMP/exec64_v5" 0 0x$A5 2>/dev/null)
+        OUR_Q=$($BIN $FLAGS -e "$TMP/exec64_v5" zz 0x$A5 2>"$TMP/q.err")
+        expect_eq "10q-3 argv '$FLAGS'" "$OUR_Q" "$WANT"
+        grep 'invalid address: zz' "$TMP/q.err" >/dev/null ||
+            fail "10q-3 argv '$FLAGS' no warning"
+        OUR_Q=$(printf 'zz\n0x%s\n' "$A5" | $BIN $FLAGS -e "$TMP/exec64_v5" 2>/dev/null)
+        expect_eq "10q-3 stdin '$FLAGS'" "$OUR_Q" "$WANT"
+        case $FLAGS in
+        *-p*|*-c*) ;;
+        *)
+            HOST_Q=$(norm_a2l "$(addr2line $FLAGS -e "$TMP/exec64_v5" zz 0x$A5)")
+            expect_eq "10q-3 GNU '$FLAGS'" "$(norm_a2l "$OUR_Q")" "$HOST_Q"
+            ;;
+        esac
+    done
+
     pass "all"
 }
 

@@ -16,6 +16,26 @@ result per query.
 If no addresses are provided on the command line, addresses are read from
 standard input, one per line.
 .SH OPTIONS
+Options come before the addresses; the first argument that is not an
+option, or the argument after
+.BR \-\- ,
+starts them.
+Short options may be bundled
+.RB ( "\-fpCe a.out" ).
+The value of
+.B \-e
+or
+.B \-j
+may follow the letter directly
+.RB ( \-ea.out ", " \-j.text )
+or be the next argument.
+A long option's value may follow an
+.B =
+or be the next argument
+.RB ( "\-\-exe a.out" ),
+and a long option may be abbreviated to any prefix that names it
+alone
+.RB ( \-\-func ).
 .TP
 .BI \-e " FILE\fR,\fP " \-\-exe= FILE
 Use
@@ -40,9 +60,25 @@ Strip directory prefixes from file names.
 Treat input addresses as offsets in
 .IR SECTION .
 .TP
-.BR \-C ", " \-\-demangle
+\fB\-C\fR, \fB\-\-demangle\fR[=\fISTYLE\fR]
 Demangle function names using
 .BR demangle (3).
+.I STYLE
+is one of
+.B auto
+(the default: the scheme is told from the name),
+.B gnu\-v3
+or
+.B java
+(Itanium C++),
+.BR rust ,
+.BR dlang ,
+.BR none ,
+which leaves names as they are, or
+.BR gnat ,
+which is accepted but, there being no Ada demangler, also leaves names
+as they are.
+Any other style is an error.
 .TP
 .BR \-p ", " \-\-pretty\-print
 Print each frame on one line as
@@ -90,7 +126,21 @@ enabled, or just:
 .RE
 .PP
 without
-.BR \-f .
+.BR \-f ;
+with
+.B \-p
+the frame is
+.RB \(lq "?? at ??:0" \(rq.
+.PP
+An address that is not a hexadecimal number is reported on standard
+error, and its result is printed as for an address that resolves to
+nothing, in the form the options ask for, so every query produces the
+same number of lines.
+As with GNU
+.BR addr2line ,
+the address
+.B \-a
+shows for it is 0.
 .SH ADDRESS ADJUSTMENT
 For
 .B ET_DYN

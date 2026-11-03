@@ -99,7 +99,7 @@ typedef struct {
     int show_inlines;
     const char *section_name;
     int basenames;
-    int demangle;
+    int demangle;   /* demangle(3) style flags; 0 leaves names as they are */
     int pretty;
     int show_addresses;
 } addr2line_opts_t;
@@ -321,7 +321,7 @@ static char *line_path_for_unit_file(const addr2line_image_t *img,
                                      size_t unit_index,
                                      uint32_t file_index);
 static const char *path_basename_view(const char *path);
-static void output_unresolved(void);
+static void output_unresolved(const addr2line_opts_t *opts);
 static void emit_frame_result(const addr2line_opts_t *opts,
                               const char *function_name,
                               const char *path,
@@ -330,7 +330,7 @@ static void emit_frame_result(const addr2line_opts_t *opts,
 
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-e file] [-f] [-i] [-C] [-p] [-a] [-c] [-s] [-j section] [addr ...]\n"
+            "usage: %s [-afiCpcs] [-e file] [-j section] [addr ...]\n"
             "       %s --help\n"
             "       %s --version\n",
             g_progname, g_progname, g_progname);
@@ -3532,8 +3532,33 @@ static int parse_hex_address(const char *text, uint64_t *out) {
     return 0;
 }
 
-static void output_unresolved(void) {
-    puts("??:0");
+/**
+ * @brief Print the queried address, as -a asks, ahead of its frames.
+ *
+ * On a line of its own, or with -p as a "0xADDR: " prefix on the
+ * first frame.
+ *
+ * @param opts  Output options.
+ * @param query Address being resolved.
+ */
+static void emit_query_address(const addr2line_opts_t *opts, uint64_t query) {
+    if (opts->show_addresses) {
+        printf(opts->pretty ? "0x%llx: " : "0x%llx\n", (unsigned long long)query);
+    }
+}
+
+/**
+ * @brief Print the result for an address argument that does not parse.
+ *
+ * The output is that of an address that resolves to nothing, in the
+ * form the options ask for, so every query still produces the same
+ * number of lines.  As GNU addr2line does, the address -a shows is 0.
+ *
+ * @param opts Output options.
+ */
+static void output_unresolved(const addr2line_opts_t *opts) {
+    emit_query_address(opts, 0);
+    emit_frame_result(opts, NULL, "??", 0, 0);
 }
 
 static const char *path_basename_view(const char *path) {
@@ -3574,8 +3599,8 @@ static void emit_frame_result(const addr2line_opts_t *opts,
     if (opts->basenames) {
         out_path = path_basename_view(out_path);
     }
-    if (opts->demangle && strcmp(func, "??") != 0) {
-        dem = demangle(func, DEMANGLE_AUTO);
+    if (opts->demangle != 0 && strcmp(func, "??") != 0) {
+        dem = demangle(func, opts->demangle);
         if (dem != NULL && dem[0] != '\0') {
             display_func = dem;
         }
@@ -3713,9 +3738,7 @@ static void output_lookup(const addr2line_image_t *img,
     char *path = NULL;
     size_t k;
 
-    if (opts->show_addresses) {
-        printf(opts->pretty ? "0x%llx: " : "0x%llx\n", (unsigned long long)query);
-    }
+    emit_query_address(opts, query);
 
     /*
      * Frame 0 is the innermost function (the deepest inlined subroutine,
@@ -3761,7 +3784,7 @@ static int resolve_stdin(const addr2line_image_t *img, const addr2line_opts_t *o
         uint64_t query;
         if (parse_hex_address(line, &query) != 0) {
             warnf("invalid address: %s", line);
-            output_unresolved();
+            output_unresolved(opts);
             continue;
         }
         output_lookup(img, adjust_query_address(img, opts, query), opts);
@@ -3780,7 +3803,7 @@ static int resolve_argv(const addr2line_image_t *img,
         uint64_t query;
         if (parse_hex_address(args[i], &query) != 0) {
             warnf("invalid address: %s", args[i]);
-            output_unresolved();
+            output_unresolved(opts);
             continue;
         }
         output_lookup(img, adjust_query_address(img, opts, query), opts);
@@ -3789,6 +3812,241 @@ static int resolve_argv(const addr2line_image_t *img,
     return 0;
 }
 
+/* Whether a long option takes an argument. */
+enum {
+    A2L_ARG_NONE,
+    A2L_ARG_REQUIRED,
+    A2L_ARG_OPTIONAL
+};
+
+/* A long option, and the short option it is the same as. */
+typedef struct {
+    const char *name;
+    int has_arg;
+    int key;
+} a2l_longopt_t;
+
+static const a2l_longopt_t g_longopts[] = {
+    { "addresses", A2L_ARG_NONE, 'a' },
+    { "basenames", A2L_ARG_NONE, 's' },
+    { "demangle", A2L_ARG_OPTIONAL, 'C' },
+    { "exe", A2L_ARG_REQUIRED, 'e' },
+    { "functions", A2L_ARG_NONE, 'f' },
+    { "help", A2L_ARG_NONE, 'h' },
+    { "inlines", A2L_ARG_NONE, 'i' },
+    { "pretty-print", A2L_ARG_NONE, 'p' },
+    { "section", A2L_ARG_REQUIRED, 'j' },
+    { "version", A2L_ARG_NONE, 'V' },
+    { NULL, A2L_ARG_NONE, 0 }
+};
+
+/**
+ * @brief Map a --demangle=STYLE name to demangle(3) flags.
+ *
+ * The names are those GNU addr2line accepts.  "none" turns demangling
+ * off; "gnat" is accepted, but there is no Ada demangler, so it too
+ * leaves names as they are.
+ *
+ * @param style Style name.
+ * @param flags Set to the demangle(3) flags, 0 for no demangling.
+ * @return 0 on success, -1 if @p style is not a known style.
+ */
+static int demangle_style_flags(const char *style, int *flags) {
+    static const struct {
+        const char *name;
+        int flags;
+    } styles[] = {
+        { "none", 0 },
+        { "auto", DEMANGLE_AUTO },
+        { "gnu-v3", DEMANGLE_ITANIUM },
+        { "java", DEMANGLE_ITANIUM },
+        { "gnat", 0 },
+        { "dlang", DEMANGLE_DLANG },
+        { "rust", DEMANGLE_RUST },
+    };
+    size_t k;
+
+    for (k = 0; k < sizeof(styles) / sizeof(styles[0]); ++k) {
+        if (strcmp(style, styles[k].name) == 0) {
+            *flags = styles[k].flags;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/**
+ * @brief Apply one parsed option.
+ *
+ * -h and -V print their text and exit here.
+ *
+ * @param opts  Options being filled in.
+ * @param key   Short option letter (a long option's short equivalent).
+ * @param value Option argument, or NULL when there is none.
+ * @return 0 on success, -1 on a bad argument (already reported).
+ */
+static int apply_option(addr2line_opts_t *opts, int key, const char *value) {
+    switch (key) {
+    case 'a':
+        opts->show_addresses = 1;
+        break;
+    case 'c':
+        opts->show_column = 1;
+        break;
+    case 'C':
+        if (value == NULL) {
+            opts->demangle = DEMANGLE_AUTO;
+        } else if (demangle_style_flags(value, &opts->demangle) != 0) {
+            fprintf(stderr, "%s: unknown demangling style `%s'\n", g_progname, value);
+            return -1;
+        }
+        break;
+    case 'e':
+        opts->exe_path = value;
+        break;
+    case 'f':
+        opts->show_functions = 1;
+        break;
+    case 'h':
+        usage(stdout);
+        exit(0);
+    case 'i':
+        opts->show_inlines = 1;
+        break;
+    case 'j':
+        opts->section_name = value;
+        break;
+    case 'p':
+        opts->pretty = 1;
+        break;
+    case 's':
+        opts->basenames = 1;
+        break;
+    case 'V':
+        print_version();
+        exit(0);
+    default:
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * @brief Parse one "--name[=value]" argument.
+ *
+ * A name may be abbreviated to any prefix that names one option only.
+ * An option that requires an argument takes it after '=' or, failing
+ * that, from the next argument; an optional argument is only taken
+ * after '='.
+ *
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @param i    Index of the argument; advanced past a separate value.
+ * @param opts Options being filled in.
+ * @return 0 on success, -1 on error (already reported).
+ */
+static int parse_long_option(int argc, char **argv, int *i, addr2line_opts_t *opts) {
+    const char *arg = argv[*i];
+    const char *name = arg + 2;
+    const char *eq = strchr(name, '=');
+    size_t len = eq != NULL ? (size_t)(eq - name) : strlen(name);
+    const a2l_longopt_t *match = NULL;
+    const char *value = NULL;
+    size_t k;
+    int matches = 0;
+
+    for (k = 0; g_longopts[k].name != NULL; ++k) {
+        if (strncmp(g_longopts[k].name, name, len) != 0) {
+            continue;
+        }
+        if (g_longopts[k].name[len] == '\0') {
+            match = &g_longopts[k];
+            matches = 1;
+            break;
+        }
+        match = &g_longopts[k];
+        matches++;
+    }
+    if (matches == 0 || len == 0u) {
+        fprintf(stderr, "%s: unknown option: %s\n", g_progname, arg);
+        return -1;
+    }
+    if (matches > 1) {
+        fprintf(stderr, "%s: option '%.*s' is ambiguous\n", g_progname,
+                (int)(len + 2u), arg);
+        return -1;
+    }
+
+    if (eq != NULL) {
+        if (match->has_arg == A2L_ARG_NONE) {
+            fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n",
+                    g_progname, match->name);
+            return -1;
+        }
+        value = eq + 1;
+    } else if (match->has_arg == A2L_ARG_REQUIRED) {
+        if (*i + 1 >= argc) {
+            fprintf(stderr, "%s: option '--%s' requires an argument\n",
+                    g_progname, match->name);
+            return -1;
+        }
+        (*i)++;
+        value = argv[*i];
+    }
+    return apply_option(opts, match->key, value);
+}
+
+/**
+ * @brief Parse one argument of bundled short options, such as "-fpCe".
+ *
+ * -e and -j take the rest of the argument as their value ("-ea.out")
+ * or, when nothing follows them, the next argument.
+ *
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @param i    Index of the argument; advanced past a separate value.
+ * @param opts Options being filled in.
+ * @return 0 on success, -1 on error (already reported).
+ */
+static int parse_short_options(int argc, char **argv, int *i, addr2line_opts_t *opts) {
+    const char *p;
+
+    for (p = argv[*i] + 1; *p != '\0'; ++p) {
+        if (*p == 'e' || *p == 'j') {
+            const char *value = p + 1;
+            if (*value == '\0') {
+                if (*i + 1 >= argc) {
+                    fprintf(stderr, "%s: -%c requires %s\n", g_progname, *p,
+                            *p == 'e' ? "a file path" : "a section name");
+                    return -1;
+                }
+                (*i)++;
+                value = argv[*i];
+            }
+            return apply_option(opts, *p, value);
+        }
+        if (strchr("acCfhipsV", *p) == NULL) {
+            fprintf(stderr, "%s: unknown option: -%c\n", g_progname, *p);
+            return -1;
+        }
+        if (apply_option(opts, *p, NULL) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Parse the command line into @p opts.
+ *
+ * Options come first: the first argument that is not an option, or
+ * the one after "--", starts the addresses.
+ *
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @param opts Filled in.
+ * @return 0 on success, -1 on a bad option (already reported).
+ */
 static int parse_options(int argc, char **argv, addr2line_opts_t *opts) {
     int i;
 
@@ -3802,106 +4060,20 @@ static int parse_options(int argc, char **argv, addr2line_opts_t *opts) {
             i++;
             break;
         }
-
-        if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
-            usage(stdout);
-            exit(0);
+        if (arg[0] != '-') {
+            break;
         }
-        if (strcmp(arg, "-V") == 0 || strcmp(arg, "--version") == 0) {
-            print_version();
-            exit(0);
-        }
-
-        if (strcmp(arg, "-e") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "%s: -e requires a file path\n", g_progname);
-                return -1;
-            }
-            i++;
-            opts->exe_path = argv[i];
-            continue;
-        }
-        if (strncmp(arg, "--exe=", 6) == 0) {
-            opts->exe_path = arg + 6;
-            continue;
-        }
-        if (strcmp(arg, "--functions") == 0) {
-            opts->show_functions = 1;
-            continue;
-        }
-        if (strcmp(arg, "--inlines") == 0) {
-            opts->show_inlines = 1;
-            continue;
-        }
-        if (strcmp(arg, "--demangle") == 0) {
-            opts->demangle = 1;
-            continue;
-        }
-        if (strcmp(arg, "--pretty-print") == 0) {
-            opts->pretty = 1;
-            continue;
-        }
-        if (strcmp(arg, "--addresses") == 0) {
-            opts->show_addresses = 1;
-            continue;
-        }
-        if (strcmp(arg, "-c") == 0) {
-            opts->show_column = 1;
-            continue;
-        }
-        if (strcmp(arg, "-f") == 0) {
-            opts->show_functions = 1;
-            continue;
-        }
-        if (strcmp(arg, "-C") == 0) {
-            opts->demangle = 1;
-            continue;
-        }
-        if (strcmp(arg, "-p") == 0) {
-            opts->pretty = 1;
-            continue;
-        }
-        if (strcmp(arg, "-a") == 0) {
-            opts->show_addresses = 1;
-            continue;
-        }
-        if (strcmp(arg, "-i") == 0) {
-            opts->show_inlines = 1;
-            continue;
-        }
-        if (strcmp(arg, "-s") == 0 || strcmp(arg, "--basenames") == 0) {
-            opts->basenames = 1;
-            continue;
-        }
-        if (strcmp(arg, "-j") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "%s: -j requires a section name\n", g_progname);
-                return -1;
-            }
-            i++;
-            opts->section_name = argv[i];
-            continue;
-        }
-        if (strcmp(arg, "--section") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "%s: --section requires a section name\n", g_progname);
-                return -1;
-            }
-            i++;
-            opts->section_name = argv[i];
-            continue;
-        }
-        if (strncmp(arg, "--section=", 10) == 0) {
-            opts->section_name = arg + 10;
-            continue;
-        }
-
-        if (arg[0] == '-') {
+        if (arg[1] == '\0') {
             fprintf(stderr, "%s: unknown option: %s\n", g_progname, arg);
             return -1;
         }
-
-        break;
+        if (arg[1] == '-') {
+            if (parse_long_option(argc, argv, &i, opts) != 0) {
+                return -1;
+            }
+        } else if (parse_short_options(argc, argv, &i, opts) != 0) {
+            return -1;
+        }
     }
 
     opts->addr_args = (const char **)&argv[i];
