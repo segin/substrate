@@ -1692,6 +1692,8 @@ size_t elf_segment_count(const elfobj_t *obj);
 uint32_t elf_program_header_type(const elfobj_t *obj, size_t index);
 uint32_t elf_program_header_flags(const elfobj_t *obj, size_t index);
 uint64_t elf_program_header_align(const elfobj_t *obj, size_t index);
+/* Its p_vaddr, as elf_open() read it from the file. */
+uint64_t elf_program_header_vaddr(const elfobj_t *obj, size_t index);
 elf_section_t *elf_section_get(const elfobj_t *obj, size_t index);
 elf_err_t elf_program_header_set_type(elfobj_t *obj, size_t index, uint32_t type);
 elf_err_t elf_program_header_set_flags(elfobj_t *obj, size_t index, uint32_t flags);

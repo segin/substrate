@@ -442,6 +442,44 @@ addr_of() {
     nm -n "$obj" | awk -v s="$sym" '$3==s {print $1; exit}'
 }
 
+# Write VAL as N little-endian bytes at byte offset OFF of FILE.
+put_le() {
+    f=$1
+    off=$2
+    val=$3
+    n=$4
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        # shellcheck disable=SC2059
+        printf "\\$(printf '%03o' $(( (val >> (8 * i)) & 255 )))"
+        i=$((i + 1))
+    done | dd of="$f" bs=1 seek="$off" conv=notrunc 2>/dev/null
+}
+
+# Rewrite a little-endian ELF (32- or 64-bit) to use ELF's extended
+# section numbering: e_shnum 0 with the real count in section 0's
+# sh_size, and e_shstrndx SHN_XINDEX with the real index in its sh_link.
+make_extended_numbering() {
+    src=$1
+    out=$2
+    cls=$3
+    shoff=$(readelf -hW "$src" | awk '/Start of section headers/ {print $5}')
+    shnum=$(readelf -hW "$src" | awk '/Number of section headers/ {print $5}')
+    strndx=$(readelf -hW "$src" | awk '/Section header string table index/ {print $6}')
+    cp "$src" "$out"
+    if [ "$cls" = 64 ]; then
+        put_le "$out" 60 0 2
+        put_le "$out" 62 65535 2
+        put_le "$out" $((shoff + 32)) "$shnum" 8
+        put_le "$out" $((shoff + 40)) "$strndx" 4
+    else
+        put_le "$out" 48 0 2
+        put_le "$out" 50 65535 2
+        put_le "$out" $((shoff + 20)) "$shnum" 4
+        put_le "$out" $((shoff + 24)) "$strndx" 4
+    fi
+}
+
 main() {
     require_cmd cc
     require_cmd nm
@@ -901,6 +939,56 @@ SRC
     else
         printf 'skip: 10o (cc cannot build with -fsanitize=address)\n'
     fi
+
+    # 10p: section addresses come from the object elf_open() parsed, so
+    # an image using ELF's extended section numbering (e_shnum 0,
+    # e_shstrndx SHN_XINDEX) still has its sections, and -j finds them.
+    # GNU addr2line is the judge.
+    require_cmd readelf
+    require_cmd dd
+    mkdir -p "$TMP/xnum"
+    for XC in 64 32; do
+        if [ "$XC" = 64 ]; then
+            XSRC="$TMP/exec64_v5"
+        else
+            XSRC="$TMP/exec32_v4"
+            if [ ! -f "$XSRC" ]; then
+                pass "10p-1 elf32 skipped (no -m32 toolchain)"
+                continue
+            fi
+        fi
+        XA=$(addr_of "$XSRC" f1)
+        [ -n "$XA" ] || fail "10p-1 elf$XC symbol f1 not found"
+        XT=$(readelf -SW "$XSRC" | \
+            awk '$2==".text" {print $4; exit} $3==".text" {print $5; exit}')
+        [ -n "$XT" ] || fail "10p-1 elf$XC .text address not found"
+        XOFF=$(printf '%x' $((0x$XA - 0x$XT)))
+        make_extended_numbering "$XSRC" "$TMP/xnum/x$XC" "$XC"
+        readelf -hW "$TMP/xnum/x$XC" | grep -E 'Number of section headers: +0 \(' >/dev/null ||
+            fail "10p-1 elf$XC fixture does not use extended numbering"
+        HOST_X=$(addr2line -j .text -e "$TMP/xnum/x$XC" 0x$XOFF)
+        OUT_X=$($BIN -j .text -e "$TMP/xnum/x$XC" 0x$XOFF 2>"$TMP/xnum/err$XC") ||
+            { cat "$TMP/xnum/err$XC" >&2; fail "10p-1 elf$XC -j .text failed"; }
+        expect_eq "10p-1 elf$XC -j .text" "$OUT_X" "$HOST_X"
+        expect_eq "10p-1 elf$XC stderr" "$(cat "$TMP/xnum/err$XC")" ""
+    done
+
+    # 10p-2: an ELF32 executable that is only its 52-byte header (no
+    # program or section headers) is a valid, empty image: GNU prints
+    # "??:0" and nothing on stderr, and so must addr2line.
+    H32="$TMP/xnum/hdr32"
+    printf '\177ELF\001\001\001' > "$H32"
+    dd if=/dev/zero bs=1 count=45 2>/dev/null >> "$H32"
+    put_le "$H32" 16 2 2        # e_type ET_EXEC
+    put_le "$H32" 18 3 2        # e_machine EM_386
+    put_le "$H32" 20 1 4        # e_version
+    put_le "$H32" 40 52 2       # e_ehsize
+    [ "$(wc -c < "$H32" | tr -d ' ')" = 52 ] || fail "10p-2 fixture is not 52 bytes"
+    HOST_H=$(addr2line -e "$H32" 0x10 2>"$TMP/xnum/hgnu.err")
+    OUT_H=$($BIN -e "$H32" 0x10 2>"$TMP/xnum/h.err")
+    expect_eq "10p-2 header-only elf32" "$OUT_H" "$HOST_H"
+    expect_eq "10p-2 header-only elf32 stderr" "$(cat "$TMP/xnum/h.err")" \
+        "$(cat "$TMP/xnum/hgnu.err")"
 
     pass "all"
 }

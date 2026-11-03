@@ -107,6 +107,7 @@ elf_program_header_set_align
 elf_program_header_set_flags
 elf_program_header_set_type
 elf_program_header_type
+elf_program_header_vaddr
 elf_register_reloc_backend
 elf_reloc_addend
 elf_reloc_at

@@ -1041,6 +1041,21 @@ uint64_t elf_program_header_align(const elfobj_t *obj, size_t index) {
     return obj->phdrs[index].align;
 }
 
+/**
+ * @brief Return the virtual address (p_vaddr) of a parsed program header.
+ *
+ * @param obj    Object opened with elf_open() or elf_open_memory().
+ * @param index  Program-header index, below elf_program_header_count().
+ * @return The header's p_vaddr, or 0 for a NULL object or an index out of
+ *         range.
+ */
+uint64_t elf_program_header_vaddr(const elfobj_t *obj, size_t index) {
+    if (obj == NULL || index >= obj->phdr_count) {
+        return 0;
+    }
+    return obj->phdrs[index].vaddr;
+}
+
 elf_err_t elf_program_header_set_type(elfobj_t *obj, size_t index, uint32_t type) {
     if (obj == NULL) {
         return ELF_ERR_STATE;

@@ -14,13 +14,6 @@
 
 #define ADDR2LINE_VERSION "0.1.0"
 
-#define EI_CLASS_IDX 4
-#define EI_DATA_IDX 5
-#define ELFCLASS32 1
-#define ELFCLASS64 2
-#define ELFDATA2LSB 1
-#define ELFDATA2MSB 2
-
 #define DW_FORM_addr 0x01u
 #define DW_FORM_data2 0x05u
 #define DW_FORM_data4 0x06u
@@ -360,13 +353,6 @@ static uint32_t rd_u32(const uint8_t *p, elfobj_endian_t e) {
     }
     return ((uint32_t)p[0]) | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
            ((uint32_t)p[3] << 24);
-}
-
-static uint16_t rd_u16(const uint8_t *p, elfobj_endian_t e) {
-    if (e == ELFOBJ_ENDIAN_BE) {
-        return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
-    }
-    return (uint16_t)(((uint16_t)p[1] << 8) | p[0]);
 }
 
 static uint64_t rd_u64(const uint8_t *p, elfobj_endian_t e) {
@@ -2164,174 +2150,49 @@ static int image_append_section_meta(addr2line_image_t *img, const char *name, u
     return 0;
 }
 
-static int parse_elf_metadata(addr2line_image_t *img, const char *path) {
-    FILE *fp;
-    uint8_t ident[16];
-    uint8_t *data = NULL;
-    size_t file_size;
-    size_t nread;
-    elfobj_endian_t e;
-    int cls;
-    uint64_t shoff = 0;
-    uint16_t shentsize = 0;
-    uint16_t shnum = 0;
-    uint16_t shstrndx = 0;
-    uint64_t phoff = 0;
-    uint16_t phentsize = 0;
-    uint16_t phnum = 0;
-    const uint8_t *shstr = NULL;
-    size_t shstr_size = 0;
+/**
+ * @brief Collect section addresses and the lowest PT_LOAD address.
+ *
+ * Everything comes from the object elf_open() already parsed and
+ * validated, so the file is read once: its section table (extended
+ * numbering included) and program headers are taken as libelfobj
+ * resolved them, not decoded a second time from a fresh read that
+ * could see a different file.
+ *
+ * @param img  Image whose @c elf is open; @c sections and
+ *             @c min_load_vaddr are filled in.
+ * @return 0 on success, -1 when memory runs out.
+ */
+static int parse_elf_metadata(addr2line_image_t *img) {
+    size_t count;
     size_t i;
 
-    fp = fopen(path, "rb");
-    if (fp == NULL) {
-        return -1;
-    }
-    if (fread(ident, 1, sizeof(ident), fp) != sizeof(ident)) {
-        fclose(fp);
-        return -1;
-    }
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return -1;
-    }
-    file_size = (size_t)ftell(fp);
-    if (fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        return -1;
-    }
-    data = (uint8_t *)malloc(file_size);
-    if (data == NULL) {
-        fclose(fp);
-        return -1;
-    }
-    nread = fread(data, 1, file_size, fp);
-    fclose(fp);
-    if (nread != file_size || file_size < 64u) {
-        free(data);
-        return -1;
-    }
+    count = elf_program_header_count(img->elf);
+    for (i = 0; i < count; ++i) {
+        uint64_t vaddr;
 
-    cls = data[EI_CLASS_IDX];
-    if (data[EI_DATA_IDX] == ELFDATA2MSB) {
-        e = ELFOBJ_ENDIAN_BE;
-    } else if (data[EI_DATA_IDX] == ELFDATA2LSB) {
-        e = ELFOBJ_ENDIAN_LE;
-    } else {
-        free(data);
-        return -1;
-    }
-
-    if (cls == ELFCLASS32) {
-        if (file_size < 52u) {
-            free(data);
-            return -1;
+        if (elf_program_header_type(img->elf, i) != PT_LOAD) {
+            continue;
         }
-        phoff = rd_u32(data + 28, e);
-        shoff = rd_u32(data + 32, e);
-        phentsize = (uint16_t)rd_u16(data + 42, e);
-        phnum = (uint16_t)rd_u16(data + 44, e);
-        shentsize = (uint16_t)rd_u16(data + 46, e);
-        shnum = (uint16_t)rd_u16(data + 48, e);
-        shstrndx = (uint16_t)rd_u16(data + 50, e);
-    } else if (cls == ELFCLASS64) {
-        if (file_size < 64u) {
-            free(data);
-            return -1;
-        }
-        phoff = rd_u64(data + 32, e);
-        shoff = rd_u64(data + 40, e);
-        phentsize = (uint16_t)rd_u16(data + 54, e);
-        phnum = (uint16_t)rd_u16(data + 56, e);
-        shentsize = (uint16_t)rd_u16(data + 58, e);
-        shnum = (uint16_t)rd_u16(data + 60, e);
-        shstrndx = (uint16_t)rd_u16(data + 62, e);
-    } else {
-        free(data);
-        return -1;
-    }
-
-    if (phoff > 0 && phentsize > 0) {
-        for (i = 0; i < phnum; ++i) {
-            uint64_t off = phoff + (uint64_t)i * phentsize;
-            uint32_t ptype;
-            uint64_t vaddr;
-            if (off + (uint64_t)phentsize > file_size) {
-                break;
-            }
-            if (cls == ELFCLASS32) {
-                ptype = rd_u32(data + off, e);
-                vaddr = rd_u32(data + off + 8, e);
-            } else {
-                ptype = rd_u32(data + off, e);
-                vaddr = rd_u64(data + off + 16, e);
-            }
-            if (ptype == PT_LOAD) {
-                if (!img->has_min_load_vaddr || vaddr < img->min_load_vaddr) {
-                    img->min_load_vaddr = vaddr;
-                    img->has_min_load_vaddr = 1;
-                }
-            }
+        vaddr = elf_program_header_vaddr(img->elf, i);
+        if (!img->has_min_load_vaddr || vaddr < img->min_load_vaddr) {
+            img->min_load_vaddr = vaddr;
+            img->has_min_load_vaddr = 1;
         }
     }
 
-    if (shoff == 0 || shentsize == 0 || shnum == 0 || shstrndx >= shnum) {
-        free(data);
-        return 0;
-    }
+    count = elf_section_count(img->elf);
+    for (i = 0; i < count; ++i) {
+        const elf_section_t *sec = elf_section_get(img->elf, i);
 
-    if (shoff + (uint64_t)shentsize * shnum > file_size) {
-        free(data);
-        return -1;
-    }
-
-    {
-        uint64_t shstr_off = shoff + (uint64_t)shstrndx * shentsize;
-        uint64_t strtab_off;
-        uint64_t strtab_size;
-        if (cls == ELFCLASS32) {
-            strtab_off = rd_u32(data + shstr_off + 16, e);
-            strtab_size = rd_u32(data + shstr_off + 20, e);
-        } else {
-            strtab_off = rd_u64(data + shstr_off + 24, e);
-            strtab_size = rd_u64(data + shstr_off + 32, e);
+        if (sec == NULL) {
+            continue;
         }
-        if (strtab_off + strtab_size <= file_size) {
-            shstr = data + strtab_off;
-            shstr_size = (size_t)strtab_size;
-        }
-    }
-
-    for (i = 0; i < shnum; ++i) {
-        uint64_t off = shoff + (uint64_t)i * shentsize;
-        uint32_t name_off;
-        uint64_t addr;
-        const char *name = NULL;
-        if (cls == ELFCLASS32) {
-            name_off = rd_u32(data + off, e);
-            addr = rd_u32(data + off + 12, e);
-        } else {
-            name_off = rd_u32(data + off, e);
-            addr = rd_u64(data + off + 16, e);
-        }
-        if (shstr != NULL && name_off < shstr_size) {
-            const uint8_t *s = shstr + name_off;
-            size_t remain = shstr_size - name_off;
-            size_t j;
-            for (j = 0; j < remain; ++j) {
-                if (s[j] == 0) {
-                    name = (const char *)s;
-                    break;
-                }
-            }
-        }
-        if (name != NULL && image_append_section_meta(img, name, addr) != 0) {
-            free(data);
+        if (image_append_section_meta(img, elf_section_name(sec), elf_section_addr(sec)) != 0) {
             return -1;
         }
     }
 
-    free(data);
     return 0;
 }
 
@@ -3599,8 +3460,10 @@ static int image_open(addr2line_image_t *img, const char *path) {
     img->elf_class = elf_class(img->elf);
     img->elf_endian = elf_endian(img->elf);
     img->elf_type = elf_type(img->elf);
-    if (parse_elf_metadata(img, path) != 0) {
-        warnf("failed to parse ELF metadata for %s", path);
+    if (parse_elf_metadata(img) != 0) {
+        fprintf(stderr, "%s: out of memory\n", g_progname);
+        image_reset(img);
+        return -1;
     }
 
     if (load_debug_blob(img, ".debug_line", &img->debug_line) != 0 ||

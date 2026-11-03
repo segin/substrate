@@ -1,4 +1,4 @@
-.Dd March 2, 2026
+.Dd November 2, 2026
 .Dt ELFOBJ 3
 .Os Substrate
 .Sh NAME
@@ -41,6 +41,7 @@
 .Nm elf_symbol_count ,
 .Nm elf_reloc_count ,
 .Nm elf_program_header_count ,
+.Nm elf_program_header_vaddr ,
 .Nm elf_segment_count ,
 .Nm elf_arm_attribute_count ,
 .Nm elf_arm_attribute_tag_at ,
@@ -144,6 +145,8 @@
 .Fn elf_reloc_count "const elfobj_t *obj"
 .Ft uint16_t
 .Fn elf_program_header_count "const elfobj_t *obj"
+.Ft uint64_t
+.Fn elf_program_header_vaddr "const elfobj_t *obj" "size_t index"
 .Ft size_t
 .Fn elf_segment_count "const elfobj_t *obj"
 .Ft size_t
@@ -294,6 +297,17 @@ other object do not disturb it.
 .Pp
 High-level counters expose section/symbol/relocation/segment totals and parsed
 program-header count for reader-side inspection.
+.Fn elf_program_header_vaddr
+returns the
+.Dv p_vaddr
+of the program header at
+.Fa index
+as
+.Fn elf_open
+read it, or 0 when
+.Fa index
+is not below
+.Fn elf_program_header_count .
 .Sh RETURN VALUES
 Most mutating/query calls return
 .Dv ELF_OK
