@@ -194,7 +194,7 @@ What is open: `docs/ld-audit.md` is the checked record of what the linker does a
 
 Modularity pressure: Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`. What was asked for is apart from what the link finds out (`ld_options_t`, the context's `opt`), but a pass can still write either; narrowing what each file can see (its own header, its own part of the context, the options `const`) is the next step, and can be taken a file at a time.
 
-Speed: shared objects are re-read for each question asked of them, archives are searched by reading every member, and `.gnu.hash` is written with one bucket.
+Speed: the link is single-threaded and keeps no cache between links (`SPEC.md` §4.15). Within a link, a shared object is read once and kept (`ld_dso.c`), an archive's members are taken by its symbol index, and `.gnu.hash` has as many buckets as its symbols call for.
 
 ## 10. Project Identification
 
