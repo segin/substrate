@@ -38,6 +38,7 @@ all: $(TESTS)
 	./test_tool_integration.sh
 	@if [ "${ELFOBJ_RUN_PERF_GATE:-0}" = "1" ]; then ./test_perf_gate.sh; fi
 	./test_abi_surface.sh
+	./test_dead_stores.sh
 
 test_roundtrip: test_roundtrip.c ../../../usr.lib/elfobj/libelfobj.a
 	$(CC) $(CFLAGS) test_roundtrip.c ../../../usr.lib/elfobj/libelfobj.a -o test_roundtrip
