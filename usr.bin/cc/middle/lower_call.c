@@ -3150,6 +3150,10 @@ static int callee_binds_locally(const cc_translation_unit_t *tu, const char *nam
     for (i = 0; i < tu->func_count; ++i) {
         const cc_function_t *f = &tu->funcs[i];
 
+        /* (a weakref is a weak reference to another symbol, through the PLT) */
+        if (f->name != NULL && strcmp(f->name, name) == 0 && (f->attr_flags & CC_ATTR_WEAKREF) != 0) {
+            return 0;
+        }
         if (f->name != NULL && strcmp(f->name, name) == 0 &&
             ((f->storage & CC_STORAGE_STATIC) != 0 || (f->attr_flags & local_vis) != 0)) {
             return 1;

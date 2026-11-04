@@ -16125,7 +16125,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             const cc_function_t *fn = &tu->funcs[i];
             char **grown;
 
-            if (fn->has_body || fn->name == NULL ||
+            /* (a weakref's is a weak reference to another symbol, which need not bind here) */
+            if (fn->has_body || fn->name == NULL || (fn->attr_flags & CC_ATTR_WEAKREF) != 0 ||
                 ((fn->storage & CC_STORAGE_STATIC) == 0 && (fn->attr_flags & local_vis) == 0)) {
                 continue;
             }
@@ -16246,6 +16247,18 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 /* a global register variable has no storage: nothing to define (it was a .bss object, once per file) */
                 out->globals[i].storage = CC_STORAGE_EXTERN;
                 out->globals[i].has_init = 0;
+                continue;
+            }
+            if ((tu->globals[i].attr_flags & CC_ATTR_WEAKREF) != 0) {
+                /* a weakref, static as it is, defines nothing: a weak reference, reached as an external one */
+                out->globals[i].storage = CC_STORAGE_EXTERN;
+                out->globals[i].attr_flags = tu->globals[i].attr_flags;
+                out->globals[i].has_init = 0;
+                if (out->globals[i].name == NULL) {
+                    set_diag(diag, "out of memory duplicating global name");
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
                 continue;
             }
             out->globals[i].attr_flags = tu->globals[i].attr_flags;

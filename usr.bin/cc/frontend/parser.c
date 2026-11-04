@@ -4119,7 +4119,7 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
             return -1;
         }
     }
-    if ((src->flags & CC_ATTR_ALIAS) != 0 && src->alias != NULL) {
+    if ((src->flags & (CC_ATTR_ALIAS | CC_ATTR_WEAKREF)) != 0 && src->alias != NULL) {
         alias_dup = cc_strndup(src->alias, strlen(src->alias));
         if (alias_dup == NULL) {
             free(sec_dup);
@@ -5290,6 +5290,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_malloc_fn;
     int is_alias;
     int is_weak;
+    int is_weakref;
     int is_flatten;
     int is_target;
     int is_visibility;
@@ -5348,6 +5349,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_malloc_fn = tok_is_gnu_attr_name(p, "malloc");
     is_alias = tok_is_gnu_attr_name(p, "alias");
     is_weak = tok_is_gnu_attr_name(p, "weak");
+    is_weakref = tok_is_gnu_attr_name(p, "weakref");
     is_flatten = tok_is_gnu_attr_name(p, "flatten");
     is_target = tok_is_gnu_attr_name(p, "target");
     is_visibility = tok_is_gnu_attr_name(p, "visibility");
@@ -5370,7 +5372,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
                 is_always_inline || is_gnu_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
-                is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_counted_by ||
+                is_weakref || is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_counted_by ||
                 is_constructor ||
                 is_destructor || is_transparent_union ||
                 is_vector_size || is_ext_vector_type || is_may_alias || is_mode || is_regparm || is_no_instrument ||
@@ -5581,6 +5583,15 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
             free(out_attrs->alias);
             out_attrs->alias = sec;
             sec = NULL;
+        }
+        if (is_weakref) {
+            /* its target, if it names one here, as alias's (apply_weakrefs() settles the two) */
+            out_attrs->flags |= CC_ATTR_WEAKREF;
+            if (sec != NULL) {
+                free(out_attrs->alias);
+                out_attrs->alias = sec;
+                sec = NULL;
+            }
         }
         if (is_visibility) {
             out_attrs->flags &= ~(CC_ATTR_VIS_DEFAULT | CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL);
@@ -11985,6 +11996,88 @@ static int apply_weak_pragmas(cc_translation_unit_t *tu, const char *src, size_t
     return 0;
 }
 
+/**
+ * Settle the weakref attributes of @p tu as gcc reads them.  `static T x __attribute__((weakref("y")))`, or
+ * weakref with alias("y"), makes x a name for a weak reference to y, defining nothing: each of x's
+ * declarations is CC_ATTR_WEAKREF and CC_ATTR_WEAK (its address may be null), not an alias, and the unit
+ * says `.weakref x, y` for the assembler, which makes y weak in the object when x is referred to and leaves
+ * nothing when it is not.  Without a target weakref is weak.  A weakref not static is gcc's error, "'weakref'
+ * symbol 'x' must have static linkage".
+ *
+ * @return 0; 1 when an error was reported; -1 when out of memory
+ */
+static int apply_weakrefs(cc_translation_unit_t *tu, cc_diag_t *diag) {
+    size_t i;
+    size_t j;
+
+    for (i = 0; i < tu->func_count + tu->global_count; ++i) {
+        int is_fn = i < tu->func_count;
+        cc_function_t *fn = is_fn ? &tu->funcs[i] : NULL;
+        cc_global_t *g = is_fn ? NULL : &tu->globals[i - tu->func_count];
+        const char *name = is_fn ? fn->name : g->name;
+        cc_attr_flags_t *flags = is_fn ? &fn->attr_flags : &g->attr_flags;
+        const char *target = is_fn ? fn->attr_alias : g->attr_alias;
+        size_t len;
+        char *text;
+
+        if ((*flags & CC_ATTR_WEAKREF) == 0 || name == NULL) {
+            continue;
+        }
+        if (target == NULL || target[0] == '\0') {
+            *flags = (*flags & ~CC_ATTR_WEAKREF) | CC_ATTR_WEAK;
+            continue;
+        }
+        if (((is_fn ? fn->storage : g->storage) & CC_STORAGE_STATIC) == 0) {
+            char msg[300];
+
+            if (is_fn ? fn->src_file > 0 : g->src_file > 0) {
+                int id = (is_fn ? fn->src_file : g->src_file) - 1;
+
+                if (g_parser_files != NULL && (size_t)id < g_parser_files->count) {
+                    g_parser_diag_file_id = id;
+                    g_parser_diag_file = g_parser_files->items[id].name;
+                }
+            }
+            snprintf(msg, sizeof(msg), "'weakref' symbol '%s' must have static linkage", name);
+            set_diag(diag, is_fn ? fn->line : g->line, is_fn ? fn->col : g->col, msg);
+            cc_diag_report(diag);
+            return 1;
+        }
+        /* every declaration of the name is the reference (one without the attribute too) */
+        for (j = 0; j < tu->func_count; ++j) {
+            if (tu->funcs[j].name != NULL && strcmp(tu->funcs[j].name, name) == 0) {
+                tu->funcs[j].attr_flags = (tu->funcs[j].attr_flags & ~CC_ATTR_ALIAS) | CC_ATTR_WEAKREF | CC_ATTR_WEAK;
+            }
+        }
+        for (j = 0; j < tu->global_count; ++j) {
+            if (tu->globals[j].name != NULL && strcmp(tu->globals[j].name, name) == 0) {
+                tu->globals[j].attr_flags =
+                    (tu->globals[j].attr_flags & ~CC_ATTR_ALIAS) | CC_ATTR_WEAKREF | CC_ATTR_WEAK;
+            }
+        }
+        for (j = 0; j < tu->toplevel_asm_count; ++j) {
+            if (strncmp(tu->toplevel_asm[j], "\t.weakref ", 10) == 0 &&
+                strncmp(tu->toplevel_asm[j] + 10, name, strlen(name)) == 0 &&
+                tu->toplevel_asm[j][10 + strlen(name)] == ',') {
+                break; /* said already, by another of its declarations */
+            }
+        }
+        if (j < tu->toplevel_asm_count) {
+            continue;
+        }
+        len = strlen(name) + strlen(target) + 16;
+        text = (char *)malloc(len);
+        if (text == NULL) {
+            return -1;
+        }
+        snprintf(text, len, "\t.weakref %s, %s", name, target);
+        if (tu_add_toplevel_asm(tu, text) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag) {
     FILE *fp;
     size_t sz;
@@ -12376,7 +12469,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     parser_free_enum_consts(&p);
     parser_free_enum_tags(&p);
     parser_free_local_labels(&p);
-    if (apply_weak_pragmas(out, buf, sz, diag) != 0) {
+    if (apply_weakrefs(out, diag) < 0 || apply_weak_pragmas(out, buf, sz, diag) != 0) {
         parser_free_structs(&p);
         free(buf);
         cc_tu_free(out);
