@@ -145,11 +145,15 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   bits its operands are known to have decide (`kbits_settle()`: a
   constant's, through masks, ors, xors, shifts by a constant and
   zero-extending loads, a variable's those its definitions agree on).  `opt.c`'s `fold_module_ranges()` runs
-  it over each function, gathering what every direct call passes, then
-  again over each static function only direct calls reach
-  (`mark_only_called()`, which `constant_args()` shares) with its
-  parameters within what they are passed -- not negative, within their
-  types -- as gcc's interprocedural range propagation.
+  it over each function once, callers first (`callers_first()`),
+  gathering what every direct call passes; a static function only
+  direct calls reach (`mark_only_called()`, which `constant_args()`
+  shares), every call of which it has seen, has its parameters within
+  what they are passed -- not negative, within their types -- as gcc's
+  interprocedural range propagation, and so passes on what it knows of
+  them to the functions it calls in turn (a function on a cycle of
+  calls, walked before some of its callers, knows nothing of its
+  parameters).
 
 Not here yet: mem2reg, CSE of computations across blocks (GVN; loads
 only, above), LICM and loop transforms.

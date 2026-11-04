@@ -6419,13 +6419,113 @@ static int fold_ranges_settled(cc_ssa_function_t *f, const cc_range_t *params, c
 }
 
 /**
- * Fold the module's compares that the ranges of their operands decide (passes/range.c): each function's on
- * its own, and then the functions only direct calls reach (mark_only_called()) again with what their calls
- * pass each parameter, as gcc's interprocedural range propagation knows it.  Linux's mm/vmscan.c has
- * read_ctrl_pos(), too large to inline, with a min(tier, 3U) whose BUILD_BUG_ON asks that tier is not
- * negative, called with 0, 4 and a counter in [1, 3]; kernel/bpf/arena.c's arena_alloc_pages() a
- * min(page_cnt, ...) of a long every call passes a u32: each left a call of an undefined
- * __compiletime_assert_N.  Run before resolve_isconst(), which decides what is still not known constant.
+ * Order the functions of @p m for fold_module_ranges(): each that only direct calls reach (@p only_called)
+ * after every function that calls it.  Where a cycle of calls leaves none ready, the first function not yet
+ * placed comes next, before some of its callers; @p all_seen says, per function, whether every call of it is in a function before
+ * it in @p order, so that what its calls pass is all known when it is reached.
+ *
+ * @param m            the module
+ * @param only_called  per function: mark_only_called()'s
+ * @param order        receives every function's index once, in the order to walk them
+ * @param all_seen     receives 1 or 0 per function
+ * @return             0, or -1 when out of memory
+ */
+static int callers_first(const cc_ssa_module_t *m, const unsigned char *only_called, size_t *order,
+                         unsigned char *all_seen) {
+    size_t n = m->func_count;
+    size_t *ebase = (size_t *)malloc((n + 1) * sizeof(*ebase));
+    size_t *pending = (size_t *)calloc(n > 0 ? n : 1, sizeof(*pending));
+    unsigned char *placed = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    size_t *edge = NULL;
+    size_t head = 0;
+    size_t tail = 0;
+    size_t next = 0;
+    size_t i;
+    size_t k;
+    int pass;
+
+    if (ebase == NULL || pending == NULL || placed == NULL) {
+        free(ebase);
+        free(pending);
+        free(placed);
+        return -1;
+    }
+    /* the calls of each function of those only calls reach: counted, then listed */
+    for (pass = 0; pass < 2; ++pass) {
+        size_t e = 0;
+
+        for (i = 0; i < n; ++i) {
+            const cc_ssa_function_t *f = &m->funcs[i];
+
+            ebase[i] = e;
+            for (k = 0; k < f->instr_count; ++k) {
+                long gi;
+
+                if (f->instrs[k].op != CC_SSA_CALL || (gi = function_named(m, f->instrs[k].sym)) < 0 ||
+                    !only_called[gi]) {
+                    continue;
+                }
+                if (pass == 1) {
+                    edge[e] = (size_t)gi;
+                    pending[gi]++;
+                }
+                e++;
+            }
+        }
+        ebase[n] = e;
+        if (pass == 0 && (edge = (size_t *)malloc((e > 0 ? e : 1) * sizeof(*edge))) == NULL) {
+            free(ebase);
+            free(pending);
+            free(placed);
+            return -1;
+        }
+    }
+    for (i = 0; i < n; ++i) {
+        all_seen[i] = pending[i] == 0;
+        if (all_seen[i]) {
+            placed[i] = 1;
+            order[tail++] = i;
+        }
+    }
+    while (head < n) {
+        size_t v;
+
+        if (head == tail) {
+            /* on a cycle: what calls it is not all seen */
+            while (placed[next]) {
+                next++;
+            }
+            placed[next] = 1;
+            order[tail++] = next;
+        }
+        v = order[head++];
+        for (k = ebase[v]; k < ebase[v + 1]; ++k) {
+            size_t w = edge[k];
+
+            if (--pending[w] == 0 && !placed[w]) {
+                placed[w] = 1;
+                all_seen[w] = 1;
+                order[tail++] = w;
+            }
+        }
+    }
+    free(ebase);
+    free(pending);
+    free(placed);
+    free(edge);
+    return 0;
+}
+
+/**
+ * Fold the module's compares that the ranges of their operands decide (passes/range.c): each function once,
+ * callers first (callers_first()), a function only direct calls reach (mark_only_called()) with what its
+ * calls pass each parameter, as gcc's interprocedural range propagation knows it -- and so what a function
+ * passes on of its own parameter is known in turn.  Linux's mm/vmscan.c has read_ctrl_pos(), too large to
+ * inline, with a min(tier, 3U) whose BUILD_BUG_ON asks that tier is not negative, called with 0, 4 and a
+ * counter in [1, 3]; kernel/bpf/arena.c's arena_alloc_pages() a min(page_cnt, ...) of a long every call passes
+ * a u32; hid-steam's steam_send_report_id() a max(size + 1, len) of a size its callers pass on from theirs,
+ * each in the end a constant: each left a call of an undefined __compiletime_assert_N.  Run before
+ * resolve_isconst(), which decides what is still not known constant.
  *
  * @return 0, or -1 when out of memory
  */
@@ -6434,13 +6534,16 @@ static int fold_module_ranges(cc_ssa_module_t *m) {
     call_ranges_t c;
     size_t *base = (size_t *)malloc((n + 1) * sizeof(*base));
     unsigned char *only_called = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    size_t *order = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*order));
+    unsigned char *all_seen = (unsigned char *)calloc(n > 0 ? n : 1, 1);
     cc_range_t *seeds = NULL;
     size_t i;
+    size_t j;
     size_t k;
     int rc = 0;
 
     memset(&c, 0, sizeof(c));
-    if (base == NULL || only_called == NULL) {
+    if (base == NULL || only_called == NULL || order == NULL || all_seen == NULL) {
         rc = -1;
         goto done;
     }
@@ -6482,19 +6585,21 @@ static int fold_module_ranges(cc_ssa_module_t *m) {
                 sz >= 8 ? LLONG_MAX : (long long)((1ULL << (8 * sz - (cc_ssa_value_is_unsigned(g, in->dst) ? 0 : 1))) - 1);
         }
     }
-    /* each function on its own, noting what its calls pass */
-    for (i = 0; i < n && rc == 0; ++i) {
-        rc = fold_ranges_settled(&m->funcs[i], NULL, note_call_ranges, &c);
+    if (callers_first(m, only_called, order, all_seen) != 0) {
+        rc = -1;
+        goto done;
     }
-    /* then those only calls reach, with what they are passed */
-    for (i = 0; i < n && rc == 0; ++i) {
-        cc_ssa_function_t *g = &m->funcs[i];
+    /*
+     * each function once, callers first, noting what its calls pass: one only calls reach, all of whose calls
+     * were seen, with what they pass it -- so a range passed on through a parameter reaches the next callee
+     */
+    for (j = 0; j < n && rc == 0; ++j) {
+        cc_ssa_function_t *g;
         int any = 0;
 
-        if (!only_called[i]) {
-            continue;
-        }
-        for (k = 0; k < g->param_count; ++k) {
+        i = order[j];
+        g = &m->funcs[i];
+        for (k = 0; only_called[i] && all_seen[i] && k < g->param_count; ++k) {
             seeds[k].lo = LLONG_MIN;
             seeds[k].hi = LLONG_MAX;
             if (c.seen[base[i] + k] == ARG_CONST && c.max[base[i] + k] >= 0) {
@@ -6502,13 +6607,13 @@ static int fold_module_ranges(cc_ssa_module_t *m) {
                 any = 1;
             }
         }
-        if (any) {
-            rc = fold_ranges_settled(g, seeds, NULL, NULL);
-        }
+        rc = fold_ranges_settled(g, any ? seeds : NULL, note_call_ranges, &c);
     }
 done:
     free(base);
     free(only_called);
+    free(order);
+    free(all_seen);
     free(c.arg);
     free(c.seen);
     free(c.max);

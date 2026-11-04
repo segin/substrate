@@ -436,7 +436,11 @@ A parameter of a
 function that every call of it passes the same constant, its address
 not taken, is that constant within it, as with
 .Xr gcc 1 Ns 's
-interprocedural constant propagation.
+interprocedural constant propagation; and, from
+.Fl O1 ,
+such a parameter is known within the range of what its calls pass, a
+range a function passes on from its own parameter included, so that a
+compare that range decides is folded.
 Integer arithmetic a loop computes the same on every trip \(em of values
 the loop does not change, an address of a global, a constant \(em and
 on every trip, not in a branch some trips skip, is
