@@ -849,13 +849,24 @@ offsets in the section:
 sets a bit of
 .Ar sym Ns 's
 offset.
-A number, and a symbol that is absolute, are plain numbers there, and a
+A number, and a symbol that is absolute (one the body set with
+.Ic ABSOLUTE
+too), are plain numbers there, and a
 plain number assigned to
 .Ql \&.
-or a symbol is an offset in the section.
-.Ic ALIGN
-in a body aligns the address; it does not make the section more aligned
-than its input sections make it.
+or a symbol is an offset in the section:
+.Dq "x = ABSOLUTE(.); y = x;"
+makes
+.Ar y
+the section's address plus
+.Ar x .
+.Dq ALIGN(n)
+in a body aligns the address, and
+.Dq ALIGN(exp, n)
+of an address in the section aligns its offset there, as GNU ld does;
+neither makes the section more aligned than its input sections make it.
+.Ic ASSERT
+tests an address in a section as its offset in it.
 Where the location counter is moved to what the linker cannot know while
 it puts the input sections together, such as a symbol's address, the
 link is done over with the addresses the pass before came to, until they
@@ -887,13 +898,22 @@ defines its symbol only if an input refers to it and none defines it;
 and
 .Ic PROVIDE_HIDDEN
 make the symbol hidden.
-A symbol defined inside
+A symbol set with
+.Ql =
+in an output section's body is where GNU ld puts it: in that section for
+.Ql \&.
+or a plain number, in the other section for a symbol or
+.Ic ADDR
+of one, and absolute for an absolute address, so
+.Dq "setup_size = ALIGN(ABSOLUTE(.), 4096);"
+is absolute; in an output section nothing went into, which is not made,
+what would be in it goes in the section before it or the one after,
+whichever is more like it, of two alike the one after if the symbol is
+not before it, as GNU ld chooses.
+Any other symbol defined inside
 .Ic SECTIONS
 belongs to the section its address falls in (in an output section's body,
-that section, counting what its body adds to its end; in an output
-section nothing went into, which is not made, the section before it or
-the one after, whichever is more like it, of two alike the one after if
-the symbol is not before it, as GNU ld chooses), except one set with
+that section, counting what its body adds to its end), except one set with
 .Ql =
 between output sections or outside
 .Ic SECTIONS ,

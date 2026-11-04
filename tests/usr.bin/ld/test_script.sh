@@ -101,7 +101,7 @@ SECTIONS
     .rodata : { *(.rodata .rodata.*) }
     . = 0x00500000;
     .data : { data_begin = .; *(.data .data.*) data_finish = .; }
-    .bss : { bss_begin = .; *(.bss .bss.*) *(COMMON) . = ALIGN(., 0x400); bss_finish = .; }
+    .bss : { bss_begin = .; *(.bss .bss.*) *(COMMON) . = ALIGN(0x400); bss_finish = .; }
     . += 0x100;
     end = .;
     ASSERT(bss_finish > bss_begin && (bss_finish & 0x3ff) == 0, "bss is not padded to its alignment")

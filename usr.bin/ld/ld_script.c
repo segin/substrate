@@ -192,8 +192,8 @@ static const char lds_fill_sec_tag;
 
 /**
  * Whether a statement in an output section's body sets symbol @p name:
- * one that is an address in that section, though until the statement is
- * carried out the symbol may not say so.
+ * in the merge, which has no addresses, one that may be an address in
+ * that section, and is taken as an absolute address, not a number.
  */
 static int lds_set_in_body(const lds_eval_ctx_t *ec, const char *name) {
     const lds_stmtvec_t *v = ec->ctx != NULL && ec->ctx->script != NULL ? &ec->ctx->script->stmts : NULL;
@@ -217,15 +217,20 @@ static int lds_set_in_body(const lds_eval_ctx_t *ec, const char *name) {
  * A symbol in a section is an address in that section, and any other an
  * absolute address -- one the script set from the location counter too,
  * since GNU ld moves those into a section only once the script is done.
- * In an output section's body an absolute symbol is a number, as GNU ld
- * has it there.  In the merge, a symbol is in the section being filled
- * if its body set it or the pass before put it there (ld_relayout_t).
+ * One the script has set is where its assignment put it (lw_home()), and
+ * not where the symbol of the output says, which is made only in the
+ * walk's last pass.  In an output section's body an absolute symbol is a
+ * number, as GNU ld has it there: `x = ABSOLUTE(.); y = x;` makes y the
+ * section's address plus x.  In the merge, a symbol is in the section
+ * being filled if its body set it or the pass before put it there
+ * (ld_relayout_t).
  *
  * @param ec   The evaluation.
  * @param name The symbol.
  */
 static void lds_val_of_name(lds_eval_ctx_t *ec, const char *name) {
-    const lds_stmtvec_t *v = ec->ctx != NULL && ec->ctx->script != NULL ? &ec->ctx->script->stmts : NULL;
+    const lds_script_t *sc = ec->ctx != NULL ? ec->ctx->script : NULL;
+    const lds_stmtvec_t *v = sc != NULL ? &sc->stmts : NULL;
     const elf_symbol_t *sym;
     uint32_t shndx;
     size_t i;
@@ -252,7 +257,21 @@ static void lds_val_of_name(lds_eval_ctx_t *ec, const char *name) {
             }
             return;             /* in another section: an absolute address, which the merge can only take it as */
         }
-        goto absolute;
+        if (!lds_set_in_body(ec, name)) {
+            ec->vkind = LDS_VAL_NUMBER;
+        }
+        return;
+    }
+    at = ec->obj != NULL && sc != NULL ? defsymvec_find(&sc->homes, name) : -1;
+    if (at >= 0) {
+        uint64_t home = sc->homes.items[at].value;
+
+        if (home == 0 || home > elf_section_count(ec->obj)) {
+            goto absolute;
+        }
+        ec->vkind = LDS_VAL_SECTION;
+        ec->vsec = elf_section_get(ec->obj, (size_t)(home - 1));
+        return;
     }
     sym = ec->obj != NULL ? elf_find_symbol((elfobj_t *)ec->obj, name) : NULL;
     shndx = sym != NULL ? elf_symbol_shndx(sym) : SHN_UNDEF;
@@ -265,7 +284,7 @@ static void lds_val_of_name(lds_eval_ctx_t *ec, const char *name) {
     return;
 
 absolute:
-    if (ec->in_body && !lds_set_in_body(ec, name)) {
+    if (ec->in_body) {
         ec->vkind = LDS_VAL_NUMBER;
     }
 }
@@ -390,10 +409,14 @@ static uint64_t lds_val_operands(lds_eval_ctx_t *ec, lds_val_kind_t lkind, const
  *        section whose body it is in, as GNU ld has it, and an absolute
  *        address between output sections.
  *
+ * In the body of a section nothing went into, which is not made, that
+ * section is NULL: the value is still in it, and offsets in it are the
+ * addresses themselves (lds_sec_base()).
+ *
  * @param ec The evaluation.
  */
 static void lds_val_dot(lds_eval_ctx_t *ec) {
-    ec->vkind = ec->in_body && ec->body_sec != NULL ? LDS_VAL_SECTION : LDS_VAL_ABS;
+    ec->vkind = ec->in_body ? LDS_VAL_SECTION : LDS_VAL_ABS;
     ec->vsec = ec->in_body ? ec->body_sec : NULL;
     ec->from_dot = 1;
 }
@@ -560,10 +583,13 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
     ec->vkind = LDS_VAL_NUMBER;
     ec->vsec = NULL;
     if (strcmp(name, "ALIGN") == 0) {
+        uint64_t base = 0;
+
         if (arg_count == 2) {
+            /* in a body, an address in the section is aligned as an offset in it: ALIGN(., 16) */
             ec->vkind = kinds[1];
             ec->vsec = secs[1];
-            lds_val_binary(ec, kinds[0], secs[0], 0);
+            base = lds_val_operands(ec, kinds[0], secs[0], &vals[0], &vals[1], 0);
         } else {
             lds_val_dot(ec);
         }
@@ -585,6 +611,7 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
                 ec->err_msg = "invalid ALIGN arguments";
                 return -1;
             }
+            *out += base;
         } else {
             ec->err_tok = name_tok;
             ec->err_msg = "ALIGN expects one or two arguments";
@@ -1784,6 +1811,7 @@ void lds_script_free(lds_script_t *sc) {
     }
     free(sc->regions);
     defsymvec_free(&sc->locals);
+    defsymvec_free(&sc->homes);
     free(sc->entry);
     strvec_free(&sc->files);
     free(sc->data);
@@ -3789,23 +3817,114 @@ static const elf_symbol_t *lw_assign_src(lds_walk_t *w, const lds_stmt_t *st) {
     return src;
 }
 
-/*
- * Give a symbol the script defines its value in the output.  One set
- * outside output sections ("sym = expr;") is where GNU ld puts it: in the
- * section of a symbol or ADDR() the expression came to; absolute for a
- * number or what mixes sections (the kernel's real-mode `real_mode_seg =
- * 0;`, which its relocs tool finds only as SHN_ABS, and `sym = other + 1;`);
- * and by the location counter for what came from "." alone.  One in an
- * output section, or changed by an operator, belongs to the section its
- * address is in, so that it moves with the program if the program is moved.
- * @p ec is the evaluation of the value, or NULL when it has no single one.
+/**
+ * @brief The section a symbol the script sets goes in, as GNU ld puts it.
+ *
+ * One set outside output sections ("sym = expr;") goes in the section of
+ * a symbol or ADDR() the expression came to; is absolute for a number or
+ * what mixes sections (the kernel's real-mode `real_mode_seg = 0;`, which
+ * its relocs tool finds only as SHN_ABS, and `sym = other + 1;`); and goes
+ * by the location counter for what came from "." alone, once the script
+ * is done (@p by_dot).  One set by `=` in an output section's body goes,
+ * as GNU ld's "Expression Section" has it, in the section its value is
+ * in: that section, for "." and a number (an offset in it: `x = 16`, and
+ * `y = x / 512` with x absolute, which is read there as a number); the
+ * other section, for a symbol in one; nowhere, for an absolute address
+ * (`x = ALIGN(ABSOLUTE(.), 4096)`, `y = ABSOLUTE(x / 512)`).  In a
+ * section nothing went into, which is not made, it goes in the section
+ * GNU ld moves it to (lw_removed_section_home()).  One changed by an
+ * operator (`x += 4`) belongs to the section its address is in.
+ *
+ * @param w        The walk.
+ * @param st       The assignment.
+ * @param value    Its value, an address.
+ * @param ec       The evaluation of the value.
+ * @param hint     The section whose body it is in, or NULL.
+ * @param hint_end Where that section ends, with what its body adds.
+ * @param by_dot   Set if the symbol is absolute until the script is done.
+ * @return The section, or NULL for an absolute address.
  */
-static int lw_define(lds_walk_t *w, lds_stmt_t *st, uint64_t value, const lds_eval_ctx_t *ec, elf_section_t *hint,
-                     uint64_t hint_end) {
-    elf_symbol_t *sym = elf_find_symbol(w->out, st->at.text);
-    const elf_symbol_t *src;
+static elf_section_t *lw_home(lds_walk_t *w, const lds_stmt_t *st, uint64_t value, const lds_eval_ctx_t *ec,
+                              elf_section_t *hint, uint64_t hint_end, int *by_dot) {
     elf_section_t *home = NULL;
     size_t i;
+
+    *by_dot = 0;
+    if (st->where != LDS_IN_BODY && st->op == '=') {
+        if (ec->vkind == LDS_VAL_SECTION) {
+            home = (elf_section_t *)ec->vsec;
+        } else if (ec->vkind == LDS_VAL_ABS && ec->from_dot) {
+            home = lw_dot_section(w);
+            *by_dot = home != NULL;
+        }
+        return home;
+    }
+    if (st->where == LDS_IN_TOP) {
+        return NULL;
+    }
+    if (st->where == LDS_IN_BODY && st->op == '=') {
+        if (ec->vkind == LDS_VAL_ABS) {
+            return NULL;
+        }
+        if (ec->vkind == LDS_VAL_SECTION && ec->vsec != NULL) {
+            return (elf_section_t *)ec->vsec;
+        }
+        if (hint != NULL) {
+            return hint;
+        }
+    }
+    if (hint != NULL && value >= elf_section_addr(hint) && value <= hint_end) {
+        home = hint;
+    } else if (hint == NULL && w->in_body && w->body_sec == NULL) {
+        home = lw_removed_section_home(w, value);
+    }
+    for (i = 0; home == NULL && i < elf_section_count(w->out); ++i) {
+        elf_section_t *sec = elf_section_get(w->out, i);
+
+        if (sec != NULL && (elf_section_flags(sec) & SHF_ALLOC) != 0 && value >= elf_section_addr(sec) &&
+            value <= elf_section_addr(sec) + elf_section_size(sec)) {
+            home = sec;
+        }
+    }
+    return home;
+}
+
+/**
+ * @brief Note where a symbol the script set went (lw_home()), for the
+ *        expressions after that name it (lds_val_of_name()).
+ *
+ * @param w      The walk.
+ * @param name   The symbol.
+ * @param home   Its section, or NULL.
+ * @param by_dot Whether it is absolute until the script is done.
+ * @return 0, or -1 out of memory.
+ */
+static int lw_note_home(lds_walk_t *w, const char *name, const elf_section_t *home, int by_dot) {
+    uint64_t at = 0;
+    size_t i;
+
+    for (i = 0; home != NULL && !by_dot && i < elf_section_count(w->out); ++i) {
+        if (elf_section_get(w->out, i) == home) {
+            at = (uint64_t)i + 1;
+            break;
+        }
+    }
+    return defsymvec_set(&w->sc->homes, name, at);
+}
+
+/**
+ * @brief Give a symbol the script defines its value in the output.
+ *
+ * @param w     The walk.
+ * @param st    The assignment.
+ * @param value Its value, an address.
+ * @param home  The section it goes in (lw_home()), or NULL for absolute.
+ * @param by_dot Whether it goes there only once the script is done.
+ * @return 0, or -1.
+ */
+static int lw_define(lds_walk_t *w, lds_stmt_t *st, uint64_t value, elf_section_t *home, int by_dot) {
+    elf_symbol_t *sym = elf_find_symbol(w->out, st->at.text);
+    const elf_symbol_t *src;
 
     if (sym == NULL) {
         sym = elf_add_symbol(w->out, st->at.text, value, 0, STB_GLOBAL, STT_NOTYPE);
@@ -3813,27 +3932,8 @@ static int lw_define(lds_walk_t *w, lds_stmt_t *st, uint64_t value, const lds_ev
             return -1;
         }
     }
-    if (st->where != LDS_IN_BODY && st->op == '=' && ec != NULL) {
-        if (ec->vkind == LDS_VAL_SECTION) {
-            home = (elf_section_t *)ec->vsec;
-        } else if (ec->vkind == LDS_VAL_ABS && ec->from_dot) {
-            home = lw_dot_section(w);
-            st->by_dot = home != NULL;
-        }
-    } else if (st->where != LDS_IN_TOP) {
-        if (hint != NULL && value >= elf_section_addr(hint) && value <= hint_end) {
-            home = hint;
-        } else if (hint == NULL && w->in_body && w->body_sec == NULL) {
-            home = lw_removed_section_home(w, value);
-        }
-        for (i = 0; home == NULL && i < elf_section_count(w->out); ++i) {
-            elf_section_t *sec = elf_section_get(w->out, i);
-
-            if (sec != NULL && (elf_section_flags(sec) & SHF_ALLOC) != 0 && value >= elf_section_addr(sec) &&
-                value <= elf_section_addr(sec) + elf_section_size(sec)) {
-                home = sec;
-            }
-        }
+    if (by_dot) {
+        st->by_dot = 1;
     }
     if (home != NULL) {
         if (elf_symbol_define(sym, home, value - elf_section_addr(home)) != ELF_OK) {
@@ -3859,6 +3959,8 @@ static int lw_assign(lds_walk_t *w, lds_stmt_t *st, int have_dot, uint64_t *dot,
     int is_dot = strcmp(st->at.text, ".") == 0;
     const char *base = st->at.text;
     lds_eval_ctx_t vec;
+    elf_section_t *home;
+    int by_dot;
     uint64_t v = 0;
     uint64_t cur = 0;
 
@@ -3941,7 +4043,11 @@ static int lw_assign(lds_walk_t *w, lds_stmt_t *st, int have_dot, uint64_t *dot,
     if (defsymvec_set(&w->ctx->opt.defsyms, st->at.text, v) != 0) {
         return -1;
     }
-    return w->final ? lw_define(w, st, v, &vec, hint, hint_end) : 0;
+    home = lw_home(w, st, v, &vec, hint, hint_end, &by_dot);
+    if (lw_note_home(w, st->at.text, home, by_dot) != 0) {
+        return -1;
+    }
+    return w->final ? lw_define(w, st, v, home, by_dot) : 0;
 }
 
 /** Say that ASSERT @p st failed, with its message. */
@@ -3951,13 +4057,18 @@ static void lw_assert_report(const lds_stmt_t *st) {
 }
 
 static int lw_assert(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t dot) {
+    lds_eval_ctx_t ec;
     uint64_t v = 0;
 
     if (!w->final) {
         return 0;
     }
-    if (lw_eval(w, &st->expr, have_dot, dot, &st->at, &v) != 0) {
+    if (lw_eval_val(w, &st->expr, have_dot, dot, &st->at, &v, &ec) != 0) {
         return -1;
+    }
+    if (ec.vkind == LDS_VAL_SECTION) {
+        /* GNU ld tests an address in a section as its offset there: ASSERT(.) at a section's start fails */
+        v -= lds_sec_base(&ec, ec.vsec);
     }
     if (v == 0) {
         if (!w->settle_off && w->ctx->relayout != NULL && w->ctx->relayout->pass + 1 < LD_MAX_RELAYOUT_PASSES) {

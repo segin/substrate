@@ -110,6 +110,8 @@ Description: The linker-script path tokenizes and parses scripts, evaluates buil
 
 An output section's input sections are put together by the merge (`libelfobj`) before anything has an address; the statements between its input section descriptions -- `. = ALIGN(16)`, `. = sym | (1 << 2)` -- are worked out there (`script_rank_gap()`) as far as they can be, and the walk that gives the addresses (`script_assign_addresses()`) checks that the merge left the room it works out. Where it did not, because an expression needed an address the merge could not know, the walk stops the link and `main()` does it over (`link_once()`), carrying the addresses the pass came to (`ld_relayout_t`) and keeping quiet what the pass before already said, until they settle -- as GNU ld sizes its sections over.
 
+An expression's value is an address, and beside it its kind (`lds_val_kind_t`): a plain number, an absolute address, or an address in a section -- GNU ld's "Expression Section" rules, which differ in an output section's body: there `.` is in the section, an absolute symbol is a number, an operator or `ALIGN(exp, n)` works on offsets in the section, and a number assigned is an offset in it. Where a symbol the script sets goes (`lw_home()`) follows from its value's kind, and is noted for the expressions after it (the script's `homes`), since the symbols of the output are made only in the walk's last pass: `setup_size = ALIGN(ABSOLUTE(.), 4096)` is absolute, and `setup_sects = ABSOLUTE(setup_size / 512)` after it reads it as the number it is.
+
 Technologies: C, custom lexer/parser, bounded include stack, address arithmetic with overflow checks
 
 Deployment: Internal to `ld`; no external script interpreter dependency
@@ -206,7 +208,7 @@ Repository Path: `usr.bin/ld/`
 
 Primary Consumers: Direct user invocation, `usr.bin/cc`, native toolchain/package validation
 
-Date of Last Update: 2026-11-02
+Date of Last Update: 2026-11-04
 
 ## 11. Glossary / Acronyms
 

@@ -554,6 +554,9 @@ typedef struct lds_script {
     int has_sections;
     defsymvec_t locals;         /* what PROVIDE names and nothing refers to:
                                  * no symbol, but the script may use it */
+    defsymvec_t homes;          /* the symbols the walk has set, and where: 0 for an absolute
+                                 * address, else 1 + the index of the output section it is in
+                                 * (lw_home()), which is what a later expression takes it as */
     strvec_t files;             /* the script and what it INCLUDEs: tokens
                                  * point at these names */
     char *version_text;         /* VERSION { }'s text, for ld_version_script_parse() */
