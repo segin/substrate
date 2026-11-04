@@ -11794,6 +11794,197 @@ done:
     return rc;
 }
 
+/**
+ * Read an identifier at @p *pp, past blanks, into @p buf of @p cap bytes.
+ *
+ * @return 1 and @p *pp past it, or 0 when there is none (or it does not fit)
+ */
+static int weak_pragma_ident(const char **pp, char *buf, size_t cap) {
+    const char *p = *pp;
+    size_t n = 0;
+
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    if (!(isalpha((unsigned char)*p) || *p == '_' || *p == '$')) {
+        return 0;
+    }
+    while (isalnum((unsigned char)p[n]) || p[n] == '_' || p[n] == '$') {
+        n++;
+    }
+    if (n + 1 > cap) {
+        return 0;
+    }
+    memcpy(buf, p, n);
+    buf[n] = '\0';
+    *pp = p + n;
+    return 1;
+}
+
+/**
+ * Report that `#pragma weak` names @p name, which a declaration at @p line, @p col of file @p src_file (one
+ * more than its index in the unit's files; 0 unknown) makes static, as gcc reports it there.
+ */
+static void weak_not_public(const char *name, int src_file, size_t line, size_t col, cc_diag_t *diag) {
+    char msg[300];
+
+    if (src_file > 0 && g_parser_files != NULL && (size_t)src_file <= g_parser_files->count) {
+        g_parser_diag_file_id = src_file - 1;
+        g_parser_diag_file = g_parser_files->items[src_file - 1].name;
+    }
+    snprintf(msg, sizeof(msg), "weak declaration of '%s' must be public", name);
+    set_diag(diag, line, col, msg);
+    cc_diag_report(diag);
+}
+
+/**
+ * Make @p name weak as `#pragma weak name` (or `#pragma weak name = target`, with @p target) asks, in each of
+ * its file-scope declarations, wherever they are in the unit: gcc's pragma applies to the declarations before
+ * it and after it alike.  With a target, the name is a weak alias of it; one never declared is defined so all
+ * the same (`.weak name` and `.set name, target`, as gcc writes it).  A name declared static is an error, as
+ * gcc's ("weak declaration of 'x' must be public"); a name without a target that is never declared is let be.
+ *
+ * @return 0; 1 when an error was reported; -1 when out of memory
+ */
+static int apply_weak_pragma(cc_translation_unit_t *tu, const char *name, const char *target, cc_diag_t *diag) {
+    int declared = 0;
+    int defined = 0;
+    size_t i;
+
+    for (i = 0; i < tu->func_count; ++i) {
+        const cc_function_t *fn = &tu->funcs[i];
+
+        if (fn->name != NULL && strcmp(fn->name, name) == 0 && fn->nest_parent == NULL) {
+            if ((fn->storage & CC_STORAGE_STATIC) != 0) {
+                weak_not_public(name, fn->src_file, fn->name_line != 0 ? fn->name_line : fn->line,
+                                fn->name_line != 0 ? fn->name_col : fn->col, diag);
+                return 1;
+            }
+            declared = 1;
+            defined |= fn->has_body;
+        }
+    }
+    for (i = 0; i < tu->global_count; ++i) {
+        const cc_global_t *g = &tu->globals[i];
+
+        if (g->name != NULL && strcmp(g->name, name) == 0 && g->asm_register == NULL) {
+            if ((g->storage & CC_STORAGE_STATIC) != 0) {
+                weak_not_public(name, g->src_file, g->line, g->col, diag);
+                return 1;
+            }
+            declared = 1;
+            defined |= g->init != NULL || (g->storage & CC_STORAGE_EXTERN) == 0;
+        }
+    }
+    if (!declared) {
+        size_t len;
+        char *text;
+
+        if (target == NULL) {
+            return 0;
+        }
+        len = strlen(name) * 2 + strlen(target) + 32;
+        text = (char *)malloc(len);
+        if (text == NULL) {
+            return -1;
+        }
+        snprintf(text, len, "\t.weak %s\n\t.set %s, %s", name, name, target);
+        return tu_add_toplevel_asm(tu, text);
+    }
+    /* (a target for one the unit defines is not taken: gcc's alias would be a second definition) */
+    if (defined) {
+        target = NULL;
+    }
+    for (i = 0; i < tu->func_count; ++i) {
+        cc_function_t *fn = &tu->funcs[i];
+
+        if (fn->name == NULL || strcmp(fn->name, name) != 0 || fn->nest_parent != NULL) {
+            continue;
+        }
+        fn->attr_flags |= CC_ATTR_WEAK;
+        if (target != NULL && fn->attr_alias == NULL) {
+            fn->attr_flags |= CC_ATTR_ALIAS;
+            if ((fn->attr_alias = cc_strdup(target)) == NULL) {
+                return -1;
+            }
+        }
+    }
+    for (i = 0; i < tu->global_count; ++i) {
+        cc_global_t *g = &tu->globals[i];
+
+        if (g->name == NULL || strcmp(g->name, name) != 0 || g->asm_register != NULL) {
+            continue;
+        }
+        g->attr_flags |= CC_ATTR_WEAK;
+        if (target != NULL && g->attr_alias == NULL) {
+            g->attr_flags |= CC_ATTR_ALIAS;
+            if ((g->attr_alias = cc_strdup(target)) == NULL) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * Take in each `#pragma weak` the preprocessor passed on in @p src (its output, @p len bytes): `#pragma weak
+ * name`, or `#pragma weak name = target`, as gcc reads them, with no macro expansion (apply_weak_pragma()).
+ * Only a directive is a line that starts with `#` there.  A malformed one is ignored (gcc warns of it).
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int apply_weak_pragmas(cc_translation_unit_t *tu, const char *src, size_t len, cc_diag_t *diag) {
+    size_t pos = 0;
+
+    while (pos < len) {
+        const char *p = src + pos;
+        const char *eol = memchr(p, '\n', len - pos);
+        size_t line_len = eol != NULL ? (size_t)(eol - p) : len - pos;
+        char line[1024];
+        char name[256];
+        char target[256];
+        int has_target = 0;
+        const char *q;
+
+        pos += line_len + 1;
+        while (line_len > 0 && (*p == ' ' || *p == '\t')) {
+            p++;
+            line_len--;
+        }
+        if (line_len < 12 || *p != '#' || line_len >= sizeof(line)) {
+            continue;
+        }
+        memcpy(line, p, line_len);
+        line[line_len] = '\0';
+        q = line + 1;
+        if (!weak_pragma_ident(&q, name, sizeof(name)) || strcmp(name, "pragma") != 0 ||
+            !weak_pragma_ident(&q, name, sizeof(name)) || strcmp(name, "weak") != 0 ||
+            !weak_pragma_ident(&q, name, sizeof(name))) {
+            continue;
+        }
+        while (*q == ' ' || *q == '\t' || *q == '\r') {
+            q++;
+        }
+        if (*q == '=') {
+            q++;
+            if (!weak_pragma_ident(&q, target, sizeof(target))) {
+                continue;
+            }
+            has_target = 1;
+            while (*q == ' ' || *q == '\t' || *q == '\r') {
+                q++;
+            }
+        }
+        if (*q != '\0') {
+            continue;
+        }
+        if (apply_weak_pragma(tu, name, has_target ? target : NULL, diag) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag) {
     FILE *fp;
     size_t sz;
@@ -12185,6 +12376,13 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     parser_free_enum_consts(&p);
     parser_free_enum_tags(&p);
     parser_free_local_labels(&p);
+    if (apply_weak_pragmas(out, buf, sz, diag) != 0) {
+        parser_free_structs(&p);
+        free(buf);
+        cc_tu_free(out);
+        set_diag(diag, 0, 0, "out of memory");
+        return -1;
+    }
     if (diag != NULL && diag->error_count > 0) {
         parser_free_structs(&p);
         free(buf);

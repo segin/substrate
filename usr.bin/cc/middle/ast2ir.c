@@ -16073,6 +16073,33 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
     return 0;
 }
 
+/**
+ * Note @p name in @p m's weak declarations (cc_ssa_module_t.weak_decls), unless it is there already.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int note_weak_decl(cc_ssa_module_t *m, const char *name) {
+    char **grown;
+    size_t i;
+
+    for (i = 0; i < m->weak_decl_count; ++i) {
+        if (strcmp(m->weak_decls[i], name) == 0) {
+            return 0;
+        }
+    }
+    grown = (char **)realloc(m->weak_decls, (m->weak_decl_count + 1) * sizeof(*grown));
+    if (grown == NULL) {
+        return -1;
+    }
+    m->weak_decls = grown;
+    m->weak_decls[m->weak_decl_count] = cc_strdup(name);
+    if (m->weak_decls[m->weak_decl_count] == NULL) {
+        return -1;
+    }
+    m->weak_decl_count++;
+    return 0;
+}
+
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag) {
     if (!tu || !out) return -1;
     g_file_scope_init = 0;
@@ -16116,6 +16143,32 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 return -1;
             }
             out->local_decl_count++;
+        }
+    }
+
+    /*
+     * the external functions and objects a declaration makes weak: one the module only declares is a weak
+     * undefined symbol where it is referenced, as gcc has it (the emitter's .weak), not an undefined one that
+     * a link without its definition fails on -- or that makes a Linux module's reference a hard one
+     */
+    for (i = 0; i < tu->func_count; ++i) {
+        const cc_function_t *fn = &tu->funcs[i];
+
+        if (fn->name != NULL && (fn->attr_flags & CC_ATTR_WEAK) != 0 && (fn->storage & CC_STORAGE_STATIC) == 0 &&
+            note_weak_decl(out, fn->name) != 0) {
+            set_diag(diag, "out of memory noting weak declarations");
+            cc_ssa_module_free(out);
+            return -1;
+        }
+    }
+    for (i = 0; i < tu->global_count; ++i) {
+        const cc_global_t *g = &tu->globals[i];
+
+        if (g->name != NULL && (g->attr_flags & CC_ATTR_WEAK) != 0 && (g->storage & CC_STORAGE_STATIC) == 0 &&
+            g->asm_register == NULL && note_weak_decl(out, g->name) != 0) {
+            set_diag(diag, "out of memory noting weak declarations");
+            cc_ssa_module_free(out);
+            return -1;
         }
     }
 

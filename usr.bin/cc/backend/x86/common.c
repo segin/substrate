@@ -1755,6 +1755,100 @@ static void emit_toplevel_asm(FILE *fp, const cc_ssa_module_t *m) {
     fprintf(fp, "\t.text\n");
 }
 
+/** Whether symbol reference @p sym (perhaps `name+8`) names @p name. */
+static int sym_ref_is(const char *sym, const char *name) {
+    size_t n;
+
+    if (sym == NULL || name == NULL) {
+        return 0;
+    }
+    n = strcspn(sym, "+-");
+    return strlen(name) == n && strncmp(sym, name, n) == 0;
+}
+
+/**
+ * Whether @p m defines @p name: a function of it, or an object with storage, an initializer or an alias's
+ * target (an alias, of an object or of a function, is a global of the module).
+ */
+static int module_defines_symbol(const cc_ssa_module_t *m, const char *name) {
+    size_t i;
+
+    for (i = 0; i < m->func_count; ++i) {
+        if (m->funcs[i].name != NULL && strcmp(m->funcs[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+
+        if (g->name != NULL && strcmp(g->name, name) == 0 &&
+            ((g->storage & CC_STORAGE_EXTERN) == 0 || g->has_init || (g->attr_flags & CC_ATTR_ALIAS) != 0)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Whether what @p m emits refers to @p name: a call of it, its address in a function, or its address in an
+ * object's initializer.
+ */
+static int module_refers_to_symbol(const cc_ssa_module_t *m, const char *name) {
+    size_t i;
+    size_t k;
+
+    for (i = 0; i < m->func_count; ++i) {
+        const cc_ssa_function_t *f = &m->funcs[i];
+
+        for (k = 0; k < f->instr_count; ++k) {
+            const cc_ssa_instr_t *in = &f->instrs[k];
+
+            /* (only these name symbols: an ASM's is its template, a STR's its text, a REGREAD's a register) */
+            if ((in->op == CC_SSA_CALL || in->op == CC_SSA_GADDR) && sym_ref_is(in->sym, name)) {
+                return 1;
+            }
+        }
+    }
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+
+        if ((g->storage & CC_STORAGE_EXTERN) != 0 && !g->has_init) {
+            continue; /* a declaration: no data */
+        }
+        if (sym_ref_is(g->init_sym, name)) {
+            return 1;
+        }
+        for (k = 0; k < g->init_item_count; ++k) {
+            if (sym_ref_is(g->init_items[k].init_sym, name)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * Make weak each symbol of @p m that a declaration makes weak (cc_ssa_module_t.weak_decls), that the module
+ * refers to and does not define, as gcc does at the end of its output: `.weak name`, a weak undefined
+ * symbol, which the link resolves to 0 when no object defines it.  Without it the reference was an undefined
+ * one, and a program whose weak reference has no definition did not link.  A weak declaration nothing refers
+ * to leaves nothing in the object (gcc's neither); a defined one's definition is made weak where it is written.
+ *
+ * @param fp the assembly output
+ * @param m  the module
+ */
+static void emit_weak_references(FILE *fp, const cc_ssa_module_t *m) {
+    size_t i;
+
+    for (i = 0; i < m->weak_decl_count; ++i) {
+        const char *name = m->weak_decls[i];
+
+        if (!module_defines_symbol(m, name) && module_refers_to_symbol(m, name)) {
+            fprintf(fp, "\t.weak %s\n", name);
+        }
+    }
+}
+
 static void emit_compiler_stamp(FILE *fp) {
     /* in .comment, as gcc's: no part of what is loaded (it was in .rodata, 26 bytes in every program's image) */
     fprintf(fp, "\n\t.ident \"Substrate C Compiler v0.1\"\n");
@@ -5990,6 +6084,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         }
     }
 
+    emit_weak_references(fp, m);
     /* a nested function's trampoline runs on the stack */
     fprintf(fp, "\n.section .note.GNU-stack,\"%s\",@progbits\n", m->needs_exec_stack ? "x" : "");
 

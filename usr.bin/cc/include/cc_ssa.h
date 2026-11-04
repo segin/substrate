@@ -356,6 +356,12 @@ typedef struct {
      *  internal by an attribute or a visibility pragma -- for position-independent code to reach directly (owned) */
     char **local_decls;
     size_t local_decl_count;
+    /** the functions and objects with external linkage that a declaration makes weak -- the weak attribute on
+     *  any one of them, or `#pragma weak` -- whether or not the module defines them; one it only declares and
+     *  references is a weak undefined symbol, `.weak` in the object, whose address is null when nothing defines
+     *  it (owned) */
+    char **weak_decls;
+    size_t weak_decl_count;
     /** the file-scope functions and objects an asm label names, `int f(void) asm("g")`: their names in the
      *  source, which the IR keeps until cc_ssa_module_apply_asm_labels() gives each its label (owned) */
     char **asm_label_names;

@@ -51,6 +51,10 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
         free(m->local_decls[i]);
     }
     free(m->local_decls);
+    for (i = 0; i < m->weak_decl_count; ++i) {
+        free(m->weak_decls[i]);
+    }
+    free(m->weak_decls);
     for (i = 0; i < m->asm_label_count; ++i) {
         free(m->asm_label_names[i]);
         free(m->asm_labels[i]);
@@ -224,6 +228,11 @@ int cc_ssa_module_apply_asm_labels(cc_ssa_module_t *m) {
     }
     for (i = 0; i < m->local_decl_count; ++i) {
         if (asm_label_rewrite(m, &m->local_decls[i]) != 0) {
+            return -1;
+        }
+    }
+    for (i = 0; i < m->weak_decl_count; ++i) {
+        if (asm_label_rewrite(m, &m->weak_decls[i]) != 0) {
             return -1;
         }
     }

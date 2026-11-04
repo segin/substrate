@@ -1227,6 +1227,13 @@ static int is_pack_pragma(const char *rest) {
     return strncmp(p, "pack", 4) == 0 && (p[4] == '(' || isspace((unsigned char)p[4]));
 }
 
+/** Whether pragma text @p rest (after `#pragma`) is `weak ...`. */
+static int is_weak_pragma(const char *rest) {
+    const char *p = skip_ws(rest);
+
+    return strncmp(p, "weak", 4) == 0 && isspace((unsigned char)p[4]);
+}
+
 static int validate_stdc_pragma(const char *rest, cc_diag_t *diag, size_t line_no) {
     const char *p = rest;
     char scope[32];
@@ -5816,7 +5823,7 @@ static int pragma_operator_line(const char *src, size_t start, size_t end, sb_t 
             return -1;
         }
     }
-    if (text.buf != NULL && (is_pack_pragma(text.buf) || is_visibility_pragma(text.buf))) {
+    if (text.buf != NULL && (is_pack_pragma(text.buf) || is_visibility_pragma(text.buf) || is_weak_pragma(text.buf))) {
         rc = sb_append(out, "\n#pragma ") != 0 || sb_append(out, text.buf) != 0 || sb_append_c(out, '\n') != 0
                  ? -1
                  : 0;
@@ -7784,9 +7791,10 @@ static int preprocess_file(pp_state_t *st, const char *path, const char *display
                      * include/linux/hidden.h makes every symbol of its position-independent code hidden
                      * so; else each was reached through a GOT entry.  So does #pragma pack, which holds
                      * the alignment of the structure members after it (lx_note_pack_pragma()): ACPI's
-                     * table structures are packed so.
+                     * table structures are packed so.  And #pragma weak, which makes a name weak wherever
+                     * it is declared, before or after the pragma (the parser's apply_weak_pragmas()).
                      */
-                    if (!macros_only && (is_visibility_pragma(r) || is_pack_pragma(r))) {
+                    if (!macros_only && (is_visibility_pragma(r) || is_pack_pragma(r) || is_weak_pragma(r))) {
                         if (code_accum.len > 0) {
                             char *expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path,
                                                          code_start_line, 0, NULL, diag);
