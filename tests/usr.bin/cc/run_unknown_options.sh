@@ -39,7 +39,7 @@ if command -v gcc >/dev/null 2>&1; then
 	done
 fi
 # taken: Linux's x86-64 build's own (Makefile, arch/x86/Makefile, without cc-option), and Substrate's kernel's
-for f in -fno-strict-aliasing -fno-common -fms-extensions -fshort-wchar -funsigned-char -fno-PIE \
+for f in -fno-strict-aliasing -fno-common -fms-extensions -fno-lto -fshort-wchar -funsigned-char -fno-PIE \
 	-mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx -mno-sse4a -mno-80387 -mno-fp-ret-in-387 \
 	-mskip-rax-setup -mno-red-zone -mcmodel=kernel -fno-delete-null-pointer-checks -fno-stack-check \
 	-fconserve-stack -fno-builtin-wcslen -fno-builtin -ffreestanding -fno-zero-initialized-in-bss \

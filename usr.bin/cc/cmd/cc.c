@@ -1784,6 +1784,8 @@ static const driver_opt_t options[] = {
      "-fno-common -fno-allow-store-data-races -fno-stack-check -fno-stack-clash-protection "
      "-fno-zero-initialized-in-bss",
      OPT_FLAG, 0, NULL, 0, 0},
+    /* no link-time optimization: cc has none (Linux's BTF step compiles its .BTF object so) */
+    {"-fno-lto", OPT_FLAG, 0, NULL, 0, 0},
     /* an anonymous member of a structure or union type always taken (Linux's -fms-extensions) */
     {"-fms-extensions", OPT_FLAG, 0, NULL, 0, 0},
     /* a library function cc expands in line (memcpy, memset) keeps its meaning, as one not a builtin does */

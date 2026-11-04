@@ -41,7 +41,9 @@
 #define PP_MAX_EXPAND_DEPTH 256
 #define PP_MAX_EXPAND_PASSES 2
 #define PP_MAX_EXPANDED_TEXT (64 * 1024 * 1024)
-#define PP_MAX_OUTPUT_SIZE (64 * 1024 * 1024)
+/* (gcc has no bound on a file's output either: Linux's kallsyms table of a distribution kernel, .tmp_vmlinux1's
+ * half a million symbols, is a 120 MiB assembler source) */
+#define PP_MAX_OUTPUT_SIZE ((size_t)1024 * 1024 * 1024)
 #define PP_MAX_EXPANDED_TOKENS (16 * 1024 * 1024)
 #define PP_EMPTY_ARG_MARKER '\x1f'
 #define PP_HIDE_MACRO_BEGIN '\x1d'
