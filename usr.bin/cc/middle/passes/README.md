@@ -44,7 +44,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   fuse_notify_store() reads `outarg.offset` twice; and a store of an
   integer to a slot or a global so too, a load of its bytes a copy of
   the value stored where that value is what the load reads back,
-  already extended as the load extends it); then, from -O1,
+  already extended as the load extends it -- and one through a pointer
+  of unknown object, which writes all memory but knows its own bytes,
+  while nothing writes memory, as Linux's virtiovf_init_legacy_io()
+  reads back the member it stored a constant to); then, from -O1,
   inlining bottom-up over the call graph (a function is rewritten once
   its callees are, then folded again, with what the module's
   declarations tell, `fold_module_facts()`: a load from a const table at

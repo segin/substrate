@@ -3546,7 +3546,11 @@ static int stored_as_loaded(const cc_ssa_function_t *f, const long *def_at, int 
  * plain load of them, of the store's size, with nothing between that may write them, is a copy of the value
  * stored, where that value is what the load reads back (stored_as_loaded()) -- Linux's ad7768_get_voltage_sel()
  * passes &val to regmap_read(), assigns val a FIELD_GET() and clamp()s it, whose BUILD_BUG_ON needs the field's
- * range.  Two values made one symbol's address are one address (ld_state_t's canon).
+ * range.  A store through a pointer of unknown object writes all memory, but its own bytes it knows just as
+ * well, and a load of them, with nothing between that may write memory, is the value stored, as gcc's value
+ * numbering has it: Linux's virtiovf_init_legacy_io() stores a constant to `virtvdev->bar0_virtual_buf_size`
+ * and BUILD_BUG_ON()s that the member it reads back is a power of two.  Two values made one symbol's address
+ * are one address (ld_state_t's canon).
  *
  * @return the loads turned into copies, or -1 when out of memory
  */
@@ -3740,11 +3744,16 @@ static int cse_loads(cc_ssa_function_t *f) {
         if (in->op == CC_SSA_STORE) {
             ld_addr_t at;
 
+            int known = ld_word(f, in->lhs);
+
             at.root = -1;
-            if (ld_word(f, in->lhs)) {
+            if (known) {
                 at = ld_addr_of(&s, in->lhs);
             }
-            if (at.root >= 0 && in->seg == 0) {
+            if (at.root < 0) {
+                /* (through a pointer of unknown object: it may write any memory, but its own bytes it knows) */
+                writes_all = 1;
+            } else if (in->seg == 0) {
                 /* one slot's bytes, or the globals', and whatever a pointer may reach of them */
                 if (s.obj[at.root] == LD_OBJ_SLOT) {
                     s.slot_mem[at.root] = ++s.tick;
@@ -3752,6 +3761,10 @@ static int cse_loads(cc_ssa_function_t *f) {
                     s.mem_glob = ++s.tick;
                 }
                 s.mem_other = ++s.tick;
+            } else {
+                writes_all = 1;
+            }
+            if (known && in->seg == 0) {
                 if ((in->imm == 1 || in->imm == 2 || in->imm == 4 || in->imm == 8) && in->rhs >= 0 &&
                     in->rhs < f->value_count && cc_ssa_value_class(f, in->rhs) == CC_VAL_I64 &&
                     f->value_ty[in->rhs].kind == CC_TY_INT) {
@@ -3763,8 +3776,6 @@ static int cse_loads(cc_ssa_function_t *f) {
                     skey.dst = in->rhs;
                     stored = 1;
                 }
-            } else {
-                writes_all = 1;
             }
         } else if (ld_writes_memory(in)) {
             writes_all = 1;
