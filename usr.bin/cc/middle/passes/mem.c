@@ -247,11 +247,45 @@ static long slot_size(const addr_info_t *a, int s) {
 }
 
 /**
+ * The operands of call @p in for addr_info_build(), an address into a slot among them escaping it -- but a
+ * structure argument passed by value, its bytes inside one slot: the call reads them, to copy them where the
+ * callee takes them, and writes none.
+ */
+static void note_call_uses(addr_info_t *a, const cc_ssa_instr_t *in) {
+    const cc_ssa_function_t *f = a->f;
+    size_t k;
+
+    if (in->lhs >= 0) {
+        escape_value(a, in->lhs);
+    }
+    if (in->rhs >= 0) {
+        escape_value(a, in->rhs);
+    }
+    if (in->call_chain > 0) {
+        escape_value(a, in->call_chain - 1);
+    }
+    for (k = 0; k < in->arg_count; ++k) {
+        int p = in->args[k];
+        int kind = CC_ABI_KIND(in->call_arg_abi[k]);
+
+        if ((kind == CC_CALL_ARG_ABI_AGG_MEM || kind == CC_CALL_ARG_ABI_AGG_REG) && is_value(f, p) &&
+            a->slot[p] >= 0 && a->off[p] >= 0 && in->call_arg_sizes[k] > 0 &&
+            a->off[p] + (long long)in->call_arg_sizes[k] <= slot_size(a, a->slot[p])) {
+            continue;
+        }
+        if (p >= 0) {
+            escape_value(a, p);
+        }
+    }
+}
+
+/**
  * Work out where each value points: a STACKALLOC, a single-definition move of such an address, or one plus a
  * constant.  An address used any other way -- passed, stored, compared, offset by a variable, moved into a value
  * defined more than once -- escapes its slot, and under an asm goto every slot does when @p asm_goto_escapes.  A
  * zeroing memset of a whole slot does not count as an escape when @p allow_memset has bit 1, nor a constant-size
- * memcpy to or from one, the whole of it, when it has bit 2.
+ * memcpy to or from one, the whole of it, when it has bit 2, nor a structure passed by value from one to a call,
+ * which only reads it, when it has bit 4 (note_call_uses()).
  *
  * @return 0, or -1 when out of memory
  */
@@ -322,15 +356,24 @@ static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow
         if ((allow_memset & 2) && is_plain_memcpy(a, in, &sz)) {
             int k2;
 
-            /* a whole slot copied to or from is accessed, not escaping; any other address of one escapes */
+            /*
+             * a whole slot copied to or from is accessed, not escaping, through its address or a move of it (an
+             * inlined function's structure parameter is one); any other address of one escapes
+             */
             for (k2 = 0; k2 < 2; ++k2) {
                 int p = in->args[k2];
 
                 if (is_value(f, p) && a->slot[p] >= 0 &&
-                    !(a->slot[p] == p && sz == slot_size(a, p) && in->args[0] != in->args[1])) {
+                    !(a->off[p] == 0 && sz == slot_size(a, a->slot[p]) &&
+                      !(is_value(f, in->args[1 - k2]) && a->slot[in->args[1 - k2]] == a->slot[p]))) {
                     escape_value(a, p);
                 }
             }
+            continue;
+        }
+        if ((allow_memset & 4) && (in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) && in->call_arg_abi != NULL &&
+            in->call_arg_sizes != NULL) {
+            note_call_uses(a, in);
             continue;
         }
         if (asm_goto_escapes && in->op == CC_SSA_ASM && in->asm_is_goto) {
@@ -349,9 +392,12 @@ static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow
 /* ---- (a) a slot nothing reads goes, and one stored once is read as its value ---- */
 
 /**
- * Drop every store into, and every zeroing memset of, a slot whose address does not escape and that nothing
- * loads from, at any offset or size: its contents are never read.  The STACKALLOC, used by nothing then, goes
- * with the dead definitions.  An asm goto does not matter: its jump reads no memory it is not given.
+ * Drop every store into, every zeroing memset of, and every whole copy into, a slot whose address does not escape
+ * and that nothing loads from or copies from, at any offset or size: its contents are never read.  A copy so
+ * dropped reads its source no more, which may go in turn (a structure an inlined function takes by value, copied
+ * to its own local, whose fields all folded to constants: both copies were left).  The STACKALLOC, used by
+ * nothing then, goes with the dead definitions.  An asm goto does not matter: its jump reads no memory it is not
+ * given.
  *
  * @return 1 if anything changed, 0 if not, -1 when out of memory
  */
@@ -361,49 +407,61 @@ static int drop_unread_slots(cc_ssa_function_t *f) {
     size_t i;
     size_t w;
     int changed = 0;
+    int dropped = 1;
 
     if (f->value_count <= 0) {
         return 0;
     }
-    if (addr_info_build(&a, f, 1, 0) != 0) {
-        return -1;
-    }
-    read = (unsigned char *)calloc((size_t)f->value_count, 1);
-    if (read == NULL) {
+    while (dropped) {
+        dropped = 0;
+        if (addr_info_build(&a, f, 3, 0) != 0) {
+            return -1;
+        }
+        read = (unsigned char *)calloc((size_t)f->value_count, 1);
+        if (read == NULL) {
+            addr_info_free(&a);
+            return -1;
+        }
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            long long n;
+
+            if (in->op == CC_SSA_LOAD && is_value(f, in->lhs) && a.slot[in->lhs] >= 0) {
+                read[a.slot[in->lhs]] = 1;
+            } else if (is_plain_memcpy(&a, in, &n) && is_value(f, in->args[1]) && a.slot[in->args[1]] >= 0) {
+                read[a.slot[in->args[1]]] = 1;
+            }
+        }
+        w = 0;
+        for (i = 0; i < f->instr_count; ++i) {
+            cc_ssa_instr_t *in = &f->instrs[i];
+            int s = -1;
+            long long n;
+
+            if (in->op == CC_SSA_STORE && is_value(f, in->lhs)) {
+                s = a.slot[in->lhs];
+            } else if (is_zeroing_memset(&a, in, &n) && is_value(f, in->args[0])) {
+                s = a.slot[in->args[0]];
+            } else if (is_plain_memcpy(&a, in, &n) && is_value(f, in->args[0])) {
+                s = a.slot[in->args[0]];
+                if (s >= 0 && !a.escapes[s] && !read[s]) {
+                    dropped = 1; /* (its source may be read by nothing now) */
+                }
+            }
+            if (s >= 0 && !a.escapes[s] && !read[s]) {
+                cc_ssa_instr_free(in);
+                changed = 1;
+                continue;
+            }
+            if (w != i) {
+                f->instrs[w] = f->instrs[i];
+            }
+            w++;
+        }
+        f->instr_count = w;
+        free(read);
         addr_info_free(&a);
-        return -1;
     }
-    for (i = 0; i < f->instr_count; ++i) {
-        const cc_ssa_instr_t *in = &f->instrs[i];
-
-        if (in->op == CC_SSA_LOAD && is_value(f, in->lhs) && a.slot[in->lhs] >= 0) {
-            read[a.slot[in->lhs]] = 1;
-        }
-    }
-    w = 0;
-    for (i = 0; i < f->instr_count; ++i) {
-        cc_ssa_instr_t *in = &f->instrs[i];
-        int s = -1;
-        long long n;
-
-        if (in->op == CC_SSA_STORE && is_value(f, in->lhs)) {
-            s = a.slot[in->lhs];
-        } else if (is_zeroing_memset(&a, in, &n) && is_value(f, in->args[0])) {
-            s = a.slot[in->args[0]];
-        }
-        if (s >= 0 && !a.escapes[s] && !read[s]) {
-            cc_ssa_instr_free(in);
-            changed = 1;
-            continue;
-        }
-        if (w != i) {
-            f->instrs[w] = f->instrs[i];
-        }
-        w++;
-    }
-    f->instr_count = w;
-    free(read);
-    addr_info_free(&a);
     return changed;
 }
 
@@ -2416,11 +2474,12 @@ int cc_promote_slots(cc_ssa_function_t *f) {
             for (k2 = 0; k2 < 2; ++k2) {
                 int p = in->args[k2];
 
-                if (!is_value(f, p) || a.slot[p] != p) {
+                if (!is_value(f, p) || a.slot[p] < 0) {
                     continue;
                 }
-                s = p;
-                if (n != slot_size(&a, s) || (n != 1 && n != 2 && n != 4 && n != 8) || in->args[0] == in->args[1] ||
+                s = a.slot[p];
+                if (p != s || n != slot_size(&a, s) || (n != 1 && n != 2 && n != 4 && n != 8) ||
+                    in->args[0] == in->args[1] ||
                     (size[s] != 0 && (size[s] != (long)n || cls[s] != (int)CC_VAL_I64))) {
                     bad[s] = 1;
                     continue;
@@ -2651,12 +2710,26 @@ long cc_ssa_memory_slot_bytes(const cc_ssa_function_t *f) {
  * nothing defined.  The writes may be of other sizes than the load: a structure an inlined function returns from
  * a const table is stored as its words, 8 bytes at a time, and its fields read 4 at a time -- Linux's
  * BUILD_BUG_ON(x86_feature_cpuid(X86_FEATURE_PERFMON_V2).function != 0x80000022), whose call of an undefined
- * __compiletime_assert_N stayed in kvm-amd.ko.  The stores, read by nothing then, go with the slot.
+ * __compiletime_assert_N stayed in kvm-amd.ko.  The stores, read by nothing then, go with the slot.  A slot passed
+ * by value to a call is read by it, not escaping (note_call_uses()).
  *
- * @return 1 if anything changed, 0 if not, -1 when out of memory
+ * With @p fold NULL nothing changes: the @p n bytes at address @p query (into a slot) are asked for instead, into
+ * @p out (cc_slot_const_bytes()).  A copy into a slot from elsewhere than a slot writes what @p src, unless NULL,
+ * says is there.
+ *
+ * @param f      the function
+ * @param fold   @p f to fold its loads, or NULL to answer @p query
+ * @param query  with @p fold NULL, the value whose bytes are asked for
+ * @param out    receives them
+ * @param n      how many
+ * @param src    asked for the bytes a copy copies from an address not into a slot, or NULL
+ * @param ctx    passed to it
+ * @return 1 if anything changed (or, asked, every byte is known), 0 if not, -1 when out of memory
  */
-static int forward_const_bytes(cc_ssa_function_t *f) {
+static int const_bytes(const cc_ssa_function_t *f, cc_ssa_function_t *fold, int query, unsigned char *out, long n,
+                       cc_const_src_fn src, void *ctx) {
     addr_info_t a;
+    unsigned char src_bytes[CONST_BYTES_MAX]; /* what src() gives */
     unsigned char **state = NULL; /* per slot: per byte 0 not written, 1 known, 2 not known */
     unsigned char **byte = NULL;  /* per slot: per byte its value where known */
     unsigned char **prev_state = NULL; /* the same, as the round before found them */
@@ -2675,8 +2748,14 @@ static int forward_const_bytes(cc_ssa_function_t *f) {
     if (i == f->instr_count) {
         return 0;
     }
-    if (addr_info_build(&a, f, 3, 1) != 0) {
+    /* (an asm goto does not matter: what each byte is written with holds on every path, whatever the jumps) */
+    if (addr_info_build(&a, f, 7, 0) != 0) {
         return -1;
+    }
+    if (fold == NULL && (!is_value(f, query) || a.slot[query] < 0 || a.escapes[a.slot[query]] || a.off[query] < 0 ||
+                         n <= 0 || a.off[query] + n > slot_size(&a, a.slot[query]))) {
+        addr_info_free(&a);
+        return 0;
     }
     state = (unsigned char **)calloc((size_t)f->value_count, sizeof(*state));
     byte = (unsigned char **)calloc((size_t)f->value_count, sizeof(*byte));
@@ -2732,12 +2811,23 @@ static int forward_const_bytes(cc_ssa_function_t *f) {
             int p;
             int s;
             int from = -1; /* a copy's source slot, whose bytes it writes */
+            int copied = 0; /* a copy of the bytes src() gave */
             long long k;
 
             if (in->op == CC_SSA_STORE) {
+                const cc_ssa_instr_t *ld;
+
                 p = in->lhs;
                 n = in->imm;
                 known = (n == 1 || n == 2 || n == 4 || n == 8) && single_const(f, a.defs, a.def_at, in->rhs, &c);
+                if (!known && src != NULL && (n == 1 || n == 2 || n == 4 || n == 8) && is_value(f, in->rhs) &&
+                    a.def_at[in->rhs] >= 0 && (ld = &f->instrs[a.def_at[in->rhs]])->op == CC_SSA_LOAD &&
+                    ld->imm == n && ld->seg == 0 && !(is_value(f, ld->lhs) && a.slot[ld->lhs] >= 0) &&
+                    src(ctx, ld->lhs, n, src_bytes)) {
+                    /* the store of what a load read where the caller knows the bytes: a const table's */
+                    known = 1;
+                    copied = 1;
+                }
             } else if (is_zeroing_memset(&a, in, &n)) {
                 p = in->args[0];
                 known = 1;
@@ -2750,6 +2840,11 @@ static int forward_const_bytes(cc_ssa_function_t *f) {
                     a.off[in->args[1]] >= 0 && a.off[in->args[1]] + n <= slot_size(&a, a.slot[in->args[1]])) {
                     from = a.slot[in->args[1]];
                     known = 1;
+                } else if (src != NULL && !(is_value(f, in->args[1]) && a.slot[in->args[1]] >= 0) && n > 0 &&
+                           n <= CONST_BYTES_MAX && src(ctx, in->args[1], n, src_bytes)) {
+                    /* bytes the caller knows where they are copied from: a const table's */
+                    known = 1;
+                    copied = 1;
                 }
             } else {
                 continue;
@@ -2773,6 +2868,8 @@ static int forward_const_bytes(cc_ssa_function_t *f) {
                     /* (a byte the source never had written is not known either) */
                     kb = prev_state[from][a.off[in->args[1]] + k] == 1;
                     b = prev_byte[from][a.off[in->args[1]] + k];
+                } else if (copied) {
+                    b = src_bytes[k];
                 }
                 if (!kb) {
                     *st = 2;
@@ -2794,9 +2891,20 @@ static int forward_const_bytes(cc_ssa_function_t *f) {
             break;
         }
     }
+    if (fold == NULL) {
+        /* the bytes asked for */
+        int s = a.slot[query];
+        long long k;
+
+        for (k = 0; state[s] != NULL && k < n && state[s][a.off[query] + k] == 1; ++k) {
+            out[k] = byte[s][a.off[query] + k];
+        }
+        changed = state[s] != NULL && k == n;
+        goto out;
+    }
     /* the loads they decide */
     for (i = 0; i < f->instr_count; ++i) {
-        cc_ssa_instr_t *in = &f->instrs[i];
+        cc_ssa_instr_t *in = &fold->instrs[i];
         unsigned long long val = 0;
         long long off;
         long long k;
@@ -2843,6 +2951,38 @@ out:
     free(prev_byte);
     addr_info_free(&a);
     return changed;
+}
+
+/**
+ * Fold each load of @p f from a slot whose bytes are each written with one constant byte only (const_bytes()).
+ *
+ * @return 1 if anything changed, 0 if not, -1 when out of memory
+ */
+static int forward_const_bytes(cc_ssa_function_t *f) {
+    return const_bytes(f, f, -1, NULL, 0, NULL, NULL);
+}
+
+int cc_slot_const_bytes(const cc_ssa_function_t *f, int v, unsigned char *out, long n, cc_const_src_fn src,
+                        void *ctx) {
+    return const_bytes(f, NULL, v, out, n, src, ctx);
+}
+
+unsigned char *cc_ssa_escaping_slots(const cc_ssa_function_t *f) {
+    addr_info_t a;
+    unsigned char *esc = (unsigned char *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), 1);
+    int v;
+
+    if (esc == NULL || (f->value_count > 0 && addr_info_build(&a, f, 3, 0) != 0)) {
+        free(esc);
+        return NULL;
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        esc[v] = a.slot[v] == v && a.escapes[v];
+    }
+    if (f->value_count > 0) {
+        addr_info_free(&a);
+    }
+    return esc;
 }
 
 int cc_optimize_slots(cc_ssa_function_t *f) {

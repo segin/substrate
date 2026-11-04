@@ -32,7 +32,7 @@
 #include <string.h>
 
 /** The most bits of liveness (virtual registers x blocks) a function's sets may take; past it, the caller's path. */
-#define LS_MAX_LIVE_BITS (64UL * 1024 * 1024)
+#define LS_MAX_LIVE_BITS (128UL * 1024 * 1024)
 /** The most rounds of allocation before giving up. */
 #define LS_MAX_ROUNDS 12
 

@@ -499,7 +499,12 @@ nor
 defined in the file with an initializer, at an offset known when
 compiling, is what the initializer puts there: an integer, or the
 address of a function, an object or a string literal, as with
-.Xr gcc 1 .
+.Xr gcc 1 ;
+so is a field of a local structure copied from such an object, however
+many times it is copied, passed by value to an inlined
+.Ic always_inline
+function among them, which is then folded with it even in a very large
+caller.
 A
 .Ic static
 function or object that nothing emitted refers to, once inlining and

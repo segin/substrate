@@ -120,6 +120,44 @@ int cc_propagate_copies(cc_ssa_function_t *f);
 long cc_ssa_memory_slot_bytes(const cc_ssa_function_t *f);
 
 /**
+ * Per value of @p f, 1 for a stack slot (a STACKALLOC's value) whose address escapes -- used other than to load,
+ * store, zero or copy the whole slot through -- else 0 (passes/mem.c).
+ *
+ * @return the array, which the caller frees, or NULL when out of memory
+ */
+unsigned char *cc_ssa_escaping_slots(const cc_ssa_function_t *f);
+
+/**
+ * Asked by cc_slot_const_bytes() for the @p n bytes at address @p v of the function, not into one of its slots,
+ * that a copy copies from: 1 with @p out set when they are known constants wherever read, else 0.
+ */
+typedef int (*cc_const_src_fn)(void *ctx, int v, long long n, unsigned char *out);
+
+/**
+ * The @p n bytes that address @p v of @p f, into one of its stack slots, holds wherever they are read, if each
+ * is known: the slot's address escapes nowhere but to calls that take a structure from it by value, and every
+ * write of each byte -- a store of a constant, a zeroing memset, a whole copy of another slot so known, or of
+ * bytes @p src knows -- writes the same constant byte (passes/mem.c).
+ *
+ * @param f    the function
+ * @param v    the address
+ * @param out  receives the bytes
+ * @param n    how many
+ * @param src  asked for the bytes a copy from elsewhere than a slot copies, or NULL
+ * @param ctx  passed to it
+ * @return 1 when every byte is known, 0 when not, -1 when out of memory
+ */
+int cc_slot_const_bytes(const cc_ssa_function_t *f, int v, unsigned char *out, long n, cc_const_src_fn src,
+                        void *ctx);
+
+/**
+ * cc_slot_const_bytes() with what module @p m declares known too: the bytes of its read-only globals a copy
+ * copies from (passes/opt.c).
+ */
+int cc_module_slot_const_bytes(const cc_ssa_module_t *m, const cc_ssa_function_t *f, int v, unsigned char *out,
+                               long n);
+
+/**
  * Call @p fn for each value instruction @p in reads, with the role it has: 0 an operand, 1 the address of a
  * load or store, 2 the value a store writes (passes/mem.c).  An operation's fields it does not read are not
  * named, whatever they hold.

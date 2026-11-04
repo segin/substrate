@@ -757,20 +757,175 @@ static int put_struct_result(cc_ssa_function_t *f, ivec_t *out, const cc_ssa_ins
     return 0;
 }
 
+/** A stack slot of the caller that bodies inlined in one round share: one STACKALLOC at its entry. */
+typedef struct {
+    int value;          /**< the STACKALLOC's value */
+    long long size;     /**< its size */
+    int stack_align;    /**< its alignment, as its STACKALLOC has it */
+    unsigned char ssp;  /**< and its -fstack-protector class */
+} pool_slot_t;
+
+/** The slots bodies inlined in one round of cc_inline_calls() share (splice_body()). */
+typedef struct {
+    pool_slot_t *at;
+    size_t count;
+    size_t cap;
+} slot_pool_t;
+
+/** Whether pool slot @p p may hold STACKALLOC @p in: one of its size, alignment and protector class. */
+static int pool_slot_fits(const pool_slot_t *p, const cc_ssa_instr_t *in) {
+    return p->size == in->imm && p->stack_align == in->stack_align && p->ssp == in->ssp;
+}
+
 /**
- * Write @p g's body in place of @p call into @p out, the rewrite of @p f.
+ * The bytes of memory slots (cc_ssa_memory_slot_bytes()) that inlining @p g adds to a frame that has @p pool's
+ * slots: those of its slots whose address escapes, which splice_body() puts in a pool slot alike, count nothing.
+ *
+ * @return the bytes, or -1 when out of memory
+ */
+static long pool_need(const slot_pool_t *pool, const cc_ssa_function_t *g) {
+    long need = cc_ssa_memory_slot_bytes(g);
+    unsigned char *esc;
+    unsigned char *taken;
+    size_t i;
+    size_t k;
+
+    if (need == 0 || pool->count == 0) {
+        return need;
+    }
+    esc = cc_ssa_escaping_slots(g);
+    taken = (unsigned char *)calloc(pool->count, 1);
+    if (esc == NULL || taken == NULL) {
+        free(esc);
+        free(taken);
+        return -1;
+    }
+    for (i = 0; i < g->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &g->instrs[i];
+
+        if (in->op != CC_SSA_STACKALLOC || in->dst < 0 || in->dst >= g->value_count || !esc[in->dst] || in->imm <= 0) {
+            continue;
+        }
+        for (k = 0; k < pool->count && (taken[k] || !pool_slot_fits(&pool->at[k], in)); ++k) {
+        }
+        if (k < pool->count) {
+            taken[k] = 1;
+            need -= (long)in->imm;
+        }
+    }
+    free(esc);
+    free(taken);
+    return need;
+}
+
+/**
+ * Give each slot of @p g whose address escapes a slot of @p pool alike, in @p vmap, and @p pooled[v] set for
+ * it: one not given another slot of @p g, or else a new one, its STACKALLOC put at the entry of @p out, the
+ * rewrite of @p f, and in the pool.  Such a slot stays memory; another inlined body that holds one alike, at
+ * another call, is never live with it, and nothing reads it there before the body writes it.
  *
  * @return 0, or -1 when out of memory
  */
-static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const cc_ssa_function_t *g, ivec_t *out) {
+static int pool_bind(cc_ssa_function_t *f, const cc_ssa_function_t *g, ivec_t *out, slot_pool_t *pool, int *vmap,
+                     unsigned char *pooled) {
+    unsigned char *esc = cc_ssa_escaping_slots(g);
+    unsigned char *taken = NULL;
+    size_t had = pool->count;
+    size_t i;
+    size_t k;
+    int rc = 0;
+
+    if (esc == NULL) {
+        return -1;
+    }
+    if (had > 0 && (taken = (unsigned char *)calloc(had, 1)) == NULL) {
+        free(esc);
+        return -1;
+    }
+    for (i = 0; i < g->instr_count && rc == 0; ++i) {
+        const cc_ssa_instr_t *src = &g->instrs[i];
+        cc_ssa_instr_t sa;
+        size_t at;
+        int nv;
+
+        if (src->op != CC_SSA_STACKALLOC || src->dst < 0 || src->dst >= g->value_count || !esc[src->dst] ||
+            src->imm <= 0) {
+            continue;
+        }
+        /* (a slot made for this body is not one it may take again) */
+        for (k = 0; k < had && (taken[k] || !pool_slot_fits(&pool->at[k], src)); ++k) {
+        }
+        if (k < had) {
+            taken[k] = 1;
+            vmap[src->dst] = pool->at[k].value;
+            pooled[src->dst] = 1;
+            continue;
+        }
+        if (pool->count == pool->cap) {
+            size_t ncap = pool->cap == 0 ? 8 : pool->cap * 2;
+            pool_slot_t *next = (pool_slot_t *)realloc(pool->at, ncap * sizeof(*next));
+
+            if (next == NULL) {
+                rc = -1;
+                break;
+            }
+            pool->at = next;
+            pool->cap = ncap;
+        }
+        nv = cc_ssa_function_new_value(f, cc_ssa_value_class(g, src->dst));
+        if (nv < 0) {
+            rc = -1;
+            break;
+        }
+        f->value_ty[nv] = g->value_ty[src->dst];
+        sa = plain_instr(CC_SSA_STACKALLOC);
+        sa.dst = nv;
+        sa.imm = src->imm;
+        sa.stack_align = src->stack_align;
+        sa.ssp = src->ssp;
+        sa.dbg_var = src->dbg_var;
+        if (ivec_put(out, &sa) != 0) {
+            rc = -1;
+            break;
+        }
+        /* at the entry, after the parameters, where it is before every use */
+        for (at = 0; at + 1 < out->count && (out->at[at].op == CC_SSA_PARAM || out->at[at].op == CC_SSA_CHAIN); ++at) {
+        }
+        memmove(&out->at[at + 1], &out->at[at], (out->count - 1 - at) * sizeof(*out->at));
+        out->at[at] = sa;
+        pool->at[pool->count].value = nv;
+        pool->at[pool->count].size = src->imm;
+        pool->at[pool->count].stack_align = src->stack_align;
+        pool->at[pool->count].ssp = src->ssp;
+        pool->count++;
+        vmap[src->dst] = nv;
+        pooled[src->dst] = 1;
+    }
+    free(esc);
+    free(taken);
+    return rc;
+}
+
+/**
+ * Write @p g's body in place of @p call into @p out, the rewrite of @p f; with @p pool, its slots whose address
+ * escapes in slots bodies inlined before it share (pool_bind()).
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const cc_ssa_function_t *g, ivec_t *out,
+                       slot_pool_t *pool) {
     int *vmap;
+    unsigned char *pooled = NULL; /* per value of g: a slot pool_bind() gave a pool slot */
+    size_t nv;
     int label_base;
     int done_label;
     int v;
     size_t i;
     cc_ssa_instr_t in;
 
-    vmap = (int *)malloc((size_t)(g->value_count > 0 ? g->value_count : 1) * sizeof(*vmap));
+    /* (pooled after the map, in its allocation: freed with it) */
+    nv = (size_t)(g->value_count > 0 ? g->value_count : 1);
+    vmap = (int *)calloc(nv * sizeof(*vmap) + nv, 1);
     if (vmap == NULL) {
         return -1;
     }
@@ -782,6 +937,13 @@ static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const c
         }
         f->value_ty[vmap[v]] = g->value_ty[v];
     }
+    if (pool != NULL) {
+        pooled = (unsigned char *)(vmap + nv);
+        if (pool_bind(f, g, out, pool, vmap, pooled) != 0) {
+            free(vmap);
+            return -1;
+        }
+    }
     label_base = f->label_count;
     f->label_count += g->label_count;
     done_label = f->label_count++;
@@ -789,6 +951,10 @@ static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const c
     for (i = 0; i < g->instr_count; ++i) {
         const cc_ssa_instr_t *src = &g->instrs[i];
 
+        if (src->op == CC_SSA_STACKALLOC && pooled != NULL && src->dst >= 0 && src->dst < g->value_count &&
+            pooled[src->dst]) {
+            continue; /* (its slot is the pool's, allocated at the entry) */
+        }
         if (src->op == CC_SSA_PARAM) {
             /* the parameter is its argument, narrowed when the parameter is narrower */
             int arg = call->args[src->param_index];
@@ -906,24 +1072,118 @@ static void bound_copy_free(cc_ssa_function_t *h) {
 }
 
 /**
+ * Append to @p h, at its next instruction, the stores that fill slot @p p with the @p size bytes @p bytes: a
+ * word at a time, then what is left in halves of that.
+ */
+static int put_const_bytes(cc_ssa_function_t *h, int p, const unsigned char *bytes, long size) {
+    long word = cc_target_pointer_size();
+    long off = 0;
+
+    while (off < size) {
+        long n = word;
+        unsigned long long val = 0;
+        cc_ssa_instr_t c = plain_instr(CC_SSA_CONST);
+        cc_ssa_instr_t st = plain_instr(CC_SSA_STORE);
+        long b;
+
+        while (n > size - off) {
+            n /= 2;
+        }
+        for (b = n - 1; b >= 0; --b) {
+            val = (val << 8) | bytes[off + b];
+        }
+        c.dst = cc_ssa_function_new_value(h, CC_VAL_I64);
+        if (c.dst < 0) {
+            return -1;
+        }
+        cc_ssa_value_set_size(h, c.dst, (uint32_t)n);
+        cc_ssa_value_set_unsigned(h, c.dst, 1);
+        c.imm = (long long)val;
+        c.is_unsigned = 1;
+        h->instrs[h->instr_count++] = c;
+        st.lhs = p;
+        if (off > 0) {
+            cc_ssa_instr_t ko = plain_instr(CC_SSA_CONST);
+            cc_ssa_instr_t ad = plain_instr(CC_SSA_ADD);
+
+            ko.dst = cc_ssa_function_new_value(h, CC_VAL_I64);
+            ad.dst = cc_ssa_function_new_value(h, CC_VAL_I64);
+            if (ko.dst < 0 || ad.dst < 0) {
+                return -1;
+            }
+            cc_ssa_value_set_unsigned(h, ko.dst, 1);
+            cc_ssa_value_set_unsigned(h, ad.dst, 1);
+            ko.imm = off;
+            ko.is_unsigned = 1;
+            ad.lhs = p;
+            ad.rhs = ko.dst;
+            ad.is_unsigned = 1;
+            h->instrs[h->instr_count++] = ko;
+            h->instrs[h->instr_count++] = ad;
+            st.lhs = ad.dst;
+        }
+        st.rhs = c.dst;
+        st.imm = n;
+        h->instrs[h->instr_count++] = st;
+        off += n;
+    }
+    return 0;
+}
+
+/**
  * Make @p h a copy of @p g with each parameter @p call passes a constant (@p is_k, @p k, as find_constants()
  * leaves them, over the caller's first @p n values) made that constant, folded at @p opt_level as the inlined
- * body would be -- with what module @p m declares too (its const tables), unless @p m is NULL.  The copy shares
- * g's names and parameter arrays, which no pass changes, and owns its code and values (bound_copy_free()).
+ * body would be -- with what module @p m declares too (its const tables), unless @p m is NULL.  A structure
+ * passed by value whose bytes caller @p f, unless NULL, holds known (cc_module_slot_const_bytes()) is bound too: the
+ * parameter, its storage's address, a slot of the copy's own those bytes are stored to, which the body reads as
+ * it would the argument -- the copy then folds the loads of its fields.  The copy shares g's names and parameter
+ * arrays, which no pass changes, and owns its code and values (bound_copy_free()).
  *
  * @return 0, or -1 when the call passes no constant or out of memory (and @p h holds nothing)
  */
-static int bound_copy(const cc_ssa_module_t *m, const cc_ssa_function_t *g, const cc_ssa_instr_t *call,
-                      const unsigned char *is_k, const long long *k, int n, int opt_level, cc_ssa_function_t *h) {
+static int bound_copy(const cc_ssa_module_t *m, const cc_ssa_function_t *f, const cc_ssa_function_t *g,
+                      const cc_ssa_instr_t *call, const unsigned char *is_k, const long long *k, int n, int opt_level,
+                      cc_ssa_function_t *h) {
     int *vmap = NULL;
+    unsigned char **sbytes = NULL; /* per argument: the bytes of a structure by value, when known */
+    size_t extra = 0;              /* the instructions that store them */
     size_t i;
     int bound = 0;
 
     memset(h, 0, sizeof(*h));
-    for (i = 0; i < call->arg_count && !bound; ++i) {
-        bound = call->args[i] >= 0 && call->args[i] < n && is_k[call->args[i]];
+    for (i = 0; i < call->arg_count; ++i) {
+        long size;
+        int rc;
+
+        if (call->args[i] >= 0 && call->args[i] < n && is_k[call->args[i]]) {
+            bound = 1;
+            continue;
+        }
+        if (f == NULL || g->param_abi == NULL || i >= g->param_count || !abi_is_struct(g->param_abi[i]) ||
+            call->call_arg_sizes == NULL || (size = (long)call->call_arg_sizes[i]) <= 0 || call->args[i] < 0) {
+            continue;
+        }
+        if (sbytes == NULL && (sbytes = (unsigned char **)calloc(call->arg_count, sizeof(*sbytes))) == NULL) {
+            return -1;
+        }
+        if ((sbytes[i] = (unsigned char *)malloc((size_t)size)) == NULL ||
+            (rc = cc_module_slot_const_bytes(m, f, call->args[i], sbytes[i], size)) < 0) {
+            bound = -1;
+            break;
+        }
+        if (rc == 0) {
+            free(sbytes[i]);
+            sbytes[i] = NULL;
+            continue;
+        }
+        bound = 1;
+        extra += 1 + 4 * (size_t)size;
     }
-    if (!bound) {
+    if (bound <= 0) {
+        for (i = 0; sbytes != NULL && i < call->arg_count; ++i) {
+            free(sbytes[i]);
+        }
+        free(sbytes);
         return -1;
     }
     h->name = g->name;
@@ -941,7 +1201,7 @@ static int bound_copy(const cc_ssa_module_t *m, const cc_ssa_function_t *g, cons
     h->label_count = g->label_count;
     h->value_cap = g->value_count > 0 ? (size_t)g->value_count : 1;
     h->value_ty = (cc_ssa_type_t *)malloc(h->value_cap * sizeof(*h->value_ty));
-    h->instr_cap = g->instr_count > 0 ? g->instr_count : 1;
+    h->instr_cap = (g->instr_count > 0 ? g->instr_count : 1) + extra;
     h->instrs = (cc_ssa_instr_t *)malloc(h->instr_cap * sizeof(*h->instrs));
     vmap = (int *)malloc(h->value_cap * sizeof(*vmap));
     if (h->value_ty == NULL || h->instrs == NULL || vmap == NULL) {
@@ -965,6 +1225,26 @@ static int bound_copy(const cc_ssa_module_t *m, const cc_ssa_function_t *g, cons
             c.imm = k[call->args[pi]];
             c.is_unsigned = cc_ssa_value_is_unsigned(g, src->dst);
             h->instrs[h->instr_count++] = c;
+        } else if (pi >= 0 && (size_t)pi < call->arg_count && sbytes != NULL && sbytes[pi] != NULL &&
+                   src->dst >= 0) {
+            /*
+             * the structure's storage: a slot of its own, its bytes stored -- a new value, which the body's
+             * reads of the parameter read (the parameter's own may be value 0, which an instruction's unused
+             * operand fields name)
+             */
+            cc_ssa_instr_t sa = plain_instr(CC_SSA_STACKALLOC);
+
+            sa.dst = cc_ssa_function_new_value(h, cc_ssa_value_class(g, src->dst));
+            if (sa.dst < 0) {
+                goto fail;
+            }
+            h->value_ty[sa.dst] = g->value_ty[src->dst];
+            vmap[src->dst] = sa.dst;
+            sa.imm = (long long)call->call_arg_sizes[pi];
+            h->instrs[h->instr_count++] = sa;
+            if (put_const_bytes(h, sa.dst, sbytes[pi], (long)call->call_arg_sizes[pi]) != 0) {
+                goto fail;
+            }
         } else if (clone_instr(src, vmap, 0, &h->instrs[h->instr_count]) == 0) {
             h->instr_count++;
         } else {
@@ -972,6 +1252,10 @@ static int bound_copy(const cc_ssa_module_t *m, const cc_ssa_function_t *g, cons
         }
     }
     free(vmap);
+    for (i = 0; sbytes != NULL && i < call->arg_count; ++i) {
+        free(sbytes[i]);
+    }
+    free(sbytes);
     if ((m != NULL ? cc_optimize_function_in(m, h, opt_level) : cc_optimize_function(h, opt_level)) != 0) {
         bound_copy_free(h);
         return -1;
@@ -979,6 +1263,10 @@ static int bound_copy(const cc_ssa_module_t *m, const cc_ssa_function_t *g, cons
     return 0;
 fail:
     free(vmap);
+    for (i = 0; sbytes != NULL && i < call->arg_count; ++i) {
+        free(sbytes[i]);
+    }
+    free(sbytes);
     bound_copy_free(h);
     return -1;
 }
@@ -995,7 +1283,7 @@ static int hint_folds_to_small(const cc_ssa_function_t *g, const cc_ssa_instr_t 
     cc_ssa_function_t h;
     int small;
 
-    if (bound_copy(NULL, g, call, is_k, k, n, opt_level, &h) != 0) {
+    if (bound_copy(NULL, NULL, g, call, is_k, k, n, opt_level, &h) != 0) {
         return 0;
     }
     /*
@@ -1284,7 +1572,9 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
     long long *consts;
     unsigned char *local = NULL; /* the addresses of locals only calls of inline functions take */
     long *fdef = NULL;           /* per value: its one defining instruction, -1 for none or more */
+    slot_pool_t pool;            /* the slots the bodies inlined past the limit share */
 
+    memset(&pool, 0, sizeof(pool));
     if (find_constants(f, nk, &is_const, &consts) != 0) {
         return -1;
     }
@@ -1304,6 +1594,7 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
         const cc_ssa_function_t *g;
         cc_ssa_function_t folded; /* past CALLER_MAX_INSTRS: g with the call's constants bound, folded */
         int past = out.count >= CALLER_MAX_INSTRS;
+        long need = 0; /* past the limit: the bytes of memory slots the body adds, past those it shares */
 
         memset(&folded, 0, sizeof(folded));
         if (call->op == CC_SSA_CALL && call->sym != NULL) {
@@ -1335,7 +1626,8 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
         if (g != NULL && opt_level <= 0 && (g->attr_flags & CC_ATTR_ALWAYS_INLINE) == 0) {
             g = NULL;
         }
-        if (g != NULL && past) {
+        if (g != NULL &&
+            (past || (again_here && opt_level > 0 && (g->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0))) {
             /*
              * Past CALLER_MAX_INSTRS only an always_inline function no bigger than gcc's max-inline-insns-single
              * once the call's constants, with what the module declares, are folded into a copy of it -- the
@@ -1346,24 +1638,46 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
              * BUILD_BUG_ON()s stayed calls of undefined __compiletime_assert_N past the limit.  A call passing
              * no constant takes the body as it is, under the same limits.  Anything bigger stays a call, so the
              * caller grows no further than it must.
+             *
+             * A call weighed again -- of an always_inline function an inlined body brought in, or one left a
+             * call the first time -- the same way, but only as such a folded copy: the constants it passes may
+             * be known only now, a structure by value among them (bound_copy()).  kvm_initialize_cpu_caps()
+             * passes raw_cpuid_get() the reverse_cpuid[] entry x86_feature_cpuid() returned, inlined in the
+             * same round, and the out-of-line copy kept its BUILD_BUG() on the entry's reg.  A call not so
+             * folded, not past the limit, is weighed below as any other.
+             *
+             * The slots a body so inlined keeps in memory are those of an earlier one, inlined in the same
+             * round, wherever they are alike (splice_body()): two bodies inlined at two calls are never live at
+             * once, and gcc shares their frames as it does the slots of locals not live at once.
              */
             int bound = 0;
+            int ok = (g->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 && opt_level > 0 && (size_t)gi != fi &&
+                     ready[gi] && cc_inline_candidate(g) && call_site_inlinable(f, call, g);
 
-            if ((g->attr_flags & CC_ATTR_ALWAYS_INLINE) == 0 || again_here || opt_level <= 0 || (size_t)gi == fi ||
-                !ready[gi] || !cc_inline_candidate(g) || !call_site_inlinable(f, call, g)) {
-                g = NULL;
-            } else if ((bound = bound_copy(m, g, call, is_const, consts, nk, opt_level, &folded) == 0) &&
-                       (body_cost(&folded) > LOCAL_ARG_MAX_COST || !inline_body_ok(&folded, INLINE_MAX_INSTRS) ||
-                        (cc_ssa_memory_slot_bytes(&folded) != 0 &&
-                         !frame_growth_ok(frame, grown + cc_ssa_memory_slot_bytes(&folded))))) {
+            if (ok) {
+                bound = bound_copy(m, f, g, call, is_const, consts, nk, opt_level, &folded) == 0;
+            }
+            if (ok && (need = pool_need(&pool, bound ? &folded : g)) < 0) {
+                if (bound) {
+                    bound_copy_free(&folded);
+                }
+                break;
+            }
+            if (bound && (body_cost(&folded) > LOCAL_ARG_MAX_COST || !inline_body_ok(&folded, INLINE_MAX_INSTRS) ||
+                          (need != 0 && !frame_growth_ok(frame, grown + need)))) {
                 bound_copy_free(&folded);
-                g = NULL;
-            } else if (!bound && (body_cost(g) > LOCAL_ARG_MAX_COST ||
-                                  (cc_ssa_memory_slot_bytes(g) != 0 &&
-                                   !frame_growth_ok(frame, grown + cc_ssa_memory_slot_bytes(g))))) {
+                bound = 0;
+                ok = 0;
+            } else if (ok && !bound &&
+                       (again_here || body_cost(g) > LOCAL_ARG_MAX_COST ||
+                        (need != 0 && !frame_growth_ok(frame, grown + need)))) {
+                ok = 0;
+            }
+            if (ok) {
+                past = bound ? 1 : 2; /* (1: the folded copy is inlined; 2: the body itself) */
+            } else if (past) {
                 g = NULL;
             }
-            past = bound ? 1 : 2; /* (1: the folded copy is inlined; 2: the body itself) */
         }
         if (g != NULL &&
             (past ||
@@ -1379,8 +1693,8 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
 
             /* (past the limit what is inlined is reckoned by the slots it keeps alone: its values are the
              * register allocator's) */
-            grown += past ? cc_ssa_memory_slot_bytes(past == 1 ? &folded : g) : frame_cost(g);
-            rc = splice_body(f, call, past == 1 ? &folded : g, &out);
+            grown += past ? need : frame_cost(g);
+            rc = splice_body(f, call, past == 1 ? &folded : g, &out, past ? &pool : NULL);
             if (past == 1) {
                 bound_copy_free(&folded);
             }
@@ -1414,6 +1728,7 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
     free(consts);
     free(local);
     free(fdef);
+    free(pool.at);
     if (i < f->instr_count) {
         /* out of memory: the instructions moved are in out, the rest still in f */
         size_t k;

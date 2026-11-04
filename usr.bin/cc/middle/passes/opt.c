@@ -5136,6 +5136,8 @@ typedef struct {
     long *fill;           /**< per STACKALLOC value: the instruction of the memcpy that fills it, or -1 */
     const char **src_sym; /**< per STACKALLOC value: the read-only global that memcpy copies from */
     long long *src_off;   /**< per STACKALLOC value: and the offset in it the copy starts at */
+    int *from;            /**< per STACKALLOC value: the slot that memcpy copies from instead, or -1 */
+    long long *from_off;  /**< per STACKALLOC value: and the offset in that slot the copy starts at */
 } copy_slots_t;
 
 /** cc_ssa_for_each_use() callback: count a use. */
@@ -5166,7 +5168,11 @@ static void copy_note_escape(void *ctx, int v, int role) {
  * static const table copied to a local (`typeof(_f[0]) __f = _f[i];`) with BUILD_BUG_ON()s on its fields, and
  * ice_common.c left 683 calls of undefined __compiletime_assert_N while the copy stayed memory.  Only an integer
  * load wholly inside the bytes copied (const_load() says which globals and loads); the copy, read by nothing
- * then, goes with the slot once mem.c finds it unread.
+ * then, goes with the slot once mem.c finds it unread.  A slot that one memcpy fills from another such slot,
+ * within the bytes that one holds, holds them too, through any chain of such copies: i386 passes a structure
+ * by value in memory, and Linux's kvm_cpu_cap_init() hands raw_cpuid_get() a copy of reverse_cpuid[leaf],
+ * which the inlined body copies again before it switches on its reg field; the switch's default arm, a
+ * BUILD_BUG(), stayed a call of an undefined __compiletime_assert_N.
  *
  * @return 1 when a load was folded, 0 when none was, or -1 when out of memory
  */
@@ -5177,6 +5183,7 @@ static int fold_const_copies(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     size_t n = (size_t)(f->value_count > 0 ? f->value_count : 1);
     size_t i;
     int v;
+    int grew;
     int changed = 0;
 
     if (f->value_count <= 0 || m->global_count == 0) {
@@ -5204,8 +5211,10 @@ static int fold_const_copies(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     c.fill = (long *)malloc(n * sizeof(*c.fill));
     c.src_sym = (const char **)calloc(n, sizeof(*c.src_sym));
     c.src_off = (long long *)calloc(n, sizeof(*c.src_off));
+    c.from = (int *)malloc(n * sizeof(*c.from));
+    c.from_off = (long long *)calloc(n, sizeof(*c.from_off));
     if (k == NULL || c.slot == NULL || c.off == NULL || c.uses == NULL || c.bad == NULL || c.fill == NULL ||
-        c.src_sym == NULL || c.src_off == NULL) {
+        c.src_sym == NULL || c.src_off == NULL || c.from == NULL || c.from_off == NULL) {
         changed = -1;
         goto out;
     }
@@ -5214,6 +5223,7 @@ static int fold_const_copies(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
 
         c.slot[v] = -1;
         c.fill[v] = -1;
+        c.from[v] = -1;
         if (def_at[v] >= 0 && address_ref(f, def_at, k, v, &r, 0) && r.slot >= 0) {
             c.slot[v] = r.slot;
             c.off[v] = r.off;
@@ -5253,7 +5263,43 @@ static int fold_const_copies(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
             c.src_off[d] = soff;
             continue;
         }
+        if (in->op == CC_SSA_CALL && in->sym != NULL && strcmp(in->sym, "memcpy") == 0 && in->arg_count == 3 &&
+            in->call_chain == 0 && (in->dst < 0 || in->dst >= f->value_count || c.uses[in->dst] == 0) &&
+            in->args[2] >= 0 && in->args[2] < f->value_count && k[in->args[2]].known &&
+            k[in->args[2]].type == CC_VAL_I64 && k[in->args[2]].i > 0 && in->args[0] >= 0 &&
+            in->args[0] < f->value_count && (d = c.slot[in->args[0]]) >= 0 && c.off[in->args[0]] == 0 &&
+            in->args[1] >= 0 && in->args[1] < f->value_count && c.slot[in->args[1]] >= 0 &&
+            c.slot[in->args[1]] != d && c.off[in->args[1]] >= 0 &&
+            (in->lhs < 0 || in->lhs >= f->value_count || c.slot[in->lhs] < 0) &&
+            (in->rhs < 0 || in->rhs >= f->value_count || c.slot[in->rhs] < 0)) {
+            /*
+             * the one copy that fills slot d from another slot: a read of that one, and read-only bytes in d
+             * too when that one holds them (resolved below) -- a structure copied from a const table to a
+             * local, then passed by value to an inlined function, which copies it to its own
+             */
+            if (c.fill[d] >= 0) {
+                c.bad[d] = 1;
+            }
+            c.fill[d] = (long)i;
+            c.from[d] = c.slot[in->args[1]];
+            c.from_off[d] = c.off[in->args[1]];
+            continue;
+        }
         cc_ssa_for_each_use(in, copy_note_escape, &c);
+    }
+    /* a slot filled from another so filled holds what that one does: through chains of such copies */
+    for (grew = 1; grew;) {
+        grew = 0;
+        for (v = 0; v < f->value_count; ++v) {
+            int s = c.from[v];
+
+            if (s >= 0 && c.src_sym[v] == NULL && !c.bad[v] && !c.bad[s] && c.fill[s] >= 0 && c.src_sym[s] != NULL &&
+                c.from_off[v] + k[f->instrs[c.fill[v]].args[2]].i <= k[f->instrs[c.fill[s]].args[2]].i) {
+                c.src_sym[v] = c.src_sym[s];
+                c.src_off[v] = c.src_off[s] + c.from_off[v];
+                grew = 1;
+            }
+        }
     }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
@@ -5266,7 +5312,7 @@ static int fold_const_copies(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
         size_t sl;
 
         if (in->op != CC_SSA_LOAD || in->lhs < 0 || in->lhs >= f->value_count || (s = c.slot[in->lhs]) < 0 ||
-            c.bad[s] || c.fill[s] < 0) {
+            c.bad[s] || c.fill[s] < 0 || c.src_sym[s] == NULL) {
             continue;
         }
         cp = &f->instrs[c.fill[s]];
@@ -5305,7 +5351,70 @@ out:
     free(c.fill);
     free(c.src_sym);
     free(c.src_off);
+    free(c.from);
+    free(c.from_off);
     return changed;
+}
+
+/** What global_const_bytes() reads a function's addresses by. */
+typedef struct {
+    const cc_ssa_module_t *m;
+    const cc_ssa_function_t *f;
+    long *def_at;       /**< single_def_at() */
+    const_state_t *k;   /**< single_def_consts() */
+} global_bytes_t;
+
+/**
+ * cc_const_src_fn for cc_module_slot_const_bytes(): the @p n bytes at address @p v, a constant offset into a
+ * read-only global of the module (foldable_global()), as its initializer lays them out.
+ */
+static int global_const_bytes(void *ctx, int v, long long n, unsigned char *out) {
+    const global_bytes_t *gb = (const global_bytes_t *)ctx;
+    const cc_ssa_global_t *g;
+    const char *sym = NULL;
+    long long off = 0;
+    long long at;
+    long sz;
+
+    if (!symbol_address(gb->f, gb->def_at, gb->k, v, &sym, &off, 0) ||
+        (g = foldable_global(gb->m, sym, sym_name_len(sym))) == NULL) {
+        return 0;
+    }
+    sz = global_data_size(g);
+    if (off < 0 || n <= 0 || off + n > sz) {
+        return 0;
+    }
+    for (at = 0; at < n; at += 8) {
+        data_window_t w;
+
+        memset(&w, 0, sizeof(w));
+        w.off = (long)(off + at);
+        w.n = (long)(n - at < 8 ? n - at : 8);
+        if (!global_window(g, sz, &w)) {
+            return 0;
+        }
+        memcpy(out + at, w.b, (size_t)w.n);
+    }
+    return 1;
+}
+
+int cc_module_slot_const_bytes(const cc_ssa_module_t *m, const cc_ssa_function_t *f, int v, unsigned char *out,
+                               long n) {
+    global_bytes_t gb;
+    int rc;
+
+    gb.m = m;
+    gb.f = f;
+    gb.def_at = single_def_at(f);
+    gb.k = gb.def_at != NULL ? single_def_consts(f) : NULL;
+    if (gb.k == NULL) {
+        free(gb.def_at);
+        return -1;
+    }
+    rc = cc_slot_const_bytes(f, v, out, n, m != NULL && m->global_count > 0 ? global_const_bytes : NULL, &gb);
+    free(gb.def_at);
+    free(gb.k);
+    return rc;
 }
 
 /**
