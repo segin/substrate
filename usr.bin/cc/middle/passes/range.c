@@ -38,6 +38,14 @@
  * interval wherever it is read, as every read comes after it; a
  * variable's, as a fact of its own.
  *
+ * A value the whole-function step let go gets back what the walk shows of
+ * it (range_induct()), as gcc's ranges know a loop's induction variable:
+ * guessed within the bound that was not moving -- a counter's start --
+ * and what its definitions give, it holds what its definitions give in a
+ * walk under the guess, where that is within the guess for each of them.
+ * `i` of `for (i = 0; i < 3; i++)` only rises from 0, and rises only
+ * where the test holds it below 3: within [0, 3], and [0, 2] inside.
+ *
  * Beside the intervals, the bits each value is known to have, over the
  * whole function (kbits_settle()): a constant's, what masks, ors, xors and
  * shifts by a constant make of them, the zeros a narrow load extends with,
@@ -83,6 +91,16 @@ typedef struct {
 /** How many times a value's interval may grow before it is let go to every value it can hold. */
 #define RANGE_GROWTH 3
 
+/** wide[]: the value's interval was let go. */
+#define WIDE_SET 1
+/** wide[]: its lower bound was falling when it was. */
+#define WIDE_LO 2
+/** wide[]: its upper bound was rising when it was. */
+#define WIDE_HI 4
+
+/** The most checking walks range_induct() makes. */
+#define INDUCT_ROUNDS 3
+
 /** The state of one function's walk. */
 typedef struct {
     cc_ssa_function_t *f;
@@ -96,6 +114,11 @@ typedef struct {
     long *def_at;             /**< per value defined once: its instruction, else -1 */
     vrange_t *r;              /**< per value: what it can hold anywhere it is read */
     unsigned char *grew;      /**< per value: how many times r grew */
+    unsigned char *wide;      /**< per value: WIDE_* -- r was let go, and which of its bounds were moving then */
+    vrange_t *pre;            /**< per value let go: r just before */
+    unsigned char *cand;      /**< per value: an induction the walk checks (range_induct()) */
+    vrange_t *seen;           /**< per such value: what its definitions gave in the checking walk */
+    int checking;             /**< the walk checks inductions: it folds nothing, reports no call */
     vrange_t *shl_s;          /**< per value made by `shl x, k`: x's low bits sign-extended as the shl read them */
     vrange_t *shl_z;          /**< and zero-extended */
     long *label_at;           /**< per label: its instruction, or -1 */
@@ -262,6 +285,21 @@ static vrange_t current(const range_t *s, int v, int walking) {
     for (i = 0; walking && i < s->nfacts; ++i) {
         if (s->facts[i].v == v && s->facts[i].bits == 0) {
             r = meet(r, s->facts[i].r);
+        }
+    }
+    /*
+     * what is known of its low bits extended, where every value it can hold is that extension of itself (an int
+     * a sign extension made, in a 64-bit register): the loop test `i < 3` of an int i holds of i itself
+     */
+    for (i = 0; walking && i < s->nfacts; ++i) {
+        const vfact_t *fa = &s->facts[i];
+        vrange_t e;
+
+        if (fa->v == v && fa->bits != 0 && r.lo <= r.hi) {
+            e = ext_range(r, fa->bits, fa->sign);
+            if (e.lo == r.lo && e.hi == r.hi) {
+                r = meet(r, fa->r);
+            }
         }
     }
     return r;
@@ -908,6 +946,10 @@ static void range_free(range_t *s) {
     free(s->def_at);
     free(s->r);
     free(s->grew);
+    free(s->wide);
+    free(s->pre);
+    free(s->cand);
+    free(s->seen);
     free(s->shl_s);
     free(s->shl_z);
     free(s->label_at);
@@ -967,6 +1009,10 @@ static int range_init(range_t *s, cc_ssa_function_t *f) {
     s->def_at = (long *)malloc(nv * sizeof(long));
     s->r = (vrange_t *)malloc(nv * sizeof(vrange_t));
     s->grew = (unsigned char *)calloc(nv, 1);
+    s->wide = (unsigned char *)calloc(nv, 1);
+    s->pre = (vrange_t *)malloc(nv * sizeof(vrange_t));
+    s->cand = (unsigned char *)calloc(nv, 1);
+    s->seen = (vrange_t *)malloc(nv * sizeof(vrange_t));
     s->shl_s = (vrange_t *)malloc(nv * sizeof(vrange_t));
     s->shl_z = (vrange_t *)malloc(nv * sizeof(vrange_t));
     s->label_at = (long *)malloc(nl * sizeof(long));
@@ -979,7 +1025,8 @@ static int range_init(range_t *s, cc_ssa_function_t *f) {
     s->k0 = (unsigned long long *)calloc(nv, sizeof(*s->k0));
     s->kseen = (unsigned char *)calloc(nv, 1);
     if (s->bits == NULL || s->pinned == NULL || s->ndefs == NULL || s->def_at == NULL || s->r == NULL ||
-        s->grew == NULL || s->shl_s == NULL || s->shl_z == NULL || s->label_at == NULL || s->edge_min == NULL ||
+        s->grew == NULL || s->wide == NULL || s->pre == NULL || s->cand == NULL || s->seen == NULL ||
+        s->shl_s == NULL || s->shl_z == NULL || s->label_at == NULL || s->edge_min == NULL ||
         s->edge_max == NULL || s->edge_count == NULL || s->edge == NULL || s->edge_n == NULL || s->k1 == NULL ||
         s->k0 == NULL || s->kseen == NULL) {
         return -1;
@@ -1074,6 +1121,12 @@ static int range_settle(range_t *s) {
             nr = join(s->r[d], r);
             if (nr.lo != s->r[d].lo || nr.hi != s->r[d].hi) {
                 if (s->r[d].lo <= s->r[d].hi && ++s->grew[d] > RANGE_GROWTH) {
+                    if (!s->wide[d]) {
+                        /* (what range_induct() tries: the bound that was not moving) */
+                        s->pre[d] = s->r[d];
+                        s->wide[d] = (unsigned char)(WIDE_SET | (nr.lo < s->r[d].lo ? WIDE_LO : 0) |
+                                                     (nr.hi > s->r[d].hi ? WIDE_HI : 0));
+                    }
                     nr = full_range(s->bits[d]);
                 }
                 if (nr.lo != s->r[d].lo || nr.hi != s->r[d].hi) {
@@ -1349,6 +1402,9 @@ static int range_walk(range_t *s) {
     int changed = 0;
     size_t i;
 
+    /* (what an earlier walk learned is its own) */
+    s->nfacts = 0;
+    memset(s->edge_n, 0, (size_t)(f->label_count > 0 ? f->label_count : 1) * sizeof(int));
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
         int d = in->dst;
@@ -1402,13 +1458,13 @@ static int range_walk(range_t *s) {
                 kill_facts(s, ov);
             }
         }
-        if (in->op == CC_SSA_CALL && s->on_call != NULL && report_call(s, in, 1) != 0) {
+        if (in->op == CC_SSA_CALL && s->on_call != NULL && !s->checking && report_call(s, in, 1) != 0) {
             return -1;
         }
         if (d < 0 || d >= s->nv) {
             continue;
         }
-        if (in->op == CC_SSA_CMP && s->def_at[d] >= 0 && tracked(s, in->lhs) && tracked(s, in->rhs) &&
+        if (in->op == CC_SSA_CMP && s->def_at[d] >= 0 && !s->checking && tracked(s, in->lhs) && tracked(s, in->rhs) &&
             s->bits[in->lhs] == s->bits[in->rhs]) {
             long long out;
 
@@ -1432,6 +1488,9 @@ static int range_walk(range_t *s) {
             continue;
         }
         r = eval(s, in, s->bits[d], 1);
+        if (s->checking && s->cand[d]) {
+            s->seen[d] = join(s->seen[d], r);
+        }
         if (in->op == CC_SSA_MOV && tracked(s, in->lhs) && s->bits[in->lhs] == s->bits[d]) {
             /* a copy's low bits are its source's: what is known of them, from here, or everywhere if defined once */
             int nf = s->nfacts;
@@ -1468,6 +1527,194 @@ static int range_walk(range_t *s) {
 }
 
 /**
+ * Narrow what the whole-function step let go: each value within what its definitions give from what their
+ * operands now hold (a value defined once at once, a variable after all its definitions), @p rounds times.
+ * An int a sign extension made, whose interval grew with the loop's counter it is made from, is an int again.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int range_narrow(range_t *s, int rounds) {
+    cc_ssa_function_t *f = s->f;
+    vrange_t *acc = (vrange_t *)malloc((size_t)s->nv * sizeof(*acc));
+    int round;
+    size_t i;
+    int v;
+
+    if (acc == NULL) {
+        return -1;
+    }
+    for (round = 0; round < rounds; ++round) {
+        for (v = 0; v < s->nv; ++v) {
+            acc[v].lo = 1; /* empty */
+            acc[v].hi = 0;
+        }
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int d = in->dst;
+            int n = shl_ext_bits(s, in);
+
+            if (n > 0) {
+                s->shl_s[d] = meet(s->shl_s[d], current_ext(s, in->lhs, n, 1, 0));
+                s->shl_z[d] = meet(s->shl_z[d], current_ext(s, in->lhs, n, 0, 0));
+            }
+            if (!tracked(s, d)) {
+                continue;
+            }
+            if (s->def_at[d] >= 0) {
+                s->r[d] = meet(s->r[d], eval(s, in, s->bits[d], 0));
+            } else {
+                acc[d] = join(acc[d], eval(s, in, s->bits[d], 0));
+            }
+        }
+        for (v = 0; v < s->nv; ++v) {
+            if (tracked(s, v) && s->def_at[v] < 0 && !is_empty(acc[v])) {
+                s->r[v] = meet(s->r[v], acc[v]);
+            }
+        }
+    }
+    free(acc);
+    return 0;
+}
+
+/**
+ * Give back the bound the whole-function step let go of a value whose interval kept growing, where the walk
+ * shows it holds: a loop's counter, `for (i = 0; i < 3; i++)`, which only rises from 0 and rises only where
+ * the loop's test holds it below 3, is within [0, 3] -- as gcc's ranges know a loop's induction variable, from
+ * its start, its step and the test that ends the loop.  Linux's KVM inlines a function whose BUILD_BUG_ON asks
+ * that its index is below 3 into such a loop, and left a call of an undefined __compiletime_assert_N.
+ *
+ * Each value let go keeps, as a guess, the bound that was not moving when it was let go, and its other bound
+ * from what its definitions can give.  A walk with every guess taken as the value's interval (checking: it
+ * folds nothing) learns what each definition of each guessed value gives there, with what the branches before
+ * it teach; where that is within the guess for every definition, no definition ever leaves it, and the value
+ * holds only what they gave.  A guess one of whose definitions leaves it is dropped, and the others are walked
+ * again without it.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int range_induct(range_t *s) {
+    cc_ssa_function_t *f = s->f;
+    size_t nv = (size_t)s->nv;
+    vrange_t *save_r = NULL;
+    vrange_t *save_s = NULL;
+    vrange_t *save_z = NULL;
+    vrange_t *guess = NULL;
+    int ncand = 0;
+    int rc = 0;
+    int round;
+    size_t i;
+    int v;
+
+    for (v = 0; v < s->nv; ++v) {
+        /* (a value defined once the walk narrows where it is defined) */
+        if (tracked(s, v) && s->def_at[v] < 0 && s->wide[v] &&
+            (s->wide[v] & (WIDE_LO | WIDE_HI)) != (WIDE_LO | WIDE_HI)) {
+            s->cand[v] = 1;
+            s->seen[v].lo = 1; /* empty */
+            s->seen[v].hi = 0;
+            ncand++;
+        }
+    }
+    if (ncand == 0) {
+        return 0;
+    }
+    if (range_narrow(s, 2) != 0) {
+        memset(s->cand, 0, nv);
+        return -1;
+    }
+    /* the bound that moved: what the definitions give, as the whole-function step knows their operands */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int d = in->dst;
+
+        if (d >= 0 && d < s->nv && s->cand[d]) {
+            s->seen[d] = join(s->seen[d], eval(s, in, s->bits[d], 0));
+        }
+    }
+    guess = (vrange_t *)malloc(nv * sizeof(*guess));
+    save_r = (vrange_t *)malloc(nv * sizeof(*save_r));
+    save_s = (vrange_t *)malloc(nv * sizeof(*save_s));
+    save_z = (vrange_t *)malloc(nv * sizeof(*save_z));
+    if (guess == NULL || save_r == NULL || save_s == NULL || save_z == NULL) {
+        free(guess);
+        free(save_r);
+        free(save_s);
+        free(save_z);
+        return -1;
+    }
+    for (v = 0; v < s->nv; ++v) {
+        vrange_t g;
+
+        if (!s->cand[v]) {
+            continue;
+        }
+        g = full_range(s->bits[v]);
+        if (!(s->wide[v] & WIDE_LO)) {
+            g.lo = s->pre[v].lo;
+        }
+        if (!(s->wide[v] & WIDE_HI)) {
+            g.hi = s->pre[v].hi;
+        }
+        g = meet(g, s->seen[v]);
+        if (is_full(g, s->bits[v])) {
+            s->cand[v] = 0;
+            ncand--;
+        }
+        guess[v] = g;
+    }
+    memcpy(save_r, s->r, nv * sizeof(*save_r));
+    memcpy(save_s, s->shl_s, nv * sizeof(*save_s));
+    memcpy(save_z, s->shl_z, nv * sizeof(*save_z));
+    for (round = 0; round < INDUCT_ROUNDS && ncand > 0 && rc == 0; ++round) {
+        int dropped = 0;
+
+        for (v = 0; v < s->nv; ++v) {
+            if (s->cand[v]) {
+                s->r[v] = guess[v];
+                s->seen[v].lo = 1;
+                s->seen[v].hi = 0;
+            }
+        }
+        s->checking = 1;
+        rc = range_walk(s) < 0 ? -1 : 0;
+        s->checking = 0;
+        for (v = 0; v < s->nv && rc == 0; ++v) {
+            if (s->cand[v] && (is_empty(s->seen[v]) || s->seen[v].lo < guess[v].lo || s->seen[v].hi > guess[v].hi)) {
+                s->cand[v] = 0;
+                ncand--;
+                dropped = 1;
+            }
+        }
+        if (rc == 0 && !dropped) {
+            /* every guess holds: what the walk learned under them holds too */
+            for (v = 0; v < s->nv; ++v) {
+                if (s->cand[v]) {
+                    s->r[v] = s->seen[v];
+                }
+                s->cand[v] = 0;
+            }
+            ncand = 0;
+            break;
+        }
+        memcpy(s->r, save_r, nv * sizeof(*save_r));
+        memcpy(s->shl_s, save_s, nv * sizeof(*save_s));
+        memcpy(s->shl_z, save_z, nv * sizeof(*save_z));
+    }
+    if (ncand > 0) {
+        /* (not settled within the rounds: nothing is kept) */
+        memcpy(s->r, save_r, nv * sizeof(*save_r));
+        memcpy(s->shl_s, save_s, nv * sizeof(*save_s));
+        memcpy(s->shl_z, save_z, nv * sizeof(*save_z));
+        memset(s->cand, 0, nv);
+    }
+    free(guess);
+    free(save_r);
+    free(save_s);
+    free(save_z);
+    return rc;
+}
+
+/**
  * Fold each compare of @p f that the ranges of its operands decide (see the head of this file), with what
  * @p params says every call passes each parameter; report each direct call to @p on_call.
  *
@@ -1495,7 +1742,10 @@ int cc_fold_ranges(cc_ssa_function_t *f, const cc_range_t *params, cc_range_call
     s.ctx = ctx;
     if (f->value_count > 0 && range_settle(&s)) {
         kbits_settle(&s);
-        rc = range_walk(&s);
+        rc = range_induct(&s);
+        if (rc == 0) {
+            rc = range_walk(&s);
+        }
     } else if (on_call != NULL) {
         /* nothing known: every call passes anything */
         for (i = 0; i < f->instr_count && rc == 0; ++i) {

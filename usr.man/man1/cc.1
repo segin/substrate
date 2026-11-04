@@ -449,6 +449,18 @@ computed once before the loop, as with
 .Fl fmove-loop-invariants ;
 a division, a load from memory and floating-point arithmetic are not
 moved, as each may fail or differ where the loop would not have run.
+An integer compare that what its operands can hold decides is that
+answer \(em what their definitions give, what the branches before it
+allow, and of a loop's counter what its start, its steps and the test
+that ends the loop allow, so that
+.Ic i
+of
+.Ic for (i = 0; i < 3; i++)
+is below 3 inside the loop, also as an unsigned int and under
+.Fl fwrapv \(em
+as with
+.Xr gcc 1 Ns 's
+value-range propagation.
 A read of a
 .Ic const
 object, neither

@@ -49,7 +49,8 @@ usr.bin/cc/
 │   ├── passes/inline.c      # Inlining of small static inline functions (-O1 and up)
 │   ├── passes/mem.c         # Non-escaping stack slots: forwarding, splitting, value sets (-O1 and up)
 │   ├── passes/licm.c        # Loop-invariant code motion into loop preheaders (-O1 and up)
-│   ├── passes/range.c       # Value ranges and known bits: compares they decide (-O1 and up)
+│   ├── passes/range.c       # Value ranges and known bits: compares they decide (-O1 and up);
+│   │                        # a loop counter's from its start, steps and the loop's test (range_induct())
 │   └── ssa/                 # SSA module/function/block/instruction infrastructure
 ├── backend/
 │   ├── regalloc.c           # Register allocation and spill planning
