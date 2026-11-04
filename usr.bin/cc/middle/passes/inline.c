@@ -1055,18 +1055,6 @@ static long *one_defs(const cc_ssa_function_t *f) {
     return at;
 }
 
-/** Whether @p g takes a structure by value. */
-static int has_struct_param(const cc_ssa_function_t *g) {
-    size_t i;
-
-    for (i = 0; g->param_abi != NULL && i < g->param_count; ++i) {
-        if (abi_is_struct(g->param_abi[i])) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 /**
  * The function of @p m that indirect call @p call of @p f calls, if its target is that function's address: a
  * GADDR of its name alone, through copies, each value defined once (@p fdef, one_defs()'s).
@@ -1328,8 +1316,7 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
              * constant stayed in a body never inlined
              */
             gi = calli_target(m, f, fdef, call);
-            if (gi >= 0 && (m->funcs[gi].is_variadic || has_struct_param(&m->funcs[gi]))) {
-                /* (a structure through a pointer is lowered otherwise than one to a declared function) */
+            if (gi >= 0 && m->funcs[gi].is_variadic) {
                 gi = -1;
             }
             if (gi >= 0) {

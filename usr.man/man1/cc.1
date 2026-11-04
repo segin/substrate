@@ -409,6 +409,8 @@ function of the same file is replaced by the function's body, and what
 that makes constant is folded, so a call a constant helper guards is
 dropped with its dead branch, as with
 .Xr gcc 1 .
+So is a call through a pointer that inlining has made such a function's
+address, whatever structures it passes by value.
 So is a call of a
 .Ic static
 function called from that one place only and named nowhere else (its

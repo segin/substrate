@@ -3516,6 +3516,17 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         int arg_is_variadic =
             (in.call_is_variadic && (int)i >= in.call_fixed_count) ? 1 : 0;
         long arg_size = e->args[i] != NULL ? lower_value_size(tu, e->args[i]) : cc_target_pointer_size();
+        /*
+         * the structure the prototype's parameter is, a declared function's or, through a pointer, the type
+         * pointed to's: passed as the target's ABI passes it to a function that is defined so, which is what
+         * the pointer calls
+         */
+        const cc_ctype_t *param_ct =
+            (e->ident != NULL && callee != NULL && callee->has_prototype && i < callee->param_count)
+                ? lower_param_ctype(&callee->params[i])
+            : (in.op == CC_SSA_CALLI && ptr_fnt != NULL && ptr_fnt->prototyped && i < ptr_fnt->param_count)
+                ? ptr_fnt->params[i]
+                : NULL;
         if (arg_size <= 0) {
             arg_size = cc_target_pointer_size();
         }
@@ -3526,14 +3537,14 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
             free(in.call_arg_sizes);
             return -1;
         }
-        if (e->ident != NULL && callee != NULL && callee->has_prototype && i < callee->param_count) {
-            if (ct_record_id(lower_param_ctype(&callee->params[i])) >= 0) {
-                long agg_size = cc_ct_size(lower_param_ctype(&callee->params[i]), tu);
+        if (param_ct != NULL && (in.op == CC_SSA_CALL || ct_record_id(param_ct) >= 0)) {
+            if (ct_record_id(param_ct) >= 0) {
+                long agg_size = cc_ct_size(param_ct, tu);
                 int is_transparent_union = 0;
                 int pass_union_scalar = 0;
                 int arg_is_same_aggregate = 0;
                 int agg_abi = CC_CALL_ARG_ABI_DEFAULT;
-                int param_sid = param_record_id(&callee->params[i]);
+                int param_sid = ct_record_id(param_ct);
 
                 arg_size = cc_target_pointer_size();
                 if (param_sid >= 0 && (size_t)param_sid < tu->struct_count) {
