@@ -443,9 +443,29 @@ computed once before the loop, as with
 .Fl fmove-loop-invariants ;
 a division, a load from memory and floating-point arithmetic are not
 moved, as each may fail or differ where the loop would not have run.
+A
+.Ic static
+function or object that nothing emitted refers to, once inlining and
+dead code are gone, is not emitted either, nor what only it refers to,
+as with
+.Xr gcc 1 :
+kept are what has external linkage, what is marked
+.Ic used ,
+a constructor or destructor, an alias's target, and what those name
+\(em a
+.Ic section
+attribute alone keeps nothing.
+One named only in the text of an
+.Ic asm
+is kept, where
+.Xr gcc 1
+leaves it undefined.
 At
 .Fl O0
-nothing is inlined.
+nothing is inlined, and of the unreferenced statics only a
+.Ic static inline
+function is dropped, with its block-scope statics, as with
+.Xr gcc 1 .
 .Pp
 At every level the i386 code generator keeps values in registers from
 one instruction to the next within a block, writes back only what is

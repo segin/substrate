@@ -2045,154 +2045,284 @@ static size_t sym_name_len(const char *s) {
     return n;
 }
 
-/** Mark the function @p sym names as kept, and queue it, if it is one not kept yet. */
-static void keep_named(const cc_ssa_module_t *m, const char *sym, unsigned char *keep, size_t *stack, size_t *top) {
-    size_t n;
-    size_t i;
+static uint64_t fn_name_hash(const char *s, size_t n);
 
-    if (sym == NULL) {
+/**
+ * The walk remove_unreferenced() makes of what the module's code and data refer to: its functions and
+ * objects by name (several entries may share one: an object's declarations and its definition), and which
+ * of them are kept.  Entities 0 to nf - 1 are the functions, the rest the globals.
+ */
+typedef struct {
+    const cc_ssa_module_t *m; /**< the module */
+    size_t nf;                /**< the number of functions */
+    size_t n;                 /**< the number of entities: the functions and then the globals */
+    long *slots;              /**< per name: its first entity; open addressing, -1 for an empty slot */
+    size_t cap;               /**< the number of slots, a power of two */
+    long *next;               /**< per entity: the next of the same name, or -1 */
+    unsigned char *keep;      /**< per entity: kept */
+    size_t *stack;            /**< the kept entities whose references are still to be followed */
+    size_t top;               /**< how many there are */
+} reach_t;
+
+/** The name of entity @p e of walk @p r. */
+static const char *reach_name(const reach_t *r, size_t e) {
+    return e < r->nf ? r->m->funcs[e].name : r->m->globals[e - r->nf].name;
+}
+
+/**
+ * The first entity of walk @p r named by the @p len bytes at @p s.
+ *
+ * @return its index, or -1 when the module has none of that name
+ */
+static long reach_find(const reach_t *r, const char *s, size_t len) {
+    size_t at = (size_t)fn_name_hash(s, len) & (r->cap - 1);
+
+    while (r->slots[at] >= 0) {
+        const char *name = reach_name(r, (size_t)r->slots[at]);
+
+        if (strncmp(name, s, len) == 0 && name[len] == '\0') {
+            return r->slots[at];
+        }
+        at = (at + 1) & (r->cap - 1);
+    }
+    return -1;
+}
+
+/**
+ * Keep, and queue, every entity of walk @p r named by the @p len bytes at @p s, but an inline-only body:
+ * what names it names the external function (gcc).
+ */
+static void reach_mark(reach_t *r, const char *s, size_t len) {
+    long e;
+
+    if (len == 0) {
         return;
     }
-    n = sym_name_len(sym);
-    for (i = 0; i < m->func_count; ++i) {
-        const char *name = m->funcs[i].name;
-
-        /* (an inline-only body is never kept: what names it names the external function) */
-        if (!keep[i] && !m->funcs[i].inline_only && name != NULL && strlen(name) == n &&
-            strncmp(name, sym, n) == 0) {
-            keep[i] = 1;
-            stack[(*top)++] = i;
+    for (e = reach_find(r, s, len); e >= 0; e = r->next[e]) {
+        if (r->keep[e] || ((size_t)e < r->nf && r->m->funcs[e].inline_only)) {
+            continue;
         }
+        r->keep[e] = 1;
+        r->stack[r->top++] = (size_t)e;
     }
 }
 
-/** Whether @p sym (a symbol, perhaps with an offset) is @p name. */
-static int sym_is(const char *sym, const char *name) {
-    size_t n;
-
-    if (sym == NULL || name == NULL) {
-        return 0;
+/** Keep what symbol reference @p sym (an offset or @PLT perhaps after its name; NULL for none) names. */
+static void reach_mark_sym(reach_t *r, const char *sym) {
+    if (sym != NULL) {
+        reach_mark(r, sym, sym_name_len(sym));
     }
-    n = sym_name_len(sym);
-    return strlen(name) == n && strncmp(name, sym, n) == 0;
 }
 
-/** Whether global @p g's initializer names @p name. */
-static int global_names(const cc_ssa_global_t *g, const char *name) {
-    size_t k;
-
-    if (sym_is(g->init_sym, name) || sym_is(g->attr_alias, name)) {
-        return 1;
-    }
-    for (k = 0; k < g->init_item_count; ++k) {
-        if (sym_is(g->init_items[k].init_sym, name)) {
-            return 1;
-        }
-    }
-    return 0;
+/** Whether @p c may be in an assembler symbol's name. */
+static int asm_sym_char(char c) {
+    return c == '_' || c == '.' || c == '$' || (c >= '0' && c <= '9') || ((c | 0x20) >= 'a' && (c | 0x20) <= 'z');
 }
 
 /**
- * Drop the block-scope statics (and their guards) of the functions dropped: those cc made, named
- * __cc_static_*, that no function left names or keeps (a used one, cc_ssa_function_t.keep_syms) and
- * no global kept names.  A static inline in a header that
- * nothing calls left its tables behind, and a table of pointers in .data has relocations: the vDSO,
- * which must have none, got of_overlay_action_name()'s.
+ * Keep what assembler text @p text (a file-scope asm, an asm statement's template) names: each word of it
+ * that is a symbol's name, or the asm label of one (`int x asm("y")`, labels being given after the middle
+ * passes).  gcc keeps only what an asm's operands name, and a static named only in the text is left
+ * undefined; keeping it is the safe side of that.
+ */
+static void reach_mark_text(reach_t *r, const char *text) {
+    const char *p = text;
+
+    while (p != NULL && *p != '\0') {
+        const char *w;
+        size_t len;
+        size_t k;
+
+        if (!asm_sym_char(*p)) {
+            p++;
+            continue;
+        }
+        w = p;
+        while (asm_sym_char(*p)) {
+            p++;
+        }
+        len = (size_t)(p - w);
+        if (*w >= '0' && *w <= '9') {
+            continue; /* a number, or a local label's `1f` */
+        }
+        reach_mark(r, w, len);
+        for (k = 0; k < r->m->asm_label_count; ++k) {
+            const char *label = r->m->asm_labels[k];
+
+            label = label != NULL && label[0] == '*' ? label + 1 : label;
+            if (label != NULL && strlen(label) == len && strncmp(label, w, len) == 0 &&
+                r->m->asm_label_names[k] != NULL) {
+                reach_mark(r, r->m->asm_label_names[k], strlen(r->m->asm_label_names[k]));
+            }
+        }
+    }
+}
+
+/**
+ * Whether the globals named @p name in walk @p r may all be dropped when nothing refers to them: from -O1,
+ * a name of internal linkage -- a static one, not marked used, its other entries static or declarations
+ * only -- as gcc drops such an object at -O1 and up, its section attribute or not; at -O0, as gcc keeps
+ * every static object there, only a block-scope static cc made (__cc_static_*), whose function dropped
+ * leaves it orphaned.  A block-scope static marked used is kept by its function (keep_syms), as gcc drops
+ * it with a function it drops.
+ *
+ * @param r          the walk
+ * @param e          the name's first global entity
+ * @param opt_level  the -O level
+ * @return           1 or 0
+ */
+static int reach_globals_droppable(const reach_t *r, long e, int opt_level) {
+    static const char prefix[] = "__cc_static_";
+    const char *name = reach_name(r, (size_t)e);
+    int local = strncmp(name, prefix, sizeof(prefix) - 1) == 0;
+    int any_static = 0;
+
+    if (opt_level <= 0 && !local) {
+        return 0;
+    }
+    for (; e >= 0; e = r->next[e]) {
+        const cc_ssa_global_t *g;
+
+        if ((size_t)e < r->nf) {
+            return 0; /* (a function of the name too: not one this decides) */
+        }
+        g = &r->m->globals[(size_t)e - r->nf];
+        if ((g->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0 ||
+            ((g->attr_flags & CC_ATTR_USED) != 0 && !local)) {
+            return 0;
+        }
+        any_static |= (g->storage & CC_STORAGE_STATIC) != 0;
+    }
+    return any_static;
+}
+
+/**
+ * Set up walk @p r of module @p m: its name index, nothing kept yet.
  *
  * @return 0, or -1 when out of memory
  */
-static int remove_orphan_static_locals(cc_ssa_module_t *m) {
-    static const char prefix[] = "__cc_static_";
-    unsigned char *keep;
+static int reach_init(reach_t *r, const cc_ssa_module_t *m) {
     size_t i;
-    size_t w = 0;
-    int grew = 1;
 
-    if (m->global_count == 0) {
-        return 0;
+    memset(r, 0, sizeof(*r));
+    r->m = m;
+    r->nf = m->func_count;
+    r->n = m->func_count + m->global_count;
+    r->cap = 64;
+    while (r->cap < r->n * 2) {
+        r->cap *= 2;
     }
-    keep = (unsigned char *)calloc(m->global_count, 1);
-    if (keep == NULL) {
+    r->slots = (long *)malloc(r->cap * sizeof(*r->slots));
+    r->next = (long *)malloc((r->n > 0 ? r->n : 1) * sizeof(*r->next));
+    r->keep = (unsigned char *)calloc(r->n > 0 ? r->n : 1, 1);
+    /* (each entity is queued once at most) */
+    r->stack = (size_t *)malloc((r->n > 0 ? r->n : 1) * sizeof(*r->stack));
+    if (r->slots == NULL || r->next == NULL || r->keep == NULL || r->stack == NULL) {
         return -1;
     }
-    for (i = 0; i < m->global_count; ++i) {
-        const char *name = m->globals[i].name;
-        size_t fi;
+    for (i = 0; i < r->cap; ++i) {
+        r->slots[i] = -1;
+    }
+    /* backwards, each put first in its name's list: the lists come out in order */
+    for (i = r->n; i > 0; --i) {
+        size_t e = i - 1;
+        const char *name = reach_name(r, e);
+        size_t len;
+        size_t at;
 
-        if (name == NULL || strncmp(name, prefix, sizeof(prefix) - 1) != 0) {
-            keep[i] = 1;
+        r->next[e] = -1;
+        if (name == NULL || name[0] == '\0') {
             continue;
         }
-        for (fi = 0; fi < m->func_count && !keep[i]; ++fi) {
-            const cc_ssa_function_t *f = &m->funcs[fi];
-            size_t k;
-
-            for (k = 0; k < f->instr_count && !keep[i]; ++k) {
-                keep[i] = sym_is(f->instrs[k].sym, name);
-            }
-            /* a used one its function, or one inlined into it, keeps */
-            for (k = 0; k < f->keep_sym_count && !keep[i]; ++k) {
-                keep[i] = strcmp(f->keep_syms[k], name) == 0;
-            }
+        len = strlen(name);
+        at = (size_t)fn_name_hash(name, len) & (r->cap - 1);
+        while (r->slots[at] >= 0 && strcmp(reach_name(r, (size_t)r->slots[at]), name) != 0) {
+            at = (at + 1) & (r->cap - 1);
         }
+        r->next[e] = r->slots[at];
+        r->slots[at] = (long)e;
     }
-    /* and what a kept one's initializer names, until no more is */
-    while (grew) {
-        grew = 0;
-        for (i = 0; i < m->global_count; ++i) {
-            size_t j;
-
-            for (j = 0; !keep[i] && j < m->global_count; ++j) {
-                if (keep[j] && j != i && global_names(&m->globals[j], m->globals[i].name)) {
-                    keep[i] = 1;
-                    grew = 1;
-                }
-            }
-        }
-    }
-    for (i = 0; i < m->global_count; ++i) {
-        if (!keep[i]) {
-            cc_ssa_global_free(&m->globals[i]);
-            continue;
-        }
-        if (w != i) {
-            m->globals[w] = m->globals[i];
-        }
-        w++;
-    }
-    m->global_count = w;
-    free(keep);
     return 0;
 }
 
+/** Free what walk @p r holds. */
+static void reach_free(reach_t *r) {
+    free(r->slots);
+    free(r->next);
+    free(r->keep);
+    free(r->stack);
+    memset(r, 0, sizeof(*r));
+}
+
 /**
- * Drop the static functions nothing refers to, as gcc does: one marked
- * `static inline` at every level, any static one from -O1.  Kept are the
- * functions with external linkage, those marked used, constructor or
- * destructor, and whatever a kept function calls or takes the address of,
- * or a global's initializer or an alias names.  Linux's headers define
- * many static inline helpers per file, some for the other architecture
- * (rip_rel_ptr's `leaq ...(%rip)` in an i386 build), which gcc never
- * compiles unless called; cc emitted them all.
+ * Follow what kept entity @p e of walk @p r refers to: a function's calls, the addresses it takes, the
+ * objects it reads and writes, the words of its asm statements, its used static locals and its alias's
+ * target; an object's initializer's addresses and its alias's target.
+ */
+static void reach_follow(reach_t *r, size_t e) {
+    size_t k;
+
+    if (e < r->nf) {
+        const cc_ssa_function_t *f = &r->m->funcs[e];
+
+        reach_mark_sym(r, f->attr_alias);
+        for (k = 0; k < f->instr_count; ++k) {
+            const cc_ssa_instr_t *in = &f->instrs[k];
+
+            if (in->sym == NULL || in->op == CC_SSA_STR) {
+                continue; /* (a literal's text) */
+            }
+            if (in->op == CC_SSA_ASM) {
+                reach_mark_text(r, in->sym);
+            } else {
+                reach_mark_sym(r, in->sym);
+            }
+        }
+        for (k = 0; k < f->keep_sym_count; ++k) {
+            if (f->keep_syms[k] != NULL) {
+                reach_mark(r, f->keep_syms[k], strlen(f->keep_syms[k]));
+            }
+        }
+    } else {
+        const cc_ssa_global_t *g = &r->m->globals[e - r->nf];
+
+        reach_mark_sym(r, g->init_sym);
+        reach_mark_sym(r, g->attr_alias);
+        for (k = 0; k < g->init_item_count; ++k) {
+            reach_mark_sym(r, g->init_items[k].init_sym);
+        }
+    }
+}
+
+/**
+ * Drop the static functions and objects nothing kept refers to, as gcc does, transitively and after the
+ * functions' own passes, so that what only a dead arm or an inlined call's unread argument named goes: a
+ * static const driver table whose address only a call inlined away took, and the probe function its
+ * initializer names, then the external functions that one called (Linux's lm75 left i3c_* undefined).
+ *
+ * Droppable are a function marked `static inline` at every level, any static one from -O1, an inline-only
+ * body always; and the objects reach_globals_droppable() says.  Kept are the rest -- the functions with
+ * external linkage, those marked used, constructor or destructor, the objects with external linkage or
+ * marked used -- and, from those and the words of the file-scope asm, whatever a kept one names: the
+ * calls, addresses, loads and stores of a function and the words of its asm statements, its used static
+ * locals, an object's initializer, either one's alias target.  A section attribute keeps nothing (gcc).
+ * Debug information describes only what is still defined.  Linux's headers define many static inline
+ * helpers per file, some for the other architecture (rip_rel_ptr's `leaq ...(%rip)` in an i386 build),
+ * which gcc never compiles unless called; cc emitted them all.
  *
  * @return 0, or -1 when out of memory
  */
-static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
+static int remove_unreferenced(cc_ssa_module_t *m, int opt_level) {
     const cc_attr_flags_t pinned = CC_ATTR_USED | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR;
-    unsigned char *keep;
-    size_t *stack;
-    size_t top = 0;
+    reach_t r;
     size_t i;
-    size_t w = 0;
+    size_t w;
 
-    if (m->func_count == 0) {
+    if (m->func_count + m->global_count == 0) {
         return 0;
     }
-    keep = (unsigned char *)calloc(m->func_count, 1);
-    stack = (size_t *)malloc(m->func_count * sizeof(*stack));
-    if (keep == NULL || stack == NULL) {
-        free(keep);
-        free(stack);
+    if (reach_init(&r, m) != 0) {
+        reach_free(&r);
         return -1;
     }
     for (i = 0; i < m->func_count; ++i) {
@@ -2201,36 +2331,39 @@ static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
                         ((f->storage & CC_STORAGE_STATIC) != 0 &&
                          (opt_level > 0 || (f->storage & CC_STORAGE_INLINE) != 0) && (f->attr_flags & pinned) == 0);
 
-        if (!removable) {
-            keep[i] = 1;
-            stack[top++] = i;
+        if (!removable && !r.keep[i]) {
+            r.keep[i] = 1;
+            r.stack[r.top++] = i;
         }
     }
     for (i = 0; i < m->global_count; ++i) {
-        const cc_ssa_global_t *g = &m->globals[i];
-        size_t k;
+        const char *name = m->globals[i].name;
+        long first;
 
-        keep_named(m, g->init_sym, keep, stack, &top);
-        keep_named(m, g->attr_alias, keep, stack, &top);
-        for (k = 0; k < g->init_item_count; ++k) {
-            keep_named(m, g->init_items[k].init_sym, keep, stack, &top);
+        if (r.keep[r.nf + i]) {
+            continue;
         }
-    }
-    while (top > 0) {
-        const cc_ssa_function_t *f = &m->funcs[stack[--top]];
-        size_t k;
-
-        keep_named(m, f->attr_alias, keep, stack, &top);
-        for (k = 0; k < f->instr_count; ++k) {
-            const cc_ssa_instr_t *in = &f->instrs[k];
-
-            if (in->sym != NULL && (in->op == CC_SSA_CALL || in->op == CC_SSA_GADDR)) {
-                keep_named(m, in->sym, keep, stack, &top);
+        first = name != NULL && name[0] != '\0' ? reach_find(&r, name, strlen(name)) : -1;
+        if (first < 0) {
+            r.keep[r.nf + i] = 1; /* (a nameless one: not for this to judge) */
+        } else if (!reach_globals_droppable(&r, first, opt_level)) {
+            /* (the name's objects, all of them; a function of the name is the functions' to judge) */
+            for (; first >= 0; first = r.next[first]) {
+                if ((size_t)first >= r.nf && !r.keep[first]) {
+                    r.keep[first] = 1;
+                    r.stack[r.top++] = (size_t)first;
+                }
             }
         }
     }
-    for (i = 0; i < m->func_count; ++i) {
-        if (!keep[i]) {
+    for (i = 0; i < m->toplevel_asm_count; ++i) {
+        reach_mark_text(&r, m->toplevel_asm[i]);
+    }
+    while (r.top > 0) {
+        reach_follow(&r, r.stack[--r.top]);
+    }
+    for (i = 0, w = 0; i < m->func_count; ++i) {
+        if (!r.keep[i]) {
             cc_ssa_function_free(&m->funcs[i]);
             continue;
         }
@@ -2240,9 +2373,19 @@ static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
         w++;
     }
     m->func_count = w;
-    free(keep);
-    free(stack);
-    return remove_orphan_static_locals(m);
+    for (i = 0, w = 0; i < m->global_count; ++i) {
+        if (!r.keep[r.nf + i]) {
+            cc_ssa_global_free(&m->globals[i]);
+            continue;
+        }
+        if (w != i) {
+            m->globals[w] = m->globals[i];
+        }
+        w++;
+    }
+    m->global_count = w;
+    reach_free(&r);
+    return 0;
 }
 
 /**
@@ -6585,7 +6728,7 @@ static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag)
         return -1;
     }
     /* after the functions' own passes: a call that was in a dead arm no longer keeps its callee */
-    if (remove_unused_static_functions(m, opt_level) != 0) {
+    if (remove_unreferenced(m, opt_level) != 0) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "out of memory in optimizer");
         }

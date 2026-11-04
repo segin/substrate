@@ -71,9 +71,10 @@ for m in 64 32; do
 	want_out=$("$CC_TMP/g")
 	for pic in -fno-pic -fPIC; do
 		for ds in "" -fdata-sections; do
-			gcc -m$m -std=gnu17 -O0 $pic $ds -c -o "$CC_TMP/g.o" "$CC_TMP/b.c"
-			want=$(placement "$CC_TMP/g.o")
 			for o in O0 O2; do
+				# (at the same level: from -O1 the static one read only as its value is not emitted)
+				gcc -m$m -std=gnu17 -$o $pic $ds -c -o "$CC_TMP/g.o" "$CC_TMP/b.c"
+				want=$(placement "$CC_TMP/g.o")
 				for path in mir legacy; do
 					run="env"
 					if [ $path = legacy ]; then run="env CC_NO_MIR=1"; fi

@@ -17087,7 +17087,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
              * named memcmp in each file using it made modpost refuse
              * vmlinux ("local symbol 'memcmp' was exported").  Static
              * while the optimizer considers it, then dropped
-             * (remove_unused_static_functions()).
+             * (remove_unreferenced()).
              */
             sf->inline_only = 1;
             sf->storage |= CC_STORAGE_STATIC;
