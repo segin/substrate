@@ -435,7 +435,7 @@ writes a line to standard output;
 is an error below 500 and a warning from there.
 A directive that is not known is an error.
 .It Symbols
-.Cm .globl/.global , .local , .weak , .comm , .lcomm , .type , .size ,
+.Cm .globl/.global , .local , .weak , .weakref , .comm , .lcomm , .type , .size ,
 .Cm .hidden , .protected , .internal , .symver .
 .Cm .lcomm ,
 and
@@ -495,6 +495,56 @@ for the version a plain reference gets,
 for the only name the symbol is to have
 .Pc ,
 which the linker reads.
+.Pp
+.Cm .weakref Ar alias , Ar target
+makes
+.Ar alias
+a weak reference to
+.Ar target ,
+as GNU as does.
+The alias is no symbol of the object: whatever refers to it, before
+the directive or after, is a relocation against
+.Ar target
+.Po
+with
+.Ql @PLT ,
+.Ql @GOT ,
+.Ql @GOTPCREL
+or
+.Ql @GOTOFF
+as written
+.Pc ,
+and
+.Cm .globl
+or
+.Cm .type
+of the alias says nothing.
+A target referred to through such aliases alone is weak and undefined,
+and is not in the object when they are not used; one the file names
+anywhere else (an instruction, a datum,
+.Cm .globl ,
+.Cm .type ,
+.Cm .set )
+is the strong reference it would be without them, and one the file
+defines is that definition.
+The target may itself be an alias, in either order; a weak reference
+that comes round to itself
+.Pq Dq would close weakref loop ,
+an alias a label,
+.Cm .equiv
+or another
+.Cm .weakref
+defined before it, or that a label,
+.Cm .set ,
+.Cm .equ
+or
+.Cm .equiv
+defines after it
+.Pq Dq is already defined ,
+and a target that is not a symbol's name are errors.
+A name
+.Cm .set
+gave a value before may be made an alias.
 .It Conditionals and macros
 .Cm .if/.ifdef/.ifndef/.else/.endif , .macro/.endm , .rept/.endr , .irp/.irpc
 .Pp

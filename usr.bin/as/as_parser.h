@@ -225,6 +225,14 @@ typedef struct {
      * sees them.  0 otherwise, for a pattern of one byte.
      */
     unsigned fill_width;
+    /*
+     * For a `.weakref alias, target`: 1 when the target is referred to
+     * through weak references alone, and is then weak in the object --
+     * which the lowering of the directives finds out (lower_weakrefs()),
+     * before the alias is put in its place and that can no longer be
+     * told.  0 for every other directive.
+     */
+    unsigned weakrefd;
 } as_directive_t;
 
 /* The most labels one statement may have before it: what the room for

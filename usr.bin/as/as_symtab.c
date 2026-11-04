@@ -615,10 +615,12 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (as_strcmp(d->name, ".set") == 0 || as_strcmp(d->name, ".equ") == 0 || as_strcmp(d->name, ".equiv") == 0) {
+    if (as_strcmp(d->name, ".set") == 0 || as_strcmp(d->name, ".equ") == 0 || as_strcmp(d->name, ".equiv") == 0 ||
+        as_strcmp(d->name, ".weakref") == 0) {
         char *name;
         as_symbol_t *sym;
         int is_equiv = as_strcmp(d->name, ".equiv") == 0;
+        int is_weakref = as_strcmp(d->name, ".weakref") == 0;
         int rc;
 
         if (d->arg_count < 2) {
@@ -638,9 +640,10 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
          * label, and not one `.equiv` set, which says it is set once --
          * and `.equiv` itself not for a name that is anything yet.
          * Each was taken, and whichever came last was what the name
-         * was.
+         * was.  (What a `.weakref` may not be of, and what may not
+         * follow one, was refused before: lower_weakrefs().)
          */
-        if (sym->defined && (!sym->defined_by_set || sym->defined_by_equiv || is_equiv)) {
+        if (sym->defined && !is_weakref && (!sym->defined_by_set || sym->defined_by_equiv || is_equiv)) {
             set_err(ctx, "%s:%u: symbol `%s' is already defined", st->file != NULL ? st->file : "<input>", st->line,
                     name);
             free(name);
@@ -649,6 +652,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         free(name);
         sym->defined_by_set = 1;
         sym->defined_by_equiv = is_equiv;
+        sym->is_weakref = is_weakref;
 
         free(sym->alias_target);
         sym->alias_target = NULL;
@@ -675,7 +679,27 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             sym->defined = 1;
         }
 
-        return parse_set_rhs(d->args[1], sym);
+        rc = parse_set_rhs(d->args[1], sym);
+        /* The target that is referred to through weak references
+         * alone is weak (as_directive_t.weakrefd); by now the name
+         * written is the one at the end of the chain. */
+        if (rc == 0 && is_weakref && d->weakrefd) {
+            char *tname = trim_copy(d->args[1]);
+            as_symbol_t *target;
+
+            if (tname == NULL) {
+                return -1;
+            }
+            target = get_or_create_symbol(ctx, tname);
+            free(tname);
+            if (target == NULL) {
+                return -1;
+            }
+            if (target->bind == AS_SYM_BIND_LOCAL) {
+                target->bind = AS_SYM_BIND_WEAK;
+            }
+        }
+        return rc;
     }
 
     if (as_strcmp(d->name, ".hidden") == 0) {

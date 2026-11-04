@@ -211,6 +211,11 @@ static int symbol_is_not_emitted(emit_ctx_t *ctx, const as_symtab_t *symtab, con
     if (is_local_temp_symbol_name(s->name) && s->bind == AS_SYM_BIND_LOCAL) {
         return 1;
     }
+    /* The alias of a `.weakref` is its target wherever it is used, and
+     * is none of the object's, whatever `.globl` or `.type` said of it. */
+    if (s->is_weakref) {
+        return 1;
+    }
     /* A view of the line table is a number and no symbol. */
     {
         size_t at;

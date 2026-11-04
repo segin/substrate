@@ -1713,6 +1713,7 @@ static int parse_directive(const as_token_t *tokv, size_t n, as_stmt_t *st) {
     st->u.directive.arg_count = 0;
     st->u.directive.zero_assumed = 0;
     st->u.directive.fill_width = 0;
+    st->u.directive.weakrefd = 0;
     if (st->u.directive.name == NULL) {
         return -1;
     }

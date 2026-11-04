@@ -322,7 +322,7 @@ static int is_binary_metadata_directive(const char *name) {
     if (as_strcmp(name, ".globl") == 0 || as_strcmp(name, ".global") == 0 || as_strcmp(name, ".local") == 0 ||
         as_strcmp(name, ".weak") == 0 || as_strcmp(name, ".type") == 0 || as_strcmp(name, ".size") == 0 ||
         as_strcmp(name, ".hidden") == 0 || as_strcmp(name, ".protected") == 0 || as_strcmp(name, ".internal") == 0 ||
-        as_strcmp(name, ".symver") == 0 || as_strcmp(name, ".comm") == 0 || as_strcmp(name, ".lcomm") == 0 ||
+        as_strcmp(name, ".symver") == 0 || as_strcmp(name, ".weakref") == 0 || as_strcmp(name, ".comm") == 0 || as_strcmp(name, ".lcomm") == 0 ||
         as_strcmp(name, ".file") == 0 || as_strcmp(name, ".loc") == 0 || as_strcmp(name, ".ident") == 0) {
         return 1;
     }

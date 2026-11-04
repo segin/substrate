@@ -5,6 +5,7 @@
 #include "as_data.h"
 #include "as_elf_emit.h"
 #include "as_expr.h"
+#include "as_strmap.h"
 #include "as_util.h"
 
 #include <ctype.h>
@@ -1247,7 +1248,7 @@ static int struct_directive_is_placeless(const char *name) {
     static const char *const names[] = {
         ".set",    ".equ",       ".equiv",    ".globl", ".global", ".local", ".weak", ".type",
         ".size",   ".hidden",    ".internal", ".protected", ".file", ".ident", ".code16", ".code32",
-        ".code64", ".intel_syntax", ".att_syntax", ".arch",
+        ".code64", ".intel_syntax", ".att_syntax", ".arch", ".weakref",
     };
     size_t i;
 
@@ -1809,9 +1810,16 @@ static int set_lookup(void *cookie, const char *name, long long *value_out) {
     return !struct_lookup((void *)&c->never, name, &unused) && struct_lookup((void *)&c->last, name, value_out);
 }
 
+/* A `.weakref alias, target`: a name for another, as a `.set` is, by
+ * the time anything after lower_weakrefs() sees it. */
+static int directive_is_weakref(const as_directive_t *d) {
+    return as_strcmp(d->name, ".weakref") == 0 && d->arg_count == 2;
+}
+
 static int directive_is_set(const as_directive_t *d) {
-    return (as_strcmp(d->name, ".set") == 0 || as_strcmp(d->name, ".equ") == 0 || as_strcmp(d->name, ".equiv") == 0) &&
-           d->arg_count == 2;
+    return ((as_strcmp(d->name, ".set") == 0 || as_strcmp(d->name, ".equ") == 0 || as_strcmp(d->name, ".equiv") == 0) &&
+            d->arg_count == 2) ||
+           directive_is_weakref(d);
 }
 
 /* Every name the source sets, with the number it ends as. */
@@ -1833,7 +1841,8 @@ static int set_consts_collect(const as_parse_result_t *parsed, set_consts_t *c) 
         }
         /* A name that is ever set to what is no number is not known
          * ahead of where it is set. */
-        is_number = as_expr_eval_string(st->u.directive.args[1], struct_lookup, &c->last, &v) == AS_EXPR_EVAL_OK;
+        is_number = !directive_is_weakref(&st->u.directive) &&
+                    as_expr_eval_string(st->u.directive.args[1], struct_lookup, &c->last, &v) == AS_EXPR_EVAL_OK;
         if (struct_define(is_number ? &c->last : &c->never, name, v) != 0) {
             free(name);
             return -1;
@@ -2300,6 +2309,7 @@ typedef struct {
     int busy;
     int resolved;
     int kept; /* a symbol of its own: see lower_aliases() */
+    int weakref; /* made by `.weakref`: the target wherever it is named */
     /* What a branch to the name goes to, if the name is this file's
      * own for a label of it: see alias_branch_target(). */
     int branch_known;
@@ -2573,7 +2583,9 @@ static const char *alias_branch_target(alias_ctx_t *a, as_parse_result_t *parsed
     }
     def->branch_known = 1;
     alias_resolve(a, def);
-    if (a->loop != NULL || a->failed || def->kept || def->expr == NULL || def->expr->kind != AS_EXPR_SYMBOL ||
+    /* (A weak reference is the target as it would be written: a branch
+     * to it goes where one to the target would.) */
+    if (a->loop != NULL || a->failed || def->kept || def->weakref || def->expr == NULL || def->expr->kind != AS_EXPR_SYMBOL ||
         def->expr->symbol == NULL || def->expr->reloc_op != NULL || def->expr->lhs != NULL || def->expr->rhs != NULL) {
         return NULL;
     }
@@ -2619,6 +2631,463 @@ static const char *alias_branch_target(alias_ctx_t *a, as_parse_result_t *parsed
     return NULL;
 }
 
+/*
+ * `.weakref alias, target`, as GNU as has it (gas's s_weakref()).
+ *
+ * The alias is another name for the target, and no symbol of the
+ * object: what refers to it refers to the target, and is a relocation
+ * against the target.  And the target, where it is referred to through
+ * such aliases alone -- the file names it nowhere else, and does not
+ * define it -- is weak: a program linked with no definition of it has
+ * a 0 where it is used, and is not refused.  A file that names the
+ * target itself anywhere (a call, a `.globl`, a `.type`, a `.set` of
+ * another name to it) wants it as it would any other, and it is a
+ * strong reference whatever else refers to it; one defined in the file
+ * is the definition.  An alias of an alias is one of what that is of.
+ *
+ * The aliases are put in their places by lower_aliases(), with the
+ * names `.set` made: a `.weakref` is one of those by then
+ * (directive_is_set()).  What is done here is what must be done before
+ * that, while the source still says which name each reference was
+ * written with: the directive is checked, refused as gas refuses it,
+ * and marked when its target is weak (as_directive_t.weakrefd).
+ */
+typedef struct {
+    char *alias;
+    char *target;
+    size_t final; /* the target its chain ends at: its number in `finals` */
+} weakref_def_t;
+
+/**
+ * The length of the symbol name at the head of @p s: a letter, `_`, `.`
+ * or `$` and any of those and digits after.
+ *
+ * @param s  text
+ * @return   the name's length, 0 where @p s does not begin with one
+ */
+static size_t weakref_name_len(const char *s) {
+    size_t n = 0;
+
+    if (!isalpha((unsigned char)s[0]) && s[0] != '_' && s[0] != '.' && s[0] != '$') {
+        return 0;
+    }
+    while (isalnum((unsigned char)s[n]) || s[n] == '_' || s[n] == '.' || s[n] == '$') {
+        n++;
+    }
+    return n;
+}
+
+/**
+ * Read the two names of a `.weakref`, or say what is wrong with it in
+ * gas's words.
+ *
+ * @param d       the directive
+ * @param alias   receives the alias, to be freed
+ * @param target  receives the target, to be freed
+ * @param why     receives the message where the directive is wrong
+ * @param why_sz  its room
+ * @return        0, 1 where the directive is wrong, -1 out of memory
+ */
+static int weakref_read(const as_directive_t *d, char **alias, char **target, char *why, size_t why_sz) {
+    const char *s = arg_text(d, 0);
+    const char *t;
+    size_t n;
+    size_t m;
+
+    *alias = NULL;
+    *target = NULL;
+    while (isspace((unsigned char)*s)) {
+        s++;
+    }
+    n = weakref_name_len(s);
+    if (n == 0) {
+        snprintf(why, why_sz, "expected symbol name");
+        return 1;
+    }
+    t = s + n;
+    while (isspace((unsigned char)*t)) {
+        t++;
+    }
+    if (*t != '\0' || d->arg_count < 2) {
+        snprintf(why, why_sz, "expected comma after \"%.*s\"", (int)n, s);
+        return 1;
+    }
+    t = arg_text(d, 1);
+    while (isspace((unsigned char)*t)) {
+        t++;
+    }
+    m = weakref_name_len(t);
+    if (m == 0) {
+        snprintf(why, why_sz, "expected symbol name");
+        return 1;
+    }
+    {
+        const char *rest = t + m;
+
+        while (isspace((unsigned char)*rest)) {
+            rest++;
+        }
+        if (*rest == '\0' && d->arg_count > 2) {
+            rest = ",";
+        }
+        if (*rest != '\0') {
+            snprintf(why, why_sz, "junk at end of line, first unrecognized character is `%c'", *rest);
+            return 1;
+        }
+    }
+    *alias = (char *)malloc(n + 1);
+    *target = (char *)malloc(m + 1);
+    if (*alias == NULL || *target == NULL) {
+        free(*alias);
+        free(*target);
+        *alias = NULL;
+        *target = NULL;
+        return -1;
+    }
+    memcpy(*alias, s, n);
+    (*alias)[n] = '\0';
+    memcpy(*target, t, m);
+    (*target)[m] = '\0';
+    return 0;
+}
+
+/**
+ * Mark the targets @p text names: each name in it that is one of
+ * @p finals.  What is in quotes is a string and names nothing.
+ *
+ * @param text       a directive's argument, or an operand as written
+ * @param finals     the targets, each to its number
+ * @param mentioned  one flag for each target, set where it is named
+ * @return           0, or -1 out of memory
+ */
+static int weakref_scan_text(const char *text, const as_strmap_t *finals, unsigned char *mentioned) {
+    const char *p = text;
+
+    while (p != NULL && *p != '\0') {
+        size_t n;
+
+        if (*p == '"') {
+            for (p++; *p != '\0' && *p != '"'; p++) {
+                if (*p == '\\' && p[1] != '\0') {
+                    p++;
+                }
+            }
+            if (*p == '"') {
+                p++;
+            }
+            continue;
+        }
+        if (isdigit((unsigned char)*p)) {
+            /* a number, `0x1f` and `1b` with it */
+            while (isalnum((unsigned char)*p) || *p == '_') {
+                p++;
+            }
+            continue;
+        }
+        n = weakref_name_len(p);
+        if (n == 0) {
+            p++;
+            continue;
+        }
+        {
+            char small[128];
+            char *name = n < sizeof(small) ? small : (char *)malloc(n + 1);
+            size_t at;
+
+            if (name == NULL) {
+                return -1;
+            }
+            memcpy(name, p, n);
+            name[n] = '\0';
+            if (as_strmap_get(finals, name, &at)) {
+                mentioned[at] = 1;
+            }
+            if (name != small) {
+                free(name);
+            }
+        }
+        p += n;
+    }
+    return 0;
+}
+
+/**
+ * Mark the targets an expression names.
+ *
+ * @param e          the expression
+ * @param finals     the targets, each to its number
+ * @param mentioned  one flag for each target, set where it is named
+ */
+static void weakref_scan_expr(const as_expr_t *e, const as_strmap_t *finals, unsigned char *mentioned) {
+    size_t at;
+
+    if (e == NULL) {
+        return;
+    }
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && as_strmap_get(finals, e->symbol, &at)) {
+        mentioned[at] = 1;
+    }
+    weakref_scan_expr(e->lhs, finals, mentioned);
+    weakref_scan_expr(e->rhs, finals, mentioned);
+}
+
+/**
+ * Check each `.weakref` of @p parsed, refuse what gas refuses, and mark
+ * those whose target is to be weak (see the comment above
+ * weakref_def_t).
+ *
+ * @param parsed     the statements
+ * @param errbuf     receives the message of a refusal
+ * @param errbuf_sz  its room
+ * @return           0, or -1 with the message written
+ */
+static int lower_weakrefs(as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
+    weakref_def_t *defs = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+    as_strmap_t aliases;  /* alias -> its def */
+    as_strmap_t defined;  /* the names labels and `.equiv` have defined so far */
+    as_strmap_t finals;   /* target at the end of a chain -> its number */
+    arg_vec_t final_names; /* those targets, the keys of `finals` */
+    arg_vec_t owned;       /* the names of `defined` that are not labels' */
+    unsigned char *mentioned = NULL;
+    char why[1024];
+    const char *file = NULL;
+    unsigned line = 0;
+    int rc = -1;
+    size_t i;
+    size_t k;
+
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
+            as_strcmp(st->u.directive.name, ".weakref") == 0) {
+            break;
+        }
+    }
+    if (i == parsed->count) {
+        return 0;
+    }
+    memset(&aliases, 0, sizeof(aliases));
+    memset(&defined, 0, sizeof(defined));
+    memset(&finals, 0, sizeof(finals));
+    memset(&final_names, 0, sizeof(final_names));
+    memset(&owned, 0, sizeof(owned));
+    why[0] = '\0';
+
+    /* Each, in order: what is wrong with it is wrong where gas says. */
+    for (i = 0; i < parsed->count && why[0] == '\0'; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        as_directive_t *d = &st->u.directive;
+        size_t at;
+
+        for (k = 0; k < st->label_count && why[0] == '\0'; ++k) {
+            const as_label_def_t *l = &st->labels[k];
+
+            if (l->name == NULL) {
+                continue;
+            }
+            if (as_strmap_get(&aliases, l->name, &at)) {
+                file = l->file != NULL ? l->file : st->file;
+                line = l->line;
+                snprintf(why, sizeof(why), "symbol `%s' is already defined", l->name);
+                break;
+            }
+            if (as_strmap_put(&defined, l->name, 0) != 0) {
+                goto oom;
+            }
+        }
+        if (why[0] != '\0' || st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
+            continue;
+        }
+        file = st->file;
+        line = st->line;
+        if (as_strcmp(d->name, ".weakref") != 0) {
+            /* A name `.set`, `.equ` or `.equiv` would give a value to,
+             * that is already a weak reference. */
+            if (directive_is_set(d)) {
+                char *name = local_common_name(d);
+                int is_alias;
+
+                if (name == NULL) {
+                    goto oom;
+                }
+                is_alias = as_strmap_get(&aliases, name, &at);
+                if (is_alias) {
+                    snprintf(why, sizeof(why), "symbol `%s' is already defined", name);
+                    free(name);
+                    break;
+                }
+                if (as_strcmp(d->name, ".equiv") == 0) {
+                    /* (The map does not copy the name: `owned` keeps it.) */
+                    if (vec_push(&owned, name) != 0 || as_strmap_put(&defined, name, 0) != 0) {
+                        goto oom;
+                    }
+                } else {
+                    free(name);
+                }
+            }
+            continue;
+        }
+
+        {
+            char *alias = NULL;
+            char *target = NULL;
+            int r = weakref_read(d, &alias, &target, why, sizeof(why));
+            char chain[512];
+            size_t used;
+            const char *cur;
+
+            if (r < 0) {
+                goto oom;
+            }
+            if (r > 0) {
+                break;
+            }
+            /* A second `.weakref` of the name, or one of a name a label
+             * or `.equiv` has defined (a `.set` lends it a value, which
+             * the `.weakref` takes back). */
+            if (as_strmap_get(&aliases, alias, &at) || as_strmap_get(&defined, alias, &at)) {
+                snprintf(why, sizeof(why), "symbol `%s' is already defined", alias);
+                free(alias);
+                free(target);
+                break;
+            }
+            /* One that comes back to itself. */
+            used = (size_t)snprintf(chain, sizeof(chain), "%s => %s", alias, target);
+            cur = target;
+            while (strcmp(cur, alias) != 0 && as_strmap_get(&aliases, cur, &at)) {
+                cur = defs[at].target;
+                if (used < sizeof(chain)) {
+                    used += (size_t)snprintf(chain + used, sizeof(chain) - used, " => %s", cur);
+                }
+            }
+            if (strcmp(cur, alias) == 0) {
+                snprintf(why, sizeof(why), "%.255s: would close weakref loop: %s", alias, chain);
+                free(alias);
+                free(target);
+                break;
+            }
+            if (count == cap) {
+                size_t ncap = cap != 0 ? cap * 2 : 8;
+                weakref_def_t *grown = (weakref_def_t *)realloc(defs, ncap * sizeof(*grown));
+
+                if (grown == NULL) {
+                    free(alias);
+                    free(target);
+                    goto oom;
+                }
+                defs = grown;
+                cap = ncap;
+            }
+            defs[count].alias = alias;
+            defs[count].target = target;
+            defs[count].final = 0;
+            if (as_strmap_put(&aliases, alias, count) != 0) {
+                count++;
+                goto oom;
+            }
+            count++;
+        }
+    }
+    if (why[0] != '\0') {
+        if (errbuf != NULL && errbuf_sz != 0) {
+            snprintf(errbuf, errbuf_sz, "%s:%u: %s", file != NULL ? file : "<input>", line, why);
+        }
+        goto done;
+    }
+
+    /* The target each chain of them ends at. */
+    for (i = 0; i < count; ++i) {
+        const char *cur = defs[i].target;
+        size_t at;
+
+        while (as_strmap_get(&aliases, cur, &at)) {
+            cur = defs[at].target;
+        }
+        if (!as_strmap_get(&finals, cur, &at)) {
+            at = final_names.count;
+            if (vec_push(&final_names, lower_strdup(cur)) != 0 ||
+                as_strmap_put(&finals, final_names.items[at], at) != 0) {
+                goto oom;
+            }
+        }
+        defs[i].final = at;
+    }
+    mentioned = (unsigned char *)calloc(final_names.count != 0 ? final_names.count : 1, 1);
+    if (mentioned == NULL) {
+        goto oom;
+    }
+
+    /* Which of them the source defines, or names other than as the
+     * target of a `.weakref`. */
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+
+        for (k = 0; k < st->label_count; ++k) {
+            size_t at;
+
+            if (st->labels[k].name != NULL && as_strmap_get(&finals, st->labels[k].name, &at)) {
+                mentioned[at] = 1;
+            }
+        }
+        if (st->kind == AS_STMT_INSTRUCTION) {
+            for (k = 0; k < st->u.instr.operand_count; ++k) {
+                const as_operand_t *op = &st->u.instr.operands[k];
+
+                if (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) {
+                    weakref_scan_expr(op->u.expr, &finals, mentioned);
+                } else if (op->kind == AS_OPERAND_MEMORY) {
+                    weakref_scan_expr(op->u.mem.disp, &finals, mentioned);
+                } else if (op->kind == AS_OPERAND_RAW && weakref_scan_text(op->raw, &finals, mentioned) != 0) {
+                    goto oom;
+                }
+            }
+        } else if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
+                   as_strcmp(st->u.directive.name, ".weakref") != 0) {
+            for (k = 0; k < st->u.directive.arg_count; ++k) {
+                if (weakref_scan_text(st->u.directive.args[k], &finals, mentioned) != 0) {
+                    goto oom;
+                }
+            }
+        }
+    }
+    for (i = 0, k = 0; i < parsed->count; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+
+        if (st->kind != AS_STMT_DIRECTIVE || st->u.directive.name == NULL ||
+            as_strcmp(st->u.directive.name, ".weakref") != 0) {
+            continue;
+        }
+        /* (The defs are in the order of the directives.) */
+        if (k < count) {
+            st->u.directive.weakrefd = !mentioned[defs[k].final];
+            k++;
+        }
+    }
+    rc = 0;
+    goto done;
+
+oom:
+    if (errbuf != NULL && errbuf_sz != 0) {
+        snprintf(errbuf, errbuf_sz, "out of memory");
+    }
+done:
+    as_strmap_free(&aliases);
+    as_strmap_free(&defined);
+    as_strmap_free(&finals);
+    for (i = 0; i < count; ++i) {
+        free(defs[i].alias);
+        free(defs[i].target);
+    }
+    free(defs);
+    vec_free(&final_names);
+    vec_free(&owned);
+    free(mentioned);
+    return rc;
+}
+
 static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
     alias_ctx_t a;
     int rc = -1;
@@ -2640,7 +3109,9 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
         if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL || !directive_is_set(d)) {
             continue;
         }
-        if (as_expr_eval_string(d->args[1], set_lookup, &a.consts, &value) == AS_EXPR_EVAL_OK) {
+        /* (A weak reference is to a symbol, whatever number that is.) */
+        if (!directive_is_weakref(d) &&
+            as_expr_eval_string(d->args[1], set_lookup, &a.consts, &value) == AS_EXPR_EVAL_OK) {
             continue;
         }
         e = as_parse_expr_string(d->args[1], st->unit, st->ordinal);
@@ -2678,6 +3149,7 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
         a.items[a.count].name = name;
         a.items[a.count].stmt = i;
         a.items[a.count].expr = e;
+        a.items[a.count].weakref = directive_is_weakref(d);
         a.count++;
     }
     for (i = 0; i < a.count; ++i) {
@@ -2710,7 +3182,9 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
             for (j = 0; j < a.count; ++j) {
                 as_expr_linear_t lin;
 
-                if (strcmp(a.items[j].name, name) == 0 &&
+                /* (An alias `.weakref` made is never a symbol: gas's
+                 * `.globl` of one says nothing.) */
+                if (strcmp(a.items[j].name, name) == 0 && !a.items[j].weakref &&
                     as_expr_eval_linear(a.items[j].expr, NULL, NULL, &lin) == AS_EXPR_EVAL_OK &&
                     lin.add_symbol != NULL && lin.sub_symbol == NULL && source_has_label(parsed, lin.add_symbol)) {
                     a.items[j].kept = 1;
@@ -2804,7 +3278,7 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
                 }
             }
             /* The numbers as they stand, for what is further down. */
-            if (is_set) {
+            if (is_set && !directive_is_weakref(d)) {
                 long long value;
                 char *name = local_common_name(d);
 
@@ -2995,7 +3469,8 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
     if (lower_structs(parsed, errbuf, errbuf_sz) != 0) {
         return -1;
     }
-    if (lower_local_commons(parsed, errbuf, errbuf_sz) != 0 || lower_aliases(parsed, errbuf, errbuf_sz) != 0) {
+    if (lower_local_commons(parsed, errbuf, errbuf_sz) != 0 || lower_weakrefs(parsed, errbuf, errbuf_sz) != 0 ||
+        lower_aliases(parsed, errbuf, errbuf_sz) != 0) {
         return -1;
     }
     return lower_arguments(parsed, errbuf, errbuf_sz);

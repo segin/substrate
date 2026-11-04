@@ -42,6 +42,9 @@ typedef struct {
      * and by `.equiv`, which may not be undone. */
     int defined_by_set;
     int defined_by_equiv;
+    /* The alias of a `.weakref`: a name for alias_target, and never a
+     * symbol of the object. */
+    int is_weakref;
     /* Where it was defined: as its author wrote it, for a message, and
      * which statement that is (see as_label_def_t). */
     unsigned def_line;

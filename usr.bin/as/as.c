@@ -328,7 +328,7 @@ static int directive_is_known(const char *name) {
         ".subsection", ".group",
         /* symbols */
         ".globl", ".global", ".local", ".weak", ".hidden", ".internal", ".protected", ".type", ".size",
-        ".comm", ".lcomm", ".symver", ".set", ".equ", ".equiv",
+        ".comm", ".lcomm", ".symver", ".set", ".equ", ".equiv", ".weakref",
         /* modes */
         ".code16", ".code32", ".code64", ".intel_syntax", ".att_syntax",
         /* debugging */
