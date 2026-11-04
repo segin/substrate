@@ -2114,49 +2114,6 @@ static void reach_mark_sym(reach_t *r, const char *sym) {
     }
 }
 
-/** Whether @p c may be in an assembler symbol's name. */
-static int asm_sym_char(char c) {
-    return c == '_' || c == '.' || c == '$' || (c >= '0' && c <= '9') || ((c | 0x20) >= 'a' && (c | 0x20) <= 'z');
-}
-
-/**
- * Keep what assembler text @p text (a file-scope asm, an asm statement's template) names: each word of it
- * that is a symbol's name, or the asm label of one (`int x asm("y")`, labels being given after the middle
- * passes).  gcc keeps only what an asm's operands name, and a static named only in the text is left
- * undefined; keeping it is the safe side of that.
- */
-static void reach_mark_text(reach_t *r, const char *text) {
-    const char *p = text;
-
-    while (p != NULL && *p != '\0') {
-        const char *w;
-        size_t len;
-        size_t k;
-
-        if (!asm_sym_char(*p)) {
-            p++;
-            continue;
-        }
-        w = p;
-        while (asm_sym_char(*p)) {
-            p++;
-        }
-        len = (size_t)(p - w);
-        if (*w >= '0' && *w <= '9') {
-            continue; /* a number, or a local label's `1f` */
-        }
-        reach_mark(r, w, len);
-        for (k = 0; k < r->m->asm_label_count; ++k) {
-            const char *label = r->m->asm_labels[k];
-
-            label = label != NULL && label[0] == '*' ? label + 1 : label;
-            if (label != NULL && strlen(label) == len && strncmp(label, w, len) == 0 &&
-                r->m->asm_label_names[k] != NULL) {
-                reach_mark(r, r->m->asm_label_names[k], strlen(r->m->asm_label_names[k]));
-            }
-        }
-    }
-}
 
 /**
  * Whether the globals named @p name in walk @p r may all be dropped when nothing refers to them: from -O1,
@@ -2269,14 +2226,10 @@ static void reach_follow(reach_t *r, size_t e) {
         for (k = 0; k < f->instr_count; ++k) {
             const cc_ssa_instr_t *in = &f->instrs[k];
 
-            if (in->sym == NULL || in->op == CC_SSA_STR) {
-                continue; /* (a literal's text) */
+            if (in->sym == NULL || in->op == CC_SSA_STR || in->op == CC_SSA_ASM) {
+                continue; /* (a literal's text; an asm's template, whose words keep nothing in gcc) */
             }
-            if (in->op == CC_SSA_ASM) {
-                reach_mark_text(r, in->sym);
-            } else {
-                reach_mark_sym(r, in->sym);
-            }
+            reach_mark_sym(r, in->sym);
         }
         for (k = 0; k < f->keep_sym_count; ++k) {
             if (f->keep_syms[k] != NULL) {
@@ -2303,9 +2256,12 @@ static void reach_follow(reach_t *r, size_t e) {
  * Droppable are a function marked `static inline` at every level, any static one from -O1, an inline-only
  * body always; and the objects reach_globals_droppable() says.  Kept are the rest -- the functions with
  * external linkage, those marked used, constructor or destructor, the objects with external linkage or
- * marked used -- and, from those and the words of the file-scope asm, whatever a kept one names: the
- * calls, addresses, loads and stores of a function and the words of its asm statements, its used static
- * locals, an object's initializer, either one's alias target.  A section attribute keeps nothing (gcc).
+ * marked used -- and, from those, whatever a kept one names: the calls, addresses, loads and stores of a
+ * function (an asm statement's operands among them), its used static locals, an object's initializer,
+ * either one's alias target.  The text of an asm, a file-scope one or a statement's template, keeps
+ * nothing, as in gcc: a static named only there is left undefined, and a word of it that only spells an
+ * instruction (Linux's `wrmsr`, `xgetbv`) must not keep the static inline helper of that name, whose
+ * paravirt call then reached pv_ops and BUG_func from the boot code.  A section attribute keeps nothing.
  * Debug information describes only what is still defined.  Linux's headers define many static inline
  * helpers per file, some for the other architecture (rip_rel_ptr's `leaq ...(%rip)` in an i386 build),
  * which gcc never compiles unless called; cc emitted them all.
@@ -2355,9 +2311,6 @@ static int remove_unreferenced(cc_ssa_module_t *m, int opt_level) {
                 }
             }
         }
-    }
-    for (i = 0; i < m->toplevel_asm_count; ++i) {
-        reach_mark_text(&r, m->toplevel_asm[i]);
     }
     while (r.top > 0) {
         reach_follow(&r, r.stack[--r.top]);

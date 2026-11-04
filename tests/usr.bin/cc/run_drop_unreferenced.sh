@@ -7,7 +7,8 @@
 # one's calls -- Linux's lm75 left i3c_device_match_id() undefined.  Kept,
 # as gcc keeps them, are what has external linkage, what is marked used
 # or a constructor, an asm operand, an alias's target, and what those
-# name; a section attribute alone keeps nothing.  At -O0 gcc keeps every
+# name; a section attribute alone keeps nothing, nor does the text of an
+# asm, which is not a reference.  At -O0 gcc keeps every
 # static but an unused static inline function, and cc does the same.
 # The defined and undefined symbols are gcc's, -m64 and -m32, -O0 to -O2,
 # with and without -g, and every function goes through MIR.
@@ -57,6 +58,14 @@ static void sec_fn(void) { ext2(); }
 /* an asm operand */
 static int asm_obj = 7;
 void asm_user(void) { __asm__ volatile("" :: "m"(asm_obj)); }
+
+/* the text of an asm keeps nothing: an instruction's mnemonic does not
+   keep the static inline helper of that name (Linux's wrmsr() reached
+   pv_ops from the boot code), nor a call in a template its target */
+static inline void wrmsr(int a) { ext(&a); }
+static void text_only(void) { ext2(); }
+__asm__(".macro cc_test_m\n\twrmsr\n.endm");
+void asm_text(void) { __asm__ volatile("wrmsr; call text_only"); }
 
 /* an alias's target */
 static int al_tgt = 9;

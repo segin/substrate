@@ -465,11 +465,12 @@ a constructor or destructor, an alias's target, and what those name
 \(em a
 .Ic section
 attribute alone keeps nothing.
-One named only in the text of an
-.Ic asm
-is kept, where
-.Xr gcc 1
-leaves it undefined.
+The text of an
+.Ic asm ,
+a statement's template or a file-scope one, keeps nothing, as with
+.Xr gcc 1 :
+a static named only there is left undefined, and only an asm's
+operands count as references.
 At
 .Fl O0
 nothing is inlined, and of the unreferenced statics only a
