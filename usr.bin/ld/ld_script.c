@@ -3530,8 +3530,128 @@ static int script_declare_in(ld_ctx_t *ctx, elfobj_t *out, lds_stmtvec_t *v) {
     return 0;
 }
 
+/**
+ * @brief Whether expression @p e names symbol @p name.
+ *
+ * The argument of ADDR(), DEFINED() and their like is a name, not a use
+ * of a symbol, as GNU ld has it: DEFINED(sym) does not make a PROVIDE of
+ * sym define it.
+ *
+ * @param e    The expression.
+ * @param name The symbol.
+ * @return 1 if it does, else 0.
+ */
+static int lds_expr_names(const lds_tokvec_t *e, const char *name) {
+    size_t t;
+
+    for (t = 0; t < e->count; ++t) {
+        const lds_tok_t *tok = &e->items[t];
+
+        if (tok->kind != LDS_TOK_IDENT || tok->text == NULL || strcmp(tok->text, name) != 0 ||
+            (t + 1 < e->count && e->items[t + 1].kind == LDS_TOK_LPAREN)) {
+            continue;
+        }
+        if (t >= 2 && e->items[t - 1].kind == LDS_TOK_LPAREN && e->items[t - 2].kind == LDS_TOK_IDENT &&
+            lds_builtin_takes_name(e->items[t - 2].text)) {
+            continue;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * @brief Whether a statement of @p v that is carried out names symbol
+ *        @p name in an expression.
+ *
+ * A PROVIDE that provides nothing is not carried out, and what it names
+ * is not used by it; nor is @p self, the PROVIDE of @p name.
+ *
+ * @param v    The statements, an output section's bodies included.
+ * @param name The symbol.
+ * @param self The statement to pass over.
+ * @return 1 if one does, else 0.
+ */
+static int script_uses_symbol(const lds_stmtvec_t *v, const char *name, const lds_stmt_t *self) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        const lds_stmt_t *st = &v->items[i];
+
+        if (st == self || (st->kind == LDS_ST_ASSIGN && !st->active && strcmp(st->at.text, ".") != 0)) {
+            continue;
+        }
+        if (lds_expr_names(&st->expr, name)) {
+            return 1;
+        }
+        if (st->kind == LDS_ST_OUTSEC &&
+            (lds_expr_names(&st->align, name) || lds_expr_names(&st->lma, name) ||
+             script_uses_symbol(&st->body, name, self))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Make each PROVIDE that the script itself uses define its symbol.
+ *
+ * GNU ld takes a symbol an expression of the script names as referred
+ * to, so a PROVIDE of it that no input defines defines it: `PROVIDE(q =
+ * 7); x = p + q;`.  One provided only for another PROVIDE that is so
+ * used is too, so this goes on until no more are.
+ *
+ * @param ctx The link.
+ * @param out The output, whose symbols say what the inputs define.
+ * @param v   The statements to look at, @p all's or a body of them.
+ * @param all All the script's statements.
+ * @return 1 if one was made to, 0 if none was, -1 out of memory.
+ */
+static int script_provide_used(ld_ctx_t *ctx, elfobj_t *out, lds_stmtvec_t *v, const lds_stmtvec_t *all) {
+    int changed = 0;
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        lds_stmt_t *st = &v->items[i];
+        const elf_symbol_t *sym;
+        int rc;
+
+        if (st->kind == LDS_ST_OUTSEC) {
+            if ((rc = script_provide_used(ctx, out, &st->body, all)) < 0) {
+                return -1;
+            }
+            changed |= rc;
+            continue;
+        }
+        if (st->kind != LDS_ST_ASSIGN || !st->provide || st->active || strcmp(st->at.text, ".") == 0 ||
+            defsymvec_find(&ctx->opt.defsyms, st->at.text) >= 0) {
+            continue;
+        }
+        sym = elf_find_symbol(out, st->at.text);
+        if ((sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF) || !script_uses_symbol(all, st->at.text, st)) {
+            continue;
+        }
+        st->active = 1;
+        if (defsymvec_set(&ctx->opt.defsyms, st->at.text, 0) != 0) {
+            return -1;
+        }
+        changed = 1;
+    }
+    return changed;
+}
+
 int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out) {
-    return ctx->script != NULL ? script_declare_in(ctx, out, &ctx->script->stmts) : 0;
+    int rc;
+
+    if (ctx->script == NULL) {
+        return 0;
+    }
+    if (script_declare_in(ctx, out, &ctx->script->stmts) != 0) {
+        return -1;
+    }
+    while ((rc = script_provide_used(ctx, out, &ctx->script->stmts, &ctx->script->stmts)) > 0) {
+    }
+    return rc;
 }
 
 static int script_body_moves_dot(const lds_stmt_t *os) {

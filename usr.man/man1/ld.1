@@ -893,7 +893,15 @@ or changed by
 .Dq name += expression ;
 and the other compound operators.
 .Ic PROVIDE
-defines its symbol only if an input refers to it and none defines it;
+defines its symbol only if it is referred to and nothing defines it, as
+GNU ld has it: by an input, or by an expression of the script, as in
+.Dq "PROVIDE(q = 7); x = q;" ,
+an
+.Ic ASSERT ,
+a data statement or another
+.Ic PROVIDE
+that is itself referred to, though not by
+.Ic DEFINED ;
 .Ic HIDDEN
 and
 .Ic PROVIDE_HIDDEN

@@ -112,6 +112,8 @@ An output section's input sections are put together by the merge (`libelfobj`) b
 
 An expression's value is an address, and beside it its kind (`lds_val_kind_t`): a plain number, an absolute address, or an address in a section -- GNU ld's "Expression Section" rules, which differ in an output section's body: there `.` is in the section, an absolute symbol is a number, an operator or `ALIGN(exp, n)` works on offsets in the section, and a number assigned is an offset in it. Where a symbol the script sets goes (`lw_home()`) follows from its value's kind, and is noted for the expressions after it (the script's `homes`), since the symbols of the output are made only in the walk's last pass: `setup_size = ALIGN(ABSOLUTE(.), 4096)` is absolute, and `setup_sects = ABSOLUTE(setup_size / 512)` after it reads it as the number it is.
 
+A `PROVIDE` defines its symbol when an input refers to it, or when an expression of a statement the script carries out names it (`script_provide_used()`, repeated until no more are made to, since one `PROVIDE` may be used only by another), as GNU ld takes a name in the script as a reference.
+
 Technologies: C, custom lexer/parser, bounded include stack, address arithmetic with overflow checks
 
 Deployment: Internal to `ld`; no external script interpreter dependency
