@@ -7,7 +7,13 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#define ELFOBJ_MAX_ALLOC_BYTES (256u * 1024u * 1024u)
+/*
+ * The most one allocation may take: a guard against a size a damaged input makes up, not a limit on what a
+ * real link holds.  256 MiB was both, and a Linux vmlinux.o with debug information has more than that in
+ * .rela.debug_info alone (some 800 MiB), and more symbols than the link map's 256 MiB held.  A 64-bit host
+ * gets 16 GiB; a 32-bit one keeps what it can address.
+ */
+#define ELFOBJ_MAX_ALLOC_BYTES (sizeof(size_t) >= 8 ? (size_t)16 << 30 : (size_t)1 << 30)
 #define ELFOBJ_MAX_DIAG_BYTES (1u * 1024u * 1024u)
 #define ELFOBJ_MAX_DIAG_ITEMS 4096u
 

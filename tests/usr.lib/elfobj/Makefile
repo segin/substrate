@@ -6,7 +6,7 @@ TESTS = test_strtab test_roundtrip test_invalid test_link test_reader_writer tes
 	test_section_segment test_symbols_hash test_reloc_backend test_link_services \
 	test_debug_unwind test_validate_hardening test_perf_io test_matrix test_multiarch_api \
 	test_write_to_buffer test_ensure_symbols_relocs test_push_section test_segment_align test_strtab test_layout test_push_symbol test_write_twice \
-	test_write_oom test_reloc_numbers test_reloc_mutate test_lazy_link
+	test_write_oom test_reloc_numbers test_reloc_mutate test_lazy_link test_link_entsize
 
 .PHONY: all clean
 
@@ -36,6 +36,7 @@ all: $(TESTS)
 	./test_multiarch_api
 	./test_ensure_symbols_relocs
 	./test_lazy_link
+	./test_link_entsize
 	./test_layout
 	./test_build_install.sh
 	./test_tool_integration.sh
@@ -123,6 +124,9 @@ test_ensure_symbols_relocs: test_ensure_symbols_relocs.c ../../../usr.lib/elfobj
 # Linking, resolving and section changes see a lazily parsed object's symbols and relocations.
 test_lazy_link: test_lazy_link.c ../../../usr.lib/elfobj/libelfobj.a
 	$(CC) $(CFLAGS) test_lazy_link.c ../../../usr.lib/elfobj/libelfobj.a -o test_lazy_link
+
+test_link_entsize: test_link_entsize.c ../../../usr.lib/elfobj/libelfobj.a
+	$(CC) $(CFLAGS) test_link_entsize.c ../../../usr.lib/elfobj/libelfobj.a -o test_link_entsize
 
 test_layout: test_layout.c ../../../usr.lib/elfobj/libelfobj.a
 	$(CC) $(CFLAGS) test_layout.c ../../../usr.lib/elfobj/libelfobj.a -o test_layout

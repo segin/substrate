@@ -768,6 +768,9 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
         return NULL;
     }
 
+    /* (said before the allocation: a NULL with a size is a failure the caller reports -- with none, the section
+     * was dropped without a word, and a vmlinux.o lost all of .rela.debug_info) */
+    *out_size = n * entsz;
     buf = (uint8_t *)elf__calloc(n, entsz);
     if (buf == NULL) {
         return NULL;

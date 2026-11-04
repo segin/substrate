@@ -1143,6 +1143,8 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                 return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
             }
             dst->addralign = src_align;
+            /* (the first input's entry size; one with another that follows makes it none) */
+            dst->entsize = src->entsize;
             if (order_to != NULL && elf_section_set_link_order(dst, order_to) != ELF_OK) {
                 free(inflated);
                 return ELF_ERR_STATE;
@@ -1200,17 +1202,21 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
              * that says it too.  Where they differ -- strings going in
              * with constants, either with plain data, as when .rodata.*
              * is gathered into .rodata -- the result is plain bytes, and
-             * says nothing; it is not an error.
+             * says nothing; it is not an error.  An entry size is kept
+             * only where every input gives the same one: one input's 8
+             * (a .rodata.cst8 among Linux's .rodata) was taken for the
+             * whole of a section not a multiple of it, which libelf then
+             * refused to update (resolve_btfids: "invalid section entry
+             * size").
              */
             if (((dst->flags ^ src_flags) & (SHF_MERGE | SHF_STRINGS)) != 0 ||
-                (dst->entsize != src->entsize && dst->entsize != 0 && src->entsize != 0) ||
                 ((dst->flags & SHF_MERGE) != 0 && dst->entsize != src->entsize)) {
                 dst->flags = (dst->flags | src_flags) & ~(uint64_t)(SHF_MERGE | SHF_STRINGS);
                 dst->entsize = 0;
             } else {
                 dst->flags |= src_flags;
-                if (dst->entsize == 0) {
-                    dst->entsize = src->entsize;
+                if (dst->entsize != src->entsize) {
+                    dst->entsize = 0;
                 }
             }
             /* become code: the gaps so far hold no-ops, as GNU ld fills a code section's */
