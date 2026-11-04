@@ -2331,6 +2331,45 @@ static int operand_expr_is_expressible(emit_ctx_t *ctx, const as_stmt_t *st, con
     return v.n == 0 || data_value_place(&ev, &v, &pcrel) != NULL;
 }
 
+/**
+ * The number an operand's expression is once every label is placed, where the expression is not
+ * of the shape of a relocation (as_expr_eval_linear() refuses it) and comes to a number all the
+ * same: `$((end - start) << 2)`, or what a `.set` to such an expression has put in its place.  It
+ * was given a relocation against its first label, and its value was lost.
+ *
+ * @param ctx          the emitter
+ * @param st           the instruction
+ * @param e            the operand's expression
+ * @param section      the section the instruction is in
+ * @param off          where the instruction begins in it, which `.` is
+ * @param labels       the compiler's labels placed so far
+ * @param label_count  how many
+ * @param out          receives the number
+ * @return             0, or -1 where the expression is of a relocation's shape or no number
+ */
+static int operand_expr_number(emit_ctx_t *ctx, const as_stmt_t *st, const as_expr_t *e, const char *section,
+                               uint64_t off, const local_emit_label_t *labels, size_t label_count, long long *out) {
+    as_expr_linear_t lin;
+    data_eval_t ev;
+    data_value_t v;
+
+    if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK || as_expr_reloc_op(e) != NULL) {
+        return -1;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.ctx = ctx;
+    ev.st = st;
+    ev.section = section != NULL ? section : "";
+    ev.off = off;
+    ev.labels = labels;
+    ev.label_count = label_count;
+    if (data_eval(&ev, e, &v) != 0 || v.n != 0) {
+        return -1;
+    }
+    *out = v.c;
+    return 0;
+}
+
 /* The relocation of a field of `width` bytes, or AS_RELOC_TYPE_BAD where
  * the object format has none of that width. */
 static uint32_t data_reloc_type(unsigned machine, unsigned width, int pcrel) {
@@ -3026,6 +3065,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
                          * a relocation to a symbol named `.`. */
                         dot_alone = 1;
                         taken_value = lin.value;
+                    } else if (operand_expr_number(ctx, st, e, track.current, cur_off, local_labels,
+                                                   local_label_count, &label_difference) == 0) {
+                        /* Of labels, and a number: `$((end - start) / 4)`. */
+                        is_label_difference = 1;
                     }
                 }
                 /* @TLSCALL has no field: its relocation is on the

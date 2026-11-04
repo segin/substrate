@@ -60,6 +60,11 @@ typedef struct {
     /* `.set name, target - minus`: the distance between two labels of
      * one section, which is a number. */
     char *alias_minus;
+    /* `.set name, expr` of any other shape -- `(. - start) / 40`: the
+     * expression as the directive has it once lowered (its `.` a label,
+     * the names in it put in their places), which is a number once its
+     * labels are placed, as GNU as has it, or refused. */
+    char *alias_expr;
     int alias_from_dot;
     long long alias_addend;
     unsigned long long size;

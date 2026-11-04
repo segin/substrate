@@ -457,6 +457,22 @@ to what is no number is another name for it: another symbol and a
 number, the place of the directive
 .Pq Ql \&. ,
 or the distance between two labels of one section.
+It may be set to any other expression, too
+.Pq Ql ".set count, (. - table) / 40" ,
+which is a number once its labels are placed, used before the
+.Cm .set
+or after it, in data or in an instruction, and an absolute symbol
+of that value in the object.
+Two labels of one section less each other are a number, a number
+may be added to a label or taken from it, and on numbers every
+operator may be used; anything else (a difference of two sections,
+a label multiplied, another file's symbol divided) is an error, as
+it is to GNU as.
+Such a value is a number for
+.Cm .if
+only where the
+.Cm .if
+can say it, which it cannot of labels.
 It may be set again; a label may take its name; but a name that is a
 label may not be set, and
 .Cm .equiv

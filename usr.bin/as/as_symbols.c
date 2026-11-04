@@ -621,6 +621,204 @@ static int collect_dot_locations(emit_ctx_t *ctx, dot_loc_t **out, size_t *count
     return 0;
 }
 
+/** A value of a `.set` expression: a number (sec NULL), or so far into a section. */
+typedef struct {
+    elf_section_t *sec;
+    long long v;
+} set_value_t;
+
+/** What set_expr_eval() reads labels and `.` from, and where it says what is wrong. */
+typedef struct {
+    const sym_loc_t *locs;
+    const name_index_t *index;
+    const dot_loc_t *dot; /* the `.` of the `.set`, or NULL */
+    const char *why;      /* the operator refused, or the name not found */
+    int no_label;         /* why is a name, of no label */
+    int div0;             /* a number was divided by 0 */
+} set_eval_t;
+
+/**
+ * The text of the operator @p op, for a message.
+ *
+ * @param op  an operator of as_expr.h
+ * @return    its spelling
+ */
+static const char *set_op_text(as_expr_op_t op) {
+    switch (op) {
+    case AS_EXPR_OP_ADD: return "+";
+    case AS_EXPR_OP_SUB: return "-";
+    case AS_EXPR_OP_MUL: return "*";
+    case AS_EXPR_OP_DIV: return "/";
+    case AS_EXPR_OP_MOD: return "%";
+    case AS_EXPR_OP_OR: return "|";
+    case AS_EXPR_OP_AND: return "&";
+    case AS_EXPR_OP_XOR: return "^";
+    case AS_EXPR_OP_SHL: return "<<";
+    case AS_EXPR_OP_SHR: return ">>";
+    case AS_EXPR_OP_EQ: return "==";
+    case AS_EXPR_OP_NE: return "!=";
+    case AS_EXPR_OP_LT: return "<";
+    case AS_EXPR_OP_LE: return "<=";
+    case AS_EXPR_OP_GT: return ">";
+    case AS_EXPR_OP_GE: return ">=";
+    case AS_EXPR_OP_NEG: return "-";
+    case AS_EXPR_OP_BNOT: return "~";
+    case AS_EXPR_OP_LNOT: return "!";
+    case AS_EXPR_OP_ORNOT: return "!";
+    case AS_EXPR_OP_LAND: return "&&";
+    case AS_EXPR_OP_LOR: return "||";
+    default: return "?";
+    }
+}
+
+/**
+ * The value of the expression a `.set` gives a symbol (as_symbol_t.alias_expr), with every
+ * label where it ended: as GNU as has it, a place in a section less another of that section is a
+ * number, a number may be added to a place or taken from it, and on numbers anything may be done.
+ *
+ * @param ev   the labels, and what is said where the expression has no value
+ * @param e    the expression
+ * @param out  receives the value
+ * @return     0; -1 with ev->why set where an operator is of a place (or of places of two
+ *             sections), a name is of no label, or a number is divided by 0
+ */
+static int set_expr_eval(set_eval_t *ev, const as_expr_t *e, set_value_t *out) {
+    set_value_t l;
+    set_value_t r;
+
+    memset(out, 0, sizeof(*out));
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        out->v = e->value;
+        return 0;
+    case AS_EXPR_SYMBOL: {
+        const sym_loc_t *at;
+
+        if (e->symbol != NULL && e->reloc_op == NULL && as_strcmp(e->symbol, ".") == 0 && ev->dot != NULL &&
+            ev->dot->sec != NULL) {
+            out->sec = ev->dot->sec;
+            out->v = (long long)ev->dot->off;
+            return 0;
+        }
+        at = e->symbol != NULL && e->reloc_op == NULL ? find_sym_loc(ev->locs, ev->index, e->symbol) : NULL;
+        if (at == NULL || at->sec == NULL) {
+            ev->why = e->symbol != NULL ? e->symbol : "";
+            ev->no_label = 1;
+            return -1;
+        }
+        out->sec = at->sec;
+        out->v = (long long)at->off;
+        return 0;
+    }
+    case AS_EXPR_UNARY:
+        if (set_expr_eval(ev, e->lhs != NULL ? e->lhs : e->rhs, &l) != 0) {
+            return -1;
+        }
+        if (l.sec != NULL) {
+            ev->why = set_op_text(e->op);
+            return -1;
+        }
+        break;
+    case AS_EXPR_BINARY:
+        if (set_expr_eval(ev, e->lhs, &l) != 0 || set_expr_eval(ev, e->rhs, &r) != 0) {
+            return -1;
+        }
+        if (e->op == AS_EXPR_OP_ADD && (l.sec == NULL || r.sec == NULL)) {
+            out->sec = l.sec != NULL ? l.sec : r.sec;
+            out->v = (long long)((unsigned long long)l.v + (unsigned long long)r.v);
+            return 0;
+        }
+        if (e->op == AS_EXPR_OP_SUB && (r.sec == NULL || r.sec == l.sec)) {
+            out->sec = r.sec == NULL ? l.sec : NULL;
+            out->v = (long long)((unsigned long long)l.v - (unsigned long long)r.v);
+            return 0;
+        }
+        if (l.sec != NULL || r.sec != NULL) {
+            ev->why = set_op_text(e->op);
+            return -1;
+        }
+        break;
+    default:
+        ev->why = "";
+        return -1;
+    }
+    /* An operation on numbers, as as_expr.c does them all. */
+    {
+        as_expr_t node = *e;
+        as_expr_t ln;
+        as_expr_t rn;
+
+        memset(&ln, 0, sizeof(ln));
+        memset(&rn, 0, sizeof(rn));
+        ln.kind = AS_EXPR_CONST;
+        ln.value = l.v;
+        rn.kind = AS_EXPR_CONST;
+        rn.value = e->kind == AS_EXPR_BINARY ? r.v : l.v;
+        node.lhs = e->lhs != NULL ? &ln : NULL;
+        node.rhs = e->rhs != NULL ? &rn : NULL;
+        if (as_expr_eval(&node, NULL, NULL, &out->v) != AS_EXPR_EVAL_OK) {
+            ev->why = set_op_text(e->op);
+            ev->div0 = 1;
+            return -1;
+        }
+        return 0;
+    }
+}
+
+/**
+ * Give the symbol @p s, which a `.set` set to an expression of no simpler shape, the value the
+ * expression has once everything is placed: a number, the symbol absolute; or a place, the symbol
+ * there.  Refused, as GNU as refuses it, where the expression has neither.
+ *
+ * @param ctx   the emitter
+ * @param s     the symbol (s->alias_expr is its expression)
+ * @param esym  the object's symbol of it
+ * @param locs  where each label is
+ * @param idx   their index
+ * @param dot   where the `.set` is, or NULL
+ * @return      0, or -1 with the error set
+ */
+static int define_set_expression(emit_ctx_t *ctx, const as_symbol_t *s, elf_symbol_t *esym, const sym_loc_t *locs,
+                                 const name_index_t *idx, const dot_loc_t *dot) {
+    const char *file = s->def_file != NULL ? s->def_file : "<input>";
+    as_expr_t *e = as_parse_expr_string(s->alias_expr, NULL, 0);
+    set_eval_t ev;
+    set_value_t v;
+    int rc;
+
+    if (e == NULL) {
+        set_err(ctx, "%s:%u: '%s' is set to '%s', which is no expression", file, s->def_line, s->name,
+                s->alias_expr);
+        return -1;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.locs = locs;
+    ev.index = idx;
+    ev.dot = dot;
+    rc = set_expr_eval(&ev, e, &v);
+    if (rc != 0) {
+        if (ev.no_label) {
+            set_err(ctx, "%s:%u: '%s' is set to '%s', and '%s' is no label of this source", file, s->def_line,
+                    s->name, s->alias_expr, ev.why);
+        } else if (ev.div0) {
+            set_err(ctx, "%s:%u: '%s' is set to '%s', which divides by zero", file, s->def_line, s->name,
+                    s->alias_expr);
+        } else {
+            set_err(ctx, "%s:%u: invalid operands for `%s' when setting `%s': '%s' is not a number, nor a place "
+                         "and a number",
+                    file, s->def_line, ev.why != NULL ? ev.why : "", s->name, s->alias_expr);
+        }
+        as_expr_free(e); /* (after the message, which may name a symbol of it) */
+        return -1;
+    }
+    as_expr_free(e);
+    if (v.sec != NULL) {
+        return elf_symbol_define(esym, v.sec, (uint64_t)v.v) == ELF_OK ? 0 : -1;
+    }
+    return elf_symbol_set_shndx(esym, SHN_ABS) == ELF_OK && elf_symbol_set_value(esym, (uint64_t)v.v) == ELF_OK ? 0
+                                                                                                                : -1;
+}
+
 int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     size_t i;
     sym_loc_t *locs = NULL;
@@ -833,6 +1031,14 @@ int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         } else if (s->is_absolute) {
             if (elf_symbol_set_shndx(esym, SHN_ABS) != ELF_OK ||
                 elf_symbol_set_value(esym, s->absolute_value) != ELF_OK) {
+                free_sym_locs(locs, loc_count);
+                free_dot_locs(dot_locs);
+                free_name_index(&loc_index);
+                return -1;
+            }
+        } else if (s->alias_expr != NULL) {
+            if (define_set_expression(ctx, s, esym, locs, &loc_index,
+                                      find_dot_loc(dot_locs, dot_count, s->def_unit, s->def_ordinal)) != 0) {
                 free_sym_locs(locs, loc_count);
                 free_dot_locs(dot_locs);
                 free_name_index(&loc_index);

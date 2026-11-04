@@ -2316,10 +2316,21 @@ typedef struct {
     char *branch_label;
 } alias_def_t;
 
+/* A `.set` of a name to a number: which statement, and the number. */
+typedef struct {
+    char *name;
+    size_t stmt;
+    long long value;
+} alias_number_t;
+
 typedef struct {
     alias_def_t *items;
     size_t count;
     size_t cap;
+    /* The `.set`s to numbers, in the order of the source. */
+    alias_number_t *numbers;
+    size_t number_count;
+    size_t number_cap;
     set_consts_t consts;
     const char *loop; /* a name that stands for itself */
     int failed;       /* no memory */
@@ -2342,6 +2353,64 @@ static alias_def_t *alias_find(alias_ctx_t *a, const char *name, size_t use) {
         }
     }
     return before != NULL ? before : last;
+}
+
+/**
+ * Note that statement @p stmt sets @p name to the number @p value (alias_number_since()).
+ *
+ * @param a      the aliases
+ * @param name   the name
+ * @param stmt   the statement
+ * @param value  the number
+ * @return       0, or -1 for no memory
+ */
+static int alias_number_add(alias_ctx_t *a, const char *name, size_t stmt, long long value) {
+    if (a->number_count == a->number_cap) {
+        size_t cap = a->number_cap != 0 ? a->number_cap * 2 : 16;
+        alias_number_t *items = (alias_number_t *)realloc(a->numbers, cap * sizeof(*items));
+
+        if (items == NULL) {
+            return -1;
+        }
+        a->numbers = items;
+        a->number_cap = cap;
+    }
+    a->numbers[a->number_count].name = lower_strdup(name);
+    if (a->numbers[a->number_count].name == NULL) {
+        return -1;
+    }
+    a->numbers[a->number_count].stmt = stmt;
+    a->numbers[a->number_count].value = value;
+    a->number_count++;
+    return 0;
+}
+
+/**
+ * Whether @p name is a number where statement @p use is, though it is also set to what is no
+ * number: set to a number before @p use and after @p def, the `.set` of it to something else
+ * that comes before @p use (NULL where none does).  `.set a, 5` ... `.set a, (end - start) * 3`
+ * ... `.set a, 7`: `a` is 5, then the distance, then 7, as GNU as has it, and was the distance
+ * everywhere.
+ *
+ * @param a      the aliases
+ * @param name   the name
+ * @param def    the `.set` of it to no number in force at @p use, or NULL
+ * @param use    the statement it is used in
+ * @param value  receives the number
+ * @return       1 if it is one, else 0
+ */
+static int alias_number_since(const alias_ctx_t *a, const char *name, const alias_def_t *def, size_t use,
+                              long long *value) {
+    int found = 0;
+    size_t i;
+
+    for (i = 0; i < a->number_count && a->numbers[i].stmt < use; ++i) {
+        if ((def == NULL || a->numbers[i].stmt > def->stmt) && strcmp(a->numbers[i].name, name) == 0) {
+            *value = a->numbers[i].value;
+            found = 1;
+        }
+    }
+    return found;
 }
 
 static void alias_substitute(alias_ctx_t *a, as_expr_t *e, size_t use, int *changed);
@@ -2439,6 +2508,23 @@ static void alias_substitute(alias_ctx_t *a, as_expr_t *e, size_t use, int *chan
             e->value = value;
             *changed = 1;
         }
+        return;
+    }
+    /* (A number set since, or before where it is used and with nothing
+     * else set since, is what the name is there.) */
+    if (alias_number_since(a, e->symbol, def->stmt < use ? def : NULL, use, &value)) {
+        long long now;
+
+        /* (Where the names are put in, the numbers set so far are
+         * known as they stand.) */
+        if (struct_lookup(&a->consts.now, e->symbol, &now)) {
+            value = now;
+        }
+        free(e->symbol);
+        e->symbol = NULL;
+        e->kind = AS_EXPR_CONST;
+        e->value = value;
+        *changed = 1;
         return;
     }
     alias_resolve(a, def);
@@ -3112,6 +3198,12 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
         /* (A weak reference is to a symbol, whatever number that is.) */
         if (!directive_is_weakref(d) &&
             as_expr_eval_string(d->args[1], set_lookup, &a.consts, &value) == AS_EXPR_EVAL_OK) {
+            name = local_common_name(d);
+            if (name == NULL || alias_number_add(&a, name, i, value) != 0) {
+                free(name);
+                goto oom;
+            }
+            free(name);
             continue;
         }
         e = as_parse_expr_string(d->args[1], st->unit, st->ordinal);
@@ -3344,6 +3436,10 @@ done:
         free(a.consts.never.items[i].name);
     }
     free(a.consts.never.items);
+    for (i = 0; i < a.number_count; ++i) {
+        free(a.numbers[i].name);
+    }
+    free(a.numbers);
     return rc;
 }
 

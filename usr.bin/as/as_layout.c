@@ -3087,12 +3087,182 @@ static int stmt_is_of_variable_size(const as_stmt_t *st) {
     return 0;
 }
 
+/** What fixed_label_expr() walks an expression with. */
+typedef struct {
+    emit_ctx_t *ctx;
+    unsigned x86_code_bits;
+    size_t at;       /* the statement the expression is of */
+    const char *sec; /* the section of its labels, once one is met */
+    size_t lo;       /* the first of its labels' statements, and the last */
+    size_t hi;
+    int any;         /* a label has been met */
+} fixed_expr_t;
+
+/**
+ * The first walk of fixed_label_expr(): every name in @p e a label of the section of the others,
+ * standing at or before the statement, the range of them noted.
+ *
+ * @param fx  the walk
+ * @param e   the expression
+ * @return    0, or -1 where @p e is not of such names and numbers
+ */
+static int fixed_expr_labels(fixed_expr_t *fx, const as_expr_t *e) {
+    size_t idx;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == AS_EXPR_LOCAL_REF) {
+        return -1;
+    }
+    if (e->kind == AS_EXPR_SYMBOL) {
+        if (e->symbol == NULL || e->reloc_op != NULL || as_strcmp(e->symbol, ".") == 0 ||
+            label_stmt_index(fx->ctx, e->symbol, &idx) != 0 || idx > fx->at ||
+            idx >= fx->ctx->stmt_section_at_count || fx->ctx->stmt_section_at[idx] == NULL ||
+            (fx->sec != NULL && as_strcmp(fx->sec, fx->ctx->stmt_section_at[idx]) != 0)) {
+            return -1;
+        }
+        fx->sec = fx->ctx->stmt_section_at[idx];
+        if (!fx->any || idx < fx->lo) {
+            fx->lo = idx;
+        }
+        if (!fx->any || idx > fx->hi) {
+            fx->hi = idx;
+        }
+        fx->any = 1;
+        return 0;
+    }
+    return fixed_expr_labels(fx, e->lhs) != 0 || fixed_expr_labels(fx, e->rhs) != 0 ? -1 : 0;
+}
+
+/**
+ * The second walk of fixed_label_expr(): the value of @p e, a label being so far past the first
+ * of them, and whether it is a place (a label and a number) or a number -- a place less a place
+ * being a number, and nothing else done to a place.
+ *
+ * @param fx      the walk
+ * @param e       the expression
+ * @param out     receives the value
+ * @param placed  receives 1 where it is a place, 0 where a number
+ * @return        0, or -1 where something is done to a place that leaves no place or number
+ */
+static int fixed_expr_value(fixed_expr_t *fx, const as_expr_t *e, long long *out, int *placed) {
+    long long l = 0;
+    long long r = 0;
+    int lp = 0;
+    int rp = 0;
+
+    *placed = 0;
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        *out = e->value;
+        return 0;
+    case AS_EXPR_SYMBOL: {
+        size_t idx;
+        uint64_t size = 0;
+
+        if (label_stmt_index(fx->ctx, e->symbol, &idx) != 0 ||
+            stmt_range_size_in_section(fx->ctx, fx->sec, fx->lo, idx, 0, fx->x86_code_bits, &size) != 0) {
+            return -1;
+        }
+        *out = (long long)size;
+        *placed = 1;
+        return 0;
+    }
+    case AS_EXPR_UNARY:
+        if (fixed_expr_value(fx, e->lhs != NULL ? e->lhs : e->rhs, &l, &lp) != 0 || lp) {
+            return -1;
+        }
+        break;
+    case AS_EXPR_BINARY:
+        if (fixed_expr_value(fx, e->lhs, &l, &lp) != 0 || fixed_expr_value(fx, e->rhs, &r, &rp) != 0) {
+            return -1;
+        }
+        if (e->op == AS_EXPR_OP_ADD && !(lp && rp)) {
+            *out = (long long)((unsigned long long)l + (unsigned long long)r);
+            *placed = lp || rp;
+            return 0;
+        }
+        if (e->op == AS_EXPR_OP_SUB && (!rp || lp)) {
+            *out = (long long)((unsigned long long)l - (unsigned long long)r);
+            *placed = lp && !rp;
+            return 0;
+        }
+        if (lp || rp) {
+            return -1;
+        }
+        break;
+    default:
+        return -1;
+    }
+    {
+        as_expr_t node = *e;
+        as_expr_t ln;
+        as_expr_t rn;
+
+        memset(&ln, 0, sizeof(ln));
+        memset(&rn, 0, sizeof(rn));
+        ln.kind = AS_EXPR_CONST;
+        ln.value = l;
+        rn.kind = AS_EXPR_CONST;
+        rn.value = e->kind == AS_EXPR_BINARY ? r : l;
+        node.lhs = e->lhs != NULL ? &ln : NULL;
+        node.rhs = e->rhs != NULL ? &rn : NULL;
+        return as_expr_eval(&node, NULL, NULL, out) == AS_EXPR_EVAL_OK ? 0 : -1;
+    }
+}
+
+/**
+ * fixed_label_diff() of an expression of no relocation's shape -- `(b - a) << 2`, `(b - a) / 4`,
+ * which a `.set` of such an expression puts where its name is used: its labels all of one section
+ * and at or before the statement, with nothing of variable size among them, so that it is a number
+ * where the statement is read, as it is to GNU as, and an instruction is given the short form of
+ * it.
+ *
+ * @param ctx            the emitter
+ * @param st             the statement
+ * @param x86_code_bits  the code's mode
+ * @param e              the expression
+ * @param out            receives the number
+ * @return               0, or -1 where the expression is not such a one
+ */
+static int fixed_label_expr(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, const as_expr_t *e,
+                            long long *out) {
+    fixed_expr_t fx;
+    long long v;
+    int placed;
+    size_t k;
+
+    memset(&fx, 0, sizeof(fx));
+    fx.ctx = ctx;
+    fx.x86_code_bits = x86_code_bits;
+    if (parsed_stmt_index(ctx, st, &fx.at) != 0 || build_stmt_section_at(ctx) != 0 || fixed_expr_labels(&fx, e) != 0 ||
+        !fx.any) {
+        return -1;
+    }
+    for (k = fx.lo; k < fx.hi; ++k) {
+        const as_stmt_t *between = &ctx->parsed->items[k];
+
+        if (stmt_is_of_variable_size(between) &&
+            (between->kind == AS_STMT_DIRECTIVE ||
+             (ctx->stmt_section_at[k] != NULL && as_strcmp(ctx->stmt_section_at[k], fx.sec) == 0))) {
+            return -1;
+        }
+    }
+    if (fixed_expr_value(&fx, e, &v, &placed) != 0 || placed) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
 /*
  * A label less a label, where both stand before the statement, in one
  * section, with nothing of variable size between: how far apart they
  * are is known where the statement is read, and it is a number like any
  * other.  0 and the number (with whatever else the expression adds), or
- * -1 if the expression is not such a one.
+ * -1 if the expression is not such a one.  An expression of other shape
+ * of such labels is fixed_label_expr()'s.
  */
 int fixed_label_diff(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, const as_expr_t *e,
                             long long *out) {
@@ -3101,6 +3271,10 @@ int fixed_label_diff(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bit
     uint64_t size = 0;
     size_t is, ia, ib, lo, hi, k;
 
+    if (e != NULL && e->kind != AS_EXPR_CONST && first_symbol_op_in_expr(e) == NULL &&
+        as_expr_eval_linear(e, NULL, NULL, &lin) != AS_EXPR_EVAL_OK) {
+        return fixed_label_expr(ctx, st, x86_code_bits, e, out);
+    }
     if (e == NULL || e->kind == AS_EXPR_CONST || first_symbol_op_in_expr(e) != NULL ||
         as_expr_eval_linear(e, NULL, NULL, &lin) != AS_EXPR_EVAL_OK || lin.add_symbol == NULL ||
         lin.sub_symbol == NULL || lin.add_local != NULL || lin.sub_local != NULL ||

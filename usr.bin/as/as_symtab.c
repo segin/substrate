@@ -102,6 +102,7 @@ void as_symtab_free(as_symtab_t *tab) {
         free(s->def_file);
         free(s->alias_target);
         free(s->alias_minus);
+        free(s->alias_expr);
         free(s->size_base_symbol);
         free(s->size_target_symbol);
         free(s->size_anchor_file);
@@ -230,9 +231,48 @@ static as_expr_t *parse_linear_arg(const char *text, as_expr_linear_t *lin) {
     return e;
 }
 
+/**
+ * Whether @p e names a numbered label (`1f`, `2b`) anywhere in it.
+ *
+ * @param e  an expression, or NULL
+ * @return   1 if it does, else 0
+ */
+static int expr_has_local_label(const as_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    return e->kind == AS_EXPR_LOCAL_REF || expr_has_local_label(e->lhs) || expr_has_local_label(e->rhs);
+}
+
+/**
+ * Give @p sym the right-hand side of its `.set` as an expression to be
+ * evaluated once the labels in it are placed (as_symbol_t.alias_expr):
+ * what is of none of the shapes parse_set_rhs() makes a symbol of --
+ * `(. - start) / 40`, `(end - start) << 2` -- as GNU as takes any
+ * expression there and has its value when its operands are known.
+ *
+ * @param text  the right-hand side, as lowered
+ * @param sym   the symbol set
+ * @return      0, or -1 where @p text is no expression (or names a
+ *              numbered label, which it would be read from nowhere) or
+ *              there is no memory
+ */
+static int set_rhs_expression(const char *text, as_symbol_t *sym) {
+    as_expr_t *e = as_parse_expr_string(text, NULL, 0);
+    int bad = e == NULL || expr_has_local_label(e);
+
+    as_expr_free(e);
+    if (bad) {
+        return -1;
+    }
+    sym->alias_expr = xstrdup(text);
+    return sym->alias_expr != NULL ? 0 : -1;
+}
+
 /*
- * What .set gives a symbol: a number, another symbol and an addend, or
- * the distance from a symbol to here (`. - sym`).
+ * What .set gives a symbol: a number, another symbol and an addend, the
+ * distance from a symbol to here (`. - sym`) or between two; or, of any
+ * other expression, the expression (set_rhs_expression()).
  */
 static int parse_set_rhs(const char *text, as_symbol_t *sym) {
     as_expr_linear_t lin;
@@ -244,7 +284,7 @@ static int parse_set_rhs(const char *text, as_symbol_t *sym) {
     }
     e = parse_linear_arg(text, &lin);
     if (e == NULL) {
-        return -1;
+        return set_rhs_expression(text, sym);
     }
     if (lin.add_symbol == NULL && lin.sub_symbol == NULL) {
         sym->is_absolute = 1;
@@ -266,6 +306,10 @@ static int parse_set_rhs(const char *text, as_symbol_t *sym) {
         sym->alias_minus = expr_symbol_copy(lin.sub_symbol);
         sym->alias_addend = lin.value;
         rc = sym->alias_target != NULL && sym->alias_minus != NULL ? 0 : -1;
+    } else {
+        /* (`5 - sym` and the like: a number or nothing, as its labels
+         * fall.) */
+        rc = set_rhs_expression(text, sym);
     }
     as_expr_free(e);
     return rc;
@@ -658,6 +702,8 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         sym->alias_target = NULL;
         free(sym->alias_minus);
         sym->alias_minus = NULL;
+        free(sym->alias_expr);
+        sym->alias_expr = NULL;
         sym->alias_from_dot = 0;
         sym->alias_addend = 0;
         sym->is_absolute = 0;
@@ -964,6 +1010,8 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
                 sym->alias_target = NULL;
                 free(sym->alias_minus);
                 sym->alias_minus = NULL;
+                free(sym->alias_expr);
+                sym->alias_expr = NULL;
                 sym->alias_from_dot = 0;
                 sym->alias_addend = 0;
                 sym->is_absolute = 0;
