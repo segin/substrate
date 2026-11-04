@@ -1418,7 +1418,13 @@ static void emit_enum(int id, const cc_dtype_t *t) {
         return;
     }
     die_udata(DW_AT_byte_size, (unsigned long long)size);
-    die_ref(DW_AT_type, int_type_ref(size, !is_signed));
+    /*
+     * the standard integer type of its size and of the signedness of the type it is compatible with (its
+     * canonical type), as gcc names it: `enum : unsigned long long` is `long unsigned int` on x86-64
+     */
+    die_ref(DW_AT_type, int_type_ref(size, t->ct != NULL && cc_ct_is_integer(t->ct) && t->ct->kind != CC_CT_ENUM
+                                               ? cc_ct_is_unsigned(t->ct)
+                                               : !is_signed));
     die_end(&g_dw.types, id);
     if (!children) {
         return;

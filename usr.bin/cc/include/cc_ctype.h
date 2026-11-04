@@ -181,7 +181,8 @@ void cc_ct_set_complex_record(cc_ctype_kind_t elem, int id);
 int cc_ct_complex_record(const cc_ctype_t *t);
 
 /**
- * An enumerated type.
+ * An enumerated type whose definition has not been seen: a defined
+ * enumeration is the integer type it is compatible with instead.
  *
  * @param id  its id, or -1 when the parser has not given it one
  * @return    the type, or NULL when out of memory

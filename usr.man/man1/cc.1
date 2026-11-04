@@ -103,6 +103,35 @@ structure's own
 .Sq Li aligned
 still counts.
 .Pp
+An enumeration without a fixed underlying type is the integer type gcc
+makes it compatible with:
+.Vt unsigned int
+when none of its values is negative,
+.Vt int
+when one is, and
+.Vt long
+or
+.Vt unsigned long
+.Pq Vt long long No on i386
+when a value needs more than 32 bits; a
+.Sq Li packed
+one is the smallest type its values fit, and one with a
+.Sq Li mode Ns Pq Ar m
+attribute
+.Pq Li QI , HI , SI , DI , byte , word , pointer
+the type of that size.
+Its size, signedness, integer promotion and what
+.Fn __builtin_types_compatible_p
+and
+.Ic _Generic
+say of it are that type's, so
+.Li "enum { A, B } e; e + 1"
+is
+.Vt unsigned int ,
+as in gcc.
+Two enumerations compatible with one integer type are compatible with
+each other here, which in gcc they are not.
+.Pp
 gcc's
 .Sq Li counted_by Ns Pq Ar m
 on a flexible array member or a pointer member names the member holding

@@ -1120,6 +1120,18 @@ int sx_ct_record(const cc_ctype_t *t) {
 static int struct_ids_compatible_depth(const cc_translation_unit_t *tu, int lhs, int rhs, int depth);
 
 /**
+ * Whether @p t is a type a defined enumeration can be: an integer type
+ * other than _Bool, plain char and the bit-precise ones.
+ *
+ * @param t  the type, unqualified
+ * @return   1 if it is, else 0
+ */
+static int sema_enum_completion(const cc_ctype_t *t) {
+    return cc_ct_is_integer(t) && t->kind != CC_CT_BOOL && t->kind != CC_CT_CHAR && t->kind != CC_CT_BITINT &&
+           t->kind != CC_CT_UBITINT;
+}
+
+/**
  * Whether types @p a and @p b are the same type, structures and unions
  * compared as compatible ones are (C11 6.2.7: one tag, or members that
  * match); qualifiers are not compared.
@@ -1142,7 +1154,13 @@ static int sema_same_type(const cc_translation_unit_t *tu, const cc_ctype_t *a, 
         return 1;
     }
     if (a->kind != b->kind) {
-        return 0;
+        /*
+         * an enumeration named before its definition (CC_CT_ENUM) is the
+         * type its definition makes it, which only that can say: one
+         * declared with it agrees with one declared after with the integer
+         * type the enumeration is
+         */
+        return (a->kind == CC_CT_ENUM && sema_enum_completion(b)) || (b->kind == CC_CT_ENUM && sema_enum_completion(a));
     }
     switch (a->kind) {
     case CC_CT_RECORD:

@@ -157,6 +157,8 @@ typedef struct {
     long vector_bytes; /**< `vector_size(n)`: the vector's size in bytes; 0 for none */
     long vector_elems; /**< `ext_vector_type(n)`: its element count; 0 for none */
     int regparm;       /**< `regparm(n)` (i386): n + 1; 0 for none */
+    long mode_bytes;   /**< `mode(m)`: the size of integer mode m (QI, HI, SI, DI, byte, word, pointer); 0 for
+                            none.  Only an enumeration's type takes it, here */
     int patchable;     /**< `patchable_function_entry(n, m)`: n + 1; 0 for none */
     int patchable_before; /**< its m */
     char *asm_label;  /**< the string of a declarator's `asm("...")`, whole (owned); NULL for none */
@@ -841,35 +843,57 @@ static int parser_ct_compatible(const parser_t *p, const cc_ctype_t *a, const cc
 static long parser_ct_align(const parser_t *p, const cc_ctype_t *t);
 
 /**
- * The smallest integer kind that holds every enumerator of a packed
- * enumeration whose values run from @p min_v to @p max_v.
+ * The integer type an enumeration without a fixed underlying type is
+ * compatible with (C23 6.7.2.2p15 leaves the choice to the implementation),
+ * chosen as gcc chooses it: unsigned when no enumerator is negative, and
+ * of the size its values need, but at least `int`'s unless the enumeration
+ * is packed or a `mode` attribute names its size.  So `enum { A, B }` is
+ * unsigned int, one with a negative value int, one with a value beyond 32
+ * bits (unsigned) long, or long long where long has 32.
+ *
+ * @param min_v       the least enumerator
+ * @param max_v       the greatest
+ * @param packed      the enumeration is packed: as small as its values allow
+ * @param mode_bytes  the size a `mode` attribute gives it, or 0
+ * @return            the integer kind, or CC_CT_VOID when @p mode_bytes is
+ *                    too small for the values
  */
-static cc_ctype_kind_t packed_enum_kind_from_range(long min_v, long max_v) {
-    if (min_v >= 0) {
-        if ((unsigned long)max_v <= (unsigned long)UCHAR_MAX) {
-            return CC_CT_UCHAR;
-        }
-        if ((unsigned long)max_v <= (unsigned long)USHRT_MAX) {
-            return CC_CT_USHORT;
-        }
-        if ((unsigned long)max_v <= (unsigned long)UINT_MAX) {
-            return CC_CT_UINT;
-        }
-        return CC_CT_ULLONG;
+static cc_ctype_kind_t enum_compatible_kind(long min_v, long max_v, int packed, long mode_bytes) {
+    int is_unsigned = min_v >= 0;
+    long need;
+
+    if (is_unsigned) {
+        unsigned long m = (unsigned long)max_v;
+
+        need = m <= UCHAR_MAX ? 1 : m <= USHRT_MAX ? 2 : m <= UINT_MAX ? 4 : 8;
+    } else {
+        need = (min_v >= SCHAR_MIN && max_v <= SCHAR_MAX) ? 1
+               : (min_v >= SHRT_MIN && max_v <= SHRT_MAX) ? 2
+               : (min_v >= INT_MIN && max_v <= INT_MAX)   ? 4
+                                                          : 8;
     }
-    if (min_v >= SCHAR_MIN && max_v <= SCHAR_MAX) {
-        /* (a signed one: plain char is not, under -funsigned-char) */
-        return cc_options_current()->unsigned_char ? CC_CT_SCHAR : CC_CT_CHAR;
-    }
-    if (min_v >= SHRT_MIN && max_v <= SHRT_MAX) {
-        return CC_CT_SHORT;
-    }
-    if (sizeof(long) > sizeof(int)) {
-        if (min_v >= INT_MIN && max_v <= INT_MAX) {
-            return CC_CT_INT;
+    if (mode_bytes > 0) {
+        if (need > mode_bytes) {
+            return CC_CT_VOID;
         }
+        need = mode_bytes;
+    } else if (!packed && need < 4) {
+        need = 4;
     }
-    return CC_CT_LLONG;
+    switch (need) {
+    case 1:
+        /* signed char, not plain char: the two are different types */
+        return is_unsigned ? CC_CT_UCHAR : CC_CT_SCHAR;
+    case 2:
+        return is_unsigned ? CC_CT_USHORT : CC_CT_SHORT;
+    case 4:
+        return is_unsigned ? CC_CT_UINT : CC_CT_INT;
+    default:
+        if (cc_target_pointer_size() >= 8) {
+            return is_unsigned ? CC_CT_ULONG : CC_CT_LONG;
+        }
+        return is_unsigned ? CC_CT_ULLONG : CC_CT_LLONG;
+    }
 }
 
 /** Whether a bit-field may have type @p t: _Bool, a standard integer type or an enumeration. */
@@ -897,7 +921,10 @@ static int parser_is_bitfield_base_type(const cc_ctype_t *t) {
     }
 }
 
-/** Whether a bit-field of type @p t holds negative values (an enumeration's do not, here). */
+/**
+ * Whether a bit-field of type @p t holds negative values (a defined enumeration's are its integer type's, one
+ * not yet defined holds none).
+ */
 static int parser_bitfield_is_signed(const cc_ctype_t *t) {
     switch (t->unqual->kind) {
     case CC_CT_CHAR:
@@ -3673,26 +3700,30 @@ static int declspec_resolve(parser_t *p, declspec_acc_t *acc, int allow_void, co
     } else if (acc->seen_short) {
         acc->spec = cc_ct_basic(acc->seen_unsigned ? CC_CT_USHORT : CC_CT_SHORT);
     } else if (acc->seen_enum) {
-        if (!acc->enum_known_type) {
+        if (!acc->enum_known_type && acc->enum_defined) {
+            /*
+             * a defined enumeration is the integer type it is compatible
+             * with, as gcc has it: its size, its signedness, its promotion
+             * (`enum { A, B } e; e + 1` is unsigned int) and _Generic's and
+             * __builtin_types_compatible_p's view of it are that type's;
+             * the enumeration itself is kept for debug information
+             */
             int packed_enum = (out_attrs != NULL && (out_attrs->flags & CC_ATTR_PACKED) != 0);
-            if (packed_enum && acc->enum_has_values) {
-                acc->enum_ctype = cc_ct_basic(packed_enum_kind_from_range(acc->enum_min, acc->enum_max));
-            } else {
-                /* int-sized and wider enumerations are all the one enumerated type */
-                acc->enum_ctype = cc_ct_enum(-1);
+            long mode_bytes = out_attrs != NULL ? out_attrs->mode_bytes : 0;
+            cc_ctype_kind_t k = enum_compatible_kind(acc->enum_has_values ? acc->enum_min : 0,
+                                                     acc->enum_has_values ? acc->enum_max : 0, packed_enum,
+                                                     mode_bytes);
+
+            if (k == CC_CT_VOID) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "specified mode too small for enumerated values");
+                return -1;
             }
+            acc->enum_ctype = cc_ct_basic(k);
+        } else if (!acc->enum_known_type) {
+            /* an enumeration named before its definition, whose type is not known yet */
+            acc->enum_ctype = cc_ct_enum(-1);
         }
-        switch (acc->enum_ctype->kind) {
-        case CC_CT_INT:
-        case CC_CT_UINT:
-        case CC_CT_LLONG:
-        case CC_CT_ULLONG:
-            acc->spec = cc_ct_enum(-1);
-            break;
-        default:
-            acc->spec = acc->enum_ctype;
-            break;
-        }
+        acc->spec = acc->enum_ctype;
         if (acc->enum_defined && acc->enum_tag_pending != NULL && acc->enum_tag_pending_len > 0) {
             if (enum_tag_set(p, acc->enum_tag_pending, acc->enum_tag_pending_len, acc->spec, 1, acc->enum_def) != 0) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "out of memory tracking enum tag");
@@ -3745,6 +3776,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
         out_attrs->align = 0;
         out_attrs->section = NULL;
         out_attrs->alias = NULL;
+        out_attrs->mode_bytes = 0;
     }
 
     declspec_acc_init(&acc);
@@ -4177,6 +4209,7 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     a->vector_bytes = 0;
     a->vector_elems = 0;
     a->regparm = 0;
+    a->mode_bytes = 0;
     a->patchable = 0;
     a->patchable_before = 0;
 }
@@ -4202,6 +4235,7 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     a->vector_bytes = 0;
     a->vector_elems = 0;
     a->regparm = 0;
+    a->mode_bytes = 0;
     a->patchable = 0;
     a->patchable_before = 0;
 }
@@ -4243,6 +4277,9 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
     }
     if (src->regparm > 0) {
         dst->regparm = src->regparm;
+    }
+    if (src->mode_bytes > 0) {
+        dst->mode_bytes = src->mode_bytes;
     }
     if (src->patchable > 0) {
         dst->patchable = src->patchable;
@@ -5371,6 +5408,33 @@ static int parse_gnu_format_attr_arguments(parser_t *p, long *out_num, int *out_
     return next_tok(p);
 }
 
+/**
+ * The size of the integer machine mode the current token names, as the
+ * argument of gcc's `mode` attribute: QI or byte 1, HI 2, SI 4, DI 8, word
+ * and pointer the target's word, each also spelled with `__` around it.
+ *
+ * @param p  the parser, at the mode's identifier
+ * @return   the size in bytes, or 0 for any other mode
+ */
+static long gnu_int_mode_bytes(parser_t *p) {
+    if (tok_is_gnu_attr_name(p, "QI") || tok_is_gnu_attr_name(p, "byte")) {
+        return 1;
+    }
+    if (tok_is_gnu_attr_name(p, "HI")) {
+        return 2;
+    }
+    if (tok_is_gnu_attr_name(p, "SI")) {
+        return 4;
+    }
+    if (tok_is_gnu_attr_name(p, "DI")) {
+        return 8;
+    }
+    if (tok_is_gnu_attr_name(p, "word") || tok_is_gnu_attr_name(p, "pointer")) {
+        return cc_target_pointer_size();
+    }
+    return 0;
+}
+
 static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_aligned;
     int is_section;
@@ -5409,6 +5473,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_patchable;
     int is_no_stack_protector;
     int is_stack_protect;
+    long mode_bytes = 0;
     int has_num = 0;
     int has_num2 = 0;
     long num = 0;
@@ -5531,6 +5596,20 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
             out_attrs->cleanup_fn = fn;
         } else {
             free(fn);
+        }
+    } else if (is_mode && p->tok.kind == TOK_LPAREN) {
+        /* mode(m): an integer machine mode's size; any other mode is read and ignored */
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (p->tok.kind == TOK_IDENT) {
+            mode_bytes = gnu_int_mode_bytes(p);
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+        }
+        if (expect(p, TOK_RPAREN, "expected ')' after the mode attribute's mode") != 0) {
+            return -1;
         }
     } else if (is_aligned && p->tok.kind == TOK_LPAREN) {
         if (parse_gnu_const_attr_argument(p, &num, &has_num) != 0) {
@@ -5657,6 +5736,9 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         if (is_vector_size) {
             out_attrs->flags |= CC_ATTR_VECTOR_SIZE;
             out_attrs->vector_bytes = num;
+        }
+        if (mode_bytes > 0) {
+            out_attrs->mode_bytes = mode_bytes;
         }
         if (is_regparm) {
             /* i386: how many integer arguments go in %eax, %edx, %ecx; Linux's asmlinkage is regparm(0) */

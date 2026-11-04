@@ -5,8 +5,9 @@
  * Types as a declaration spelled them, for debug information.
  *
  * The compiler's own types (cc_ctype.h) are canonical: `u32` and
- * `unsigned int` are one node, and every enumerated type is the one
- * CC_CT_ENUM.  That is what C's type rules want, and what code generation
+ * `unsigned int` are one node, and an enumerated type is the integer type
+ * it is compatible with (one named before its definition the one
+ * CC_CT_ENUM).  That is what C's type rules want, and what code generation
  * needs; a debugger and pahole want more -- the typedef names and the
  * enumeration a declaration used, as gcc records them in DWARF.
  *
@@ -99,7 +100,8 @@ const cc_dtype_t *cc_dt_typedef(const char *name, const cc_dtype_t *of, long ali
  * An enumeration.
  *
  * @param def  its definition (cc_dt_enum_define())
- * @param ct   the canonical type it is (CC_CT_ENUM, or a packed one's integer type)
+ * @param ct   the canonical type it is: the integer type it is compatible with, or CC_CT_ENUM before its
+ *             definition
  * @return     the node, or NULL
  */
 const cc_dtype_t *cc_dt_enum(int def, const cc_ctype_t *ct);
