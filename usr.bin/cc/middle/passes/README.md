@@ -119,7 +119,11 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   register allocator's) and
   the copy of a body in place of a call (`cc_inline_calls()`; a call
   through a pointer inlining has made a function's address a call of
-  that function, `calli_target()`), which
+  that function, `calli_target()`; past the size no more is inlined
+  into, `CALLER_MAX_INSTRS`, an always_inline function no bigger than
+  max-inline-insns-single once a copy of it is folded with the call's
+  constants and the module's const tables, `bound_copy()` and
+  `cc_optimize_function_in()`, the copy in place of the body), which
   hands the caller the callee's `keep_syms` too: the static locals
   marked `used` that the object keeps while some function still holds
   them, whether or not its code names them.

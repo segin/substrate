@@ -3808,6 +3808,21 @@ int cc_optimize_function(cc_ssa_function_t *f, int opt_level) {
     return optimize_function(f, opt_level);
 }
 
+static int fold_module_facts(const cc_ssa_module_t *m, cc_ssa_function_t *f);
+
+int cc_optimize_function_in(const cc_ssa_module_t *m, cc_ssa_function_t *f, int opt_level) {
+    int rc = optimize_function(f, opt_level);
+
+    if (rc == 0 && opt_level > 0) {
+        /* (and its scalar locals made values, as the module's functions' are last: a parameter assigned to) */
+        rc = cc_promote_slots(f);
+        rc = rc > 0 ? optimize_function(f, opt_level) : rc;
+        rc = rc < 0 ? -1 : fold_module_facts(m, f);
+        rc = rc > 0 ? optimize_function(f, opt_level) : rc;
+    }
+    return rc < 0 ? -1 : 0;
+}
+
 /**
  * The module's functions by name, for the passes that look a callee up
  * at every call: a walk of them all was most of the inliner's time on a

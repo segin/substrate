@@ -88,7 +88,10 @@
  * its values are the register allocator's, and a few of them spilled.
  */
 #define INLINED_SPILL_BYTES 16
-/** No more is inlined into a function grown this large. */
+/**
+ * No more is inlined into a function grown this large, but an always_inline function no bigger than
+ * LOCAL_ARG_MAX_COST once its call's constants are folded into it (cc_inline_calls()).
+ */
 #define CALLER_MAX_INSTRS 60000
 
 /** The new instruction list of the caller being rewritten. */
@@ -890,53 +893,62 @@ static long find_function(const cc_ssa_module_t *m, const char *name) {
     return cc_ssa_module_function(m, name);
 }
 
+/** Free the code and values of @p h, a copy bound_copy() made; what it shares with its original stays. */
+static void bound_copy_free(cc_ssa_function_t *h) {
+    size_t i;
+
+    for (i = 0; i < h->instr_count; ++i) {
+        cc_ssa_instr_free(&h->instrs[i]);
+    }
+    free(h->instrs);
+    free(h->value_ty);
+    memset(h, 0, sizeof(*h));
+}
+
 /**
- * Whether @p g (inline_hint_too_big()), inlined for @p call, comes to no more than INLINE_MAX_COST and one for each
- * argument the call sets up, and to no more than half its own cost: a copy of it
- * with each parameter the call passes a constant (@p is_k, @p k, as find_constants() leaves them, over the
- * caller's first @p n values) made that constant, folded at @p opt_level as the inlined body would be.  gcc
- * weighs a call's constant arguments the same way: Linux's rol64() with a variable count is a dozen word
- * operations on i386, with a constant one shld.  No for a call passing no constant, or out of memory.
+ * Make @p h a copy of @p g with each parameter @p call passes a constant (@p is_k, @p k, as find_constants()
+ * leaves them, over the caller's first @p n values) made that constant, folded at @p opt_level as the inlined
+ * body would be -- with what module @p m declares too (its const tables), unless @p m is NULL.  The copy shares
+ * g's names and parameter arrays, which no pass changes, and owns its code and values (bound_copy_free()).
+ *
+ * @return 0, or -1 when the call passes no constant or out of memory (and @p h holds nothing)
  */
-static int hint_folds_to_small(const cc_ssa_function_t *g, const cc_ssa_instr_t *call, const unsigned char *is_k,
-                               const long long *k, int n, int opt_level) {
-    cc_ssa_function_t h;
+static int bound_copy(const cc_ssa_module_t *m, const cc_ssa_function_t *g, const cc_ssa_instr_t *call,
+                      const unsigned char *is_k, const long long *k, int n, int opt_level, cc_ssa_function_t *h) {
     int *vmap = NULL;
     size_t i;
     int bound = 0;
-    int small = 0;
 
+    memset(h, 0, sizeof(*h));
     for (i = 0; i < call->arg_count && !bound; ++i) {
         bound = call->args[i] >= 0 && call->args[i] < n && is_k[call->args[i]];
     }
     if (!bound) {
-        return 0;
+        return -1;
     }
-    /* the copy shares g's names and parameter arrays, which no pass changes, and owns its code and values */
-    memset(&h, 0, sizeof(h));
-    h.name = g->name;
-    h.ret_type = g->ret_type;
-    h.storage = g->storage;
-    h.attr_flags = g->attr_flags;
-    h.is_variadic = g->is_variadic;
-    h.param_count = g->param_count;
-    h.param_values = g->param_values;
-    h.param_types = g->param_types;
-    h.param_abi = g->param_abi;
-    h.ret_abi = g->ret_abi;
-    h.sret_reg = g->sret_reg;
-    h.value_count = g->value_count;
-    h.label_count = g->label_count;
-    h.value_cap = g->value_count > 0 ? (size_t)g->value_count : 1;
-    h.value_ty = (cc_ssa_type_t *)malloc(h.value_cap * sizeof(*h.value_ty));
-    h.instr_cap = g->instr_count > 0 ? g->instr_count : 1;
-    h.instrs = (cc_ssa_instr_t *)malloc(h.instr_cap * sizeof(*h.instrs));
-    vmap = (int *)malloc(h.value_cap * sizeof(*vmap));
-    if (h.value_ty == NULL || h.instrs == NULL || vmap == NULL) {
-        goto out;
+    h->name = g->name;
+    h->ret_type = g->ret_type;
+    h->storage = g->storage;
+    h->attr_flags = g->attr_flags;
+    h->is_variadic = g->is_variadic;
+    h->param_count = g->param_count;
+    h->param_values = g->param_values;
+    h->param_types = g->param_types;
+    h->param_abi = g->param_abi;
+    h->ret_abi = g->ret_abi;
+    h->sret_reg = g->sret_reg;
+    h->value_count = g->value_count;
+    h->label_count = g->label_count;
+    h->value_cap = g->value_count > 0 ? (size_t)g->value_count : 1;
+    h->value_ty = (cc_ssa_type_t *)malloc(h->value_cap * sizeof(*h->value_ty));
+    h->instr_cap = g->instr_count > 0 ? g->instr_count : 1;
+    h->instrs = (cc_ssa_instr_t *)malloc(h->instr_cap * sizeof(*h->instrs));
+    vmap = (int *)malloc(h->value_cap * sizeof(*vmap));
+    if (h->value_ty == NULL || h->instrs == NULL || vmap == NULL) {
+        goto fail;
     }
     if (g->value_count > 0) {
-        memcpy(h.value_ty, g->value_ty, (size_t)g->value_count * sizeof(*h.value_ty));
+        memcpy(h->value_ty, g->value_ty, (size_t)g->value_count * sizeof(*h->value_ty));
     }
     for (i = 0; i < (size_t)g->value_count; ++i) {
         vmap[i] = (int)i;
@@ -952,27 +964,47 @@ static int hint_folds_to_small(const cc_ssa_function_t *g, const cc_ssa_instr_t 
             c.dst = src->dst;
             c.imm = k[call->args[pi]];
             c.is_unsigned = cc_ssa_value_is_unsigned(g, src->dst);
-            h.instrs[h.instr_count++] = c;
-        } else if (clone_instr(src, vmap, 0, &h.instrs[h.instr_count]) == 0) {
-            h.instr_count++;
+            h->instrs[h->instr_count++] = c;
+        } else if (clone_instr(src, vmap, 0, &h->instrs[h->instr_count]) == 0) {
+            h->instr_count++;
         } else {
-            goto out;
+            goto fail;
         }
+    }
+    free(vmap);
+    if ((m != NULL ? cc_optimize_function_in(m, h, opt_level) : cc_optimize_function(h, opt_level)) != 0) {
+        bound_copy_free(h);
+        return -1;
+    }
+    return 0;
+fail:
+    free(vmap);
+    bound_copy_free(h);
+    return -1;
+}
+
+/**
+ * Whether @p g (inline_hint_too_big()), inlined for @p call, comes to no more than INLINE_MAX_COST and one for each
+ * argument the call sets up, and to no more than half its own cost: its copy with the call's constant arguments
+ * bound and folded (bound_copy()).  gcc weighs a call's constant arguments the same way: Linux's rol64() with a
+ * variable count is a dozen word operations on i386, with a constant one shld.  No for a call passing no
+ * constant, or out of memory.
+ */
+static int hint_folds_to_small(const cc_ssa_function_t *g, const cc_ssa_instr_t *call, const unsigned char *is_k,
+                               const long long *k, int n, int opt_level) {
+    cc_ssa_function_t h;
+    int small;
+
+    if (bound_copy(NULL, g, call, is_k, k, n, opt_level, &h) != 0) {
+        return 0;
     }
     /*
      * (the call's setting up of each argument is saved too) -- where the constants fold at least half the body
      * away: Linux's hid_map_usage_clear(), a call and a clear_bit() whatever its constants (17 to 16), copied into
      * its 237 calls in hidinput_configure_usage(), made hid-input.o twice gcc's
      */
-    small = cc_optimize_function(&h, opt_level) == 0 && body_cost(&h) <= INLINE_MAX_COST + call->arg_count &&
-            2 * body_cost(&h) <= body_cost(g);
-out:
-    for (i = 0; i < h.instr_count; ++i) {
-        cc_ssa_instr_free(&h.instrs[i]);
-    }
-    free(h.instrs);
-    free(h.value_ty);
-    free(vmap);
+    small = body_cost(&h) <= INLINE_MAX_COST + call->arg_count && 2 * body_cost(&h) <= body_cost(g);
+    bound_copy_free(&h);
     return small;
 }
 
@@ -1282,10 +1314,13 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
         int again_here = again; /* (a call made direct only now is weighed as a call seen for the first time) */
         long gi = -1;
         const cc_ssa_function_t *g;
+        cc_ssa_function_t folded; /* past CALLER_MAX_INSTRS: g with the call's constants bound, folded */
+        int past = out.count >= CALLER_MAX_INSTRS;
 
-        if (call->op == CC_SSA_CALL && call->sym != NULL && out.count < CALLER_MAX_INSTRS) {
+        memset(&folded, 0, sizeof(folded));
+        if (call->op == CC_SSA_CALL && call->sym != NULL) {
             gi = find_function(m, call->sym);
-        } else if (call->op == CC_SSA_CALLI && opt_level > 0 && out.count < CALLER_MAX_INSTRS) {
+        } else if (call->op == CC_SSA_CALLI && opt_level > 0 && !past) {
             /*
              * a call through a pointer that is a function's address: a call of that function, as gcc makes it
              * once the pointer is known -- an always_inline function of Linux's libeth passes its caller's
@@ -1313,16 +1348,56 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
         if (g != NULL && opt_level <= 0 && (g->attr_flags & CC_ATTR_ALWAYS_INLINE) == 0) {
             g = NULL;
         }
-        if (g != NULL && (size_t)gi != fi && ready[gi] &&
-            ((!again_here && cc_inline_candidate(g)) ||
-             (!again_here && once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&
-              frame_growth_ok(frame, grown + frame_cost(g))) ||
-             (!again_here && inline_hint_too_big(g) &&
-              hint_folds_to_small(g, call, is_const, consts, nk, opt_level)) ||
-             (takes_local_slot(g, call, local, nk) && frame_growth_ok(frame, grown + frame_cost(g)))) &&
-            call_site_inlinable(f, call, g)) {
-            grown += frame_cost(g);
-            if (splice_body(f, call, g, &out) != 0) {
+        if (g != NULL && past) {
+            /*
+             * Past CALLER_MAX_INSTRS only an always_inline function no bigger than gcc's max-inline-insns-single
+             * once the call's constants, with what the module declares, are folded into a copy of it -- the
+             * copy so folded inlined in place of the body -- and no more of a frame than gcc's limit lets the
+             * caller grow by: gcc inlines always_inline whatever the caller's size, folding each body as it
+             * goes, and Linux's kvm_initialize_cpu_caps() has hundreds of __feature_leaf(X86_FEATURE_*) and
+             * kvm_cpu_cap_set() calls, each a constant or a store once reverse_cpuid[] is read, whose
+             * BUILD_BUG_ON()s stayed calls of undefined __compiletime_assert_N past the limit.  A call passing
+             * no constant takes the body as it is, under the same limits.  Anything bigger stays a call, so the
+             * caller grows no further than it must.
+             */
+            int bound = 0;
+
+            if ((g->attr_flags & CC_ATTR_ALWAYS_INLINE) == 0 || again_here || opt_level <= 0 || (size_t)gi == fi ||
+                !ready[gi] || !cc_inline_candidate(g) || !call_site_inlinable(f, call, g)) {
+                g = NULL;
+            } else if ((bound = bound_copy(m, g, call, is_const, consts, nk, opt_level, &folded) == 0) &&
+                       (body_cost(&folded) > LOCAL_ARG_MAX_COST || !inline_body_ok(&folded, INLINE_MAX_INSTRS) ||
+                        (cc_ssa_memory_slot_bytes(&folded) != 0 &&
+                         !frame_growth_ok(frame, grown + cc_ssa_memory_slot_bytes(&folded))))) {
+                bound_copy_free(&folded);
+                g = NULL;
+            } else if (!bound && (body_cost(g) > LOCAL_ARG_MAX_COST ||
+                                  (cc_ssa_memory_slot_bytes(g) != 0 &&
+                                   !frame_growth_ok(frame, grown + cc_ssa_memory_slot_bytes(g))))) {
+                g = NULL;
+            }
+            past = bound ? 1 : 2; /* (1: the folded copy is inlined; 2: the body itself) */
+        }
+        if (g != NULL &&
+            (past ||
+             ((size_t)gi != fi && ready[gi] &&
+              ((!again_here && cc_inline_candidate(g)) ||
+               (!again_here && once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&
+                frame_growth_ok(frame, grown + frame_cost(g))) ||
+               (!again_here && inline_hint_too_big(g) &&
+                hint_folds_to_small(g, call, is_const, consts, nk, opt_level)) ||
+               (takes_local_slot(g, call, local, nk) && frame_growth_ok(frame, grown + frame_cost(g)))) &&
+              call_site_inlinable(f, call, g)))) {
+            int rc;
+
+            /* (past the limit what is inlined is reckoned by the slots it keeps alone: its values are the
+             * register allocator's) */
+            grown += past ? cc_ssa_memory_slot_bytes(past == 1 ? &folded : g) : frame_cost(g);
+            rc = splice_body(f, call, past == 1 ? &folded : g, &out);
+            if (past == 1) {
+                bound_copy_free(&folded);
+            }
+            if (rc != 0) {
                 break;
             }
             {

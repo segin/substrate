@@ -235,4 +235,17 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
  */
 int cc_optimize_function(cc_ssa_function_t *f, int opt_level);
 
+/**
+ * cc_optimize_function(), its scalar locals made values (cc_promote_slots()), and then the folding of what the
+ * declarations of module @p m tell -- loads from its const tables, compares of addresses, loops over constants
+ * -- and the function's passes again where that folded anything, as each function of the module is folded once
+ * its calls are inlined (passes/opt.c).
+ *
+ * @param m          the module whose declarations @p f may read; @p f need not be one of its functions
+ * @param f          the function, rewritten in place
+ * @param opt_level  the optimization level
+ * @return           0, or -1 when out of memory
+ */
+int cc_optimize_function_in(const cc_ssa_module_t *m, cc_ssa_function_t *f, int opt_level);
+
 #endif
