@@ -547,15 +547,17 @@ static int expr_lex_next(expr_lex_t *lx) {
     }
 }
 
-/* GNU as's four ranks of infix operator; -1 for what is not one. */
+/*
+ * GNU as's ranks of infix operator (gas's op_rank[]), -1 for what is not one.  Its manual puts + and -
+ * with the comparisons, but gas ranks them above: `5 != 7 - 2` is 0, the test of Linux's header.S that
+ * its two EFI entry points are 0x200 apart.
+ */
 static int expr_precedence(as_expr_op_t op) {
     switch (op) {
     case AS_EXPR_OP_LOR:
         return 1;
     case AS_EXPR_OP_LAND:
         return 2;
-    case AS_EXPR_OP_ADD:
-    case AS_EXPR_OP_SUB:
     case AS_EXPR_OP_EQ:
     case AS_EXPR_OP_NE:
     case AS_EXPR_OP_LT:
@@ -563,17 +565,20 @@ static int expr_precedence(as_expr_op_t op) {
     case AS_EXPR_OP_GT:
     case AS_EXPR_OP_GE:
         return 3;
+    case AS_EXPR_OP_ADD:
+    case AS_EXPR_OP_SUB:
+        return 4;
     case AS_EXPR_OP_OR:
     case AS_EXPR_OP_AND:
     case AS_EXPR_OP_XOR:
     case AS_EXPR_OP_ORNOT:
-        return 4;
+        return 5;
     case AS_EXPR_OP_MUL:
     case AS_EXPR_OP_DIV:
     case AS_EXPR_OP_MOD:
     case AS_EXPR_OP_SHL:
     case AS_EXPR_OP_SHR:
-        return 5;
+        return 6;
     default:
         return -1;
     }
