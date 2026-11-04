@@ -443,6 +443,16 @@ computed once before the loop, as with
 .Fl fmove-loop-invariants ;
 a division, a load from memory and floating-point arithmetic are not
 moved, as each may fail or differ where the loop would not have run.
+A read of a
+.Ic const
+object, neither
+.Ic volatile
+nor
+.Ic weak ,
+defined in the file with an initializer, at an offset known when
+compiling, is what the initializer puts there: an integer, or the
+address of a function, an object or a string literal, as with
+.Xr gcc 1 .
 A
 .Ic static
 function or object that nothing emitted refers to, once inlining and

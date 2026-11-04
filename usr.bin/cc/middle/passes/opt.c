@@ -4814,22 +4814,241 @@ static int literal_load(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, co
 }
 
 /**
+ * Whether @p sym is an address constant a function may name itself: a symbol's name, a C identifier, and
+ * perhaps a decimal offset after it (`p+8`, `p-4`) -- not a local label, a relocation operator or an
+ * expression of two symbols.
+ */
+static int plain_symbol_ref(const char *sym) {
+    size_t n;
+    const char *p;
+
+    if (sym == NULL || !(sym[0] == '_' || ((sym[0] | 0x20) >= 'a' && (sym[0] | 0x20) <= 'z'))) {
+        return 0;
+    }
+    for (n = 0; sym[n] == '_' || sym[n] == '$' || (sym[n] >= '0' && sym[n] <= '9') ||
+                ((sym[n] | 0x20) >= 'a' && (sym[n] | 0x20) <= 'z');
+         ++n) {
+    }
+    if (sym[n] == '\0') {
+        return 1;
+    }
+    if (sym[n] != '+' && sym[n] != '-') {
+        return 0;
+    }
+    p = sym + n + 1;
+    if (*p < '0' || *p > '9') {
+        return 0;
+    }
+    while (*p >= '0' && *p <= '9') {
+        p++;
+    }
+    return *p == '\0';
+}
+
+/**
+ * The address load @p in of @p f reads at offset @p off from the symbol @p sym, if a read-only global of
+ * @p m holds there an address its initializer gives (foldable_global()): a load of a pointer's size, of
+ * the whole of one item of the initializer -- the object itself, a member, an element -- that is a
+ * symbol's address, perhaps with an offset, or a string literal's.  gcc folds `static const char *const
+ * p = "..."` read in a function to the literal's address: the object, a pointer in .data.rel.ro, is then
+ * unreferenced, and its relocation gone (Linux's zstd in arch/x86/boot/compressed, a PIE that must have no
+ * dynamic relocations, read ERR_getErrorString()'s notErrorCode so).
+ *
+ * @param m    the module
+ * @param f    the function
+ * @param in   the load
+ * @param sym  the symbol it reads from
+ * @param off  the offset from it
+ * @param lit  receives 1 for a string literal's address, 0 for a symbol's
+ * @return     the symbol reference or the literal's text (the global's own, not to be freed), or NULL
+ */
+static const char *const_address_load(const cc_ssa_module_t *m, const cc_ssa_function_t *f, const cc_ssa_instr_t *in,
+                                      const char *sym, long long off, int *lit) {
+    long ptr = cc_target_pointer_size();
+    const cc_ssa_global_t *g;
+    const cc_ssa_global_init_item_t *it = NULL;
+    long sz;
+
+    if (in->op != CC_SSA_LOAD || in->seg != 0 || in->dst < 0 || in->dst >= f->value_count ||
+        cc_ssa_value_class(f, in->dst) != CC_VAL_I64 || f->value_ty[in->dst].kind != CC_TY_INT ||
+        in->imm != ptr || (long)cc_ssa_value_size(f, in->dst) != ptr) {
+        return NULL;
+    }
+    g = foldable_global(m, sym, sym_name_len(sym));
+    sz = g != NULL ? global_data_size(g) : 0;
+    if (sz <= 0 || off < 0 || off + ptr > sz) {
+        return NULL;
+    }
+    if (g->init_item_count > 0 && (g->init_items[0].init_size > 0 || g->init_items[0].init_is_zero_fill)) {
+        /* a stream of items, each of its own size: the one that starts at the offset */
+        long at = 0;
+        size_t j;
+
+        for (j = 0; j < g->init_item_count && at <= off; ++j) {
+            long size = g->init_items[j].init_size > 0 ? g->init_items[j].init_size : 1;
+
+            if (at == off && size == ptr) {
+                it = &g->init_items[j];
+                break;
+            }
+            at += size;
+        }
+    } else if (g->init_item_count > 0) {
+        /* an array of pointers, an item per element */
+        if (!g->is_array || g->data_kind != CC_SSA_DATA_POINTER || g->elem_size != ptr || off % ptr != 0 ||
+            off / ptr >= (long long)g->init_item_count) {
+            return NULL;
+        }
+        it = &g->init_items[off / ptr];
+    } else if (off == 0 && sz == ptr && !g->is_array) {
+        /* the object itself, a pointer */
+        if (g->init_is_string && g->init_str != NULL && g->data_kind == CC_SSA_DATA_POINTER) {
+            *lit = 1;
+            return g->init_str;
+        }
+        if (g->init_is_symbol && plain_symbol_ref(g->init_sym)) {
+            *lit = 0;
+            return g->init_sym;
+        }
+        return NULL;
+    }
+    if (it == NULL || it->init_is_zero_fill) {
+        return NULL;
+    }
+    if (it->init_is_string && it->init_str != NULL) {
+        *lit = 1;
+        return it->init_str;
+    }
+    if (it->init_is_symbol && plain_symbol_ref(it->init_sym)) {
+        *lit = 0;
+        return it->init_sym;
+    }
+    return NULL;
+}
+
+/** A load fold_const_loads() made a symbol's address, which an offset is still to be added to. */
+typedef struct {
+    size_t at;     /**< the instruction, now a GADDR */
+    int dst;       /**< the value the load defined, which the add is to define */
+    long long add; /**< the offset */
+} pending_add_t;
+
+/** The loads fold_const_loads() made so, in the order of their instructions. */
+typedef struct {
+    pending_add_t *at;
+    size_t count;
+    size_t cap;
+} pending_adds_t;
+
+/**
+ * Note that the GADDR instruction @p at of @p f is to have @p add added to it: it defines a new value now,
+ * and the add, made by add_offsets(), the one it defined.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int offset_after(pending_adds_t *p, cc_ssa_function_t *f, size_t at, long long add) {
+    int t;
+
+    if (p->count == p->cap) {
+        size_t ncap = p->cap == 0 ? 8 : p->cap * 2;
+        pending_add_t *next = (pending_add_t *)realloc(p->at, ncap * sizeof(*next));
+
+        if (next == NULL) {
+            return -1;
+        }
+        p->at = next;
+        p->cap = ncap;
+    }
+    t = cc_ssa_function_new_value(f, CC_VAL_I64);
+    if (t < 0) {
+        return -1;
+    }
+    cc_ssa_value_set_unsigned(f, t, 1);
+    p->at[p->count].at = at;
+    p->at[p->count].dst = f->instrs[at].dst;
+    p->at[p->count].add = add;
+    p->count++;
+    f->instrs[at].dst = t;
+    return 0;
+}
+
+/**
+ * Put after each instruction @p p notes the add of its offset: a constant, and the add that defines what
+ * the load defined.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int add_offsets(cc_ssa_function_t *f, const pending_adds_t *p) {
+    size_t cap = f->instr_count + 2 * p->count;
+    cc_ssa_instr_t *out = (cc_ssa_instr_t *)malloc(cap * sizeof(*out));
+    size_t i;
+    size_t j = 0;
+    size_t w = 0;
+
+    if (out == NULL) {
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        out[w++] = f->instrs[i];
+        if (j < p->count && p->at[j].at == i) {
+            const cc_ssa_instr_t *g = &f->instrs[i];
+            int c = cc_ssa_function_new_value(f, CC_VAL_I64);
+
+            if (c < 0) {
+                free(out); /* (its instructions are still f's) */
+                return -1;
+            }
+            memset(&out[w], 0, sizeof(out[w]));
+            out[w].op = CC_SSA_CONST;
+            out[w].dst = c;
+            out[w].lhs = -1;
+            out[w].rhs = -1;
+            out[w].imm = p->at[j].add;
+            out[w].dbg_line = g->dbg_line;
+            out[w].dbg_col = g->dbg_col;
+            out[w].dbg_file = g->dbg_file;
+            w++;
+            memset(&out[w], 0, sizeof(out[w]));
+            out[w].op = CC_SSA_ADD;
+            out[w].dst = p->at[j].dst;
+            out[w].lhs = g->dst;
+            out[w].rhs = c;
+            out[w].dbg_line = g->dbg_line;
+            out[w].dbg_col = g->dbg_col;
+            out[w].dbg_file = g->dbg_file;
+            w++;
+            j++;
+        }
+    }
+    free(f->instrs);
+    f->instrs = out;
+    f->instr_count = w;
+    f->instr_cap = cap;
+    return 0;
+}
+
+/**
  * Fold the loads of @p f from read-only globals of @p m at constant offsets to what their initializers
  * put there, as gcc does once inlining has made the offsets constant: Linux's reverse_cpuid_check(),
  * inlined with a constant leaf, has BUILD_BUG_ON(reverse_cpuid[x86_leaf].function == 0), whose call of
  * an undefined __compiletime_assert_N must go.  Only an integer load that reads bytes the initializer
  * gives, or zeros past it, wholly inside the object (foldable_global() says which objects); x86's byte
- * order, extended as the load extends them.  And a load from a string literal at a constant offset, as gcc
- * folds `"..."[k]`: Linux's printk wrappers in iwlwifi check BUILD_BUG_ON(fmt[sizeof(fmt) - 2] != '\n') of
- * their literal format, and left 2600 calls of undefined __compiletime_assert_N while the byte stayed a load.
+ * order, extended as the load extends them.  A load of an address the initializer gives there, a symbol's
+ * or a string literal's, is that address (const_address_load()).  And a load from a string literal at a
+ * constant offset, as gcc folds `"..."[k]`: Linux's printk wrappers in iwlwifi check
+ * BUILD_BUG_ON(fmt[sizeof(fmt) - 2] != '\n') of their literal format, and left 2600 calls of undefined
+ * __compiletime_assert_N while the byte stayed a load.
  *
  * @return 1 when a load was folded, 0 when none was, or -1 when out of memory
  */
 static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     long *def_at;
     const_state_t *k;
+    pending_adds_t adds;
     size_t i;
     int changed = 0;
+
+    memset(&adds, 0, sizeof(adds));
 
     if (f->value_count <= 0) {
         return 0;
@@ -4853,12 +5072,46 @@ static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
         const char *sym = NULL;
         long long off = 0;
         long long v = 0;
+        int at_sym;
 
         if (in->op != CC_SSA_LOAD || in->dst < 0 || in->dst >= f->value_count) {
             continue;
         }
-        if (!(symbol_address(f, def_at, k, in->lhs, &sym, &off, 0) && const_load(m, f, in, sym, off, &v)) &&
-            !(literal_address(f, def_at, k, in->lhs, &sym, &off, 0) && literal_load(f, in, sym, off, &v))) {
+        at_sym = symbol_address(f, def_at, k, in->lhs, &sym, &off, 0);
+        if (at_sym && !const_load(m, f, in, sym, off, &v)) {
+            int lit = 0;
+            const char *addr = const_address_load(m, f, in, sym, off, &lit);
+            size_t n = addr == NULL ? 0 : lit ? strlen(addr) : sym_name_len(addr);
+            char *text = addr != NULL ? (char *)malloc(n + 1) : NULL;
+            long long add = addr != NULL && !lit && addr[n] != '\0' ? strtoll(addr + n, NULL, 10) : 0;
+
+            if (addr == NULL) {
+                continue;
+            }
+            if (text == NULL || (add != 0 && offset_after(&adds, f, i, add) != 0)) {
+                free(text);
+                free(def_at);
+                free(k);
+                free(adds.at);
+                return -1;
+            }
+            /*
+             * the address itself: a literal's, or a symbol's -- the symbol alone, any offset an add after it
+             * (offset_after()), as lowering makes `&x[2]`: x86-64 reaches one bound outside the object
+             * through the GOT, whose entry is the symbol's
+             */
+            memcpy(text, addr, n);
+            text[n] = '\0';
+            free(in->sym);
+            in->op = lit ? CC_SSA_STR : CC_SSA_GADDR;
+            in->sym = text;
+            in->imm = 0;
+            in->lhs = -1;
+            in->rhs = -1;
+            changed = 1;
+            continue;
+        }
+        if (!at_sym && !(literal_address(f, def_at, k, in->lhs, &sym, &off, 0) && literal_load(f, in, sym, off, &v))) {
             continue;
         }
         in->op = CC_SSA_CONST;
@@ -4869,6 +5122,10 @@ static int fold_const_loads(const cc_ssa_module_t *m, cc_ssa_function_t *f) {
     }
     free(def_at);
     free(k);
+    if (adds.count > 0 && add_offsets(f, &adds) != 0) {
+        changed = -1;
+    }
+    free(adds.at);
     return changed;
 }
 
@@ -5273,6 +5530,18 @@ static int table_pointer_nonnull(const cc_ssa_module_t *m, const cc_ssa_function
 }
 
 /**
+ * Whether value @p v of @p f is the address of a string literal, at an offset from 0 to ADDR_OFF_MAX into it
+ * (literal_address()): not null.  fold_const_loads() makes a load of one from a const table, which
+ * table_pointer_nonnull() knew not null, the literal's address itself.
+ */
+static int literal_nonnull(const cc_ssa_function_t *f, const long *def_at, const const_state_t *k, int v) {
+    const char *lit = NULL;
+    long long off = 0;
+
+    return literal_address(f, def_at, k, v, &lit, &off, 0) && off >= 0 && off <= ADDR_OFF_MAX;
+}
+
+/**
  * Fold the compares of @p f between addresses whose relation is known, as gcc folds them: two constant offsets
  * from one object's address compare as the offsets do -- for an ordering, an unsigned compare of offsets from
  * 0 to ADDR_OFF_MAX, which no object's address can wrap past -- and the address of a stack slot, or of an
@@ -5346,6 +5615,10 @@ static int fold_address_compares(const cc_ssa_module_t *m, cc_ssa_function_t *f)
         } else if (eq && ((k[in->rhs].known && k[in->rhs].i == 0 && table_pointer_nonnull(m, f, def_at, k, in->lhs)) ||
                           (k[in->lhs].known && k[in->lhs].i == 0 && table_pointer_nonnull(m, f, def_at, k, in->rhs)))) {
             /* a pointer a const table holds, to an object or a function, against null */
+            out = in->cmp_kind == CC_CMP_NE;
+        } else if (eq && ((k[in->rhs].known && k[in->rhs].i == 0 && literal_nonnull(f, def_at, k, in->lhs)) ||
+                          (k[in->lhs].known && k[in->lhs].i == 0 && literal_nonnull(f, def_at, k, in->rhs)))) {
+            /* a string literal's address -- one a const table held, its load folded -- against null */
             out = in->cmp_kind == CC_CMP_NE;
         } else {
             continue;
