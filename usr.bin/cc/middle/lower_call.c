@@ -2667,6 +2667,9 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         memset(&call_in, 0, sizeof(call_in));
         call_in.op = CC_SSA_CALL;
         call_in.call_is_variadic = 0;
+        /* (no lhs or rhs: a 0 there names value 0, which inlining renames into a use of whatever it becomes) */
+        call_in.lhs = -1;
+        call_in.rhs = -1;
         call_in.dst = cc_ir_new_value(sf, CC_VAL_I64);
         call_in.arg_count = (bk == BUILTIN_MEMSET_CHK) ? 3 : 3;
         call_in.args = (int *)calloc(3, sizeof(*call_in.args));

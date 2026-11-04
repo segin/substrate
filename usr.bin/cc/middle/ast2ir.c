@@ -8469,6 +8469,9 @@ int emit_memcpy_instr(cc_ssa_function_t *sf, int dst_ptr, int src_ptr, long size
     call_in.op = CC_SSA_CALL;
     call_in.call_is_variadic = 0;
     call_in.sym = cc_strdup("memcpy");
+    /* (no lhs or rhs: a 0 there names value 0, which inlining renames into a use of whatever it becomes) */
+    call_in.lhs = -1;
+    call_in.rhs = -1;
     call_in.arg_count = 3;
     call_in.args = (int *)calloc(3, sizeof(*call_in.args));
     call_in.dst = cc_ir_new_value(sf, CC_VAL_I64);
@@ -8512,6 +8515,8 @@ static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, 
     call_in.op = CC_SSA_CALL;
     call_in.call_is_variadic = 0;
     call_in.sym = cc_strdup("memset");
+    call_in.lhs = -1;
+    call_in.rhs = -1;
     call_in.arg_count = 3;
     call_in.args = (int *)calloc(3, sizeof(*call_in.args));
     call_in.dst = cc_ir_new_value(sf, CC_VAL_I64);

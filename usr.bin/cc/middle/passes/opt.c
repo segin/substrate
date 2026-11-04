@@ -1902,6 +1902,26 @@ static int unreachable_function(cc_ssa_function_t *f) {
 
 static void mark_uses(const cc_ssa_instr_t *in, int *uses) {
     size_t i;
+
+    switch (in->op) {
+    case CC_SSA_CONST:
+    case CC_SSA_STR:
+    case CC_SSA_GADDR:
+    case CC_SSA_LADDR:
+    case CC_SSA_STACKALLOC:
+    case CC_SSA_CHAIN:
+    case CC_SSA_FRAMEADDR:
+    case CC_SSA_REGREAD:
+    case CC_SSA_LABEL:
+    case CC_SSA_BR:
+        /*
+         * no value operands, whatever their fields hold (lowering leaves 0 in some, which inlining renames);
+         * a PARAM's lhs is one: a structure in registers, the storage lowering gave it
+         */
+        return;
+    default:
+        break;
+    }
     if (in->lhs >= 0) {
         uses[in->lhs]++;
     }
