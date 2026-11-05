@@ -222,7 +222,12 @@ go to one output section of their name for each output section they are
 ordered by, its
 .Va sh_link
 that section, as GNU ld makes them; so they do in a program too, unless a
-script gathers them under a name of its own.
+script statement places them, under their name or another
+(Linux's module script's
+.Ql __patchable_function_entries : { *(__patchable_function_entries) } ) :
+that gathers them into one output section, its
+.Va sh_link
+the section the first is ordered by.
 .It Fl shared
 Produce a shared object: no entry is needed, what it leaves undefined is
 for the program that loads it to supply, and it is not made executable.

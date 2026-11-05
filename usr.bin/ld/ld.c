@@ -389,6 +389,10 @@ static int phase_merge(ld_link_t *l) {
     }
     if (err == ELF_OK && ctx->script != NULL && ctx->script->has_sections) {
         err = elf_link_plan_set_section_name_hook(plan, script_output_name, ctx->script);
+        /* a statement gathers the sections ordered by others it places into one (__patchable_function_entries) */
+        if (err == ELF_OK) {
+            err = elf_link_plan_set_section_gathered_hook(plan, script_places, ctx->script);
+        }
         /* in each output section, the order of the script's input descriptions */
         if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
             err = elf_link_plan_set_section_rank_hooks(plan, script_input_rank, script_rank_gap, ctx);

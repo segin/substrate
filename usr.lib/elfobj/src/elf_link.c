@@ -767,42 +767,65 @@ static const char *output_section_name(const elf_link_plan_t *plan,
         return src->name;
     }
     if (src->index < input->out_name_count && input->obj->sections[src->index] == src &&
-        input->out_name_asked[src->index]) {
+        (input->out_name_asked[src->index] & OUT_NAME_ASKED) != 0) {
         return input->out_names[src->index];
     }
     name = plan->section_name_hook(src->name, input->name, plan->section_name_user);
     if (src->index < input->out_name_count && input->obj->sections[src->index] == src) {
         input->out_names[src->index] = name;
-        input->out_name_asked[src->index] = 1;
+        input->out_name_asked[src->index] |= OUT_NAME_ASKED;
     }
     return name;
 }
 
 /**
+ * @brief Whether a script statement places input section @p src (the plan's gathered hook), asked once
+ * for each section as output_section_name() asks its hook.
+ *
+ * @param plan  the link
+ * @param input the input @p src is of
+ * @param src   the input section
+ * @return nonzero if one does; 0 with no hook
+ */
+static int section_gathered(const elf_link_plan_t *plan, const struct elf_link_input *input,
+                            const struct elf_section *src) {
+    int cached = src->index < input->out_name_count && input->obj->sections[src->index] == src;
+    int gathered;
+
+    if (plan->gathered_hook == NULL) {
+        return 0;
+    }
+    if (cached && (input->out_name_asked[src->index] & OUT_GATHERED_ASKED) != 0) {
+        return (input->out_name_asked[src->index] & OUT_GATHERED) != 0;
+    }
+    gathered = plan->gathered_hook(src->name, input->name, plan->gathered_user) != 0;
+    if (cached) {
+        input->out_name_asked[src->index] |= OUT_GATHERED_ASKED | (gathered ? OUT_GATHERED : 0);
+    }
+    return gathered;
+}
+
+/**
  * @brief The output section an input section ordered by another (SHF_LINK_ORDER) is ordered by.
  *
- * GNU ld keeps one output section of such a name for each output section the inputs are ordered by
- * (gcc's __patchable_function_entries, one for each function's section), its sh_link that one, unless a
- * script gathers them under a name of its own.  This is the output section @p src's own one went to.
+ * This is the output section @p src's own one went to (see ordered_output()).
  *
  * @param plan  the link
  * @param out   the output
  * @param input the input @p src is of
  * @param src   the input section
- * @return that output section, or NULL when @p src is not so ordered, is renamed, or its own is not merged
+ * @return that output section, or NULL when @p src is not so ordered, is left out, or its own is not merged
  */
 static struct elf_section *link_order_target(const elf_link_plan_t *plan, elfobj_t *out,
                                              const struct elf_link_input *input, const struct elf_section *src) {
     const struct elf_section *to;
-    const char *name;
     const char *to_name;
 
     if ((src->flags & SHF_LINK_ORDER) == 0 || src->link == 0 || src->link >= input->obj->section_count) {
         return NULL;
     }
-    name = output_section_name(plan, input, src);
     to = input->obj->sections[src->link];
-    if (name == NULL || strcmp(name, src->name) != 0 || to == NULL || to == src || to->name == NULL) {
+    if (output_section_name(plan, input, src) == NULL || to == NULL || to == src || to->name == NULL) {
         return NULL;
     }
     to_name = output_section_name(plan, input, to);
@@ -829,6 +852,35 @@ static struct elf_section *find_ordered_output(elfobj_t *out, const char *name, 
     return NULL;
 }
 
+/**
+ * @brief The output section named @p name that input section @p src goes to, as GNU ld picks it.
+ *
+ * Input sections ordered by another (SHF_LINK_ORDER) and left to their own name -- orphans, or every
+ * one with no script -- make one output section of the name for each output section they are ordered
+ * by (gcc's __patchable_function_entries, one for each function's section), its sh_link that one.  A
+ * script statement that places them, under their name or another (Linux's module.lds,
+ * `__patchable_function_entries : { *(__patchable_function_entries) }`), gathers them into one, its
+ * sh_link the first one's.
+ *
+ * @param plan     the link
+ * @param out      the output
+ * @param input    the input @p src is of
+ * @param src      the input section
+ * @param name     its output section's name
+ * @param order_to receives the output section @p src is ordered by, NULL if none: the sh_link of an
+ *                 output section made for it
+ * @return that output section, or NULL when there is none yet
+ */
+static struct elf_section *ordered_output(const elf_link_plan_t *plan, elfobj_t *out,
+                                          const struct elf_link_input *input, const struct elf_section *src,
+                                          const char *name, struct elf_section **order_to) {
+    *order_to = link_order_target(plan, out, input, src);
+    if (*order_to == NULL || strcmp(name, src->name) != 0 || section_gathered(plan, input, src)) {
+        return elf_find_section(out, name);
+    }
+    return find_ordered_output(out, name, *order_to);
+}
+
 /* The output section an input section was merged into, if it was. */
 static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj_t *out,
                                              const struct elf_link_input *input,
@@ -839,11 +891,7 @@ static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj
     if (name == NULL) {
         return NULL;
     }
-    to = link_order_target(plan, out, input, src);
-    if (to != NULL) {
-        return find_ordered_output(out, name, to);
-    }
-    return elf_find_section(out, name);
+    return ordered_output(plan, out, input, src, name, &to);
 }
 
 /**
@@ -1159,8 +1207,7 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
         if (plan->x86_note_merged && src->type == SHT_NOTE && strcmp(src->name, ".note.gnu.property") == 0) {
             return place_x86_note(plan, out, out_name, j, sec_bases, sec_included);
         }
-        order_to = link_order_target(plan, out, input, src);
-        dst = order_to != NULL ? find_ordered_output(out, out_name, order_to) : elf_find_section(out, out_name);
+        dst = ordered_output(plan, out, input, src, out_name, &order_to);
         if (dst != NULL && plan->section_merge_hook != NULL) {
             action = plan->section_merge_hook(out_name, dst, src, plan->section_merge_user);
         }
@@ -2232,6 +2279,16 @@ elf_err_t elf_link_plan_set_section_name_hook(elf_link_plan_t *plan,
     }
     plan->section_name_hook = hook;
     plan->section_name_user = user;
+    return ELF_OK;
+}
+
+elf_err_t elf_link_plan_set_section_gathered_hook(elf_link_plan_t *plan, elf_link_section_gathered_hook_t hook,
+                                                  void *user) {
+    if (plan == NULL) {
+        return ELF_ERR_STATE;
+    }
+    plan->gathered_hook = hook;
+    plan->gathered_user = user;
     return ELF_OK;
 }
 

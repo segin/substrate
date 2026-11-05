@@ -1,0 +1,67 @@
+.Dd November 5, 2026
+.Dt ELF_LINK_PLAN_SET_SECTION_GATHERED_HOOK 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_set_section_gathered_hook
+.Nd say which input sections a linker script's statements place
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_set_section_gathered_hook "elf_link_plan_t *plan" "elf_link_section_gathered_hook_t hook" "void *user"
+.Sh DESCRIPTION
+Installs
+.Fa hook ,
+called with an input section's name, its input's name and
+.Fa user ,
+to say whether a statement of a linker script places that section (nonzero)
+or it is an orphan (zero).
+.Pp
+It matters for input sections ordered by another
+.Pq Dv SHF_LINK_ORDER ,
+such as gcc's
+.Pa __patchable_function_entries .
+Those of one name that keep it and are placed by no statement go to one
+output section for each output section they are ordered by, its
+.Va sh_link
+that section; those a statement places, or renames through the section
+name hook, are gathered into one output section, its
+.Va sh_link
+the section the first is ordered by.
+This is what GNU ld does.
+With no hook, every section that keeps its name is taken as an orphan.
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, otherwise
+.Dv ELF_ERR_STATE
+for a NULL
+.Fa plan .
+.Sh EXAMPLES
+Gather every section ordered by another, as a script placing all of them
+would.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+static int
+placed(const char *section, const char *input, void *user)
+{
+    (void)section; (void)input; (void)user;
+    return 1;
+}
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+
+    elf_link_plan_set_section_gathered_hook(plan, placed, NULL);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elf_link 3 ,
+.Xr elf_link_plan_set_section_merge_hook 3 ,
+.Xr ld 1

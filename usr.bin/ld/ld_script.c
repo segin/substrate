@@ -3181,6 +3181,8 @@ lds_script_t *lds_script_parse(const char *path, const ld_ctx_t *ctx) {
  *
  * script_output_name()     as the inputs are merged: the output section
  *                          an input section belongs to
+ * script_places()          as well: whether a statement places it, which
+ *                          gathers sections ordered by others into one
  * script_declare_symbols() before symbols are resolved: the names the
  *                          script will define exist
  * script_apply_sections()  once the output's sections exist: discard,
@@ -3258,6 +3260,19 @@ const char *script_output_name(const char *section, const char *file, void *user
         return sc->discard_orphans ? NULL : section;
     }
     return os->discard ? NULL : os->at.text;
+}
+
+/**
+ * @brief The elfobj hook: whether a statement of the script places input section @p section of
+ * @p file, as against its being an orphan.
+ *
+ * @param section the input section's name
+ * @param file    its input's name
+ * @param user    the script
+ * @return nonzero if one does
+ */
+int script_places(const char *section, const char *file, void *user) {
+    return script_taker((const lds_script_t *)user, section, file) != NULL;
 }
 
 /**

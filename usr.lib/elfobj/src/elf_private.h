@@ -257,12 +257,18 @@ struct elf_link_input {
     /* The output section each of obj's sections goes to, as the section name
      * hook said it the first time it was asked (output_section_name()): the
      * merge asks again for each relocation, and a script's hook matches the
-     * section against every pattern of the script.  out_name_asked[i] is 1
-     * once out_names[i] holds the answer (NULL: left out). */
+     * section against every pattern of the script.  out_name_asked[i] has
+     * OUT_NAME_ASKED once out_names[i] holds the answer (NULL: left out), and
+     * OUT_GATHERED_ASKED once the gathered hook's answer is OUT_GATHERED's. */
     const char **out_names;
     uint8_t *out_name_asked;
     size_t out_name_count;
 };
+
+/* elf_link_input.out_name_asked: what has been asked of the plan's hooks for a section, and an answer */
+#define OUT_NAME_ASKED 0x1u     /* the section name hook */
+#define OUT_GATHERED_ASKED 0x2u /* the gathered hook */
+#define OUT_GATHERED 0x4u       /* its answer: a script statement places the section */
 
 struct elf_link_map_entry_rec {
     char *symbol_name;
@@ -289,6 +295,8 @@ struct elf_link_plan {
     void *section_merge_user;
     elf_link_section_name_hook_t section_name_hook;
     void *section_name_user;
+    elf_link_section_gathered_hook_t gathered_hook; /* whether a script statement places a section */
+    void *gathered_user;
     elf_link_section_rank_hook_t rank_hook;
     elf_link_section_gap_hook_t gap_hook;
     void *rank_user;

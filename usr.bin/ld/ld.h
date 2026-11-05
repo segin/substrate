@@ -866,6 +866,7 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx);
 void lds_script_free(lds_script_t *sc);
 lds_script_t *lds_script_parse(const char *path, const ld_ctx_t *ctx);
 const char *script_output_name(const char *section, const char *file, void *user);
+int script_places(const char *section, const char *file, void *user);
 int script_keeps_input(const lds_script_t *sc, const char *section, const char *file);
 int script_check_orphans(ld_ctx_t *ctx, const objvec_t *inputs);
 int script_say_orphans(ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out);

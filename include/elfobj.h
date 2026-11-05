@@ -1329,6 +1329,9 @@ typedef elf_link_merge_action_t (*elf_link_section_merge_hook_t)(
  * its own name and its input's; NULL leaves the section out. */
 typedef const char *(*elf_link_section_name_hook_t)(
     const char *section_name, const char *input_name, void *user);
+/* Whether a linker script's statement places an input section, given its
+ * name and its input's (an orphan is placed by none). */
+typedef int (*elf_link_section_gathered_hook_t)(const char *section_name, const char *input_name, void *user);
 /* Where an input section goes among the others of its output section: a
  * rank (a linker script's input description's place in the section's
  * body); sections go in by rank, and in input order within one unless the
@@ -1526,6 +1529,18 @@ elf_err_t elf_link_plan_set_section_merge_hook(elf_link_plan_t *plan,
 elf_err_t elf_link_plan_set_section_name_hook(elf_link_plan_t *plan,
                                               elf_link_section_name_hook_t hook,
                                               void *user);
+/**
+ * @brief Which input sections a linker script's statement places, for the sections ordered by another
+ * (SHF_LINK_ORDER): a statement gathers those of a name into one output section, where an orphan's make
+ * one for each output section they are ordered by, as in GNU ld.
+ *
+ * @param plan the link
+ * @param hook whether a statement places a section, or NULL for none (no script)
+ * @param user passed to @p hook
+ * @return ELF_OK, or ELF_ERR_STATE for no plan
+ */
+elf_err_t elf_link_plan_set_section_gathered_hook(elf_link_plan_t *plan, elf_link_section_gathered_hook_t hook,
+                                                  void *user);
 /**
  * @brief Whether the link merges SHF_MERGE sections, as GNU ld does in a program or shared object.
  *
