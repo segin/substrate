@@ -250,6 +250,14 @@ struct elfobj {
 struct elf_link_input {
     elfobj_t *obj;
     char *name;
+    /* The output section each of obj's sections goes to, as the section name
+     * hook said it the first time it was asked (output_section_name()): the
+     * merge asks again for each relocation, and a script's hook matches the
+     * section against every pattern of the script.  out_name_asked[i] is 1
+     * once out_names[i] holds the answer (NULL: left out). */
+    const char **out_names;
+    uint8_t *out_name_asked;
+    size_t out_name_count;
 };
 
 struct elf_link_map_entry_rec {

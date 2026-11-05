@@ -160,7 +160,7 @@ A relocatable output has one section symbol for each of its sections that a relo
 
 ## 5. External Integrations / APIs
 
-`libelfobj`: The linker relies on `usr.lib/elfobj` for ELF parsing, mutation, relocation application, and final write-out.
+`libelfobj`: The linker relies on `usr.lib/elfobj` for ELF parsing, mutation, relocation application, and final write-out. The script's answer to which output section an input section goes to (`script_output_name()`, the plan's section name hook) is asked once for each input section and kept (`elf_link_input.out_names`): the merge asks it for each relocation, and matching each of Linux's millions against the kernel script's patterns was nine tenths of a link of vmlinux, 25 minutes of each of the build's three (86 seconds now) (`tests/usr.lib/elfobj/test_link_name_hook_once.c`).
 
 `cc`: The compiler driver shells out to `ld` during full compilation/link workflows and resolves the sibling in-tree linker before PATH fallbacks.
 

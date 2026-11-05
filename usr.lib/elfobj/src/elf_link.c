@@ -645,6 +645,14 @@ static elf_err_t plan_push_input(elf_link_plan_t *plan, elfobj_t *obj, const cha
     if (in->name == NULL) {
         return ELF_ERR_OOM;
     }
+    if (obj->section_count != 0) {
+        in->out_names = (const char **)calloc(obj->section_count, sizeof(*in->out_names));
+        in->out_name_asked = (uint8_t *)calloc(obj->section_count, 1);
+        if (in->out_names == NULL || in->out_name_asked == NULL) {
+            return ELF_ERR_OOM;
+        }
+        in->out_name_count = obj->section_count;
+    }
     return ELF_OK;
 }
 
@@ -744,15 +752,30 @@ static elf_err_t inflate_input_section(elfobj_t *out,
 /*
  * The name of the output section an input section goes to: its own, unless
  * the caller has said otherwise (a linker script's SECTIONS does).  NULL:
- * it is left out of the output.
+ * it is left out of the output.  The hook is asked once for each input
+ * section (elf_link_input.out_names): the merge asks for each relocation,
+ * and Linux's vmlinux.o has millions, each of which matched its section
+ * against every pattern of the kernel's script -- nine tenths of a link of
+ * vmlinux.
  */
 static const char *output_section_name(const elf_link_plan_t *plan,
                                        const struct elf_link_input *input,
                                        const struct elf_section *src) {
+    const char *name;
+
     if (plan->section_name_hook == NULL) {
         return src->name;
     }
-    return plan->section_name_hook(src->name, input->name, plan->section_name_user);
+    if (src->index < input->out_name_count && input->obj->sections[src->index] == src &&
+        input->out_name_asked[src->index]) {
+        return input->out_names[src->index];
+    }
+    name = plan->section_name_hook(src->name, input->name, plan->section_name_user);
+    if (src->index < input->out_name_count && input->obj->sections[src->index] == src) {
+        input->out_names[src->index] = name;
+        input->out_name_asked[src->index] = 1;
+    }
+    return name;
 }
 
 /**
@@ -1804,6 +1827,8 @@ void elf_link_plan_destroy(elf_link_plan_t *plan) {
     }
     for (i = 0; i < plan->input_count; ++i) {
         free(plan->inputs[i].name);
+        free(plan->inputs[i].out_names);
+        free(plan->inputs[i].out_name_asked);
     }
     free(plan->inputs);
     free_map_entries(plan);
