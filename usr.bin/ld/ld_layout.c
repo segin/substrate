@@ -707,8 +707,9 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 return -1;
             }
         }
+        /* (a script's layout has one only if the script puts its end on a page, as GNU ld has it) */
         if (ctx->opt.z_relro && is_alloc && (flags & SHF_WRITE) != 0 &&
-            is_relro_candidate_name(name)) {
+            is_relro_candidate_name(name) && (!script_layout || script_has_relro_end(ctx->script))) {
             if (relro_seg == NULL) {
                 relro_seg = elf_add_segment(obj, PT_GNU_RELRO, LD_PF_R, 1);
                 if (relro_seg == NULL) {

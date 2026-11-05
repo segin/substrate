@@ -549,6 +549,13 @@ is laid out together on pages of its own, ahead of the data the program
 writes, and
 .Dv PT_GNU_RELRO
 covers those pages whole.
+A script's
+.Ic SECTIONS
+lays them out instead, and the output has a
+.Dv PT_GNU_RELRO
+only if the script says where they end
+.Pq Ic DATA_SEGMENT_RELRO_END ,
+as GNU ld has it.
 Substrate's dynamic linker makes them read-only in the libraries it
 loads, not in the program the kernel loaded.
 .Cm now
@@ -895,8 +902,20 @@ the input sections are not yet put in the order of the descriptions, so
 .Dq first
 is the first merged.
 An input section nothing asks for keeps its own name, and is placed where
-the default layout would have put it among the sections the script names,
-on a page of its own when it is protected unlike the section before it.
+the default layout would have put it among the sections the script names.
+A section the linker makes itself that the script places nowhere
+.Pq the dynamic tables, Pa .interp , No the PLT and GOT and their relocations
+is placed as GNU ld places it: in the order GNU ld makes them, each
+after the one before it of its kind, the first of a kind after the
+output section named for the kind
+.Pq Pa .text , Pa .rodata , Pa .data , Pa .bss , Pa .rel.dyn , Pa .interp
+or else after the last one with the kind's protection, one of its own
+ELF type first: the read-only tables and their relocations after the
+code and read-only data,
+.Pa .dynamic
+and the GOT after the writable data.
+Neither is put on a page of its own; like the sections the script names,
+each is at the location counter.
 .It Ic PHDRS
 The program headers of the output.
 A section goes in the headers named after its output section, and one

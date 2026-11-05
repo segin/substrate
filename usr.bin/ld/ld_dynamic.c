@@ -1937,7 +1937,8 @@ static int plan_dynamic_tables(ld_ctx_t *ctx, elfobj_t *out) {
                 return -1;
             }
         }
-        if (elf_section_set_align(hash_sec, 4) != ELF_OK) {
+        /* (its words are 4 bytes, but GNU ld aligns it as a pointer, and what follows it is placed after) */
+        if (elf_section_set_align(hash_sec, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
             return -1;
         }
     }

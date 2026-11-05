@@ -3361,6 +3361,17 @@ static int say_orphan(ld_ctx_t *ctx, const char *section, const char *file) {
     return ld_warn(ctx, "orphan section `%s' from `%s' being placed in section `%s'", section, file, section) != 0;
 }
 
+/*
+ * The sections the linker makes itself, in the order GNU ld makes them in the first input (and so says
+ * and places them as orphans).
+ */
+static const char *const made_sections[] = { ".interp",    ".note.gnu.build-id", ".gnu.version_d", ".gnu.version",
+                                             ".gnu.version_r", ".dynsym",       ".dynstr",        ".dynamic",
+                                             ".hash",      ".gnu.hash",          ".plt",           ".rel.plt",
+                                             ".rela.plt",  ".got",               ".got.plt",       ".rel.dyn",
+                                             ".rela.dyn",  ".iplt",              ".eh_frame_hdr" };
+#define MADE_SECTION_COUNT (sizeof(made_sections) / sizeof(made_sections[0]))
+
 /**
  * @brief Whether input section @p name is among the orphans script_check_orphans() found: an output
  * section of that name is theirs, not one the linker made.
@@ -3392,11 +3403,7 @@ static int noted_orphan(const ld_ctx_t *ctx, const char *name) {
  * @return 0, or 1 to stop the link
  */
 int script_say_orphans(ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
-    static const char *const made[] = { ".interp",    ".note.gnu.build-id", ".gnu.version_d", ".gnu.version",
-                                        ".gnu.version_r", ".dynsym",       ".dynstr",        ".dynamic",
-                                        ".hash",      ".gnu.hash",          ".plt",           ".rel.plt",
-                                        ".rela.plt",  ".got",               ".got.plt",       ".rel.dyn",
-                                        ".rela.dyn",  ".iplt",              ".eh_frame_hdr" };
+    const char *const *made = made_sections;
     const lds_script_t *sc = ctx->script;
     ld_orphan_mode_t mode = ctx->opt.orphan_handling;
     size_t first = inputs->count;   /* the first input: GNU ld's sections are its */
@@ -3416,7 +3423,7 @@ int script_say_orphans(ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
     for (i = 0; i < ctx->orphan_count && ctx->orphans[i].input == first; ++i) {
         failed |= say_orphan(ctx, ctx->orphans[i].section, first_name);
     }
-    for (m = 0; out != NULL && m < sizeof(made) / sizeof(made[0]); ++m) {
+    for (m = 0; out != NULL && m < MADE_SECTION_COUNT; ++m) {
         if (elf_find_section(out, made[m]) != NULL && !noted_orphan(ctx, made[m]) &&
             script_taker(sc, made[m], first_name) == NULL) {
             failed |= say_orphan(ctx, made[m], first_name);
@@ -3960,6 +3967,189 @@ int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out) {
  *
  * @return 0, or -1 on error
  */
+/** @brief Whether one of @p v's statements, or of their bodies, names DATA_SEGMENT_RELRO_END in an expression. */
+static int stmts_name_relro_end(const lds_stmtvec_t *v) {
+    size_t i, t;
+
+    for (i = 0; i < v->count; ++i) {
+        const lds_stmt_t *st = &v->items[i];
+        const lds_tokvec_t *e[3] = { &st->expr, &st->align, &st->lma };
+        size_t k;
+
+        for (k = 0; k < 3; ++k) {
+            for (t = 0; t < e[k]->count; ++t) {
+                if (e[k]->items[t].kind == LDS_TOK_IDENT && e[k]->items[t].text != NULL &&
+                    strcmp(e[k]->items[t].text, "DATA_SEGMENT_RELRO_END") == 0) {
+                    return 1;
+                }
+            }
+        }
+        if (st->kind == LDS_ST_OUTSEC && stmts_name_relro_end(&st->body)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Whether script @p sc says where the sections read-only after relocation end
+ * (DATA_SEGMENT_RELRO_END): GNU ld makes a PT_GNU_RELRO for a script's layout only then, since only
+ * then does the script put that end on a page.
+ */
+int script_has_relro_end(const lds_script_t *sc) {
+    return sc != NULL && stmts_name_relro_end(&sc->stmts);
+}
+
+/** What GNU ld's orphan placement takes an orphan section for (ldelf_place_orphan()'s hold[]). */
+typedef enum {
+    ORPHAN_INTERP,
+    ORPHAN_REL,
+    ORPHAN_RODATA,
+    ORPHAN_TEXT,
+    ORPHAN_DATA,
+    ORPHAN_BSS,
+    ORPHAN_KINDS
+} orphan_kind_t;
+
+/**
+ * @brief What @p sec, an allocated orphan, is taken for: its code, its read-only data (the dynamic
+ * linker's tables among it), its dynamic relocations, its writable data, its zeroed data; or -1
+ * for one that is not allocated or is thread-local, which the linker does not make.
+ */
+static int orphan_kind(const elf_section_t *sec, const char *name) {
+    uint64_t flags = elf_section_flags(sec);
+    uint32_t type = elf_section_type(sec);
+
+    if ((flags & SHF_ALLOC) == 0 || (flags & SHF_TLS) != 0) {
+        return -1;
+    }
+    if (strcmp(name, ".interp") == 0) {
+        return ORPHAN_INTERP;
+    }
+    if (type == SHT_REL || type == SHT_RELA) {
+        return ORPHAN_REL;
+    }
+    if ((flags & SHF_EXECINSTR) != 0) {
+        return ORPHAN_TEXT;
+    }
+    if (type == SHT_NOBITS) {
+        return ORPHAN_BSS;
+    }
+    return (flags & SHF_WRITE) != 0 ? ORPHAN_DATA : ORPHAN_RODATA;
+}
+
+/**
+ * @brief Whether output section @p cand has the flags GNU ld looks for after which to put an orphan
+ * of kind @p kind when no section has the kind's name (lang_output_section_find_by_flags()): code
+ * after code; read-only data and relocations after anything allocated and read-only, code too;
+ * writable data after writable data; zeroed after zeroed.
+ */
+static int orphan_follows(orphan_kind_t kind, const elf_section_t *cand) {
+    uint64_t flags = elf_section_flags(cand);
+    int nobits = elf_section_type(cand) == SHT_NOBITS;
+
+    if ((flags & SHF_ALLOC) == 0 || (flags & SHF_TLS) != 0) {
+        return 0;
+    }
+    switch (kind) {
+    case ORPHAN_TEXT:
+        return (flags & SHF_EXECINSTR) != 0;
+    case ORPHAN_DATA:
+        return (flags & SHF_WRITE) != 0 && (flags & SHF_EXECINSTR) == 0 && !nobits;
+    case ORPHAN_BSS:
+        return (flags & SHF_WRITE) != 0 && nobits;
+    default:
+        return (flags & SHF_WRITE) == 0 && !nobits;
+    }
+}
+
+/**
+ * @brief Put the sections the linker made itself that the script places nowhere where GNU ld puts them
+ * (ldelf_place_orphan()), not where the linker's own order has them: a -pie link like the x86-64 Linux
+ * decompressor's had its dynamic tables in front of the .head.text its script puts at 0.
+ *
+ * GNU ld takes them in the order it makes them (made_sections[]), each by its kind (orphan_kind()):
+ * the first of a kind goes after the output section named for the kind (.interp, .rel.dyn, .rodata,
+ * .text, .data, .bss), else after the last that has the kind's flags (orphan_follows()) -- of the
+ * same ELF type if one has, else any -- else first; the next of the kind after the one before it.
+ * The sections the script names are in its order by now; the inputs' orphans stay where they are.
+ *
+ * @return 0, or -1
+ */
+static int place_made_orphans(ld_ctx_t *ctx, elfobj_t *out) {
+    static const char *const kind_name[ORPHAN_KINDS] = { ".interp", ".rel.dyn", ".rodata", ".text", ".data",
+                                                          ".bss" };
+    const lds_script_t *sc = ctx->script;
+    elf_section_t *placed[MADE_SECTION_COUNT];
+    elf_section_t *last_of[ORPHAN_KINDS];
+    unsigned char pending[MADE_SECTION_COUNT];
+    size_t m, i, n, k;
+
+    memset(last_of, 0, sizeof(last_of));
+    for (m = 0; m < MADE_SECTION_COUNT; ++m) {
+        placed[m] = elf_find_section(out, made_sections[m]);
+        pending[m] = placed[m] != NULL && orphan_kind(placed[m], made_sections[m]) >= 0 &&
+                     script_taker(sc, made_sections[m], NULL) == NULL;
+    }
+    for (m = 0; m < MADE_SECTION_COUNT; ++m) {
+        elf_section_t *sec = placed[m];
+        elf_section_t *after = NULL;
+        size_t at = 0, from = 0;
+        int kind;
+        int typed;
+
+        if (!pending[m]) {
+            continue;
+        }
+        pending[m] = 0;
+        kind = orphan_kind(sec, made_sections[m]);
+        after = last_of[kind];
+        if (after == NULL && (after = elf_find_section(out, kind_name[kind])) != NULL) {
+            /* (one still to be placed is no place: the name is its own) */
+            for (k = 0; k < MADE_SECTION_COUNT; ++k) {
+                if (pending[k] && placed[k] == after) {
+                    after = NULL;
+                }
+            }
+            if (after == sec) {
+                after = NULL;
+            }
+        }
+        for (typed = 1; after == NULL && typed >= 0; --typed) {
+            n = elf_section_count(out);
+            for (i = 0; i < n; ++i) {
+                elf_section_t *cand = elf_section_get(out, i);
+                int skip = cand == sec;
+
+                for (k = 0; k < MADE_SECTION_COUNT && !skip; ++k) {
+                    skip = pending[k] && placed[k] == cand;
+                }
+                if (!skip && orphan_follows((orphan_kind_t)kind, cand) &&
+                    (!typed || elf_section_type(cand) == elf_section_type(sec))) {
+                    after = cand;
+                }
+            }
+        }
+        n = elf_section_count(out);
+        for (i = 0; i < n; ++i) {
+            if (elf_section_get(out, i) == sec) {
+                from = i;
+            }
+            if (after != NULL && elf_section_get(out, i) == after) {
+                at = i;
+            }
+        }
+        if (after != NULL) {
+            at = from < at ? at : at + 1;
+        }
+        if (at != from && elf_reorder_section(out, sec, at) != ELF_OK) {
+            return -1;
+        }
+        last_of[kind] = sec;
+    }
+    return 0;
+}
+
 int script_order_sections(ld_ctx_t *ctx, elfobj_t *out) {
     lds_script_t *sc = ctx->script;
     elf_section_t **want = NULL;
@@ -4003,6 +4193,10 @@ int script_order_sections(ld_ctx_t *ctx, elfobj_t *out) {
             fprintf(stderr, "ld: failed to put the sections in the script's order\n");
             goto done;
         }
+    }
+    if (place_made_orphans(ctx, out) != 0) {
+        fprintf(stderr, "ld: failed to place the linker's own sections among the script's\n");
+        goto done;
     }
     rc = 0;
 done:
@@ -4758,11 +4952,8 @@ static lds_region_t *script_find_region(lds_script_t *sc, const char *name) {
 
 /* One pass over the output's sections with the script's location counter. */
 static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
-    const uint64_t page = 0x1000u;
     lds_script_t *sc = w->sc;
     size_t next = 0, i;
-    int last_class = -1;
-    int last_relro = -1;
 
     w->dot = first_addr;
     w->high = 0;
@@ -4800,8 +4991,6 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
         lds_region_t *region = NULL;
         uint64_t flags, align, size, end;
         size_t si = 0;
-        int explicit;
-        int cls;
 
         if (sec == NULL || name == NULL) {
             continue;
@@ -4820,13 +5009,11 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
             }
             next = si + 1;
         }
-        explicit = w->moved;
         w->moved = 0;
         if (os != NULL && os->expr.count != 0) {
             if (lw_eval(w, &os->expr, 1, w->dot, &os->at, &w->dot) != 0) {
                 return -1;
             }
-            explicit = 1;
         }
         if (os != NULL && os->region != NULL) {
             region = script_find_region(sc, os->region);
@@ -4836,29 +5023,15 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
             }
             if (os->expr.count == 0) {
                 w->dot = region->cursor;
-                explicit = 1;
             }
         }
-        cls = alloc_section_class(flags);
-        if (!explicit && os == NULL) {
-            /* A section the script does not place, as the default layout
-             * has it: what is protected differently does not share a
-             * page.  One it places is where the counter is, as GNU ld
-             * has it: Linux's setup.ld runs .header (read-only), .text
-             * and .data on without a gap and asserts the whole is at
-             * most 64 sectors, which two pages of padding broke. */
-            int relro = cls == 2 && is_relro_candidate_name(name);
-
-            /* (read-only after writable shares the writable segment, as add_default_segments() makes it) */
-            if ((last_class != -1 && cls != last_class && !(last_class == 2 && cls == 1)) ||
-                (cls == 2 && last_class == 2 && last_relro != -1 && relro != last_relro)) {
-                if (!align_up_u64_checked(w->dot, page, &w->dot)) {
-                    return -1;
-                }
-            }
-        }
-        last_class = cls;
-        last_relro = cls == 2 ? (is_relro_candidate_name(name) ? 1 : 0) : -1;
+        /*
+         * A section the script does not place (an orphan) is where the counter is, as one it places is and
+         * as GNU ld has both, whatever its protection: no page between code, read-only data and writable
+         * data.  Linux's setup.ld runs .header (read-only), .text and .data on without a gap and asserts the
+         * whole is at most 64 sectors, and its decompressor's -pie script has the dynamic tables run on
+         * after .text and .data.
+         */
         if (os != NULL && os->align.count != 0) {
             uint64_t a = 0;
 
