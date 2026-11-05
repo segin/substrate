@@ -189,6 +189,8 @@ static int parse_gnu_attribute_spec(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
 static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out, cc_bounds_t *out_vla_bounds);
+static int parse_type_name_spelled(parser_t *p, const char *what, const cc_ctype_t **out, cc_bounds_t *out_vla_bounds,
+                                   const cc_dtype_t **out_d);
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_cond(parser_t *p);
 static cc_expr_t *parse_unary(parser_t *p);
@@ -6588,8 +6590,25 @@ static int take_vla_bounds(declarator_t *d, const cc_ctype_t *arr, size_t skip, 
  * @return                0, or -1 on error (diagnosed)
  */
 static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out, cc_bounds_t *out_vla_bounds) {
+    return parse_type_name_spelled(p, what, out, out_vla_bounds, NULL);
+}
+
+/**
+ * Parse a type name (parse_type_name()), and give it as spelled too.
+ *
+ * @param p               the parser, at the type name
+ * @param what            the message for a missing type
+ * @param out             receives the type
+ * @param out_vla_bounds  as parse_type_name()'s; may be NULL
+ * @param out_d           receives the type as spelled, for debug
+ *                        information (NULL when out of memory); may be NULL
+ * @return                0, or -1 on error (diagnosed)
+ */
+static int parse_type_name_spelled(parser_t *p, const char *what, const cc_ctype_t **out, cc_bounds_t *out_vla_bounds,
+                                   const cc_dtype_t **out_d) {
     declarator_t d;
     const cc_ctype_t *spec;
+    const cc_dtype_t *spec_d;
     const cc_ctype_t *t;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
@@ -6598,6 +6617,7 @@ static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out
     if (parse_declspec(p, &spec, 1, what, NULL, NULL, NULL) != 0) {
         return -1;
     }
+    spec_d = p->last_spec_dtype;
     if (parse_declarator_into(p, &d, DECL_ABSTRACT) != 0) {
         declarator_free(&d);
         return -1;
@@ -6621,8 +6641,47 @@ static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out
             return -1;
         }
     }
+    if (out_d != NULL) {
+        *out_d = declarator_dtype(&d, spec_d, t);
+    }
     declarator_free(&d);
     *out = t;
+    return 0;
+}
+
+/**
+ * Note that the body being parsed names type @p dt in a cast or a
+ * compound literal (cc_function_t.named_dtypes), once.  Nothing outside a
+ * function's body, and nothing in a probe.
+ *
+ * @param p   the parser
+ * @param dt  the type as spelled, or NULL (nothing to note)
+ * @return    0, or -1 when out of memory (diagnosed)
+ */
+static int note_named_dtype(parser_t *p, const cc_dtype_t *dt) {
+    cc_function_t *f = p->body_fn;
+    size_t i;
+
+    if (f == NULL || dt == NULL || p->is_probe || p->diag == NULL) {
+        return 0;
+    }
+    for (i = 0; i < f->named_dtype_count; ++i) {
+        if (f->named_dtypes[i] == dt) {
+            return 0;
+        }
+    }
+    if (f->named_dtype_count == f->named_dtype_cap) {
+        size_t ncap = f->named_dtype_cap == 0 ? 4 : f->named_dtype_cap * 2;
+        const cc_dtype_t **next = (const cc_dtype_t **)realloc(f->named_dtypes, ncap * sizeof(*next));
+
+        if (next == NULL) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "out of memory recording a type for debug information");
+            return -1;
+        }
+        f->named_dtypes = next;
+        f->named_dtype_cap = ncap;
+    }
+    f->named_dtypes[f->named_dtype_count++] = dt;
     return 0;
 }
 
@@ -9297,6 +9356,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
     if (p->tok.kind == TOK_LPAREN) {
         parser_t q = *p;
         cc_expr_t *e = new_expr(CC_EXPR_CAST);
+        const cc_dtype_t *cast_d = NULL;
         if (next_tok(&q) == 0 && is_declspec_start(&q)) {
             if (e == NULL) {
                 return NULL;
@@ -9305,7 +9365,9 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name(p, "expected cast type", &e->ctype, NULL) != 0) {
+            /* the type, cast to or a compound literal's, described with the function, as gcc does */
+            if (parse_type_name_spelled(p, "expected cast type", &e->ctype, NULL, &cast_d) != 0 ||
+                note_named_dtype(p, cast_d) != 0) {
                 free_expr(e);
                 return NULL;
             }
@@ -11345,6 +11407,7 @@ static void free_func(cc_function_t *f) {
         free_stmt(&f->stmts[i]);
     }
     free(f->stmts);
+    free(f->named_dtypes);
 }
 
 void cc_tu_free(cc_translation_unit_t *tu) {
@@ -11738,9 +11801,11 @@ static int parse_function_def(parser_t *p, cc_function_t *f);
  */
 static int parse_function(parser_t *p, cc_function_t *f) {
     const char *saved = g_parser_function;
+    cc_function_t *saved_fn = p->body_fn;
     int rc = parse_function_def(p, f);
 
     g_parser_function = saved;
+    p->body_fn = saved_fn;
     return rc;
 }
 
@@ -11933,6 +11998,7 @@ static int parse_function_def(parser_t *p, cc_function_t *f) {
     }
     f->has_body = 1;
     g_parser_function = f->name;
+    p->body_fn = f;
     p->scope_depth = saved_depth + 1;
     {
         size_t i;

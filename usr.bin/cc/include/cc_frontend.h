@@ -437,6 +437,11 @@ typedef struct {
     size_t stmt_count;
     char *nest_parent;      /**< a GNU nested function: the name of the function it is defined in (owned); else NULL */
     size_t nest_stmt_index; /**< where in that function's body: the number of its top-level statements before it */
+    /** the types its body casts to or makes compound literals of, as spelled: gcc describes them wherever it
+     *  describes the function, though no object has them -- Linux's BTF_TYPE_EMIT() (owned; the types interned) */
+    const struct cc_dtype **named_dtypes;
+    size_t named_dtype_count;
+    size_t named_dtype_cap;
 } cc_function_t;
 
 typedef struct {

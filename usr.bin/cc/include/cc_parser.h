@@ -109,6 +109,7 @@ typedef struct {
     const cc_ctype_t *last_spec_ctype;  /**< the type the last declaration specifiers named */
     const struct cc_dtype *last_spec_dtype; /**< as they spelled it, for debug information (cc_dtype.h) */
     long last_spec_align; /**< the alignment of the typedef name they used (typedef_entry_t.align), or 0 */
+    cc_function_t *body_fn; /**< the function whose body is being parsed; NULL outside one */
 } parser_t;
 
 /** A constant expression's value, as the parser evaluates it. */

@@ -726,6 +726,9 @@ one the optimizer keeps in registers only has no location, rather than a
 wrong one.
 The functions inlined into those written are described as gcc's abstract
 instances, so that their types are the unit's too.
+A type a function's body casts to or makes a compound literal of is
+described with the function, as gcc does, though no object has it: a
+cast of a null pointer to a type is how Linux has a type in its BTF.
 The levels gcc tells apart are one in cc; there is no macro information.
 The unit is DWARF 5 unless
 .Fl gdwarf-4

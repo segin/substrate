@@ -2047,6 +2047,22 @@ static const cc_function_t *func_source(const cc_ssa_function_t *f) {
 static void emit_vars(FILE *fp, const cc_function_t *af, const dw_loc_t *locs, size_t loc_count);
 
 /**
+ * Queue the types a function's body names in casts and compound literals,
+ * written whether or not an object has them, as gcc writes them with the
+ * function: Linux's BTF_TYPE_EMIT() relies on it, which casts a null
+ * pointer so that pahole finds the type.
+ *
+ * @param af  the function
+ */
+static void queue_named_types(const cc_function_t *af) {
+    size_t i;
+
+    for (i = 0; i < af->named_dtype_count; ++i) {
+        (void)type_ref(af->named_dtypes[i]);
+    }
+}
+
+/**
  * Index the module's variables and the recorded calls by function, so
  * that a function's are found without a walk of them all: a list per
  * function, in order.
@@ -2144,6 +2160,7 @@ static void emit_subprogram(FILE *fp, const dw_func_t *df) {
     if (has_children) {
         emit_vars(fp, af, df->locs, df->loc_count);
     }
+    queue_named_types(af);
 }
 
 /**
@@ -2225,6 +2242,7 @@ static void emit_abstract(FILE *fp, const cc_function_t *af) {
     if (has_children) {
         emit_vars(fp, af, NULL, 0);
     }
+    queue_named_types(af);
 }
 
 /**
