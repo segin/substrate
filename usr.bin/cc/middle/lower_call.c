@@ -35,8 +35,6 @@ static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int emit_local_var_scalar_load(cc_ssa_function_t *sf, const var_entry_t *v, cc_diag_t *diag);
 static int emit_local_var_scalar_store(cc_ssa_function_t *sf, const var_entry_t *v, int rhs, cc_diag_t *diag);
-static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_size,
-                                 long *out_offset);
 static int builtin_bswap_bits(const char *name);
 static builtin_kind_t builtin_kind(const char *name);
 static int function_param_index_by_name(const lower_ctx_t *ctx, const char *name);
@@ -793,58 +791,181 @@ static int emit_local_var_scalar_store(cc_ssa_function_t *sf, const var_entry_t 
 }
 
 /**
- * Find the object a pointer expression points into and how far into it,
- * from real types: an array (which decays to its start), `&x`, and
- * pointer + or - an integer constant, `&a[i]` included.
- *
- * @param tu          the translation unit, for structure sizes
- * @param e           the pointer expression
- * @param out_size    receives the object's size in bytes
- * @param out_offset  receives the offset into it in bytes
- * @return            1 if found, 0 if not
+ * Where a pointer points, as __builtin_object_size() needs it: in the whole
+ * object (a declared variable), and in the closest subobject (the member or
+ * array it is in).  Either may be unknown: the whole one wherever the
+ * address came through a pointer, the subobject one where nothing narrower
+ * than the whole is known.
  */
-static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_size,
-                                 long *out_offset) {
-    const cc_ctype_t *t;
-    long step;
+typedef struct {
+    int whole;      /**< the whole object is known: whole_size and whole_off */
+    long whole_size;
+    long whole_off; /**< the address's offset into it */
+    int sub;        /**< a subobject is known: sub_size and sub_off */
+    long sub_size;
+    long sub_off;
+    int at_end;     /**< the object a pointer nothing is known of points at, no member taken yet */
+    int flex;       /**< the subobject is the last member of that object and an array, which may be a flexible
+                         array (gcc's -fstrict-flex-arrays=0, the default): it counts as the whole object */
+} obj_extent_t;
 
+static int addr_extent(const cc_translation_unit_t *tu, const cc_expr_t *e, obj_extent_t *x);
+
+/** Whether the member at @p offset of structure or union type @p t is its last: no member starts after it. */
+static int member_is_last(const cc_translation_unit_t *tu, const cc_ctype_t *t, long offset) {
+    const cc_struct_def_t *sd;
+    size_t i;
+
+    if (t == NULL || t->kind != CC_CT_RECORD || t->id < 0 ||
+        (size_t)t->id >= tu->struct_count) {
+        return 0;
+    }
+    sd = &tu->structs[t->id];
+    for (i = 0; i < sd->member_count; ++i) {
+        if (sd->members[i].offset > offset) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * The extent of lvalue @p e's own storage (lvalue_extent()'s, before any decay): a variable, a member, or an
+ * object a pointer points at.
+ *
+ * @return 1, or 0 when nothing is known of it
+ */
+static int lvalue_extent(const cc_translation_unit_t *tu, const cc_expr_t *e, obj_extent_t *x) {
+    long size;
+
+    memset(x, 0, sizeof(*x));
+    if (e == NULL) {
+        return 0;
+    }
+    size = cc_ct_size(e->ctype, tu);
+    if (e->kind == CC_EXPR_IDENT) {
+        /* a declared object: whole and subobject both itself */
+        if (size <= 0) {
+            return 0;
+        }
+        x->whole = x->sub = 1;
+        x->whole_size = x->sub_size = size;
+        return 1;
+    }
+    if (e->kind == CC_EXPR_DEREF && e->lhs != NULL) {
+        /* *p, a[i]: the object there, as far as the address goes */
+        if (!addr_extent(tu, e->lhs, x)) {
+            /* through a pointer nothing is known of: what is reached from here is at its end so far */
+            memset(x, 0, sizeof(*x));
+            x->at_end = 1;
+        }
+        return 1;
+    }
+    if (e->kind == CC_EXPR_MEMBER && e->lhs != NULL && !e->member_is_part && !e->member_is_bitfield) {
+        const cc_expr_t *base = e->lhs;
+        obj_extent_t b;
+        const cc_ctype_t *outer;
+
+        if (e->member_is_arrow) {
+            const cc_ctype_t *pt = cc_ct_decay(base->ctype);
+
+            if (!addr_extent(tu, base, &b)) {
+                memset(&b, 0, sizeof(b));
+                b.at_end = 1;
+            }
+            outer = pt != NULL && pt->kind == CC_CT_POINTER ? pt->of : NULL;
+        } else {
+            if (!lvalue_extent(tu, base, &b)) {
+                return 0;
+            }
+            outer = base->ctype;
+        }
+        if (outer != NULL && outer->unqual != NULL) {
+            outer = outer->unqual;
+        }
+        *x = b;
+        x->whole_off += e->member_offset;
+        x->sub = size > 0;
+        x->sub_size = size;
+        x->sub_off = 0;
+        /* an array last in the very object a pointer reaches may be flexible (not one in a member of it) */
+        x->flex = b.at_end && !b.whole && member_is_last(tu, outer, e->member_offset) && e->ctype != NULL &&
+                  e->ctype->kind == CC_CT_ARRAY;
+        x->at_end = 0;
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * The extent pointer expression @p e points into: an array (decayed to its start, the array its subobject), `&x`,
+ * a cast of one, and one plus or minus an integer constant, `&a[i]` included.
+ *
+ * @return 1, or 0 when nothing is known of it
+ */
+static int addr_extent(const cc_translation_unit_t *tu, const cc_expr_t *e, obj_extent_t *x) {
+    const cc_ctype_t *t;
+
+    memset(x, 0, sizeof(*x));
     if (e == NULL) {
         return 0;
     }
     if (e->kind == CC_EXPR_ADDR && e->lhs != NULL) {
-        const cc_expr_t *x = e->lhs;
-        if (x->kind == CC_EXPR_DEREF && x->lhs != NULL) {
-            return pointed_object_extent(tu, x->lhs, out_size, out_offset);  /* &*p, &a[i] */
+        return lvalue_extent(tu, e->lhs, x);
+    }
+    if (e->kind == CC_EXPR_CAST && e->lhs != NULL) {
+        /* the same address as another type, in the same objects */
+        t = cc_ct_decay(e->lhs->ctype);
+        if (t == NULL || t->kind != CC_CT_POINTER) {
+            return 0;
         }
-        t = x->ctype;
-        *out_size = cc_ct_size(t, tu);
-        *out_offset = 0;
-        return *out_size > 0;
+        return addr_extent(tu, e->lhs, x);
     }
     if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && e->lhs != NULL &&
         e->rhs != NULL && e->rhs->kind == CC_EXPR_INT) {
+        long step;
+        long delta;
+
         t = cc_ct_decay(e->lhs->ctype);
         if (t == NULL || t->kind != CC_CT_POINTER) {
             return 0;
         }
         step = cc_ct_size(t->of, tu);
-        if (step <= 0 || !pointed_object_extent(tu, e->lhs, out_size, out_offset)) {
+        if (step <= 0 || !addr_extent(tu, e->lhs, x)) {
             return 0;
         }
-        *out_offset += (e->op == CC_BIN_ADD ? 1 : -1) * (long)e->rhs->int_val * step;
-        return 1;
+        delta = (e->op == CC_BIN_ADD ? 1 : -1) * (long)e->rhs->int_val * step;
+        x->whole_off += delta;
+        x->sub_off += delta;
+        return x->whole || x->sub;
     }
     t = e->ctype;
     if (t != NULL && t->kind == CC_CT_ARRAY) {
-        if (e->kind == CC_EXPR_DEREF && e->lhs != NULL) {
-            /* a row, `a[i]`: part of the array it was taken from */
-            return pointed_object_extent(tu, e->lhs, out_size, out_offset);
-        }
-        *out_size = cc_ct_size(t, tu);
-        *out_offset = 0;
-        return *out_size > 0;
+        /* an array where its address is taken: itself the subobject */
+        return lvalue_extent(tu, e, x) && (x->whole || x->sub);
     }
     return 0;
+}
+
+/**
+ * __builtin_object_size(@p e, @p mode), as gcc has it: the bytes left from the address to the end of the whole
+ * object (modes 0 and 2) or of the closest subobject (1 and 3), a trailing array of an object reached through a
+ * pointer counting as the whole; -1 (modes 0 and 1) or 0 (2 and 3) when that is not known.
+ */
+static long object_size_of(const cc_translation_unit_t *tu, const cc_expr_t *e, long mode) {
+    obj_extent_t x;
+    long unknown = (mode & 2L) ? 0 : -1;
+
+    if (!addr_extent(tu, e, &x)) {
+        return unknown;
+    }
+    if ((mode & 1L) != 0 && x.sub && !x.flex) {
+        return x.sub_off >= 0 && x.sub_off <= x.sub_size ? x.sub_size - x.sub_off : 0;
+    }
+    if (x.whole) {
+        return x.whole_off >= 0 && x.whole_off <= x.whole_size ? x.whole_size - x.whole_off : 0;
+    }
+    return unknown;
 }
 
 static int builtin_bswap_bits(const char *name) {
@@ -2554,18 +2675,7 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
                 return -1;
             }
         }
-        {
-            long obj_size;
-            long obj_off;
-            if (pointed_object_extent(tu, e->args[0], &obj_size, &obj_off)) {
-                /* what is left of the object past the pointer */
-                n = (obj_off >= 0 && obj_off <= obj_size) ? obj_size - obj_off : 0;
-            }
-            /* otherwise the object is not known (a pointer from malloc, say): leave n unknown */
-        }
-        if (n < 0) {
-            n = (mode & 2L) ? 0 : -1;
-        }
+        n = object_size_of(tu, e->args[0], mode);
         return cc_ir_const(sf, n);
     }
     if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET || bk == BUILTIN_MEMCPY_CHK ||
