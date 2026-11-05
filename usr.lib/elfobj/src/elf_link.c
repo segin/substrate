@@ -1390,7 +1390,16 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
         if (sym_map != NULL && i < input->obj->symbol_count) {
             sym_map[i] = NULL;
         }
-        if (sym->name == NULL || sym->name[0] == '\0') {
+        /*
+         * An input section's own symbol is not the output's, named or not:
+         * a relocation against it is made against the output section's
+         * symbol, the input's place in it added (merge_relocations()), as
+         * GNU ld does.  Copied, a -r output had a section symbol for each
+         * input section it took, at its place, and a tool that adds a
+         * relocation against "the" section symbol took one of them for it:
+         * objtool's static call table in Linux's vmlinux.o was 20 MiB off.
+         */
+        if (sym->type == STT_SECTION || sym->name == NULL || sym->name[0] == '\0') {
             continue;
         }
         if (plan->version_hook != NULL &&

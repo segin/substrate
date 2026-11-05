@@ -154,6 +154,8 @@ Type: ELF files plus diagnostic/support artifacts
 
 Purpose: Deliver the linked program image and optional debugging/provenance outputs.
 
+A relocatable output has one section symbol for each of its sections that a relocation names, at 0, and none of the inputs': a relocation against an input section's symbol is made against the output section's, the input's place added to the addend, as GNU ld writes it, whether or not the input's symbol has a name (the in-tree assembler names them). Tools that add relocations to a `-r` output take "the" section symbol for their section -- objtool does, for Linux's static call table in `vmlinux.o` -- and with one copied for each input, at its place, they took the last (`tests/usr.bin/ld/test_r_input_section_symbols.sh`).
+
 ## 5. External Integrations / APIs
 
 `libelfobj`: The linker relies on `usr.lib/elfobj` for ELF parsing, mutation, relocation application, and final write-out.
