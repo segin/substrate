@@ -377,6 +377,9 @@ static const ld_opt_t options[] = {
     { "-e --entry", OPT_VALUE, opt_str, F(entry_symbol), 0 },
     { "-soname --soname -h", OPT_VALUE, opt_str, F(soname), 0 },
     { "-dynamic-linker --dynamic-linker", OPT_VALUE, opt_str, F(interp_path), 0 },
+    /* No interpreter asked for, whatever an earlier -dynamic-linker said; a
+     * later one asks again, as in GNU ld.  (There is no default to undo.) */
+    { "--no-dynamic-linker -no-dynamic-linker", OPT_FLAG, opt_str, F(interp_path), 0 },
     { "-rpath --rpath", OPT_VALUE, opt_strvec, F(rpaths), 0 },
     /* Where to look for the libraries of libraries at link time, which
      * this linker does not go looking for. */

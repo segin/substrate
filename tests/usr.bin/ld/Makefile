@@ -50,6 +50,7 @@ run:
 	./test_script_discard_dynamic.sh
 	./test_r_input_section_symbols.sh
 	./test_orphan_handling.sh
+	./test_no_dynamic_linker.sh
 	./test_script_sort.sh
 	./test_writable_code_section.sh
 	./test_script_body_align.sh

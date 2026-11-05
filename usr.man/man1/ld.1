@@ -271,6 +271,11 @@ The program interpreter of the output
 .Pq Dv PT_INTERP ;
 on Substrate
 .Pa /sbin/ld.so .
+.It Fl -no-dynamic-linker
+No program interpreter, whatever an earlier
+.Fl -dynamic-linker
+said; a later one names one again, as in GNU ld.
+Without either the output has none.
 .It Fl soname Ar name , Fl h Ar name
 The name a shared object gives itself
 .Pq Dv DT_SONAME ,
