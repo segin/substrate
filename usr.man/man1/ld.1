@@ -869,6 +869,23 @@ however it is protected: no page is skipped between read-only, code and
 data, as GNU ld does not skip one; a script that wants them apart says so
 with
 .Ic ALIGN .
+Input sections of different types may go into one output section, which
+is of the type of the first of them, empty or not, as GNU ld makes it,
+except that zeros
+.Pq Dv SHT_NOBITS
+and then contents make
+.Dv SHT_PROGBITS ,
+the zeros written out; an
+.Dv SHT_INIT_ARRAY ,
+.Dv SHT_FINI_ARRAY
+or
+.Dv SHT_PREINIT_ARRAY
+has a word for its entry size.
+Under
+.Fl r
+the input sections are not yet put in the order of the descriptions, so
+.Dq first
+is the first merged.
 An input section nothing asks for keeps its own name, and is placed where
 the default layout would have put it among the sections the script names,
 on a page of its own when it is protected unlike the section before it.
@@ -882,6 +899,11 @@ A
 without
 .Ic FLAGS
 has the permissions of the sections in it.
+A section with contents in a
+.Dv PT_NOTE
+is of type
+.Dv SHT_NOTE ,
+whatever its input sections are, as GNU ld makes it.
 Without
 .Ic PHDRS ,
 a

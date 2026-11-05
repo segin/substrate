@@ -126,6 +126,10 @@ struct elf_section {
                                  * merge; 0 where it is exactly data_size */
     uint8_t owns_data;
     uint8_t placeholder;        /* one of the empty sections numbered as the reserved indices are */
+    uint8_t first_set;          /* in the merge: first_type and first_rank are those of an input */
+    uint32_t first_type;        /* the type of the input first in the section's order so far, which is the
+                                 * section's (zeros first, then contents: PROGBITS) */
+    int first_rank;             /* and its rank in the script's order (inputs of one rank: the first merged) */
     uint8_t has_compression_hint;
     uint32_t compression_type;
     uint64_t compression_size;

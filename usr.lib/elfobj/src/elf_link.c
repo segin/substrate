@@ -846,6 +846,45 @@ static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj
     return elf_find_section(out, name);
 }
 
+/**
+ * The type of an output section, as GNU ld gives it, now that input @p src
+ * of rank @p rank goes in: the type of the input first in the section's
+ * order (the lowest rank; of one rank, the first merged), empty or not, and
+ * whatever the types of the rest -- *(.note.x) *(.data) is a NOTE,
+ * *(.data) *(.note.x) PROGBITS, *(.note.GNU-stack) *(.note*) PROGBITS --
+ * except that zeros first and then contents make PROGBITS: *(.bss)
+ * *(.note.x) is no NOTE.  The order is the script's descriptions' where
+ * the link has ranks; without (no script, or -r), the merge's.  An array of
+ * pointers to call -- SHT_INIT_ARRAY, SHT_FINI_ARRAY, SHT_PREINIT_ARRAY --
+ * has a word of @p out's class for its entry size, by its type alone:
+ * *(.init_array) *(.data) is an INIT_ARRAY of entry size 8 on x86-64,
+ * though .data says none.
+ *
+ * The linker refused every mix but zeros with PROGBITS ("section type
+ * mismatch during merge").
+ *
+ * @param out the output object
+ * @param dst one of its sections, which already holds what it must of
+ *            @p src (zeros made contents when contents come)
+ * @param src the input section going in
+ * @param rank its rank in the script's order (0 without a script)
+ */
+static void merge_type(const elfobj_t *out, struct elf_section *dst, const struct elf_section *src, int rank) {
+    if (!dst->first_set || rank < dst->first_rank) {
+        dst->first_set = 1;
+        dst->first_type = src->type;
+        dst->first_rank = rank;
+    }
+    if (dst->first_type != SHT_NOBITS) {
+        dst->type = dst->first_type;
+    } else if (dst->type != SHT_NOBITS) {
+        dst->type = SHT_PROGBITS;
+    }
+    if (dst->type == SHT_INIT_ARRAY || dst->type == SHT_FINI_ARRAY || dst->type == SHT_PREINIT_ARRAY) {
+        dst->entsize = out->cls == ELFOBJ_CLASS_64 ? 8 : 4;
+    }
+}
+
 /* Pad merged section @p dst out to @p offset (which it has not passed). */
 /*
  * Grow @p dst to @p offset: with @p filled a gap, filled as
@@ -1181,12 +1220,11 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
             return ELF_ERR_FORMAT;
         } else if (action == ELF_LINK_MERGE_APPEND) {
             /*
-             * .note.GNU-stack is an empty marker whose flags say whether
-             * the stack must be executable.  Toolchains disagree on its
-             * type (gcc and gas write PROGBITS, glibc's own start files
-             * NOTE), and GNU ld takes either; only its flags matter.
+             * Inputs of other types go in as they are; which type the
+             * section is, the first of them in its order says, once its
+             * rank is known (merge_type()).  Here only what it holds:
              */
-            if (dst->type == SHT_NOBITS && src->type == SHT_PROGBITS) {
+            if (dst->type == SHT_NOBITS && src->type != SHT_NOBITS) {
                 /*
                  * Zeros and contents in one output section: it has contents,
                  * the zeros so far written out, as GNU ld makes it (and the
@@ -1203,17 +1241,6 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                     free(inflated);
                     return err;
                 }
-            } else if (dst->type != src->type && dst->size == 0 && dst->data_size == 0 && src->type != SHT_NOBITS &&
-                       strcmp(src->name, ".note.GNU-stack") != 0) {
-                /* nothing in it yet (an empty .note.GNU-stack, which *(.note*) takes first): of the type
-                 * of what has contents, as GNU ld's */
-                dst->type = src->type;
-            } else if (dst->type != src->type && !(src->type == SHT_NOBITS && dst->type == SHT_PROGBITS) &&
-                       strcmp(src->name, ".note.GNU-stack") != 0) {
-                elf__set_err(out, ELF_ERR_FORMAT, "section type mismatch during merge");
-                (void)elf__append_diag(out, src->name);
-                free(inflated);
-                return ELF_ERR_FORMAT;
             }
             if (src_align > dst->addralign) {
                 dst->addralign = src_align;
@@ -1299,6 +1326,7 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                     return err;
                 }
             }
+            merge_type(out, dst, src, rank);
             err = align_merged_section(dst, src_align, &sec_bases[j]);
             if (err != ELF_OK) {
                 free(inflated);

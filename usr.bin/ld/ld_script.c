@@ -1750,6 +1750,17 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 if (pass == 0) {
                     uint64_t a = elf_section_align(sec);
 
+                    /*
+                     * What a PT_NOTE holds is notes: GNU ld makes each
+                     * section with contents in one a NOTE, whatever it was
+                     * made of -- the vDSO's `.note : { *(.note*) } :text
+                     * :note` begins with an empty PROGBITS .note.GNU-stack,
+                     * and is a NOTE all the same.
+                     */
+                    if (phdrs->items[pidx].type == PT_NOTE && elf_section_type(sec) != SHT_NOBITS &&
+                        elf_section_type(sec) != SHT_NOTE && elf_section_set_type(sec, SHT_NOTE) != ELF_OK) {
+                        goto done;
+                    }
                     flags[pidx] |= ((sflags & SHF_WRITE) != 0 ? LD_PF_W : 0) |
                                    ((sflags & SHF_EXECINSTR) != 0 ? LD_PF_X : 0);
                     if (a > aligns[pidx]) {
