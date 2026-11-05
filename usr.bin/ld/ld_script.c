@@ -3264,24 +3264,32 @@ static int orphan_candidate(const elf_section_t *sec) {
 }
 
 /**
- * @brief --orphan-handling: say each input section the script's SECTIONS places nowhere, as GNU ld
- * says it, input by input and in each input's order, or make it left out.
+ * @brief Whether input @p i of @p inputs is the linker's own object holding .note.gnu.build-id, whose
+ * section is one the linker makes rather than one of an input's.
+ */
+static int is_build_id_input(const objvec_t *inputs, size_t i) {
+    return inputs->names[i] != NULL && strcmp(inputs->names[i], LD_BUILD_ID_INPUT) == 0;
+}
+
+/**
+ * @brief --orphan-handling: find each input section the script's SECTIONS places nowhere, input by
+ * input and in each input's order, for script_say_orphans() to say; or under discard make them left
+ * out (script_output_name()).  Shared objects have no sections to place.
  *
- * GNU ld's words: under warn "orphan section `S' from `F' being placed in section `S'", under error
- * "unplaced orphan section `S' from `F'", every one before the link fails.  Under discard,
- * script_output_name() leaves them out.  Shared objects have no sections to place.
+ * They are only noted here: GNU ld says the sections it makes itself with them, after the first
+ * input's, and those are not made yet.
  *
  * @param ctx     the link, with the script read
  * @param inputs  the objects the link takes sections from, and their names
- * @return 0, or 1 to stop the link (an orphan under error, or a warning under --fatal-warnings)
+ * @return 0, or -1 when out of memory
  */
 int script_check_orphans(ld_ctx_t *ctx, const objvec_t *inputs) {
     lds_script_t *sc = ctx->script;
     ld_orphan_mode_t mode = ctx->opt.orphan_handling;
-    int failed = 0;
-    int property_said = 0;  /* (the inputs' .note.gnu.property are one, the first input's, to GNU ld) */
+    int property_seen = 0;  /* (the inputs' .note.gnu.property are one, the first input's, to GNU ld) */
     size_t i, k;
 
+    ctx->orphan_count = 0;
     if (sc == NULL || !sc->has_sections || mode == LD_ORPHAN_PLACE) {
         return 0;
     }
@@ -3293,7 +3301,7 @@ int script_check_orphans(ld_ctx_t *ctx, const objvec_t *inputs) {
         elfobj_t *obj = inputs->objs[i];
         const char *file = inputs->names[i] != NULL ? inputs->names[i] : "?";
 
-        if (obj == NULL || elf_type(obj) != ET_REL) {
+        if (obj == NULL || elf_type(obj) != ET_REL || is_build_id_input(inputs, i)) {
             continue;
         }
         for (k = 0; k < elf_section_count(obj); ++k) {
@@ -3307,18 +3315,108 @@ int script_check_orphans(ld_ctx_t *ctx, const objvec_t *inputs) {
             if (script_taker(sc, name, file) != NULL) {
                 continue;
             }
-            if (strcmp(name, ".note.gnu.property") == 0 && property_said++) {
+            if (strcmp(name, ".note.gnu.property") == 0 && property_seen++) {
                 continue;
             }
-            if (mode == LD_ORPHAN_ERROR) {
-                fprintf(stderr, "ld: error: unplaced orphan section `%s' from `%s'\n", name, file);
-                failed = 1;
-            } else if (ld_warn(ctx, "orphan section `%s' from `%s' being placed in section `%s'", name, file,
-                               name) != 0) {
-                failed = 1;
+            if (ctx->orphan_count == ctx->orphan_cap) {
+                size_t ncap = ctx->orphan_cap != 0 ? ctx->orphan_cap * 2 : 16;
+                ld_orphan_t *n = (ld_orphan_t *)realloc(ctx->orphans, ncap * sizeof(*n));
+
+                if (n == NULL) {
+                    return -1;
+                }
+                ctx->orphans = n;
+                ctx->orphan_cap = ncap;
             }
+            ctx->orphans[ctx->orphan_count].section = name;
+            ctx->orphans[ctx->orphan_count].input = i;
+            ctx->orphan_count++;
         }
     }
+    return 0;
+}
+
+/**
+ * @brief Say one orphan as GNU ld does: under warn "orphan section `S' from `F' being placed in section
+ * `S'", under error "unplaced orphan section `S' from `F'".
+ *
+ * @return 0, or 1 when it fails the link (under error, or a warning under --fatal-warnings)
+ */
+static int say_orphan(ld_ctx_t *ctx, const char *section, const char *file) {
+    if (ctx->opt.orphan_handling == LD_ORPHAN_ERROR) {
+        fprintf(stderr, "ld: error: unplaced orphan section `%s' from `%s'\n", section, file);
+        return 1;
+    }
+    return ld_warn(ctx, "orphan section `%s' from `%s' being placed in section `%s'", section, file, section) != 0;
+}
+
+/**
+ * @brief Whether input section @p name is among the orphans script_check_orphans() found: an output
+ * section of that name is theirs, not one the linker made.
+ */
+static int noted_orphan(const ld_ctx_t *ctx, const char *name) {
+    size_t i;
+
+    for (i = 0; i < ctx->orphan_count; ++i) {
+        if (strcmp(ctx->orphans[i].section, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief --orphan-handling=warn|error: say the orphans script_check_orphans() found and, in @p out, the
+ * sections the linker makes itself that the script places nowhere, then fail the link if one fails it.
+ *
+ * GNU ld makes its own sections in the first input and says them as that input's, after the sections
+ * of that input's own (whatever the script asks of a file name is asked of that one's): the
+ * interpreter's name, the build ID, the dynamic linker's tables, the PLT and GOT and their
+ * relocations, .eh_frame_hdr.  The ones this linker makes are said in GNU ld's order, each where it
+ * goes: under its own name.  Under -r there are none (@p out is NULL).
+ *
+ * @param ctx     the link
+ * @param inputs  the objects the link takes sections from, and their names
+ * @param out     the output, its sections all made; NULL to say the inputs' alone
+ * @return 0, or 1 to stop the link
+ */
+int script_say_orphans(ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
+    static const char *const made[] = { ".interp",    ".note.gnu.build-id", ".gnu.version_d", ".gnu.version",
+                                        ".gnu.version_r", ".dynsym",       ".dynstr",        ".dynamic",
+                                        ".hash",      ".gnu.hash",          ".plt",           ".rel.plt",
+                                        ".rela.plt",  ".got",               ".got.plt",       ".rel.dyn",
+                                        ".rela.dyn",  ".iplt",              ".eh_frame_hdr" };
+    const lds_script_t *sc = ctx->script;
+    ld_orphan_mode_t mode = ctx->opt.orphan_handling;
+    size_t first = inputs->count;   /* the first input: GNU ld's sections are its */
+    const char *first_name;
+    int failed = 0;
+    size_t i, m;
+
+    if (sc == NULL || !sc->has_sections || (mode != LD_ORPHAN_WARN && mode != LD_ORPHAN_ERROR)) {
+        return 0;
+    }
+    for (i = 0; i < inputs->count && first == inputs->count; ++i) {
+        if (inputs->objs[i] != NULL && elf_type(inputs->objs[i]) == ET_REL && !is_build_id_input(inputs, i)) {
+            first = i;
+        }
+    }
+    first_name = first < inputs->count && inputs->names[first] != NULL ? inputs->names[first] : "?";
+    for (i = 0; i < ctx->orphan_count && ctx->orphans[i].input == first; ++i) {
+        failed |= say_orphan(ctx, ctx->orphans[i].section, first_name);
+    }
+    for (m = 0; out != NULL && m < sizeof(made) / sizeof(made[0]); ++m) {
+        if (elf_find_section(out, made[m]) != NULL && !noted_orphan(ctx, made[m]) &&
+            script_taker(sc, made[m], first_name) == NULL) {
+            failed |= say_orphan(ctx, made[m], first_name);
+        }
+    }
+    for (; i < ctx->orphan_count; ++i) {
+        size_t in = ctx->orphans[i].input;
+
+        failed |= say_orphan(ctx, ctx->orphans[i].section, inputs->names[in] != NULL ? inputs->names[in] : "?");
+    }
+    ctx->orphan_count = 0;
     return failed;
 }
 

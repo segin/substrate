@@ -480,7 +480,42 @@ and
 are not orphans; the inputs'
 .Pa .note.gnu.property
 are one, the first input's.
-Unlike GNU ld, the sections the linker makes itself are not said.
+The sections the linker makes itself
+.Po
+.Pa .interp ,
+.Pa .note.gnu.build-id ,
+.Pa .dynsym ,
+.Pa .dynstr ,
+.Pa .dynamic ,
+.Pa .hash ,
+.Pa .gnu.hash ,
+.Pa .plt ,
+.Pa .got ,
+.Pa .got.plt ,
+.Pa .rel[a].plt ,
+.Pa .rel[a].dyn ,
+.Pa .iplt ,
+.Pa .eh_frame_hdr
+.Pc
+are orphans too when the script places them nowhere, and are said as
+GNU ld says them: as the first input's, after that input's own
+sections.
+GNU ld also says sections this linker does not make, such as an empty
+.Pa .got ,
+and names its relocation sections by their inputs
+.Pq Pa .rela.data No placed in Pa .rela.dyn ;
+this linker says the
+.Pa .rel[a].dyn
+it makes.
+Under
+.Ar discard ,
+the dynamic linker's tables and the build ID are left out, but unlike
+GNU ld a
+.Pa .rel[a].dyn ,
+.Pa .got
+or
+.Pa .plt
+the link needs is kept.
 .It Fl -defsym Ar name=value
 Define or override an absolute symbol.
 .It Fl -undefined Ar symbol

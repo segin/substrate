@@ -304,6 +304,15 @@ typedef struct {
     int current_as_needed;
 } ld_options_t;
 
+/* An input section the script places nowhere: its name, and which of the link's inputs it is from. */
+typedef struct {
+    const char *section;
+    size_t input;
+} ld_orphan_t;
+
+/* The name the linker's own object holding .note.gnu.build-id goes by among the inputs. */
+#define LD_BUILD_ID_INPUT "<build-id>"
+
 /*
  * A link: what was asked for, and what has been found out and decided
  * so far.
@@ -354,6 +363,12 @@ typedef struct {
     size_t ifunc_count;
     size_t ifunc_cap;
     ld_relayout_t *relayout;    /* what the pass before this one learned; outlives the context */
+    /* --orphan-handling=warn|error: the input sections the script places
+     * nowhere (script_check_orphans()), said with the ones the linker
+     * makes itself once those are made (script_say_orphans()). */
+    ld_orphan_t *orphans;
+    size_t orphan_count;
+    size_t orphan_cap;
 } ld_ctx_t;
 
 typedef enum {
@@ -853,6 +868,7 @@ lds_script_t *lds_script_parse(const char *path, const ld_ctx_t *ctx);
 const char *script_output_name(const char *section, const char *file, void *user);
 int script_keeps_input(const lds_script_t *sc, const char *section, const char *file);
 int script_check_orphans(ld_ctx_t *ctx, const objvec_t *inputs);
+int script_say_orphans(ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out);
 int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out);
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);

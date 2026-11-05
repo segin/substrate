@@ -367,8 +367,13 @@ static int phase_merge(ld_link_t *l) {
     elf_err_t err;
     size_t pi;
 
-    /* --orphan-handling: what the script places nowhere, said before it is placed */
+    /* --orphan-handling: what the script places nowhere, found before it is placed; said with the
+     * linker's own sections once those are made (phase_orphans), or now under -r, which makes none */
     if (script_check_orphans(ctx, &l->inputs) != 0) {
+        fprintf(stderr, "ld: out of memory\n");
+        return -1;
+    }
+    if (l->out_type == ET_REL && script_say_orphans(ctx, &l->inputs, NULL) != 0) {
         return -1;
     }
     plan = elf_link_plan_create();
@@ -547,6 +552,11 @@ static int phase_segments(ld_link_t *l) {
     return add_default_segments(l->out, l->ctx);
 }
 
+/* --orphan-handling: the inputs' orphans and the sections the linker made that the script places nowhere */
+static int phase_orphans(ld_link_t *l) {
+    return script_say_orphans(l->ctx, &l->inputs, l->out) != 0 ? -1 : 0;
+}
+
 /* Where the image begins: -Ttext-segment's, 0 for a shared object or PIE, else the target's. */
 static uint64_t image_base(const ld_link_t *l) {
     if (l->ctx->opt.have_image_base) {
@@ -721,6 +731,7 @@ static const ld_phase_t link_phases[] = {
       "failed to add output program segments" },
     { "order-sections", phase_order_sections, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
       "failed to reorder sections after segment planning" },
+    { "orphans", phase_orphans, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0, NULL },
     { "assign-addresses", phase_assign_addresses, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), DID(LAYOUT),
       "failed to assign section virtual addresses" },
     { "script-addresses", phase_script_addresses, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
@@ -872,6 +883,7 @@ static void ctx_free(ld_ctx_t *ctx) {
     free((void *)ctx->ifuncs);
     lds_script_free(ctx->script);
     ld_version_script_free(&ctx->version_script);
+    free(ctx->orphans);
 }
 
 /**

@@ -251,7 +251,7 @@ int add_build_id_input(ld_ctx_t *ctx, objvec_t *inputs) {
     sec = elf_add_section(obj, ".note.gnu.build-id", SHT_NOTE, SHF_ALLOC);
     if (sec == NULL || elf_section_set_align(sec, 4) != ELF_OK ||
         elf_section_set_data(sec, note, 16 + opt->build_id_size) != ELF_OK ||
-        objvec_push(inputs, obj, "<build-id>") != 0) {
+        objvec_push(inputs, obj, LD_BUILD_ID_INPUT) != 0) {
         elf_close(obj);
         return -1;
     }
