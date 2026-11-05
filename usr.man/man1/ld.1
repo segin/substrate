@@ -905,6 +905,10 @@ of two nested, the outer sorts and the inner breaks its ties, and
 otherwise ties keep the order of the inputs, as in GNU ld.
 .Ic SORT_NONE
 sorts nothing.
+An output section's descriptions take their sections in the order they
+are written, and the sorts sort them, under
+.Fl r
+too.
 An output section the script names is placed at the location counter,
 however it is protected: no page is skipped between read-only, code and
 data, as GNU ld does not skip one; a script that wants them apart says so

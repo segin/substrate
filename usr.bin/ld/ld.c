@@ -403,15 +403,20 @@ static int phase_merge(ld_link_t *l) {
         if (err == ELF_OK) {
             err = elf_link_plan_set_section_gathered_hook(plan, script_places, ctx->script);
         }
-        /* in each output section, the order of the script's input descriptions */
-        if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
-            err = elf_link_plan_set_section_rank_hooks(plan, script_input_rank, script_rank_gap, ctx);
+        /*
+         * in each output section, the order of the script's input descriptions, -r too (as GNU ld); what
+         * moves the counter between them is a final link's, whose walk gives the addresses
+         */
+        if (err == ELF_OK) {
+            err = elf_link_plan_set_section_rank_hooks(plan, script_input_rank,
+                                                       ctx->opt.expect_type != ET_REL ? script_rank_gap : NULL,
+                                                       ctx);
         }
         if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
             err = elf_link_plan_set_section_fill_hook(plan, script_rank_fill, ctx);
         }
-        /* and within one, SORT_BY_ALIGNMENT() and its relatives */
-        if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
+        /* and within one, SORT_BY_ALIGNMENT() and its relatives (Linux's modules: SORT(___ksymtab+*)) */
+        if (err == ELF_OK) {
             err = elf_link_plan_set_section_sort_hook(plan, script_input_sort, ctx);
         }
     } else if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
