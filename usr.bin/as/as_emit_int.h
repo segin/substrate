@@ -267,6 +267,9 @@ typedef struct {
      * "no .text/.data found" (very rare). */
     char **stmt_section_at;
     size_t stmt_section_at_count;
+    /* The code's mode (16, 32 or 64) at each stmt, from the same walk:
+     * what .code16, .code32 or .code64 last said before it. */
+    unsigned char *stmt_bits_at;
     char *errbuf;
     size_t errbuf_sz;
 } emit_ctx_t;

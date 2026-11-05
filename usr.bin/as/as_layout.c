@@ -2205,13 +2205,15 @@ static int linux_alt_original_range_size(emit_ctx_t *ctx, const char *section_na
     return 0;
 }
 
-/* Lazy build of the per-stmt section table. Walks parsed once and
- * records track.current at each stmt position. Subsequent
- * stmt_declared_label_section calls are O(1). */
+/* Lazy build of the per-stmt section table, and of the code's mode at
+ * each stmt (emit_ctx_t.stmt_bits_at). Walks parsed once and records
+ * track.current and track.x86_code_bits at each stmt position.
+ * Subsequent stmt_declared_label_section calls are O(1). */
 static int build_stmt_section_at(emit_ctx_t *ctx) {
     section_track_t track;
     size_t i;
     char **table;
+    unsigned char *bits;
     if (ctx == NULL || ctx->parsed == NULL) {
         return -1;
     }
@@ -2219,16 +2221,21 @@ static int build_stmt_section_at(emit_ctx_t *ctx) {
         return 0;
     }
     table = (char **)calloc(ctx->parsed->count, sizeof(*table));
-    if (table == NULL) {
+    bits = (unsigned char *)calloc(ctx->parsed->count != 0 ? ctx->parsed->count : 1, sizeof(*bits));
+    if (table == NULL || bits == NULL) {
+        free(table);
+        free(bits);
         return -1;
     }
     if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
                                    (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
         free(table);
+        free(bits);
         return -1;
     }
     for (i = 0; i < ctx->parsed->count; ++i) {
         const as_stmt_t *st = &ctx->parsed->items[i];
+        bits[i] = (unsigned char)track.x86_code_bits;
         table[i] = xstrdup(track.current != NULL ? track.current : "");
         if (table[i] == NULL) {
             section_track_free(&track);
@@ -2236,6 +2243,7 @@ static int build_stmt_section_at(emit_ctx_t *ctx) {
                 free(table[i]);
             }
             free(table);
+            free(bits);
             return -1;
         }
         if (st->kind == AS_STMT_DIRECTIVE) {
@@ -2246,11 +2254,14 @@ static int build_stmt_section_at(emit_ctx_t *ctx) {
                     free(table[i]);
                 }
                 free(table);
+                free(bits);
                 return -1;
             }
         }
     }
     section_track_free(&track);
+    free(ctx->stmt_bits_at);
+    ctx->stmt_bits_at = bits;
     ctx->stmt_section_at = table;
     ctx->stmt_section_at_count = ctx->parsed->count;
     return 0;
@@ -3240,6 +3251,8 @@ static int fixed_label_expr(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_c
         !fx.any) {
         return -1;
     }
+    /* (The labels' code, as fixed_label_diff() has it.) */
+    fx.x86_code_bits = ctx->stmt_bits_at[fx.lo];
     for (k = fx.lo; k < fx.hi; ++k) {
         const as_stmt_t *between = &ctx->parsed->items[k];
 
@@ -3298,9 +3311,14 @@ int fixed_label_diff(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bit
             return -1;
         }
     }
-    if (stmt_range_size_in_section(ctx, sec, lo, hi, 0, x86_code_bits, &size) != 0) {
+    /* (Sized in the code the labels are in, which nothing between them
+     * changes, not the code of the statement: `.code32` and then
+     * `ljmpl $0x10, $(b - a)` of two labels of 64-bit code took every
+     * instruction between them for none.) */
+    if (stmt_range_size_in_section(ctx, sec, lo, hi, 0, ctx->stmt_bits_at[lo], &size) != 0) {
         return -1;
     }
+    (void)x86_code_bits;
     *out = lin.value + (ib >= ia ? (long long)size : -(long long)size);
     return 0;
 }

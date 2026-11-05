@@ -3974,6 +3974,7 @@ fail:
             free(ctx.stmt_section_at[_i]);
         }
         free(ctx.stmt_section_at);
+        free(ctx.stmt_bits_at);
     }
     elf_close(ctx.obj);
     return emitted;
