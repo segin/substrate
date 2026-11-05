@@ -284,6 +284,7 @@ typedef struct {
     int pie;                    /* -pie: ET_DYN, and a program */
     int strip_debug;            /* -S, -s: no debugging information */
     int emit_relocs;            /* -q: the output keeps its relocations */
+    int force_group_allocation; /* --force-group-allocation: -r places groups' members as a final link does */
     int discard;                /* LD_DISCARD_*: which locals the output leaves out */
     strvec_t rpaths;            /* -rpath: the output's DT_RUNPATH */
     const char *map_path;
@@ -577,6 +578,7 @@ typedef struct lds_script {
     char *entry;                /* ENTRY(sym) */
     int has_sections;
     int discard_orphans;        /* --orphan-handling=discard: script_output_name() leaves them out */
+    int force_group_allocation; /* FORCE_GROUP_ALLOCATION, as --force-group-allocation */
     defsymvec_t locals;        /* what PROVIDE names and nothing refers to:
                                  * no symbol, but the script may use it */
     defsymvec_t homes;          /* the symbols the walk has set, and where: 0 for an absolute

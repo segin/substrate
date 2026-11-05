@@ -527,7 +527,13 @@ static int phase_ld_note(ld_link_t *l) {
     return ensure_substrate_ld_note(l->out);
 }
 
+/* Section groups are gone from a final link, their members placed like any section; and from -r under
+ * --force-group-allocation or a script's FORCE_GROUP_ALLOCATION, as GNU ld (Linux's modules are so linked). */
 static int phase_strip_groups(ld_link_t *l) {
+    if (l->out_type == ET_REL && !l->ctx->opt.force_group_allocation &&
+        (l->ctx->script == NULL || !l->ctx->script->force_group_allocation)) {
+        return 0;
+    }
     return strip_group_sections_for_final(l->out);
 }
 
@@ -723,8 +729,8 @@ static const ld_phase_t link_phases[] = {
 
     { "ld-note", phase_ld_note, LD_FOR_PROGRAM, DID(MERGE), DID(LAYOUT), 0,
       "failed to emit .note.substrate_ld metadata" },
-    { "strip-groups", phase_strip_groups, LD_FOR_FINAL, DID(MERGE), DID(LAYOUT), 0,
-      "failed to strip SHT_GROUP sections for final output" },
+    { "strip-groups", phase_strip_groups, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0,
+      "failed to strip SHT_GROUP sections" },
     { "linker-symbols", phase_linker_symbols, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },
     { "version-script", phase_version_script, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },
     { "relax-tls", phase_relax_tls, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },

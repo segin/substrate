@@ -228,6 +228,21 @@ script statement places them, under their name or another
 that gathers them into one output section, its
 .Va sh_link
 the section the first is ordered by.
+.It Fl -force-group-allocation
+With
+.Fl r ,
+place the members of section groups
+.Pq Dv SHT_GROUP ,
+such as C++'s COMDAT groups, as a program's link does: the groups are
+gone, one of each signature's members kept, and those are sections like
+any other, no longer marked
+.Dv SHF_GROUP .
+A script's
+.Ic FORCE_GROUP_ALLOCATION
+does the same.
+Linux links its modules so.
+Without it, the groups are not kept either (GNU ld keeps them), but their
+members are still marked as in one.
 .It Fl shared
 Produce a shared object: no entry is needed, what it leaves undefined is
 for the program that loads it to supply, and it is not made executable.

@@ -3094,6 +3094,9 @@ static int lp_top_statement(lds_parser_t *p) {
     } else if (lds_word_in(head.text, call)) {
         rc = lp_skip_group(p, LDS_TOK_LPAREN, LDS_TOK_RPAREN, "'(' is not closed") != 0 ? -1 : lp_semi(p);
     } else if (lds_word_in(head.text, bare)) {
+        if (strcmp(head.text, "FORCE_GROUP_ALLOCATION") == 0) {
+            p->sc->force_group_allocation = 1;
+        }
         rc = lp_semi(p);
     } else {
         rc = lp_assignment(p, v, LDS_IN_TOP, &head, 0, 0, 0, LDS_TOK_SEMI);
