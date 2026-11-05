@@ -769,6 +769,17 @@ protects the section from
 and
 .Ic /DISCARD/
 leaves what it names out.
+A
+.Ic /DISCARD/
+of
+.Li .dynamic
+leaves out all the dynamic tables the linker would make,
+.Li .dynamic , .dynsym , .dynstr , .hash
+and
+.Li .gnu.hash ,
+as GNU ld does: Linux's x86-64 decompressor is linked
+.Fl pie
+by a script that discards them.
 The sections a description takes go in in the order of the inputs,
 except those a pattern inside
 .Ic SORT

@@ -1898,6 +1898,13 @@ static int plan_dynamic_tables(ld_ctx_t *ctx, elfobj_t *out) {
         return -1;
     }
     need_dyn = (elf_type(out) == ET_DYN) || (ctx->dso_inputs.count != 0) || ctx->opt.export_dynamic;
+    /* A script's /DISCARD/ of .dynamic leaves these tables out, as GNU ld
+     * does: they come after the script's sections, so its discard of them
+     * never saw them (the x86 decompressor's -pie script relies on it). */
+    if (need_dyn && ctx->script != NULL && ctx->script->has_sections &&
+        script_output_name(".dynamic", NULL, ctx->script) == NULL) {
+        need_dyn = 0;
+    }
     if (!need_dyn) {
         return 0;
     }

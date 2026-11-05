@@ -1254,13 +1254,15 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     }
 
     /*
-     * A shared object's dynamic string table is made up for it; an
-     * executable's only when it has a .dynamic.  A static one got an
-     * allocated .dynstr nothing placed, at address 0, where it overlapped
-     * the first section of an image linked at 0 (Linux's realmode blob),
-     * and the output could not be read back.
+     * A shared object's or an executable's dynamic string table is made up
+     * for it only when it has a .dynamic, the table that names it.  A
+     * static one got an allocated .dynstr nothing placed, at address 0,
+     * where it overlapped the first section of an image linked at 0
+     * (Linux's realmode blob), and the output could not be read back; so
+     * did an ET_DYN whose linker script discards .dynamic (Linux's x86-64
+     * decompressor, linked -pie).
      */
-    if ((obj->type == ET_DYN || (obj->type == ET_EXEC && has_dynamic_section)) && !has_dynstr_section) {
+    if ((obj->type == ET_DYN || obj->type == ET_EXEC) && has_dynamic_section && !has_dynstr_section) {
         out_sec_t dynst;
         dynstr_data = build_dynstr(obj, &dynstr_size);
         if (dynstr_data == NULL && dynstr_size != 0) {

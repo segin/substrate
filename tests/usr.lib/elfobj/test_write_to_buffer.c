@@ -671,6 +671,13 @@ static void test_build_dynstr(void) {
 	require_true(t, elf_add_symbol(obj, "my_global_sym", 0, 0, STB_GLOBAL, STT_FUNC) != NULL, "add global sym failed");
 	require_true(t, elf_add_symbol(obj, "my_weak_sym", 0, 0, STB_WEAK, STT_OBJECT) != NULL, "add weak sym failed");
 
+	/* without a .dynamic nothing names a .dynstr: none is made up */
+	rt = roundtrip_validate(t, obj, ELF_VALIDATE_PERMISSIVE);
+	require_true(t, elf_find_section(rt.obj, ".dynstr") == NULL, ".dynstr made up with no .dynamic");
+	rt_close(&rt);
+
+	require_true(t, elf_add_section(obj, ".dynamic", SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE) != NULL,
+	    "add .dynamic failed");
 	rt = roundtrip_validate(t, obj, ELF_VALIDATE_PERMISSIVE);
 
 	elf_section_t *dynstr = require_section(t, rt.obj, ".dynstr");

@@ -149,6 +149,11 @@ static elfobj_t *make_obj(uint16_t type, int extra) {
             exit(1);
         }
     }
+    /* a shared object's .dynstr is made up only for its .dynamic */
+    if (type == ET_DYN && elf_add_section(obj, ".dynamic", SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE) == NULL) {
+        fprintf(stderr, "test_write_oom: cannot add .dynamic\n");
+        exit(1);
+    }
     if (type == ET_REL && extra % 2 == 1) {
         elf_section_t *g = elf_add_section(obj, ".text.comdat", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
 
