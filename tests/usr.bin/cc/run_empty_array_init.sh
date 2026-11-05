@@ -5,7 +5,9 @@
 # cc gave it one zero element, the rule for an empty list of a part a
 # designator reached into: Linux's EHCI driver, whose list of platform
 # drivers is empty on x86, registered one NULL driver at boot and oopsed
-# in __platform_driver_register.  Results are gcc's.
+# in __platform_driver_register.  An array of no bytes local to a statement
+# expression (Linux's mipi_dbi_command() with no data) still has an address:
+# it was refused ("invalid local storage size").  Results are gcc's.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -48,6 +50,14 @@ __attribute__((noinline)) static int register_all(struct drv *const *d, unsigned
 	return sum;
 }
 
+__attribute__((noinline)) static int send(int cmd, const unsigned char *p, unsigned long n)
+{
+	return cmd + (int)n + (p != 0);
+}
+
+/* a list of bytes for a command, local to a statement expression (Linux's mipi_dbi_command()) */
+#define command(cmd, seq...) ({ const unsigned char d[] = { seq }; send(cmd, d, ARRAY_SIZE(d)); })
+
 int main(void)
 {
 	static int sl[] = {};
@@ -60,6 +70,7 @@ int main(void)
 	       sizeof((struct pt[]){}));
 	printf("%zu %d %d %d %d\n", sizeof(fa), fa.n, fb.f[1], fc.n, fb.n);
 	printf("%d\n", register_all(drivers, ARRAY_SIZE(drivers)));
+	printf("%d %d\n", command(1), command(2, 3, 4));
 	return 0;
 }
 EOF2

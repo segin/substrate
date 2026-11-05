@@ -10920,8 +10920,10 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             return -1;
         }
         if (!is_runtime_vla) {
+            /* one of no bytes still has an address: a byte, as lower_collect_hoisted_allocs() gives it */
             varv = prealloc >= 0 ? prealloc
-                                 : cc_ir_stackalloc_aligned(sf, total_size, stmt_decl_align(tu, s), diag);
+                                 : cc_ir_stackalloc_aligned(sf, total_size > 0 ? total_size : 1,
+                                                            stmt_decl_align(tu, s), diag);
             if (varv < 0) {
                 return -1;
             }
