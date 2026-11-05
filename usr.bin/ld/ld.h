@@ -78,6 +78,14 @@ typedef enum {
     LD_HASH_GNU = 2
 } ld_hash_style_t;
 
+/** --orphan-handling=MODE: what is done with an input section a script's SECTIONS places nowhere. */
+typedef enum {
+    LD_ORPHAN_PLACE = 0,        /* the default: placed by the linker's own rules */
+    LD_ORPHAN_WARN = 1,         /* placed, and each one said */
+    LD_ORPHAN_ERROR = 2,        /* each one said, and the link fails */
+    LD_ORPHAN_DISCARD = 3       /* left out */
+} ld_orphan_mode_t;
+
 /* --build-id's styles (ld_buildid.c); none is the default, as GNU ld's. */
 enum {
     LD_BUILD_ID_NONE = 0,
@@ -259,6 +267,7 @@ typedef struct {
     int z_now;   /* -z now: the dynamic linker binds everything at once */
     uint64_t max_page_size; /* -z max-page-size: a PT_LOAD's alignment; 0 for 4 KiB */
     ld_hash_style_t hash_style;
+    ld_orphan_mode_t orphan_handling;   /* --orphan-handling */
     const char *out_path;
     const char *script_path;
     const char *plugin_path;
@@ -552,7 +561,8 @@ typedef struct lds_script {
     size_t region_cap;
     char *entry;                /* ENTRY(sym) */
     int has_sections;
-    defsymvec_t locals;         /* what PROVIDE names and nothing refers to:
+    int discard_orphans;        /* --orphan-handling=discard: script_output_name() leaves them out */
+    defsymvec_t locals;        /* what PROVIDE names and nothing refers to:
                                  * no symbol, but the script may use it */
     defsymvec_t homes;          /* the symbols the walk has set, and where: 0 for an absolute
                                  * address, else 1 + the index of the output section it is in
@@ -842,6 +852,7 @@ void lds_script_free(lds_script_t *sc);
 lds_script_t *lds_script_parse(const char *path, const ld_ctx_t *ctx);
 const char *script_output_name(const char *section, const char *file, void *user);
 int script_keeps_input(const lds_script_t *sc, const char *section, const char *file);
+int script_check_orphans(ld_ctx_t *ctx, const objvec_t *inputs);
 int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out);
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);

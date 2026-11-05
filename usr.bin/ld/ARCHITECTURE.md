@@ -154,6 +154,8 @@ Type: ELF files plus diagnostic/support artifacts
 
 Purpose: Deliver the linked program image and optional debugging/provenance outputs.
 
+`--orphan-handling` is asked before the inputs are merged (`script_check_orphans()` in `ld_script.c`, from `phase_merge`): each input section no description of the script takes -- `script_taker()`, the same matching `script_output_name()` does -- is said in GNU ld's words under `warn` and `error` (which then fails the link), and under `discard` `script_output_name()` gives it no output section. Linux passes `--orphan-handling=warn` to its links (`tests/usr.bin/ld/test_orphan_handling.sh`).
+
 A relocatable output has one section symbol for each of its sections that a relocation names, at 0, and none of the inputs': a relocation against an input section's symbol is made against the output section's, the input's place added to the addend, as GNU ld writes it, whether or not the input's symbol has a name (the in-tree assembler names them). Tools that add relocations to a `-r` output take "the" section symbol for their section -- objtool does, for Linux's static call table in `vmlinux.o` -- and with one copied for each input, at its place, they took the last (`tests/usr.bin/ld/test_r_input_section_symbols.sh`).
 
 ## 5. External Integrations / APIs

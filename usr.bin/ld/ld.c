@@ -363,9 +363,16 @@ static int phase_symtab(ld_link_t *l) {
  * one's. */
 static int phase_merge(ld_link_t *l) {
     ld_ctx_t *ctx = l->ctx;
-    elf_link_plan_t *plan = elf_link_plan_create();
-    elf_err_t err = plan != NULL ? ELF_OK : ELF_ERR_OOM;
+    elf_link_plan_t *plan;
+    elf_err_t err;
     size_t pi;
+
+    /* --orphan-handling: what the script places nowhere, said before it is placed */
+    if (script_check_orphans(ctx, &l->inputs) != 0) {
+        return -1;
+    }
+    plan = elf_link_plan_create();
+    err = plan != NULL ? ELF_OK : ELF_ERR_OOM;
 
     for (pi = 0; err == ELF_OK && pi < l->inputs.count; ++pi) {
         err = elf_link_plan_add_input(plan, l->inputs.objs[pi],

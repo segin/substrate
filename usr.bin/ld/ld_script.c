@@ -3213,10 +3213,11 @@ static int script_input_matches(const lds_stmt_t *in, const char *section, const
     return 0;
 }
 
-/* The elfobj hook: the first output section of the script that asks for
- * this input section has it; one nothing asks for keeps its own name. */
-const char *script_output_name(const char *section, const char *file, void *user) {
-    const lds_script_t *sc = (const lds_script_t *)user;
+/**
+ * @brief The output section statement of @p sc whose input descriptions first take input section
+ * @p section of @p file, a /DISCARD/ among them; NULL for an orphan, one nothing takes.
+ */
+static const lds_stmt_t *script_taker(const lds_script_t *sc, const char *section, const char *file) {
     size_t i, k;
 
     for (i = 0; i < sc->stmts.count; ++i) {
@@ -3228,11 +3229,97 @@ const char *script_output_name(const char *section, const char *file, void *user
         for (k = 0; k < os->body.count; ++k) {
             if (os->body.items[k].kind == LDS_ST_INPUT &&
                 script_input_matches(&os->body.items[k], section, file)) {
-                return os->discard ? NULL : os->at.text;
+                return os;
             }
         }
     }
-    return section;
+    return NULL;
+}
+
+/* The elfobj hook: the first output section of the script that asks for
+ * this input section has it; one nothing asks for keeps its own name, or
+ * under --orphan-handling=discard is left out. */
+const char *script_output_name(const char *section, const char *file, void *user) {
+    const lds_script_t *sc = (const lds_script_t *)user;
+    const lds_stmt_t *os = script_taker(sc, section, file);
+
+    if (os == NULL) {
+        return sc->discard_orphans ? NULL : section;
+    }
+    return os->discard ? NULL : os->at.text;
+}
+
+/**
+ * @brief Whether input section @p sec is one --orphan-handling speaks of when the script places it
+ * nowhere: what GNU ld takes as an input section, not a table of the object's own (symbols, strings,
+ * relocations, groups) nor the .note.GNU-stack that only says what the stack may be.
+ */
+static int orphan_candidate(const elf_section_t *sec) {
+    const char *name = elf_section_name(sec);
+    uint32_t type = elf_section_type(sec);
+
+    return name != NULL && name[0] != '\0' && type != SHT_NULL && type != SHT_SYMTAB && type != SHT_STRTAB &&
+           type != SHT_RELA && type != SHT_REL && type != SHT_GROUP && type != SHT_SYMTAB_SHNDX &&
+           strcmp(name, ".note.GNU-stack") != 0;
+}
+
+/**
+ * @brief --orphan-handling: say each input section the script's SECTIONS places nowhere, as GNU ld
+ * says it, input by input and in each input's order, or make it left out.
+ *
+ * GNU ld's words: under warn "orphan section `S' from `F' being placed in section `S'", under error
+ * "unplaced orphan section `S' from `F'", every one before the link fails.  Under discard,
+ * script_output_name() leaves them out.  Shared objects have no sections to place.
+ *
+ * @param ctx     the link, with the script read
+ * @param inputs  the objects the link takes sections from, and their names
+ * @return 0, or 1 to stop the link (an orphan under error, or a warning under --fatal-warnings)
+ */
+int script_check_orphans(ld_ctx_t *ctx, const objvec_t *inputs) {
+    lds_script_t *sc = ctx->script;
+    ld_orphan_mode_t mode = ctx->opt.orphan_handling;
+    int failed = 0;
+    int property_said = 0;  /* (the inputs' .note.gnu.property are one, the first input's, to GNU ld) */
+    size_t i, k;
+
+    if (sc == NULL || !sc->has_sections || mode == LD_ORPHAN_PLACE) {
+        return 0;
+    }
+    if (mode == LD_ORPHAN_DISCARD) {
+        sc->discard_orphans = 1;
+        return 0;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        elfobj_t *obj = inputs->objs[i];
+        const char *file = inputs->names[i] != NULL ? inputs->names[i] : "?";
+
+        if (obj == NULL || elf_type(obj) != ET_REL) {
+            continue;
+        }
+        for (k = 0; k < elf_section_count(obj); ++k) {
+            const elf_section_t *sec = elf_section_get(obj, k);
+            const char *name;
+
+            if (sec == NULL || !orphan_candidate(sec)) {
+                continue;
+            }
+            name = elf_section_name(sec);
+            if (script_taker(sc, name, file) != NULL) {
+                continue;
+            }
+            if (strcmp(name, ".note.gnu.property") == 0 && property_said++) {
+                continue;
+            }
+            if (mode == LD_ORPHAN_ERROR) {
+                fprintf(stderr, "ld: error: unplaced orphan section `%s' from `%s'\n", name, file);
+                failed = 1;
+            } else if (ld_warn(ctx, "orphan section `%s' from `%s' being placed in section `%s'", name, file,
+                               name) != 0) {
+                failed = 1;
+            }
+        }
+    }
+    return failed;
 }
 
 /*

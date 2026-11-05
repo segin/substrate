@@ -40,7 +40,7 @@ void ld_usage(const char *prog) {
             "[-plugin path] [-plugin-opt opt] "
             "[-e symbol] [-T script] [--allow-undefined] [-z text|notext|execstack|noexecstack|relro|norelro|separate-code|noseparate-code] "
             "[--reproduce dir] "
-            "[--hash-style=sysv|gnu|both] "
+            "[--hash-style=sysv|gnu|both] [--orphan-handling=place|warn|error|discard] "
             "[--compat=gnu|lld] input...\n",
             prog);
 }
@@ -244,6 +244,29 @@ static int opt_defsym(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const ch
     return rc;
 }
 
+/* --orphan-handling=MODE: place, warn, error or discard, as GNU ld takes them. */
+static int opt_orphan_handling(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
+    static const struct {
+        const char *name;
+        ld_orphan_mode_t mode;
+    } modes[] = {
+        { "place", LD_ORPHAN_PLACE }, { "warn", LD_ORPHAN_WARN },
+        { "error", LD_ORPHAN_ERROR }, { "discard", LD_ORPHAN_DISCARD },
+    };
+    size_t i;
+
+    (void)o;
+    (void)as;
+    for (i = 0; i < sizeof(modes) / sizeof(modes[0]); ++i) {
+        if (strcmp(val, modes[i].name) == 0) {
+            ctx->opt.orphan_handling = modes[i].mode;
+            return 0;
+        }
+    }
+    fprintf(stderr, "ld: invalid argument to option \"--orphan-handling\"\n");
+    return LD_OPT_USAGE;
+}
+
 static int opt_hash_style(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)o;
     (void)as;
@@ -366,6 +389,7 @@ static const ld_opt_t options[] = {
     { "-T", OPT_JOINED, opt_script, 0, 0 },
     { "-z", OPT_JOINED, opt_z, 0, 0 },
     { "--hash-style", OPT_VALUE, opt_hash_style, 0, 0 },
+    { "--orphan-handling", OPT_VALUE, opt_orphan_handling, 0, 0 },
     { "--eh-frame-hdr", OPT_FLAG, opt_int, F(eh_frame_hdr), 1 },
     { "--no-eh-frame-hdr", OPT_FLAG, opt_int, F(eh_frame_hdr), 0 },
     /* The debugging information is left out.  -s would leave the symbol

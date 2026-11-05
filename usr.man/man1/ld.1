@@ -25,6 +25,7 @@
 .Op Fl -print-gc-sections
 .Op Fl -icf Ns = Ns Ar safe|all|none
 .Op Fl -hash-style Ns = Ns Ar sysv|gnu|both
+.Op Fl -orphan-handling Ns = Ns Ar place|warn|error|discard
 .Op Fl -allow-undefined | Fl -no-undefined
 .Op Fl -unresolved-symbols Ns = Ns Ar ignore-all|report-all
 .Op Fl -undefined Ar symbol
@@ -447,6 +448,30 @@ Not with
 .Fl r .
 .It Fl -hash-style Ns = Ns Ar style
 Select dynamic symbol hash style.
+.It Fl -orphan-handling Ns = Ns Ar mode
+What is done with an orphan, an input section a script's
+.Ic SECTIONS
+places nowhere:
+.Ar place ,
+the default, places it by the linker's own rules;
+.Ar warn
+places it and says
+.Dq orphan section Sq Ar S No from Sq Ar F No being placed in section Sq Ar S ;
+.Ar error
+says
+.Dq unplaced orphan section Sq Ar S No from Sq Ar F
+of each and fails the link;
+.Ar discard
+leaves them out.
+These are GNU ld's words, said input by input in each input's order.
+The tables of an object
+.Pq symbols, strings, relocations, groups
+and
+.Pa .note.GNU-stack
+are not orphans; the inputs'
+.Pa .note.gnu.property
+are one, the first input's.
+Unlike GNU ld, the sections the linker makes itself are not said.
 .It Fl -defsym Ar name=value
 Define or override an absolute symbol.
 .It Fl -undefined Ar symbol
