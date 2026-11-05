@@ -1658,8 +1658,8 @@ static int init_finish(parser_t *p, const cc_ctype_t *t, cc_expr_t *l) {
             return -1;
         }
     }
-    if (l->arg_count == 0 && init_part_count(p, t) > 0 && t->unqual->count != 0) {
-        /* a part that a designator reached into and left empty: all zero */
+    if (l->arg_count == 0 && init_part_count(p, t) > 0 && t->unqual->count > 0) {
+        /* a part that a designator reached into and left empty: all zero (an array of no bound has none) */
         l->args = (cc_expr_t **)malloc(sizeof(*l->args));
         if (l->args == NULL || (l->args[0] = init_zero(p, init_part_type(p, t, 0))) == NULL) {
             parser_error(p, "out of memory canonicalizing an initializer");

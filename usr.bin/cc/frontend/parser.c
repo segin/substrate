@@ -9205,7 +9205,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                         free_expr(e);
                         return NULL;
                     }
-                    if (ce->ctype != NULL && ce->ctype->kind == CC_CT_ARRAY && ce->ctype->count < 0 && n > 0) {
+                    if (ce->ctype != NULL && ce->ctype->kind == CC_CT_ARRAY && ce->ctype->count < 0) {
                         ce->ctype = cc_ct_array(ce->ctype->of, n);
                     }
                 }
@@ -9332,7 +9332,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                         free_expr(e);
                         return NULL;
                     }
-                    if (e->ctype != NULL && e->ctype->kind == CC_CT_ARRAY && e->ctype->count < 0 && n > 0) {
+                    if (e->ctype != NULL && e->ctype->kind == CC_CT_ARRAY && e->ctype->count < 0) {
                         e->ctype = cc_ct_array(e->ctype->of, n);
                     }
                 }
@@ -10595,14 +10595,14 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             }
         }
         if (s.expr != NULL && s.expr->kind == CC_EXPR_INIT_LIST) {
-            /* the list in its one form; `T a[] = {...}`: and the bound it gives the array */
+            /* the list in its one form; `T a[] = {...}`: and the bound it gives the array (GNU: `{}` gives 0) */
             long inferred = 0;
 
             if (parser_canon_initializer(p, s.ctype, &s.expr, &inferred) != 0) {
                 free_stmt(&s);
                 return -1;
             }
-            if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0 && inferred > 0) {
+            if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0) {
                 s.ctype = cc_ct_array(s.ctype->of, inferred);
             }
         } else if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0 && s.expr != NULL &&

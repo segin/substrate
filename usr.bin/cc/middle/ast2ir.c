@@ -8498,9 +8498,13 @@ static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, 
     int bytev;
     int sizev;
 
-    if (size <= 0) {
+    if (size < 0) {
         set_diag(diag, "invalid memset size in lowering");
         return -1;
+    }
+    if (size == 0) {
+        /* an object of no bytes, `int a[] = {}`: nothing to set */
+        return 0;
     }
     bytev = cc_ir_const(sf, fill_byte);
     if (bytev < 0) {
@@ -14294,7 +14298,8 @@ static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, c
     } else {
         elems = 1;
     }
-    return elems > 0 ? elems : -1;
+    /* `{}` gives none */
+    return elems >= 0 ? elems : -1;
 }
 
 static long infer_flexible_struct_tail_extra_bytes(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init_list) {
@@ -14336,7 +14341,7 @@ static long infer_flexible_struct_tail_extra_bytes(const cc_translation_unit_t *
             long elem_size = flexible_elem_size(tu, m);
             long elems;
             elems = infer_flexible_array_member_elems(tu, m, item);
-            if (elem_size <= 0 || elems <= 0 || elems > LONG_MAX / elem_size) {
+            if (elem_size <= 0 || elems < 0 || elems > LONG_MAX / elem_size) {
                 return -1;
             }
             return elems * elem_size;
