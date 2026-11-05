@@ -1996,9 +1996,53 @@ static void asm_flag_branch(xsel_t *s, size_t j, const cc_ssa_instr_t *in, x86_a
 }
 
 /**
- * Of @p plan for inline asm @p in, each memory operand given by its address that is a symbol's -- one the code
- * reaches without the GOT -- written as the symbol (X86_ASM_SYM), as gcc writes `"m" (var)`: its address was made
- * in a register (lea var(%rip), %r10) for the asm to read through.
+ * Whether IR value @p v is a symbol's address with a number added or taken away -- `&var.member`,
+ * `&arr[3]` -- as constant additions to xs_sym_of()'s symbol: the symbol, and what is added, in *@p sym and
+ * *@p off.
+ *
+ * @param s      the selector
+ * @param v      the value
+ * @param sym    receives the symbol
+ * @param off    receives the number added to its address
+ * @param depth  how many additions have been followed (a few at most)
+ * @return 1 if it is such an address, else 0
+ */
+static int sym_plus_const(xsel_t *s, int v, const char **sym, long long *off, int depth) {
+    const cc_ssa_instr_t *d;
+    long long k;
+
+    if (xs_sym_of(s, v, sym)) {
+        *off = 0;
+        return 1;
+    }
+    if (depth > 4 || v < 0 || s->def_at[v] < 0 || s->addr_taken[v]) {
+        return 0;
+    }
+    d = &s->f->instrs[s->def_at[v]];
+    if (d->op == CC_SSA_ADD && d->lhs >= 0 && d->rhs >= 0) {
+        if (xs_const_of(s, d->rhs, &k) && sym_plus_const(s, d->lhs, sym, off, depth + 1)) {
+            *off += k;
+            return 1;
+        }
+        if (xs_const_of(s, d->lhs, &k) && sym_plus_const(s, d->rhs, sym, off, depth + 1)) {
+            *off += k;
+            return 1;
+        }
+    } else if (d->op == CC_SSA_SUB && d->lhs >= 0 && d->rhs >= 0 && xs_const_of(s, d->rhs, &k) &&
+               sym_plus_const(s, d->lhs, sym, off, depth + 1)) {
+        *off -= k;
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Of @p plan for inline asm @p in, each memory operand given by its address that is a symbol's, or a symbol's
+ * with a number added -- one the code reaches without the GOT -- written as the symbol (X86_ASM_SYM), "sym" or
+ * "sym+224", as gcc writes `"m" (var)` and `"m" (var.member)`: its address was made in a register (lea var(%rip),
+ * %r10; add $224, %r10) for the asm to read through.  Linux's paravirt calls are `call *%[op]` of `"m"
+ * (pv_ops.member)`, and the kernel finds each by its `call *pv_ops+N(%rip)` (ff 15) to make it a direct call:
+ * `call *(%r10)` stopped it on a BUG() in apply_alternatives().
  */
 static void asm_plan_symbols(xsel_t *s, const cc_ssa_instr_t *in, x86_asm_plan_t *plan) {
     size_t k;
@@ -2006,9 +2050,20 @@ static void asm_plan_symbols(xsel_t *s, const cc_ssa_instr_t *in, x86_asm_plan_t
     for (k = 0; k < plan->n; ++k) {
         int v = asm_operand_value(s->f, in, k);
         const char *sym;
+        long long off = 0;
 
-        if (plan->kind[k] == X86_ASM_ADDR && v >= 0 && xs_sym_of(s, v, &sym) && s->got == XR_NONE &&
+        if (plan->kind[k] == X86_ASM_ADDR && v >= 0 && sym_plus_const(s, v, &sym, &off, 0) && s->got == XR_NONE &&
             !(s->t->sym_got != NULL && s->t->sym_got(s, sym))) {
+            if (off != 0) {
+                char buf[32];
+
+                snprintf(buf, sizeof(buf), "%+lld", off);
+                sym = keep_name(sym, buf);
+                if (sym == NULL) {
+                    s->xf.oom = 1;
+                    return;
+                }
+            }
             plan->kind[k] = X86_ASM_SYM;
             plan->sym[k] = sym;
         }
