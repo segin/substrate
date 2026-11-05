@@ -1233,8 +1233,12 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         cc_value_type_t vt = CC_VAL_I64;
 
         if (in->op == CC_SSA_LABEL) {
-            /* falling into it from the instruction before is an edge too */
-            if (i > 0 && !cc_ssa_opcode_is_terminator(f->instrs[i - 1].op)) {
+            /*
+             * falling into it from the instruction before is an edge too, and so is the function's entry into a
+             * label first: an inlined body may begin with one, and without the edge the entry's code did not run
+             * -- the fall-through of Linux's static branches, inlined so, never joined
+             */
+            if (i == 0 || !cc_ssa_opcode_is_terminator(f->instrs[i - 1].op)) {
                 join_edge(&join, in->label, f->label_count, st, live);
             }
         }
