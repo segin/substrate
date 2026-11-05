@@ -393,6 +393,9 @@ static const ld_opt_t options[] = {
     { "-z", OPT_JOINED, opt_z, 0, 0 },
     { "--hash-style", OPT_VALUE, opt_hash_style, 0, 0 },
     { "--orphan-handling", OPT_VALUE, opt_orphan_handling, 0, 0 },
+    /* The linker makes no unwind information of its own (GNU ld's
+     * default is an FDE for the PLT), which is what this asks for. */
+    { "--no-ld-generated-unwind-info", OPT_FLAG, opt_ignored, 0, 0 },
     { "--eh-frame-hdr", OPT_FLAG, opt_int, F(eh_frame_hdr), 1 },
     { "--no-eh-frame-hdr", OPT_FLAG, opt_int, F(eh_frame_hdr), 0 },
     /* The debugging information is left out.  -s would leave the symbol

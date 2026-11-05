@@ -177,6 +177,10 @@ Without
 .Fl m
 the first input's class and machine choose.
 Given more than once, the last is the one taken.
+.It Fl -no-ld-generated-unwind-info
+No unwind information of the linker's own making, which it never makes:
+GNU ld's default is a record for the PLT, and there is no
+.Fl -ld-generated-unwind-info .
 .It Fl -eh-frame-hdr
 Make
 .Pa .eh_frame_hdr ,
