@@ -3431,6 +3431,50 @@ int script_say_orphans(ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
     return failed;
 }
 
+/**
+ * @brief --orphan-handling=discard: leave out of @p out the dynamic relocation sections the linker made
+ * and the script places nowhere, and fail the link on a GOT or PLT it needs, as GNU ld does.
+ *
+ * GNU ld leaves its own orphans out like any other.  Records in .rel[a].dyn or .rel[a].plt that are
+ * left out go unsaid: the places they name keep what the link put there.  A GOT or PLT left out would
+ * leave code reaching nothing, so GNU ld stops: "discarded output section: `.got.plt'", then "final
+ * link failed" -- .got.plt, which GNU ld makes with any GOT or PLT, whichever of them this linker
+ * made.  The dynamic tables themselves are never made under discard (plan_dynamic_tables() finds
+ * .dynamic discarded); while a script places .dynamic, its relocations are kept with it.
+ *
+ * @param ctx  the link
+ * @param out  the output, the linker's tables made and nothing yet given an address
+ * @return 0, 1 to stop the link, or -1 when a section cannot be removed
+ */
+int script_discard_made(ld_ctx_t *ctx, elfobj_t *out) {
+    static const char *const needed[] = { ".plt", ".iplt", ".got", ".got.plt" };
+    static const char *const records[] = { ".rel.dyn", ".rela.dyn", ".rel.plt", ".rela.plt" };
+    const lds_script_t *sc = ctx->script;
+    size_t i;
+
+    if (sc == NULL || !sc->has_sections || ctx->opt.orphan_handling != LD_ORPHAN_DISCARD) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(needed) / sizeof(needed[0]); ++i) {
+        if (elf_find_section(out, needed[i]) != NULL && script_taker(sc, needed[i], NULL) == NULL) {
+            fprintf(stderr, "ld: discarded output section: `%s'\nld: final link failed\n",
+                    strcmp(needed[i], ".iplt") == 0 ? ".iplt" : ".got.plt");
+            return 1;
+        }
+    }
+    if (elf_find_section(out, ".dynamic") != NULL) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(records) / sizeof(records[0]); ++i) {
+        elf_section_t *sec = elf_find_section(out, records[i]);
+
+        if (sec != NULL && script_taker(sc, records[i], NULL) == NULL && elf_remove_section(out, sec) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /*
  * The elfobj rank hook: the place, in its output section's body, of the
  * input description that takes this input section, so that sections go

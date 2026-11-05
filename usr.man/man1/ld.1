@@ -508,14 +508,22 @@ this linker says the
 .Pa .rel[a].dyn
 it makes.
 Under
-.Ar discard ,
-the dynamic linker's tables and the build ID are left out, but unlike
-GNU ld a
-.Pa .rel[a].dyn ,
-.Pa .got
-or
-.Pa .plt
-the link needs is kept.
+.Ar discard
+they are left out as GNU ld leaves them: the dynamic linker's tables,
+the build ID, and
+.Pa .rel[a].dyn
+and
+.Pa .rel[a].plt
+with the records in them, unsaid; a GOT or PLT the code needs fails the
+link with
+.Dq discarded output section Sq Pa .got.plt
+and
+.Dq final link failed .
+A script that discards
+.Pa .dynamic
+and places its relocations nowhere keeps them, as GNU ld does: a
+.Pa .rel[a].dyn
+of its records, linked to no symbol table.
 .It Fl -defsym Ar name=value
 Define or override an absolute symbol.
 .It Fl -undefined Ar symbol

@@ -999,6 +999,12 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
         if (sec->data == NULL) {
             continue;
         }
+        /* a program's or shared object's dynamic relocations with no symbol table, as GNU ld writes
+         * them when a script discards the dynamic tables: records for the loader, its RELATIVE ones,
+         * kept as the section's bytes */
+        if (sec->link == 0 && obj->type != ET_REL && (sec->flags & SHF_ALLOC) != 0) {
+            continue;
+        }
 
         if (sec->link >= obj->section_count || sec->info >= obj->section_count) {
             if (trace) {

@@ -869,6 +869,7 @@ const char *script_output_name(const char *section, const char *file, void *user
 int script_keeps_input(const lds_script_t *sc, const char *section, const char *file);
 int script_check_orphans(ld_ctx_t *ctx, const objvec_t *inputs);
 int script_say_orphans(ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out);
+int script_discard_made(ld_ctx_t *ctx, elfobj_t *out);
 int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out);
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);

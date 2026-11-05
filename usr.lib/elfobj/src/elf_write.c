@@ -1438,45 +1438,63 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                         count_gnu_verneed_entries(&secs[gnu_verneed_index], obj->endian);
                 }
             }
-            if (rela_plt_index != (size_t)-1) {
-                if (secs[rela_plt_index].entsize == 0) {
-                    secs[rela_plt_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
-                }
+        }
+        /* the dynamic relocations are records of a size whether or not there is a .dynsym to link
+         * them to: a script that discards the dynamic tables keeps them, as GNU ld does */
+        if (rela_plt_index != (size_t)-1) {
+            if (secs[rela_plt_index].entsize == 0) {
+                secs[rela_plt_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
+            }
+            if (dynsym_index != (size_t)-1) {
                 secs[rela_plt_index].link = (uint32_t)dynsym_index;
-                if (plt_index != (size_t)-1 && secs[rela_plt_index].info == 0) {
-                    secs[rela_plt_index].info = (uint32_t)plt_index;
-                } else if (gotplt_index != (size_t)-1 && secs[rela_plt_index].info == 0) {
-                    secs[rela_plt_index].info = (uint32_t)gotplt_index;
-                }
+            } else if (obj->type != ET_REL) {
+                secs[rela_plt_index].link = 0; /* (no .dynsym: not the .symtab either) */
             }
-            if (rel_plt_index != (size_t)-1) {
-                if (secs[rel_plt_index].entsize == 0) {
-                    secs[rel_plt_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
-                }
+            if (plt_index != (size_t)-1 && secs[rela_plt_index].info == 0) {
+                secs[rela_plt_index].info = (uint32_t)plt_index;
+            } else if (gotplt_index != (size_t)-1 && secs[rela_plt_index].info == 0) {
+                secs[rela_plt_index].info = (uint32_t)gotplt_index;
+            }
+        }
+        if (rel_plt_index != (size_t)-1) {
+            if (secs[rel_plt_index].entsize == 0) {
+                secs[rel_plt_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
+            }
+            if (dynsym_index != (size_t)-1) {
                 secs[rel_plt_index].link = (uint32_t)dynsym_index;
-                if (plt_index != (size_t)-1 && secs[rel_plt_index].info == 0) {
-                    secs[rel_plt_index].info = (uint32_t)plt_index;
-                } else if (gotplt_index != (size_t)-1 && secs[rel_plt_index].info == 0) {
-                    secs[rel_plt_index].info = (uint32_t)gotplt_index;
-                }
+            } else if (obj->type != ET_REL) {
+                secs[rel_plt_index].link = 0;
             }
-            if (rela_dyn_index != (size_t)-1) {
-                if (secs[rela_dyn_index].entsize == 0) {
-                    secs[rela_dyn_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
-                }
+            if (plt_index != (size_t)-1 && secs[rel_plt_index].info == 0) {
+                secs[rel_plt_index].info = (uint32_t)plt_index;
+            } else if (gotplt_index != (size_t)-1 && secs[rel_plt_index].info == 0) {
+                secs[rel_plt_index].info = (uint32_t)gotplt_index;
+            }
+        }
+        if (rela_dyn_index != (size_t)-1) {
+            if (secs[rela_dyn_index].entsize == 0) {
+                secs[rela_dyn_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
+            }
+            if (dynsym_index != (size_t)-1) {
                 secs[rela_dyn_index].link = (uint32_t)dynsym_index;
                 if (got_index != (size_t)-1 && secs[rela_dyn_index].info == 0) {
                     secs[rela_dyn_index].info = (uint32_t)got_index;
                 }
+            } else if (obj->type != ET_REL) {
+                secs[rela_dyn_index].link = 0;
             }
-            if (rel_dyn_index != (size_t)-1) {
-                if (secs[rel_dyn_index].entsize == 0) {
-                    secs[rel_dyn_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
-                }
+        }
+        if (rel_dyn_index != (size_t)-1) {
+            if (secs[rel_dyn_index].entsize == 0) {
+                secs[rel_dyn_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
+            }
+            if (dynsym_index != (size_t)-1) {
                 secs[rel_dyn_index].link = (uint32_t)dynsym_index;
                 if (got_index != (size_t)-1 && secs[rel_dyn_index].info == 0) {
                     secs[rel_dyn_index].info = (uint32_t)got_index;
                 }
+            } else if (obj->type != ET_REL) {
+                secs[rel_dyn_index].link = 0;
             }
         }
     }

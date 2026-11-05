@@ -51,6 +51,7 @@ run:
 	./test_r_input_section_symbols.sh
 	./test_orphan_handling.sh
 	./test_orphan_handling_made.sh
+	./test_orphan_discard_made.sh
 	./test_no_dynamic_linker.sh
 	./test_no_ld_generated_unwind_info.sh
 	./test_script_mixed_types.sh

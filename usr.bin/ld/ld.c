@@ -552,6 +552,11 @@ static int phase_segments(ld_link_t *l) {
     return add_default_segments(l->out, l->ctx);
 }
 
+/* --orphan-handling=discard: the linker's own sections the script places nowhere, before segments are made */
+static int phase_discard_made(ld_link_t *l) {
+    return script_discard_made(l->ctx, l->out) != 0 ? -1 : 0;
+}
+
 /* --orphan-handling: the inputs' orphans and the sections the linker made that the script places nowhere */
 static int phase_orphans(ld_link_t *l) {
     return script_say_orphans(l->ctx, &l->inputs, l->out) != 0 ? -1 : 0;
@@ -725,6 +730,7 @@ static const ld_phase_t link_phases[] = {
       "failed to make the global offset table" },
     { "plan-needed", phase_plan_needed, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
       "failed to plan dynamic DT_NEEDED entries" },
+    { "discard-made", phase_discard_made, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0, NULL },
     { "order-sections", phase_order_sections, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
       "failed to reorder sections after dynamic planning" },
     { "segments", phase_segments, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
