@@ -20,6 +20,11 @@
  * spills nothing.  Spilled registers whose intervals do not meet share a
  * slot.
  *
+ * References close together share one register (ls_rewrite()), but only
+ * while a register the round left free stays free for it: one that
+ * reached as far as the spilled interval would need the register the scan
+ * just took away, and each round would spill one more.
+ *
  * Before allocating, instructions that compute a register nothing reads
  * are dropped, which is how the selector's folding (an address into the
  * loads that use it, a constant into an immediate) leaves no trace.
@@ -1105,6 +1110,62 @@ static int ls_assign_slots(ls_t *ls, slot_t *slot) {
     return 0;
 }
 
+/** Take register @p r out of @p f, per instruction, wherever interval @p iv is. */
+static void hold_reg(unsigned *f, int nins, const ival_t *iv, int r) {
+    int j;
+
+    for (j = 0; j < iv->n; ++j) {
+        int p;
+
+        for (p = iv->r[j].from / 2; p <= (iv->r[j].to - 1) / 2 && p < nins; ++p) {
+            f[p] &= ~XR_BIT(r);
+        }
+    }
+}
+
+/**
+ * The registers free at each instruction once the scan is done: neither given to an interval it did not spill nor
+ * named by the instruction (a fixed interval).  A spilled register's shared one (ls_rewrite()) can be kept through
+ * an instruction only in one of these: at a call, only the callee-saved registers nothing else has.
+ *
+ * Each register is given to intervals that do not meet, so this takes at most a pass over the instructions per
+ * register.
+ *
+ * @return per instruction, a mask of registers (the caller frees it); NULL when out of memory
+ */
+static unsigned *ls_free_at(const ls_t *ls) {
+    const xfunc_t *xf = ls->xf;
+    unsigned *f = (unsigned *)malloc((size_t)(xf->nins > 0 ? xf->nins : 1) * sizeof(unsigned));
+    int i;
+
+    if (f == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        f[i] = ls->t->alloc_mask;
+    }
+    for (i = 0; i < ls->niv; ++i) {
+        if (!ls->iv[i].spilled && ls->iv[i].phys >= 0) {
+            hold_reg(f, xf->nins, &ls->iv[i], ls->iv[i].phys);
+        }
+    }
+    for (i = 0; i < XR_NPHYS; ++i) {
+        hold_reg(f, xf->nins, &ls->fixed[i], i);
+    }
+    return f;
+}
+
+/** How many registers @p m names. */
+static int reg_count(unsigned m) {
+    int n = 0;
+
+    while (m != 0) {
+        m &= m - 1;
+        n++;
+    }
+    return n;
+}
+
 /** Whether operand @p o is memory at slot @p s. */
 static int op_is_slot(const xop_t *o, const slot_t *s) {
     return o->kind == XO_MEM && o->base == XR_FRAME && o->obj == s->obj && o->disp == s->off && o->sym == NULL;
@@ -1216,15 +1277,220 @@ static void count_ref(int r, int k, void *ctx) {
 }
 
 /**
+ * Per instruction, the spilled registers it references, and for each of those the next instruction that references
+ * it again: how far off a register's next use is, for which of ls_rewrite()'s shared registers to give up first.
+ */
+typedef struct {
+    int *start;       /**< per instruction, and one past the last: its first entry */
+    int *reg;         /**< per entry: the virtual register's number */
+    int *next;        /**< per entry: the next instruction to reference it, or INT32_MAX */
+    int n;            /**< entries so far */
+    int at;           /**< the instruction being noted */
+    int *seen;        /**< per virtual register: the instruction that last noted it */
+    const slot_t *slot;
+    int nvr;
+    int *next_use;    /**< per virtual register, as ls_rewrite() goes: the next instruction to reference it */
+    int *plive;       /**< the spilled registers ls_rewrite() has given a shared register, some since given up */
+    int npl;
+    unsigned *avail;  /**< per instruction: the registers free there (ls_free_at()) */
+    unsigned *cand;   /**< per spilled register with a shared one: the registers free since that was made */
+    int *solo;        /**< per spilled register: an instruction where a shared one would not last (worth_sharing()) */
+} spill_refs_t;
+
+/** for_each_vreg() callback: note a spilled register an instruction references, once. */
+static void note_spill_ref(int r, int k, void *ctx) {
+    spill_refs_t *s = (spill_refs_t *)ctx;
+    int v = r - XR_VBASE;
+
+    (void)k;
+    if (v < s->nvr && s->slot[v].obj >= 0 && s->seen[v] != s->at) {
+        s->seen[v] = s->at;
+        if (s->reg != NULL) {
+            s->reg[s->n] = v;
+        }
+        s->n++;
+    }
+}
+
+/** Free what spill_refs() made. */
+static void spill_refs_free(spill_refs_t *s) {
+    free(s->start);
+    free(s->reg);
+    free(s->next);
+    free(s->seen);
+    free(s->next_use);
+    free(s->plive);
+    free(s->avail);
+    free(s->cand);
+    free(s->solo);
+}
+
+/**
+ * Note in @p s the spilled registers (those @p slot gives one) the instructions of @p ls's function reference, and
+ * the registers free at each (ls_free_at()).
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int spill_refs(spill_refs_t *s, const ls_t *ls, const slot_t *slot) {
+    const xinst_t *ins = ls->xf->ins;
+    int nins = ls->xf->nins;
+    int nvr = ls->xf->nvr;
+    int *last;
+    int i;
+    int pass;
+
+    memset(s, 0, sizeof(*s));
+    s->slot = slot;
+    s->nvr = nvr;
+    s->start = (int *)malloc((size_t)(nins + 1) * sizeof(int));
+    s->seen = (int *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(int));
+    s->next_use = (int *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(int));
+    s->plive = (int *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(int));
+    s->avail = ls_free_at(ls);
+    s->cand = (unsigned *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(unsigned));
+    s->solo = (int *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(int));
+    if (s->start == NULL || s->seen == NULL || s->next_use == NULL || s->plive == NULL || s->avail == NULL ||
+        s->cand == NULL || s->solo == NULL) {
+        spill_refs_free(s);
+        return -1;
+    }
+    /* counted, then listed */
+    for (pass = 0; pass < 2; ++pass) {
+        for (i = 0; i < nvr; ++i) {
+            s->seen[i] = -1;
+        }
+        s->n = 0;
+        for (i = 0; i < nins; ++i) {
+            s->start[i] = s->n;
+            s->at = i;
+            for_each_vreg(&ins[i], 1, note_spill_ref, s);
+            for_each_vreg(&ins[i], 2, note_spill_ref, s);
+        }
+        s->start[nins] = s->n;
+        if (pass == 0) {
+            s->reg = (int *)malloc((size_t)(s->n > 0 ? s->n : 1) * sizeof(int));
+            s->next = (int *)malloc((size_t)(s->n > 0 ? s->n : 1) * sizeof(int));
+            if (s->reg == NULL || s->next == NULL) {
+                spill_refs_free(s);
+                return -1;
+            }
+        }
+    }
+    /* and each one's next, from the end */
+    last = s->seen;
+    for (i = 0; i < nvr; ++i) {
+        last[i] = INT32_MAX;
+    }
+    for (i = nins - 1; i >= 0; --i) {
+        int e;
+
+        for (e = s->start[i]; e < s->start[i + 1]; ++e) {
+            s->next[e] = last[s->reg[e]];
+            last[s->reg[e]] = i;
+        }
+    }
+    /* (where each is used first) */
+    memcpy(s->next_use, last, (size_t)nvr * sizeof(int));
+    for (i = 0; i < nvr; ++i) {
+        s->solo[i] = -1;
+    }
+    return 0;
+}
+
+/**
+ * Whether a shared register for spilled register @p q, made at instruction @p i of @p nins, would last to the
+ * next instruction that references @p q (@p s's next_use): one register free all the way there, in the region
+ * (@p starts).  One that would not is used once and given up: the reference is better the slot itself, or a
+ * register of its own.
+ */
+static int worth_sharing(const ls_t *ls, const spill_refs_t *s, const unsigned char *starts, int nins, int i,
+                         int q) {
+    int next = s->next_use[q];
+    unsigned cand = s->avail[i] & ls->iv[q].mask;
+    int p;
+
+    if (next >= nins) {
+        return 0;
+    }
+    for (p = i + 1; p <= next && cand != 0; ++p) {
+        if (starts[p]) {
+            return 0;
+        }
+        cand &= s->avail[p];
+    }
+    return cand != 0;
+}
+
+/**
+ * Give up the shared registers (ls_rewrite()'s @p local) that cannot be kept through instruction @p i: one no
+ * register has stayed free for since it was made, and where there are more of them than registers free there, the
+ * ones next used furthest off.  The next reference of a register given up loads it from its slot again, which
+ * holds its value everywhere.  So a shared register never needs one the scan had to take from something else --
+ * which would only move one round's spill to the next, a round at a time.
+ */
+static void keep_to_free(const ls_t *ls, spill_refs_t *s, int i, int *local) {
+    int cls;
+    int j;
+    int n = 0;
+
+    /* (those given up already, out of the list) */
+    for (j = 0; j < s->npl; ++j) {
+        int q = s->plive[j];
+
+        if (local[q] == XR_NONE) {
+            continue;
+        }
+        s->cand[q] &= s->avail[i];
+        if (s->cand[q] == 0) {
+            local[q] = XR_NONE;
+            continue;
+        }
+        s->plive[n++] = q;
+    }
+    s->npl = n;
+    for (cls = 0; cls < 2; ++cls) {
+        unsigned mask = ls->t->alloc_mask & (cls ? ls->t->xmm_mask : ~ls->t->xmm_mask);
+        int have = reg_count(s->avail[i] & mask);
+
+        n = 0;
+        for (j = 0; j < s->npl; ++j) {
+            if ((ls->xf->vr[s->plive[j]].xmm != 0) == (cls != 0)) {
+                n++;
+            }
+        }
+        while (n > have) {
+            int far = -1;
+
+            for (j = 0; j < s->npl; ++j) {
+                int q = s->plive[j];
+
+                if (local[q] != XR_NONE && (ls->xf->vr[q].xmm != 0) == (cls != 0) && s->next_use[q] != i &&
+                    (far < 0 || s->next_use[q] > s->next_use[far])) {
+                    far = q;
+                }
+            }
+            if (far < 0) {
+                break; /* (all of them read or written here) */
+            }
+            local[far] = XR_NONE;
+            n--;
+        }
+    }
+}
+
+/**
  * Rewrite every operand of a spilled register.  Where it is read or written more than once before the next label,
  * those share one new register (split): loaded from the slot at the first read, stored to it after each write, so
  * the slot holds the value at every label -- a register the next round may give it, as a short interval, where the
  * whole was spilled.  Elsewhere, and for one of those spilled in turn, each operand is the slot itself where the
  * instruction can take memory there, else a new register loaded before and stored after.
  *
+ * A shared register is kept only through instructions where @p refs finds a register free for it
+ * (keep_to_free()): past a call, or where the scan ran out of registers, it is loaded again at the next reference.
+ *
  * @return 0, or -1 when out of memory
  */
-static int ls_rewrite(ls_t *ls, const slot_t *slot) {
+static int ls_rewrite(ls_t *ls, const slot_t *slot, spill_refs_t *refs) {
     xfunc_t *xf = ls->xf;
     xinst_t *old = xf->ins;
     int nold = xf->nins;
@@ -1269,8 +1535,9 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
 
 #define SPILLED(r) (XR_IS_VIRT(r) && (r) - XR_VBASE < nvr && slot[(r) - XR_VBASE].obj >= 0)
 #define SHARED(r)                                                                                                     \
-    (SPILLED(r) && ((xf->vr[(r) - XR_VBASE].split == 0 && count[(r) - XR_VBASE] >= 2) ||                          \
-                    (xf->vr[(r) - XR_VBASE].split == 1 && bcount[(r) - XR_VBASE] >= 2)))
+    (SPILLED(r) && refs->solo[(r) - XR_VBASE] != i &&                                                               \
+     ((xf->vr[(r) - XR_VBASE].split == 0 && count[(r) - XR_VBASE] >= 2) ||                                          \
+      (xf->vr[(r) - XR_VBASE].split == 1 && bcount[(r) - XR_VBASE] >= 2)))
         if (starts[i]) {
             /* a region begins: its references counted, up to the next region */
             int q;
@@ -1327,6 +1594,23 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                 bc.at = q + nold; /* (seen apart from the region's count) */
                 for_each_vreg(&old[q], 1, count_ref, &bc);
                 for_each_vreg(&old[q], 2, count_ref, &bc);
+            }
+        }
+        keep_to_free(ls, refs, i, local);
+        {
+            /* what this instruction references is next used at the next instruction that does */
+            int e;
+
+            for (e = refs->start[i]; e < refs->start[i + 1]; ++e) {
+                refs->next_use[refs->reg[e]] = refs->next[e];
+            }
+            /* and one that has no shared register yet gets one only if it would last to there */
+            for (e = refs->start[i]; e < refs->start[i + 1]; ++e) {
+                int q = refs->reg[e];
+
+                if (local[q] == XR_NONE && !worth_sharing(ls, refs, starts, nold, i, q)) {
+                    refs->solo[q] = i;
+                }
             }
         }
         /* a load of a parameter's incoming slot into the register that lives there: nothing to do */
@@ -1421,6 +1705,8 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                         xf_vreg(xf, t)->home_obj = s->obj;
                         xf_vreg(xf, t)->home_off = s->off;
                         local[r - XR_VBASE] = t;
+                        refs->plive[refs->npl++] = r - XR_VBASE;
+                        refs->cand[r - XR_VBASE] = refs->avail[i] & ls->iv[r - XR_VBASE].mask;
                         if (reads_reg(&in, r)) {
                             xop_t from = xop_frame(s->obj, s->off, bytes);
                             xop_t to = xop_reg(t, bytes);
@@ -2045,6 +2331,7 @@ int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t) {
         int rc = ls_liveness(&ls);
         int spills;
         slot_t *slot;
+        spill_refs_t refs;
         int any_memory = 0;
         int nslot = xf->nvr;
 
@@ -2106,11 +2393,18 @@ int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t) {
             return 0;
         }
         slot = (slot_t *)malloc((size_t)(xf->nvr > 0 ? xf->nvr : 1) * sizeof(*slot));
-        if (slot == NULL || ls_assign_slots(&ls, slot) != 0 || ls_rewrite(&ls, slot) != 0) {
+        if (slot == NULL || ls_assign_slots(&ls, slot) != 0 || spill_refs(&refs, &ls, slot) != 0) {
             free(slot);
             ls_free(&ls);
             return -1;
         }
+        if (ls_rewrite(&ls, slot, &refs) != 0) {
+            spill_refs_free(&refs);
+            free(slot);
+            ls_free(&ls);
+            return -1;
+        }
+        spill_refs_free(&refs);
         /* a spilled register is gone from the instructions: what lives in memory is done with too */
         for (i = 0; i < nslot; ++i) {
             if (slot[i].obj >= 0) {
