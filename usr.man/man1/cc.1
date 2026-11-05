@@ -20,6 +20,17 @@ When invoked as
 .Nm cpp ,
 preprocessor-only mode is selected.
 .Pp
+A file ending in
+.Pa .i ,
+or any file after
+.Fl x Cm cpp-output ,
+is C preprocessed already: it is compiled as it is, the preprocessor not
+run on it again, its line markers naming the files its lines came from.
+.Fl E
+passes it by and writes nothing for it, as
+.Xr gcc 1
+does.
+.Pp
 .Dv __BITINT_MAXWIDTH__
 is 65535:
 .Vt _BitInt Ns Pq Ar N

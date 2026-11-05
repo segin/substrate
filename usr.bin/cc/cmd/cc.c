@@ -2738,26 +2738,40 @@ int cc_main(int argc, char **argv) {
     int input_is_c = has_ext(in, ".c");
     int input_is_S = has_ext(in, ".S");
     int input_is_s = has_ext(in, ".s");
+    /* C preprocessed already (.i, -x cpp-output): compiled as it is */
+    int input_is_i = has_ext(in, ".i");
 
     if (o.forced_lang != NULL && strcmp(o.forced_lang, "none") != 0) {
       if (strcmp(o.forced_lang, "c") == 0) {
         input_is_c = 1;
         input_is_S = 0;
         input_is_s = 0;
+        input_is_i = 0;
+      } else if (strcmp(o.forced_lang, "cpp-output") == 0) {
+        input_is_c = 0;
+        input_is_S = 0;
+        input_is_s = 0;
+        input_is_i = 1;
       } else if (strcmp(o.forced_lang, "assembler-with-cpp") == 0) {
         input_is_c = 0;
         input_is_S = 1;
         input_is_s = 0;
+        input_is_i = 0;
       } else if (strcmp(o.forced_lang, "assembler") == 0) {
         input_is_c = 0;
         input_is_S = 0;
         input_is_s = 1;
+        input_is_i = 0;
       }
     }
 
     if (o.mode_E) {
       const char *pp_out;
 
+      if (input_is_i) {
+        /* as gcc: there is nothing left to preprocess, and -E writes nothing for it */
+        continue;
+      }
       if (has_ext(in, ".o") || has_ext(in, ".a") || has_ext(in, ".so")) {
         fprintf(stderr, "cc: -E is not valid for object/archive input %s\n",
                 in);
@@ -2771,7 +2785,7 @@ int cc_main(int argc, char **argv) {
       continue;
     }
 
-    if (o.syntax_only && !input_is_c) {
+    if (o.syntax_only && !input_is_c && !input_is_i) {
       /* only C has a syntax to check: an assembly or object input is left alone, as gcc leaves it */
       continue;
     }
@@ -2826,17 +2840,21 @@ int cc_main(int argc, char **argv) {
       continue;
     }
 
-    if (input_is_c) {
+    if (input_is_c || input_is_i) {
       char out_pp[PATH_MAX];
       char out_s[PATH_MAX];
       char out_o[PATH_MAX];
 
-      if (make_temp_path(&o, "ccpp_", ".i", out_pp) != 0) {
-        fprintf(stderr, "cc: failed to create temporary preprocessed file\n");
-        goto out;
-      }
-      if (run_preprocess(&o, in, out_pp, 0) != 0) {
-        goto out;
+      if (input_is_i) {
+        snprintf(out_pp, sizeof(out_pp), "%s", in);
+      } else {
+        if (make_temp_path(&o, "ccpp_", ".i", out_pp) != 0) {
+          fprintf(stderr, "cc: failed to create temporary preprocessed file\n");
+          goto out;
+        }
+        if (run_preprocess(&o, in, out_pp, 0) != 0) {
+          goto out;
+        }
       }
 
       if (o.mode_S) {
