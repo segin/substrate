@@ -103,4 +103,5 @@ Three environment variables help find a function the allocator
 miscompiles: `CC_NO_MIR=1` emits every function the older way,
 `CC_MIR_LIMIT=n` takes only the first n functions the allocator would
 take (bisect on n), and `CC_MIR_STATS=1` prints to stderr each function
-it takes and why it does not take the others.
+it takes and why it does not take the others (`CC_MIR_STATS=2`: only the
+ones it does not take, the fallbacks).
