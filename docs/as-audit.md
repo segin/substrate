@@ -361,7 +361,7 @@ link.
 ### 4.2 The output file
 
 - [ ] **AS-OBJ-020** The object shall be written where and as the user asked.
-  Evidence: the output is mode 0600 (`mkstemp` and `rename` in `usr.lib/elfobj/src/elf_util.c:392-412`, no `fchmod`), and an existing read-only output is replaced; `-o /dev/null` fails with "invalid ELF format" (`as.c:2348`) and leaves its intermediate files; an output that is the input overwrites the source; a dangling symbolic link as output fails; `elf_write_file failed` gives no reason (`as_elf_emit.c:15039`).  (The linker had the same faults and was mended: LD-OUT in `docs/ld-audit.md`.)
+  Evidence: the output is mode 0600 (`mkstemp` and `rename` in `usr.lib/elfobj/src/elf_util.c:392-412`, no `fchmod`), and an existing read-only output is replaced; `-o /dev/null` fails with "invalid ELF format" (`as.c:2348`) and leaves its intermediate files; an output that is the input overwrites the source; a dangling symbolic link as output fails; `elf_write_file failed` gives no reason (`as_elf_emit.c:15039`).  (The linker had the same faults and was mended.)
   Basis: reproduced.
 - [ ] **AS-OBJ-021** Names shall not be cut to fit a buffer.
   Evidence: `section_from_directive` has a static `secbuf[256]` (`:7878`): a 301-character section name is "unknown section".  `target_section[128]` (`:13116`, `13151`, `14463`, `14574`) would send a relocation to another section for a name over 127.  `emit_symbols` leaks on its early returns (`:12850`, `12963-12999`, `13022`, `13077-13091`); the result of `elf_symbol_define` is ignored at `:12252`.

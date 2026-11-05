@@ -204,7 +204,7 @@ Integration role: The linker is exercised directly by its own suite and indirect
 
 ## 9. Future Considerations / Roadmap
 
-What is open: `docs/ld-audit.md` is the checked record of what the linker does and does not do, with evidence; `SPEC.md` §0 lists what is specified and absent. `TASKLIST_LINKER.md` is the older backlog and its ticks were not all verified.
+What is open: `SPEC.md` §0 lists what is specified and absent. `TASKLIST_LINKER.md` is the older backlog and its ticks were not all verified.
 
 Modularity pressure: Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`. What was asked for is apart from what the link finds out (`ld_options_t`, the context's `opt`), but a pass can still write either; narrowing what each file can see (its own header, its own part of the context, the options `const`) is the next step, and can be taken a file at a time.
 

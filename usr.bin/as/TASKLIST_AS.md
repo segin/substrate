@@ -207,7 +207,7 @@ Validation gate for Section 1:
 
 ### 7.1 Assembler/Linker Boundary
 - [x] Re-enable `tests/usr.bin/as/test_integration_rollout.sh` once `usr.bin/ld` is fixed.  Done: it is in the suite and passes.
-- [x] ~~Add reduced repros for every assembler/linker contract bug found by the rollout test.~~ Struck: the rollout test finds none now.  The faults at that boundary found since are each a numbered task in `docs/as-tasks.md` with a test of its own (`test_merge_section_reloc.sh`, `test_reloc_field.sh`, `test_i386_pic.sh` among them) and, on the linker's side, `docs/ld-audit.md` and `tests/usr.bin/ld`.
+- [x] ~~Add reduced repros for every assembler/linker contract bug found by the rollout test.~~ Struck: the rollout test finds none now.  The faults at that boundary found since are each a numbered task in `docs/as-tasks.md` with a test of its own (`test_merge_section_reloc.sh`, `test_reloc_field.sh`, `test_i386_pic.sh` among them) and, on the linker's side, `tests/usr.bin/ld`.
 - [x] Verify (`test_relocations_elf_32_64.sh`, `test_section_kinds.sh`, `test_symbol_directives.sh`):
   - 32-bit and 64-bit relocation records
   - section flags and alignment

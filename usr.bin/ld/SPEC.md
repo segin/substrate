@@ -13,8 +13,7 @@ Stretch targets: AArch64, ARMv7 ELF
 This is the specification the linker is being built to: what it is meant to
 become.  It is not a description of what the code does today, and reading
 it as one has misled people.  What the code does is described in
-`ARCHITECTURE.md`, in the manual page `usr.man/man1/ld.1`, and, item by
-item with evidence, in `docs/ld-audit.md`.
+`ARCHITECTURE.md` and in the manual page `usr.man/man1/ld.1`.
 
 As of 2026-10-09 the linker links i386 and x86-64 programs, PIEs, shared
 objects and relocatable outputs that run on Substrate, including ones
@@ -47,8 +46,7 @@ table (`ld_symtab.c`) and the two architectures are described in one
 (`ld_arch.c`), the order of a link is a table whose constraints are
 checked, and the options are a table (`ld_options.c`) kept in a type
 of their own; but every pass is still handed the whole link context
-and may write any of it.  Those are tracked in `docs/ld-audit.md` under
-"Structure".
+and may write any of it.
 
 ---
 
