@@ -310,6 +310,13 @@ int as_parse_end(as_parser_t *p);
 int as_parse_is_direct_branch(const as_stmt_t *st);
 int as_parse_name_branch_label(as_stmt_t *st);
 
+/*
+ * The numeric labels E refers to (`2f`, `1b`) made references to the
+ * names they have beside their numbers, as a branch's are.  0, or -1
+ * for want of memory.
+ */
+int as_parse_name_local_refs(as_expr_t *e);
+
 /* Give a statement one label more, of this name, if it has not one of
  * it already.  0, or -1 for want of memory. */
 int as_stmt_add_label(as_stmt_t *st, const char *name);

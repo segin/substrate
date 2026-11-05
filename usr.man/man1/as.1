@@ -478,6 +478,21 @@ label may not be set, and
 .Cm .equiv
 sets a name once, that nothing has set.
 Names that come round to themselves are an error.
+A numeric label
+.Pq Ql 2:
+is named by
+.Ql 2f
+after it and
+.Ql 2b
+before it, as an address wherever a label may be: a RIP-relative
+operand of one in another section
+.Pq Ql "lea 2f(%rip), %r10"
+with
+.Ql 2:
+after a
+.Cm .pushsection
+has a relocation, and one of the instruction's own section is its
+distance, as GNU as has them.
 .Cm .type
 takes
 .Ql @function ,

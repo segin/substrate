@@ -2956,6 +2956,10 @@ int as_parse_name_branch_label(as_stmt_t *st) {
     return name_local_refs(st->u.instr.operands[0].u.expr);
 }
 
+int as_parse_name_local_refs(as_expr_t *e) {
+    return name_local_refs(e);
+}
+
 static int directive_names_local_labels(const char *name) {
     static const char *const names[] = {
         ".byte", ".word", ".short", ".hword", ".2byte", ".long", ".int", ".4byte", ".quad", ".8byte", ".value",

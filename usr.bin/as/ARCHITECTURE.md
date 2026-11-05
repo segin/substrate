@@ -83,7 +83,7 @@ tests/usr.bin/as/
 4. **Parse** (`as_parse_tokens()`): statements; numeric labels given names.
 5. **Lower.** `as_arm_lower()` for ARM and AArch64, then `as_directives_lower()`: the many directives made the few, numbers settled, `.struct` and common symbols resolved.
 6. **Validate** (`validate_directives()`): a directive that is none there is, is refused; `.error`, `.warning` and `.print` are said.
-7. **Order.** Numbered subsections put behind their sections (`as_sections_gather_subsections()`); branches to labels of other sections marked (`as_elf_mark_far_branches()`).
+7. **Order.** Numbered subsections put behind their sections (`as_sections_gather_subsections()`); branches to labels of other sections marked (`as_elf_mark_far_branches()`), and a RIP-relative operand's numeric label of another section, `lea 2f(%rip)` with `2:` after a `.pushsection`, made a reference to the label's name, which gets a relocation (`name_far_rip_refs()`; one of the instruction's own section stays a distance, worked out without one, as GNU as does).
 8. **Tables.** Symbols (`as_symtab_build()`), sections (`as_sections_build()`).  (Data directives have no table: the emitter emits them from the statements.)
 9. **Emit** (`as_elf_emit_file()`, or `as_elf_emit_binary_file()` for `-O binary`): branches relaxed, every statement placed, instructions encoded, relocations made, call frames and the line table built, the object written through libelfobj.
 10. **Check** (`validate_output_file()`): the object is read back and is of the machine and class asked for.

@@ -5727,6 +5727,41 @@ static const as_expr_t *far_branch_label(const as_expr_t *e) {
     return found != NULL ? found : far_branch_label(e->rhs);
 }
 
+/**
+ * Name each numeric label @p e refers to (`2f`, `1b`) that is defined in a section other than @p section: in a
+ * RIP-relative operand, `lea 2f(%rip)`, the parser kept the reference as a distance, which only a label of the
+ * instruction's own section is.  One of another section is an address the linker puts in, as for any label's
+ * name; left a distance, it had no relocation and the operand was the next instruction.
+ *
+ * @param numbered the numeric labels, sorted by far_label_cmp()
+ * @return 0, or -1 for want of memory
+ */
+static int name_far_rip_refs(as_expr_t *e, const far_label_t *numbered, size_t numbered_count, size_t section) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == AS_EXPR_LOCAL_REF) {
+        far_label_t key;
+        const far_label_t *found;
+
+        if (!e->local_resolved || numbered_count == 0) {
+            return 0;
+        }
+        memset(&key, 0, sizeof(key));
+        key.line = e->local_target_line;
+        key.digit = e->local_digit;
+        found = (const far_label_t *)bsearch(&key, numbered, numbered_count, sizeof(*numbered), far_label_cmp);
+        if (found == NULL || found->section == section) {
+            return 0;
+        }
+        return as_parse_name_local_refs(e);
+    }
+    return name_far_rip_refs(e->lhs, numbered, numbered_count, section) != 0 ||
+                   name_far_rip_refs(e->rhs, numbered, numbered_count, section) != 0
+               ? -1
+               : 0;
+}
+
 int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg) {
     section_track_t track;
     sec_buf_vec_t names; /* for the sections' numbers only */
@@ -5903,6 +5938,20 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
             free(st->u.instr.segment_override);
             st->u.instr.segment_override = NULL;
             st->u.instr.prefixes &= ~AS_PREFIX_SEG_OVERRIDE;
+        }
+        /* `lea 2f(%rip)` of a label in another section: its address, by name. */
+        if (st->kind == AS_STMT_INSTRUCTION && (cfg == NULL || cfg->target == 0)) {
+            size_t k;
+
+            for (k = 0; k < st->u.instr.operand_count; ++k) {
+                as_operand_t *op = &st->u.instr.operands[k];
+
+                if (op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg != NULL &&
+                    (streq_ci(op->u.mem.base_reg, "rip") || streq_ci(op->u.mem.base_reg, "eip")) &&
+                    name_far_rip_refs(op->u.mem.disp, numbered, numbered_count, stmt_section[i]) != 0) {
+                    goto out;
+                }
+            }
         }
         if (!as_parse_is_direct_branch(st)) {
             continue;
