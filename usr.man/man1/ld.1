@@ -241,8 +241,14 @@ A script's
 .Ic FORCE_GROUP_ALLOCATION
 does the same.
 Linux links its modules so.
-Without it, the groups are not kept either (GNU ld keeps them), but their
-members are still marked as in one.
+Without it,
+.Fl r
+keeps the groups, as GNU ld does: each is one of the output's under its
+signature, of the same kind (a COMDAT group seen before is left out with
+its members), its members sections of their own still marked
+.Dv SHF_GROUP ,
+which no section of another group or of none joins, and their relocation
+sections members too.
 .It Fl shared
 Produce a shared object: no entry is needed, what it leaves undefined is
 for the program that loads it to supply, and it is not made executable.

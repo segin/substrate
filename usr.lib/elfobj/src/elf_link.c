@@ -175,6 +175,105 @@ static elf_err_t mark_discarded_comdat_members(const struct elf_link_input *inpu
     return ELF_OK;
 }
 
+/**
+ * @brief Forget the output groups of a link: each input's numbering and the groups' signatures.
+ *
+ * @param plan the link
+ */
+static void free_output_groups(elf_link_plan_t *plan) {
+    size_t i;
+
+    for (i = 0; i < plan->input_count; ++i) {
+        free(plan->inputs[i].group_of);
+        free(plan->inputs[i].group_dst);
+        plan->inputs[i].group_of = NULL;
+        plan->inputs[i].group_dst = NULL;
+    }
+    for (i = 0; i < plan->group_count; ++i) {
+        free(plan->groups[i].signature);
+    }
+    free(plan->groups);
+    plan->groups = NULL;
+    plan->group_count = 0;
+    plan->group_cap = 0;
+}
+
+/**
+ * @brief Where the link keeps section groups (ld -r, as GNU ld): number each input group an output group
+ * of its own, and note it for each of its members.
+ *
+ * Each input group is one in the output: a COMDAT group of a signature already seen is a duplicate whose
+ * members are left out (mark_discarded_comdat_members()), so it needs no number of the kept one's, and
+ * groups that are not COMDAT stay apart, as GNU ld keeps them.  A group whose signature cannot be read is
+ * none: its members go in as other sections do.
+ *
+ * @param plan the link
+ * @return ELF_OK, or ELF_ERR_OOM
+ */
+static elf_err_t assign_output_groups(elf_link_plan_t *plan) {
+    size_t i;
+    size_t j;
+
+    free_output_groups(plan);
+    if (!plan->keep_groups) {
+        return ELF_OK;
+    }
+    for (i = 0; i < plan->input_count; ++i) {
+        struct elf_link_input *in = &plan->inputs[i];
+        const elfobj_t *obj = in->obj;
+
+        for (j = 0; j < obj->section_count; ++j) {
+            const struct elf_section *sec = obj->sections[j];
+            char *sig;
+            size_t words;
+            size_t w;
+
+            if (sec == NULL || sec->type != SHT_GROUP || sec->data == NULL || sec->data_size < 4 ||
+                (sec->data_size % 4) != 0) {
+                continue;
+            }
+            sig = group_signature_name(obj, sec);
+            if (sig == NULL) {
+                continue;
+            }
+            if (in->group_of == NULL) {
+                in->group_of = (uint32_t *)elf__calloc(obj->section_count, sizeof(*in->group_of));
+                in->group_dst = (struct elf_section **)elf__calloc(obj->section_count, sizeof(*in->group_dst));
+                if (in->group_of == NULL || in->group_dst == NULL) {
+                    free(sig);
+                    return ELF_ERR_OOM;
+                }
+            }
+            if (plan->group_count == plan->group_cap) {
+                uint32_t ncap = plan->group_cap == 0 ? 16 : plan->group_cap * 2;
+                struct elf_link_out_group *groups =
+                    (struct elf_link_out_group *)elf__reallocarray(plan->groups, ncap, sizeof(*groups));
+
+                if (groups == NULL) {
+                    free(sig);
+                    return ELF_ERR_OOM;
+                }
+                plan->groups = groups;
+                plan->group_cap = ncap;
+            }
+            plan->groups[plan->group_count].signature = sig;
+            plan->groups[plan->group_count].comdat = (elf__rd32(sec->data, obj->endian) & 0x1u) != 0;
+            plan->groups[plan->group_count].section = j;
+            plan->group_count++;
+            in->group_of[j] = plan->group_count;  /* (the group's own section, a member of none: its group) */
+            words = sec->data_size / 4;
+            for (w = 1; w < words; ++w) {
+                uint32_t member = elf__rd32(sec->data + (w * 4), obj->endian);
+
+                if (member < obj->section_count) {
+                    in->group_of[member] = plan->group_count;
+                }
+            }
+        }
+    }
+    return ELF_OK;
+}
+
 static int arm_float_conflict(uint32_t a, uint32_t b) {
     uint32_t ah = a & EF_ARM_ABI_FLOAT_HARD;
     uint32_t as = a & EF_ARM_ABI_FLOAT_SOFT;
@@ -806,6 +905,30 @@ static int section_gathered(const elf_link_plan_t *plan, const struct elf_link_i
 }
 
 /**
+ * @brief The output section named @p name that is in no group: elf_find_section()'s, unless that is a
+ * member of a group the link keeps, which a section of the same name in none must not join.
+ *
+ * @param out  the output
+ * @param name its name
+ * @return it, or NULL if there is none yet
+ */
+static struct elf_section *find_ungrouped_output(elfobj_t *out, const char *name) {
+    struct elf_section *s = elf_find_section(out, name);
+    size_t i;
+
+    if (s == NULL || s->group_index == 0) {
+        return s;
+    }
+    for (i = 0; i < out->section_count; ++i) {
+        s = out->sections[i];
+        if (s->name != NULL && strcmp(s->name, name) == 0 && s->group_index == 0) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
+/**
  * @brief The output section an input section ordered by another (SHF_LINK_ORDER) is ordered by.
  *
  * This is the output section @p src's own one went to (see ordered_output()).
@@ -828,12 +951,16 @@ static struct elf_section *link_order_target(const elf_link_plan_t *plan, elfobj
     if (output_section_name(plan, input, src) == NULL || to == NULL || to == src || to->name == NULL) {
         return NULL;
     }
+    if (input->group_of != NULL && input->group_of[to->index] != 0) {
+        return input->group_dst[to->index];  /* (a member of a group kept: its group's own section) */
+    }
     to_name = output_section_name(plan, input, to);
-    return to_name != NULL ? elf_find_section(out, to_name) : NULL;
+    return to_name != NULL ? find_ungrouped_output(out, to_name) : NULL;
 }
 
 /**
- * @brief The output section named @p name that is ordered by @p to, or by nothing when @p to is NULL.
+ * @brief The output section named @p name that is ordered by @p to, or by nothing when @p to is NULL,
+ * and is in no group.
  *
  * @param out  the output
  * @param name its name
@@ -845,8 +972,41 @@ static struct elf_section *find_ordered_output(elfobj_t *out, const char *name, 
 
     for (i = 0; i < out->section_count; ++i) {
         struct elf_section *s = out->sections[i];
-        if (s->name != NULL && strcmp(s->name, name) == 0 && s->link_order == to) {
+        if (s->name != NULL && strcmp(s->name, name) == 0 && s->link_order == to && s->group_index == 0) {
             return s;
+        }
+    }
+    return NULL;
+}
+
+/**
+ * @brief The output section of input section @p src, a member of a group the link keeps: a section of
+ * its group's own, the one an earlier member of the same name (and, ordered by another, the same one)
+ * went to, or none yet.
+ *
+ * @param plan     the link
+ * @param input    the input @p src is of
+ * @param src      the input section
+ * @param name     its output section's name
+ * @param order_to the output section it is ordered by, or NULL
+ * @return that output section, or NULL when there is none yet
+ */
+static struct elf_section *member_output(const elf_link_plan_t *plan, const struct elf_link_input *input,
+                                         const struct elf_section *src, const char *name,
+                                         const struct elf_section *order_to) {
+    const struct elf_link_out_group *g = &plan->groups[input->group_of[src->index] - 1];
+    const struct elf_section *grp = input->obj->sections[g->section];
+    size_t w;
+
+    if (input->group_dst[src->index] != NULL) {
+        return input->group_dst[src->index];
+    }
+    for (w = 1; w < grp->data_size / 4; ++w) {
+        uint32_t k = elf__rd32(grp->data + (w * 4), input->obj->endian);
+        struct elf_section *d = k < input->obj->section_count ? input->group_dst[k] : NULL;
+
+        if (d != NULL && d->name != NULL && strcmp(d->name, name) == 0 && d->link_order == order_to) {
+            return d;
         }
     }
     return NULL;
@@ -875,8 +1035,11 @@ static struct elf_section *ordered_output(const elf_link_plan_t *plan, elfobj_t 
                                           const struct elf_link_input *input, const struct elf_section *src,
                                           const char *name, struct elf_section **order_to) {
     *order_to = link_order_target(plan, out, input, src);
+    if (input->group_of != NULL && input->group_of[src->index] != 0) {
+        return member_output(plan, input, src, name, *order_to);
+    }
     if (*order_to == NULL || strcmp(name, src->name) != 0 || section_gathered(plan, input, src)) {
-        return elf_find_section(out, name);
+        return find_ungrouped_output(out, name);
     }
     return find_ordered_output(out, name, *order_to);
 }
@@ -888,8 +1051,8 @@ static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj
     const char *name = output_section_name(plan, input, src);
     struct elf_section *to;
 
-    if (name == NULL) {
-        return NULL;
+    if (name == NULL || src->type == SHT_GROUP) {
+        return NULL;  /* (a group's section is the writer's to make) */
     }
     return ordered_output(plan, out, input, src, name, &to);
 }
@@ -1032,10 +1195,13 @@ static elf_err_t rank_begin(elf_link_plan_t *plan, struct elf_section *dst, cons
  * What sec_included says of an input section that went into the output
  * folded into an identical one already there: 1 says it went in on its
  * own, 0 that it did not go in.  A folded section is where the other is,
- * and the other's relocations stand for its own.
+ * and the other's relocations stand for its own.  SEC_GROUP: the section of
+ * a group the link keeps, which the writer makes again; a symbol in it (a
+ * signature, as GNU as makes one) is in the output's.
  */
 enum {
-    SEC_FOLDED = 2
+    SEC_FOLDED = 2,
+    SEC_GROUP = 3
 };
 
 /**
@@ -1189,6 +1355,10 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
         if (src == NULL || src->name == NULL || src->name[0] == '\0') {
             return ELF_OK;
         }
+        if (src->type == SHT_GROUP && !sec_discard[j] && input->group_of != NULL && input->group_of[j] != 0) {
+            sec_included[j] = SEC_GROUP;
+            return ELF_OK;
+        }
         if (src->type == SHT_GROUP || sec_discard[j]) {
             return ELF_OK;
         }
@@ -1258,6 +1428,16 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                 free(inflated);
                 return ELF_ERR_STATE;
             }
+            /* a member of a group kept: a section of its group (the writer makes the group's section) */
+            if (input->group_of != NULL && input->group_of[j] != 0) {
+                const struct elf_link_out_group *g = &plan->groups[input->group_of[j] - 1];
+
+                if (elf_section_set_group(dst, input->group_of[j], g->comdat) != ELF_OK ||
+                    elf_section_set_group_signature(dst, g->signature) != ELF_OK) {
+                    free(inflated);
+                    return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
+                }
+            }
         } else if (strcmp(src->name, ".ARM.attributes") == 0 && src->data_size != 0 &&
                    dst->data_size != 0 &&
                    (src->data_size != dst->data_size ||
@@ -1320,6 +1500,10 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
             if ((dst->flags & SHF_EXECINSTR) != 0 && dst->zero_gap_count != 0) {
                 refill_merge_gaps(dst);
             }
+        }
+
+        if (input->group_of != NULL && input->group_of[j] != 0) {
+            input->group_dst[j] = dst;  /* (member_output(): where its group's sections are) */
         }
 
         /* a merged section: the first of its group places the group's block, the rest are in it */
@@ -1514,6 +1698,21 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
                 struct elf_section *dst_sec;
 
                 if (!sec_included[src_sec_index]) {
+                    continue;
+                }
+                if (sec_included[src_sec_index] == SEC_GROUP) {
+                    /* a local in a group's section, its signature as GNU as makes one: the output's group's */
+                    if (sym->bind == STB_LOCAL) {
+                        n = elf_add_symbol(out, sym->name, sym->value, sym->size, sym->bind, sym->type);
+                        if (n == NULL) {
+                            return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
+                        }
+                        n->other = sym->other;
+                        n->in_group_section = input->group_of[src_sec_index];
+                        if (sym_map != NULL) {
+                            sym_map[i] = n;
+                        }
+                    }
                     continue;
                 }
                 in_merge = (src_sec->flags & SHF_MERGE) != 0;
@@ -1900,6 +2099,7 @@ void elf_link_plan_destroy(elf_link_plan_t *plan) {
     if (plan == NULL) {
         return;
     }
+    free_output_groups(plan);
     for (i = 0; i < plan->input_count; ++i) {
         free(plan->inputs[i].name);
         free(plan->inputs[i].out_names);
@@ -2292,6 +2492,14 @@ elf_err_t elf_link_plan_set_section_gathered_hook(elf_link_plan_t *plan, elf_lin
     return ELF_OK;
 }
 
+elf_err_t elf_link_plan_set_keep_groups(elf_link_plan_t *plan, int enable) {
+    if (plan == NULL) {
+        return ELF_ERR_STATE;
+    }
+    plan->keep_groups = enable != 0;
+    return ELF_OK;
+}
+
 elf_err_t elf_link_plan_set_merge_sections(elf_link_plan_t *plan, int enable) {
     if (plan == NULL) {
         return ELF_ERR_STATE;
@@ -2459,8 +2667,12 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
         if (err == ELF_OK) {
             err = fold_begin(plan);
         }
+        if (err == ELF_OK) {
+            err = assign_output_groups(plan);
+        }
         if (err != ELF_OK) {
             elf__merge_free(plan);
+            free_output_groups(plan);
             elf_close(out);
             return err;
         }

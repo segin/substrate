@@ -1,0 +1,61 @@
+.Dd November 5, 2026
+.Dt ELF_LINK_PLAN_SET_KEEP_GROUPS 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_set_keep_groups
+.Nd keep the inputs' section groups in a link's output
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_set_keep_groups "elf_link_plan_t *plan" "int enable"
+.Sh DESCRIPTION
+With
+.Fa enable
+nonzero, a link through
+.Fa plan
+keeps the section groups
+.Pq Dv SHT_GROUP
+of its inputs, as GNU ld does for relocatable output
+.Pq Fl r .
+Each input group is one of the output's, under the same signature and
+flags.
+Its members go to output sections of their own, still marked
+.Dv SHF_GROUP ,
+which no section of another group or of none joins; their relocation
+sections are members too.
+A COMDAT group of a signature already seen is left out with its members,
+whether or not groups are kept.
+A group's signature is the output's symbol of that name; a local symbol
+an input defines in the group's section, as GNU as makes one for a
+signature nothing else names, is kept in the output group's section.
+.Pp
+Off by default: the groups are not kept, and their members go into the
+output as other sections do.
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, otherwise
+.Dv ELF_ERR_STATE
+for a NULL
+.Fa plan .
+.Sh EXAMPLES
+Keep the groups, as a relocatable link does.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+
+    elf_link_plan_set_keep_groups(plan, 1);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elf_link 3 ,
+.Xr elf_link_plan_set_section_gathered_hook 3 ,
+.Xr ld 1

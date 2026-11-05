@@ -418,7 +418,8 @@ static uint8_t *build_group_data(const out_group_t *group, elfobj_endian_t endia
  */
 static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_class_t cls,
                              elf_strtab_t *strtab, const char **extra_names, size_t extra_count,
-                             size_t *extra_indices, size_t *out_size, size_t *out_entsize,
+                             size_t *extra_indices, const out_group_t *groups, size_t group_count,
+                             size_t group_first, size_t *out_size, size_t *out_entsize,
                              uint8_t **xindex_out) {
     size_t entsz = (cls == ELFOBJ_CLASS_64) ? 24 : 16;
     int has_null = elf__first_symbol_is_null(obj);
@@ -450,18 +451,26 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
         uint8_t *p;
         uint32_t st_name = 0;
         uint8_t st_info = ELF32_ST_INFO(sym->bind, sym->type);
-        uint16_t st_shndx = (uint16_t)sym->shndx;
+        uint32_t shndx = sym->shndx;
+        uint16_t st_shndx;
 
         if (idx >= n) {
             free(buf);
             return NULL;
         }
-        if (sym->shndx > SHN_HIRESERVE) {
+        if (sym->in_group_section != 0) {
+            /* in a group's section, which is made after the rest at group_first on */
+            ptrdiff_t g = find_group_desc(groups, group_count, sym->in_group_section);
+
+            shndx = g >= 0 ? (uint32_t)(group_first + (size_t)g) : SHN_UNDEF;
+        }
+        st_shndx = (uint16_t)shndx;
+        if (shndx > SHN_HIRESERVE) {
             if (*xindex_out == NULL && (*xindex_out = (uint8_t *)elf__calloc(n, 4)) == NULL) {
                 free(buf);
                 return NULL;
             }
-            elf__wr32(*xindex_out + (idx * 4), e, sym->shndx);
+            elf__wr32(*xindex_out + (idx * 4), e, shndx);
             st_shndx = SHN_XINDEX;
         }
         p = buf + (idx * entsz);
@@ -881,8 +890,11 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     size_t shstr_index = 0;
     size_t i;
     size_t *obj_sec_to_out = NULL;
-    const char **group_sig_names = NULL;
-    size_t *group_sig_indices = NULL;
+    const char **group_sig_names = NULL;   /* the signatures no symbol has, made symbols */
+    size_t *group_sig_indices = NULL;      /* each group's signature symbol */
+    size_t *group_sig_missing = NULL;      /* the group each made one is of */
+    size_t *group_sig_added = NULL;        /* and where it was made */
+    size_t group_sig_count = 0;
     uint8_t *symtab_data = NULL;
     uint8_t *xindex_data = NULL;
     uint8_t *dynstr_data = NULL;
@@ -1064,7 +1076,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             memset(&out, 0, sizeof(out));
             out.name = name;
             out.type = with_addend ? SHT_RELA : SHT_REL;
-            out.flags = SHF_INFO_LINK;
+            /* a group member's relocations are of its group too, as GNU ld and as mark them */
+            out.flags = SHF_INFO_LINK | (target->group_index != 0 ? SHF_GROUP : 0);
             out.addralign = obj->cls == ELFOBJ_CLASS_64 ? 8 : 4;
             out.entsize = rel_ent;
             out.data = rel_data;
@@ -1089,14 +1102,29 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         goto done;
     }
     if (group_count != 0) {
+        int has_null = elf__first_symbol_is_null(obj);
+
         group_sig_names = (const char **)elf__calloc(group_count, sizeof(*group_sig_names));
         group_sig_indices = (size_t *)elf__calloc(group_count, sizeof(*group_sig_indices));
-        if (group_sig_names == NULL || group_sig_indices == NULL) {
+        group_sig_missing = (size_t *)elf__calloc(group_count, sizeof(*group_sig_missing));
+        group_sig_added = (size_t *)elf__calloc(group_count, sizeof(*group_sig_added));
+        if (group_sig_names == NULL || group_sig_indices == NULL || group_sig_missing == NULL ||
+            group_sig_added == NULL) {
             err = ELF_ERR_OOM;
             goto done;
         }
+        /* a group's signature is the symbol of its name, as GNU ld and as name it; one is made only for a
+         * signature no symbol has (a symbol of each, undefined, made the group name one nothing defined) */
         for (i = 0; i < group_count; ++i) {
-            group_sig_names[i] = groups[i].signature;
+            struct elf_symbol *sig = elf_find_symbol(obj, groups[i].signature);
+
+            if (sig != NULL && sig->type != STT_SECTION && sig->index < obj->symbol_count &&
+                obj->symbols[sig->index] == sig) {
+                group_sig_indices[i] = has_null ? sig->index : sig->index + 1;
+            } else {
+                group_sig_missing[group_sig_count] = i;
+                group_sig_names[group_sig_count++] = groups[i].signature;
+            }
         }
     }
 
@@ -1105,11 +1133,16 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
      * ours until a push hands them to secs; each pointer is cleared once
      * its section owns it, and done: frees whichever are still ours.
      */
-    symtab_data = build_symtab(obj, obj->endian, obj->cls, &strtab, group_sig_names, group_count,
-                               group_sig_indices, &symtab_size, &symtab_entsz, &xindex_data);
+    /* (the groups' sections are made next, in order, from the section count now) */
+    symtab_data = build_symtab(obj, obj->endian, obj->cls, &strtab, group_sig_names, group_sig_count,
+                               group_sig_added, groups, group_count, sec_count, &symtab_size, &symtab_entsz,
+                               &xindex_data);
     if (symtab_data == NULL) {
         err = ELF_ERR_OOM;
         goto done;
+    }
+    for (i = 0; i < group_sig_count; ++i) {
+        group_sig_indices[group_sig_missing[i]] = group_sig_added[i];
     }
 
     for (i = 0; i < group_count; ++i) {
@@ -1190,7 +1223,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 err = ELF_ERR_OOM;
                 goto done;
             }
-            versym_data = build_gnu_versym(obj, obj->endian, ver_names, ver_name_count, group_count, &versym_size);
+            versym_data = build_gnu_versym(obj, obj->endian, ver_names, ver_name_count, group_sig_count,
+                                           &versym_size);
             if (versym_data == NULL || versym_size == 0) {
                 err = ELF_ERR_OOM;
                 goto done;
@@ -2155,6 +2189,8 @@ done:
     free(file_order);
     free(group_sig_indices);
     free(group_sig_names);
+    free(group_sig_missing);
+    free(group_sig_added);
     free(obj_sec_to_out);
     free(ver_names);
     free(versym_data);

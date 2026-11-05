@@ -58,6 +58,7 @@ run:
 	./test_script_mixed_types.sh
 	./test_script_link_order_gather.sh
 	./test_force_group_allocation.sh
+	./test_r_keep_groups.sh
 	./test_script_sort.sh
 	./test_writable_code_section.sh
 	./test_script_body_align.sh

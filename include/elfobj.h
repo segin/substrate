@@ -1554,6 +1554,20 @@ elf_err_t elf_link_plan_set_section_gathered_hook(elf_link_plan_t *plan, elf_lin
  * @return ELF_OK, or ELF_ERR_STATE for no plan
  */
 elf_err_t elf_link_plan_set_merge_sections(elf_link_plan_t *plan, int enable);
+/**
+ * @brief Whether the link keeps section groups (SHT_GROUP), as GNU ld does under -r.
+ *
+ * Each input group is one in the output: its members go to sections of their own, still marked
+ * SHF_GROUP, which no section of another group or of none joins, and the output is written with a group
+ * section listing them (and their relocation sections) under the same signature and flags.  A COMDAT
+ * group of a signature already seen is left out with its members either way.  Off by default: the groups
+ * are not kept and their members go in as other sections do.
+ *
+ * @param plan   the link
+ * @param enable nonzero to keep them
+ * @return ELF_OK, or ELF_ERR_STATE for no plan
+ */
+elf_err_t elf_link_plan_set_keep_groups(elf_link_plan_t *plan, int enable);
 elf_err_t elf_link_plan_set_section_rank_hooks(elf_link_plan_t *plan, elf_link_section_rank_hook_t rank,
                                                elf_link_section_gap_hook_t gap, void *user);
 /**

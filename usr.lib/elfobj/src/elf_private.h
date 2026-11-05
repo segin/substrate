@@ -170,6 +170,8 @@ struct elf_symbol {
     char *version_name;
     uint8_t version_default;
     uint8_t in_merge_section;   /* a link took it from an SHF_MERGE input section */
+    uint32_t in_group_section;  /* nonzero: defined in the section the writer makes for the sections of
+                                 * that group_index (a group's signature, as GNU as defines one) */
     size_t index;
     struct elf_symbol *name_next;       /* the next in its bucket of the name index */
     uint32_t name_hash;
@@ -263,6 +265,18 @@ struct elf_link_input {
     const char **out_names;
     uint8_t *out_name_asked;
     size_t out_name_count;
+    /* Where the link keeps section groups (elf_link_plan_set_keep_groups): the output group each of
+     * obj's sections is a member of (0: none), and the output section a member went to, a section of
+     * that group of its own (NULL until merged).  NULL with no groups to keep. */
+    uint32_t *group_of;
+    struct elf_section **group_dst;
+};
+
+/* An output section group of a link that keeps them: the input group it is. */
+struct elf_link_out_group {
+    char *signature;
+    uint8_t comdat;   /* GRP_COMDAT */
+    size_t section;   /* the input's SHT_GROUP section, whose words are the members */
 };
 
 /* elf_link_input.out_name_asked: what has been asked of the plan's hooks for a section, and an answer */
@@ -326,6 +340,10 @@ struct elf_link_plan {
     size_t map_cap;
 
     int merge_sections;                 /* SHF_MERGE sections are merged (elf_link_plan_set_merge_sections) */
+    int keep_groups;                    /* section groups are kept (elf_link_plan_set_keep_groups) */
+    uint32_t group_count;               /* for one link: the output groups numbered so far */
+    uint32_t group_cap;
+    struct elf_link_out_group *groups;  /* and each one (group n at n - 1) */
     struct elf_merge_state *merge;      /* for one link: elf_merge.c */
     int x86_note_merged;                /* an x86 link: .note.gnu.property is the inputs' merged */
     uint8_t *x86_note;                  /* and this is it, NULL if no property is left */

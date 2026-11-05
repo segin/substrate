@@ -358,6 +358,13 @@ static int phase_symtab(ld_link_t *l) {
     return 0;
 }
 
+/* Whether the output keeps the inputs' section groups, as GNU ld: under -r, unless --force-group-allocation
+ * or a script's FORCE_GROUP_ALLOCATION asks for them placed as a final link places them. */
+static int keeps_groups(const ld_link_t *l) {
+    return l->out_type == ET_REL && !l->ctx->opt.force_group_allocation &&
+           (l->ctx->script == NULL || !l->ctx->script->force_group_allocation);
+}
+
 /* The inputs' sections into the output's.  The inputs go in under their
  * own names, so that a failure in one of them can be reported as that
  * one's. */
@@ -386,6 +393,9 @@ static int phase_merge(ld_link_t *l) {
     /* strings and constants are shared in a program or shared object, as GNU ld shares them; not under -r */
     if (err == ELF_OK) {
         err = elf_link_plan_set_merge_sections(plan, l->out_type != ET_REL);
+    }
+    if (err == ELF_OK) {
+        err = elf_link_plan_set_keep_groups(plan, keeps_groups(l));
     }
     if (err == ELF_OK && ctx->script != NULL && ctx->script->has_sections) {
         err = elf_link_plan_set_section_name_hook(plan, script_output_name, ctx->script);
@@ -528,13 +538,9 @@ static int phase_ld_note(ld_link_t *l) {
 }
 
 /* Section groups are gone from a final link, their members placed like any section; and from -r under
- * --force-group-allocation or a script's FORCE_GROUP_ALLOCATION, as GNU ld (Linux's modules are so linked). */
+ * --force-group-allocation or a script's FORCE_GROUP_ALLOCATION (Linux's modules are so linked). */
 static int phase_strip_groups(ld_link_t *l) {
-    if (l->out_type == ET_REL && !l->ctx->opt.force_group_allocation &&
-        (l->ctx->script == NULL || !l->ctx->script->force_group_allocation)) {
-        return 0;
-    }
-    return strip_group_sections_for_final(l->out);
+    return keeps_groups(l) ? 0 : strip_group_sections_for_final(l->out);
 }
 
 /* Whether this output's own definitions can be taken over by another's
