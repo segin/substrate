@@ -956,14 +956,21 @@ handle_set_command(const char *args)
 int
 exvi_write_allowed(buffer_t *b, const char *filename, int force)
 {
-    if (force || !option_readonly) {
+    int to_current = !(filename && b->filename && strcmp(filename, b->filename) != 0);
+
+    if (force || !to_current) {
         return 1;
     }
-    if (filename && b->filename && strcmp(filename, b->filename) != 0) {
-        return 1;
+    if (b->read_failed) {
+        /* the buffer holds only what could be read: writing it back loses the rest */
+        exvi_report_error("File was not read in full (add ! to override)");
+        return 0;
     }
-    exvi_report_error("File is read only (add ! to override)");
-    return 0;
+    if (option_readonly) {
+        exvi_report_error("File is read only (add ! to override)");
+        return 0;
+    }
+    return 1;
 }
 
 int

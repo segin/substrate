@@ -34,6 +34,9 @@ typedef struct {
     char *filename;
     char *recover_filename;
     int modified;
+    /** the file could not be read in full: writing the buffer back over it
+     *  needs `!` */
+    int read_failed;
     int empty_origin;
     int started_empty;
     line_t *marks[26];
@@ -129,7 +132,7 @@ void exvi_reset_undo_state(void);
 int exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src);
 int exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out);
 void buf_read_file(buffer_t *b, const char *filename);
-void buf_read_stream(buffer_t *b, FILE *f);
+int buf_read_stream(buffer_t *b, FILE *f);
 void buf_write_file(buffer_t *b, const char *filename, int append);
 void buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);

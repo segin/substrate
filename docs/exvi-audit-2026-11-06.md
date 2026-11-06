@@ -182,11 +182,11 @@ The number is not reused.
 
 ### EXVI-08 — an unreadable file loads as an empty buffer, and `:wq` empties it — *High*
 
-- [ ] **EXVI-08.1** (Unwanted behaviour) If an existing file cannot be opened
+- [x] **EXVI-08.1** (Unwanted behaviour) If an existing file cannot be opened
   for reading, then the editor shall report the error.
-- [ ] **EXVI-08.2** (Unwanted behaviour) If reading a file fails before its
+- [x] **EXVI-08.2** (Unwanted behaviour) If reading a file fails before its
   end, then the editor shall report the error.
-- [ ] **EXVI-08.3** (Unwanted behaviour) If a file could not be read in full,
+- [x] **EXVI-08.3** (Unwanted behaviour) If a file could not be read in full,
   then the editor shall refuse to write the buffer to that file without `!`.
 
 - **Where**: `exvi_buffer.c:356-367` ignores an `fopen` failure; `:368`

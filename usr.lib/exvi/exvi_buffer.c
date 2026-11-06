@@ -152,6 +152,7 @@ buf_init(buffer_t *b)
     b->filename = NULL;
     b->recover_filename = NULL;
     b->modified = 0;
+    b->read_failed = 0;
     b->empty_origin = 0;
     b->started_empty = 0;
     b->line_array = NULL;
@@ -337,6 +338,7 @@ buf_copy(buffer_t *dst, buffer_t *src)
         dst->recover_filename = strdup(src->recover_filename);
     }
     dst->modified = src->modified;
+    dst->read_failed = src->read_failed;
     dst->empty_origin = src->empty_origin;
     dst->started_empty = src->started_empty;
     dst->trailing_newline = src->trailing_newline;
@@ -357,23 +359,38 @@ save_undo(buffer_t *current)
     pending_undo_valid = 1;
 }
 
+/**
+ * Read filename into b.  A file that does not exist is a new file, and b
+ * stays empty; any other failure to open or read it is reported and marks
+ * b read_failed, so that the partial buffer is not written back over the
+ * file without `!`.
+ */
 void
 buf_read_file(buffer_t *b, const char *filename)
 {
     FILE *f = fopen(filename, "r");
 
+    b->read_failed = 0;
     if (!f) {
+        if (errno != ENOENT) {
+            exvi_report_errorf("%s: %s", filename, strerror(errno));
+            b->read_failed = 1;
+        }
         return;
     }
-    buf_read_stream(b, f);
+    if (buf_read_stream(b, f) != 0) {
+        exvi_report_errorf("%s: %s", filename, strerror(errno ? errno : EIO));
+        b->read_failed = 1;
+    }
     fclose(f);
 }
 
 /**
  * Append the lines of f to b, and mark b as just read: unmodified, with the
  * current line its first.  f is left open.
+ * @return 0, or -1 if reading stopped on an error (errno says which)
  */
-void
+int
 buf_read_stream(buffer_t *b, FILE *f)
 {
     char *line = NULL;
@@ -381,7 +398,9 @@ buf_read_stream(buffer_t *b, FILE *f)
     ssize_t ret;
     line_t *pos = b->tail;
     int last_had_newline = 0;
+    int failed;
 
+    errno = 0;
     while ((ret = getline(&line, &cap, f)) != -1) {
         if (ret > 0 && line[ret - 1] == '\n') {
             line[ret - 1] = '\0';
@@ -391,7 +410,13 @@ buf_read_stream(buffer_t *b, FILE *f)
         }
         pos = buf_insert_after(b, pos, line);
     }
-    free(line);
+    failed = ferror(f);
+    {
+        int saved_errno = errno;
+
+        free(line);
+        errno = saved_errno;
+    }
     if (b->line_count == 0) {
         b->empty_origin = 1;
         b->started_empty = 1;
@@ -403,6 +428,7 @@ buf_read_stream(buffer_t *b, FILE *f)
     }
     b->cur = b->head;
     b->modified = 0;
+    return failed ? -1 : 0;
 }
 
 /**
@@ -618,6 +644,7 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
     }
     if (wrote_current_file && wrote_whole_buffer && !append) {
         b->modified = 0;
+        b->read_failed = 0;
         exvi_cleanup_buffer_recover_file(b);
     }
 }
