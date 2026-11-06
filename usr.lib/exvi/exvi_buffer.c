@@ -843,6 +843,10 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
 
     if (filename[0] == '!') {
         FILE *f;
+        struct sigaction ign;
+        struct sigaction old_pipe;
+        int rc;
+        int werr = 0;
 
         if (secure_mode || restricted_mode) {
             exvi_report_shell_forbidden();
@@ -852,12 +856,30 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
         if (!f) {
             return -1;
         }
-        if (write_range_to_stream(b, f, addr1, addr2) != 0) {
-            exvi_pclose(f);
+        /*
+         * A command that stops reading must not take the editor with it:
+         * with SIGPIPE ignored the write fails with EPIPE instead, and is
+         * reported.  Ignored until pclose, which flushes what is left.
+         */
+        memset(&ign, 0, sizeof(ign));
+        ign.sa_handler = SIG_IGN;
+        sigemptyset(&ign.sa_mask);
+        sigaction(SIGPIPE, &ign, &old_pipe);
+        errno = 0;
+        rc = write_range_to_stream(b, f, addr1, addr2);
+        if (rc == -2 || (rc == 0 && fflush(f) != 0)) {
+            werr = errno ? errno : EIO;
+        }
+        exvi_pclose(f);
+        sigaction(SIGPIPE, &old_pipe, NULL);
+        if (rc == -1) {
             fprintf(stderr, "Invalid write range\n");
             return -1;
         }
-        exvi_pclose(f);
+        if (werr) {
+            fprintf(stderr, "%s: %s\n", filename + 1, strerror(werr));
+            return -1;
+        }
         return 0;
     }
 

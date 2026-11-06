@@ -269,7 +269,7 @@ The number is not reused.
 
 ### EXVI-14 — `w !cmd` dies of SIGPIPE when the command stops reading — *High*
 
-- [ ] **EXVI-14.1** (Unwanted behaviour) If a command that the buffer is
+- [x] **EXVI-14.1** (Unwanted behaviour) If a command that the buffer is
   written to exits before reading all of it, then the editor shall report the
   error and continue the session.
 
