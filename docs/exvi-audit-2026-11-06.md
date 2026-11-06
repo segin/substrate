@@ -233,16 +233,18 @@ The number is not reused.
 
 ### EXVI-12 — saving by temp file and `rename` breaks links, ownership and odd directories — *High*
 
-- [ ] **EXVI-12.1** (Event-driven) When the editor writes an existing file, it
-  shall write the file's own inode.
-- [ ] **EXVI-12.2** (Event-driven) When the file named is a symbolic link, the
+- [x] **EXVI-12.1** (Event-driven) When the editor writes an existing file, it
+  shall write the file's own inode.  (Or, where no one could tell the
+  difference -- a regular file with one link, the user's own, its group
+  kept -- a copy renamed over it, which no failure leaves half written.)
+- [x] **EXVI-12.2** (Event-driven) When the file named is a symbolic link, the
   editor shall write the link's target.
-- [ ] **EXVI-12.3** (Ubiquitous) The editor shall preserve a written file's
+- [x] **EXVI-12.3** (Ubiquitous) The editor shall preserve a written file's
   owner and group.
-- [ ] **EXVI-12.4** (Ubiquitous) The editor shall write any file the user can
+- [x] **EXVI-12.4** (Ubiquitous) The editor shall write any file the user can
   write, whatever the permissions of its directory and the length of its
   name.
-- [ ] **EXVI-12.5** (Event-driven) When a write completes, the editor shall
+- [x] **EXVI-12.5** (Event-driven) When a write completes, the editor shall
   have the data on stable storage before it reports success.
 
 - **Where**: `exvi_buffer.c:496-553`.
@@ -256,11 +258,12 @@ The number is not reused.
 
 ### EXVI-13 — `:w` clears set-user-ID and set-group-ID — *Medium*
 
-- [ ] **EXVI-13.1** (Ubiquitous) The editor shall preserve a written file's
+- [x] **EXVI-13.1** (Ubiquitous) The editor shall preserve a written file's
   permission bits, set-user-ID and set-group-ID included.
 
 - **Where**: `exvi_buffer.c:518-523`: `fchmod` before `fchown`, and `fchown`
-  clears the bits.
+  clears the bits.  (Found while fixing: so does the kernel on every write by
+  a non-root user, so the mode is set after the data is written.)
 - **Evidence**: a mode-4755 file is 755 after `:w`; 2755 the same.
 - **Basis**: reproduced.
 

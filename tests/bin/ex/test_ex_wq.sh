@@ -21,17 +21,17 @@ fail() {
 
 cd "$T" || exit 1
 
-# a failed wq! does not quit: the commands after it still run
-mkdir ro
-printf 'r\n' >ro/f
-chmod 555 ro
-if [ "$(id -u)" -ne 0 ]; then
-	out=$(printf 's/r/R/\nwq!\np\nq!\n' | "$EX_BIN" -s ro/f 2>&1)
-	if ! grep -qx R <<<"$out"; then
-		fail "wq! quit although its write failed: [$out]"
-	fi
+# a failed wq! does not quit: the commands after it still run.  (A file
+# size limit, SIGXFSZ ignored, makes the write fail with EFBIG.)
+seq 1 2000 >big
+out=$(
+	trap '' XFSZ
+	ulimit -f 4
+	printf '1s/1/R/\nwq!\n1p\nq!\n' | "$EX_BIN" -s big 2>&1
+)
+if ! grep -qx R <<<"$out"; then
+	fail "wq! quit although its write failed: [$out]"
 fi
-chmod 755 ro
 
 # wq file / x file write that file, and leave the current one alone
 for c in wq x; do

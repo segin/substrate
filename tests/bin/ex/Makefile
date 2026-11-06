@@ -26,6 +26,7 @@ test:
 	bash ./test_ex_read_error.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_wq.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_writeany.sh $(abspath $(TOP)/bin/ex/ex); \
+	bash ./test_ex_write_inplace.sh $(abspath $(TOP)/bin/ex/ex); \
 	python3 ./test_ex_frontend.py $(abspath $(TOP)/bin/ex/ex)
 
 clean:

@@ -1,6 +1,7 @@
 #include "exvi_internal.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -503,6 +504,10 @@ finish_written_stream(FILE *f, const char *name, int write_errno)
     if (!err && fflush(f) != 0) {
         err = errno ? errno : EIO;
     }
+    /* on stable storage before it is reported written (EINVAL: no such thing here) */
+    if (!err && fsync(fileno(f)) != 0 && errno != EINVAL) {
+        err = errno;
+    }
     if (fclose(f) != 0 && !err) {
         err = errno ? errno : EIO;
     }
@@ -511,6 +516,312 @@ finish_written_stream(FILE *f, const char *name, int write_errno)
         return -1;
     }
     return 0;
+}
+
+/**
+ * Write lines addr1..addr2 of b to path, a file that does not exist yet:
+ * created with the usual 0666 less the umask, and removed again if the
+ * write fails.
+ * @return 0, or -1 (reported)
+ */
+static int
+write_new_file(buffer_t *b, const char *path, int addr1, int addr2)
+{
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
+    FILE *f;
+    int rc;
+
+    if (fd < 0) {
+        perror(path);
+        return -1;
+    }
+    f = fdopen(fd, "w");
+    if (!f) {
+        perror(path);
+        close(fd);
+        unlink(path);
+        return -1;
+    }
+    errno = 0;
+    rc = write_range_to_stream(b, f, addr1, addr2);
+    if (rc == -1) {
+        fclose(f);
+        unlink(path);
+        fprintf(stderr, "Invalid write range\n");
+        return -1;
+    }
+    if (finish_written_stream(f, path, rc == -2 ? (errno ? errno : EIO) : 0) != 0) {
+        unlink(path);
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Write lines addr1..addr2 of b over path through a temporary file renamed
+ * over it, which no failure can leave half written.  Only where that is
+ * the same as writing the file itself: the caller has checked that it is a
+ * regular file with one link, owned by the user; here the temporary file
+ * must also take the file's group (fchown before fchmod, which would clear
+ * set-user-ID and set-group-ID).
+ * @return 0; -1 (reported) if the write failed and path is unchanged; 1 if
+ *         this way cannot be taken (no temporary file beside it, or its
+ *         group), with nothing done
+ */
+static int
+write_by_rename(buffer_t *b, const char *path, const struct stat *st, int addr1, int addr2)
+{
+    char *tmp;
+    int fd;
+    FILE *f;
+    int rc;
+
+    if (asprintf(&tmp, "%s.tmp.XXXXXX", path) < 0) {
+        return 1;
+    }
+    fd = mkstemp(tmp);
+    if (fd < 0) {
+        free(tmp);
+        return 1;
+    }
+    if (fchown(fd, (uid_t)-1, st->st_gid) != 0) {
+        close(fd);
+        unlink(tmp);
+        free(tmp);
+        return 1;
+    }
+    f = fdopen(fd, "w");
+    if (!f) {
+        close(fd);
+        unlink(tmp);
+        free(tmp);
+        return 1;
+    }
+    errno = 0;
+    rc = write_range_to_stream(b, f, addr1, addr2);
+    if (rc == -1) {
+        fclose(f);
+        unlink(tmp);
+        free(tmp);
+        fprintf(stderr, "Invalid write range\n");
+        return -1;
+    }
+    /*
+     * The mode once the data is written: a write clears set-user-ID and
+     * set-group-ID, and fchown (above) would too.
+     */
+    if (rc == 0 && (fflush(f) != 0 || fchmod(fd, st->st_mode & 07777) != 0)) {
+        rc = -2;
+    }
+    /* the original is replaced only by a copy known to be whole */
+    if (finish_written_stream(f, path, rc == -2 ? (errno ? errno : EIO) : 0) != 0) {
+        unlink(tmp);
+        free(tmp);
+        return -1;
+    }
+    if (rename(tmp, path) < 0) {
+        perror(path);
+        unlink(tmp);
+        free(tmp);
+        return -1;
+    }
+    free(tmp);
+    return 0;
+}
+
+/**
+ * Write lines addr1..addr2 of b into path itself, keeping its inode, links,
+ * owner and mode.  What it held is read first and put back if the write
+ * fails; a file that cannot be read is written without that.
+ * @return 0, or -1 (reported)
+ */
+static int
+write_in_place(buffer_t *b, const char *path, int addr1, int addr2)
+{
+    char *orig = NULL;
+    size_t orig_len = 0;
+    size_t orig_cap = 0;
+    int fd = open(path, O_RDWR);
+    FILE *f;
+    int rc;
+    int err = 0;
+    mode_t orig_mode = 0;
+    struct stat ost;
+
+    if (stat(path, &ost) == 0) {
+        orig_mode = ost.st_mode;
+    }
+    if (fd >= 0) {
+        for (;;) {
+            ssize_t n;
+
+            if (orig_len == orig_cap) {
+                size_t cap = orig_cap ? orig_cap * 2 : 65536;
+                char *grown = realloc(orig, cap);
+
+                if (!grown) {
+                    free(orig);
+                    close(fd);
+                    exvi_report_error("out of memory");
+                    return -1;
+                }
+                orig = grown;
+                orig_cap = cap;
+            }
+            n = read(fd, orig + orig_len, orig_cap - orig_len);
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            if (n < 0) {
+                err = errno;
+                break;
+            }
+            if (n == 0) {
+                break;
+            }
+            orig_len += (size_t)n;
+        }
+        if (err || lseek(fd, 0, SEEK_SET) != 0 || ftruncate(fd, 0) != 0) {
+            perror(path);
+            free(orig);
+            close(fd);
+            return -1;
+        }
+    } else {
+        /* written but not readable: nothing to put back */
+        fd = open(path, O_WRONLY | O_TRUNC);
+        if (fd < 0) {
+            perror(path);
+            return -1;
+        }
+    }
+    f = fdopen(fd, "w");
+    if (!f) {
+        perror(path);
+        close(fd);
+        free(orig);
+        return -1;
+    }
+    errno = 0;
+    rc = write_range_to_stream(b, f, addr1, addr2);
+    if (rc == -2) {
+        err = errno ? errno : EIO;
+    } else if (rc == 0 && fflush(f) != 0) {
+        err = errno ? errno : EIO;
+    } else if (rc == 0 && fsync(fd) != 0 && errno != EINVAL) {
+        err = errno;
+    }
+    if (rc == 0 && !err) {
+        struct stat st;
+
+        /* a write clears set-user-ID and set-group-ID: the owner may set them back */
+        if (fstat(fd, &st) == 0 && st.st_uid == geteuid()) {
+            (void)fchmod(fd, orig_mode & 07777);
+        }
+    }
+    if (rc == -1 || err) {
+        if (orig) {
+            /* put back what the file held */
+            size_t off = 0;
+
+            (void)fflush(f);
+            if (lseek(fd, 0, SEEK_SET) == 0 && ftruncate(fd, 0) == 0) {
+                while (off < orig_len) {
+                    ssize_t n = write(fd, orig + off, orig_len - off);
+
+                    if (n < 0 && errno == EINTR) {
+                        continue;
+                    }
+                    if (n <= 0) {
+                        break;
+                    }
+                    off += (size_t)n;
+                }
+            }
+        }
+        fclose(f);
+        free(orig);
+        if (rc == -1) {
+            fprintf(stderr, "Invalid write range\n");
+        } else {
+            fprintf(stderr, "%s: %s\n", path, strerror(err));
+        }
+        return -1;
+    }
+    free(orig);
+    if (fclose(f) != 0) {
+        perror(path);
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Write lines addr1..addr2 of b to filename, replacing what it holds.  A
+ * symbolic link is followed: its target is written.  A file that does not
+ * exist is created.  An existing file is written through a temporary file
+ * renamed over it where that is the same as writing it -- a regular file
+ * with one link, the user's own -- since no failure can leave that half
+ * written; otherwise it is written in place, keeping its inode, links,
+ * owner and mode, with what it held put back if the write fails.
+ * @return 0, or -1 (reported; the file as it was)
+ */
+static int
+write_file_whole(buffer_t *b, const char *filename, int addr1, int addr2)
+{
+    char *resolved = NULL;
+    const char *path = filename;
+    struct stat st;
+    int rc;
+
+    if (lstat(filename, &st) == 0 && S_ISLNK(st.st_mode)) {
+        resolved = realpath(filename, NULL);
+        if (!resolved) {
+            /* a dangling link: create its target */
+            char target[4096];
+            ssize_t n = readlink(filename, target, sizeof(target) - 1);
+
+            if (n < 0) {
+                perror(filename);
+                return -1;
+            }
+            target[n] = '\0';
+            if (target[0] != '/' && strchr(filename, '/')) {
+                const char *slash = strrchr(filename, '/');
+
+                if (asprintf(&resolved, "%.*s/%s", (int)(slash - filename), filename, target) < 0) {
+                    return -1;
+                }
+            } else {
+                resolved = strdup(target);
+                if (!resolved) {
+                    return -1;
+                }
+            }
+        }
+        path = resolved;
+    }
+    if (stat(path, &st) != 0) {
+        if (errno == ENOENT) {
+            rc = write_new_file(b, path, addr1, addr2);
+        } else {
+            perror(path);
+            rc = -1;
+        }
+        free(resolved);
+        return rc;
+    }
+    rc = 1;
+    /* (and writable: a rename would replace a file the user may not write) */
+    if (S_ISREG(st.st_mode) && st.st_nlink == 1 && st.st_uid == geteuid()
+            && access(path, W_OK) == 0) {
+        rc = write_by_rename(b, path, &st, addr1, addr2);
+    }
+    if (rc == 1) {
+        rc = write_in_place(b, path, addr1, addr2);
+    }
+    free(resolved);
+    return rc;
 }
 
 int
@@ -575,77 +886,8 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
         if (finish_written_stream(f, filename, rc == -2 ? (errno ? errno : EIO) : 0) != 0) {
             return -1;
         }
-    } else {
-        char *tmp;
-        int fd;
-        FILE *f;
-        int rc;
-
-        if (asprintf(&tmp, "%s.tmp.XXXXXX", filename) < 0) {
-            perror("asprintf");
-            return -1;
-        }
-
-        fd = mkstemp(tmp);
-        if (fd < 0) {
-            perror(tmp);
-            free(tmp);
-            return -1;
-        }
-
-        /*
-         * mkstemp() creates the temp file with mode 0600, and the rename()
-         * below replaces the original file with it -- so without this the saved
-         * file loses its permissions (a 0755 script becomes 0600 and stops
-         * being executable).  Carry the original file's mode (and, best effort,
-         * its owner) across to the replacement; for a brand-new file fall back
-         * to the normal create default, 0666 masked by the umask.
-         */
-        {
-            struct stat st;
-            if (stat(filename, &st) == 0) {
-                fchmod(fd, st.st_mode & 07777);
-                /* Best effort -- only succeeds for root / matching owner. */
-                if (fchown(fd, st.st_uid, st.st_gid) != 0) {
-                    /* ignore: not privileged to preserve ownership */
-                }
-            } else {
-                mode_t um = umask(0);
-                umask(um);
-                fchmod(fd, 0666 & ~um);
-            }
-        }
-
-        f = fdopen(fd, "w");
-        if (!f) {
-            close(fd);
-            remove(tmp);
-            free(tmp);
-            return -1;
-        }
-
-        errno = 0;
-        rc = write_range_to_stream(b, f, addr1, addr2);
-        if (rc == -1) {
-            fclose(f);
-            remove(tmp);
-            free(tmp);
-            fprintf(stderr, "Invalid write range\n");
-            return -1;
-        }
-        /* the original is replaced only by a copy known to be whole */
-        if (finish_written_stream(f, filename, rc == -2 ? (errno ? errno : EIO) : 0) != 0) {
-            remove(tmp);
-            free(tmp);
-            return -1;
-        }
-        if (rename(tmp, filename) < 0) {
-            perror("rename");
-            remove(tmp);
-            free(tmp);
-            return -1;
-        }
-        free(tmp);
+    } else if (write_file_whole(b, filename, addr1, addr2) != 0) {
+        return -1;
     }
     if (wrote_current_file && wrote_whole_buffer && !append) {
         b->modified = 0;
