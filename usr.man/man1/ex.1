@@ -303,6 +303,17 @@ preserve a modified buffer and end the session.
 The
 .Nm
 utility exits 0 on success and with a value greater than 0 if an error occurs.
+When standard input is not a terminal, the first command read from it that
+fails ends the session at once, with nothing more written, and with a
+value greater than 0; so does the end of input while the buffer is
+modified, as
+.Ic quit
+would refuse.
+Commands given with
+.Fl c
+or
+.Ar +command
+do not end the session.
 .Sh EXAMPLES
 .Bd -literal -offset indent
 ex file.txt

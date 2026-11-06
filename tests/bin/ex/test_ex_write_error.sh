@@ -35,6 +35,13 @@ fi
 if ! grep -q 'File too large' "$T/out"; then
 	fail "a failed :w was not reported: [$(cat "$T/out")]"
 fi
+# the buffer is still modified: q refuses.  (Given with -c: a command read
+# from a pipe that fails ends the session, and q would never run.)
+(
+	trap '' XFSZ
+	ulimit -f 4
+	"$EX_BIN" -s -c '1s/1/X/' -c w -c q "$T/big" </dev/null >"$T/out" 2>&1
+)
 if ! grep -q 'No write since last change' "$T/out"; then
 	fail "a failed :w left the buffer marked written: [$(cat "$T/out")]"
 fi

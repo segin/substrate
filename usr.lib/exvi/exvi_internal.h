@@ -171,6 +171,8 @@ void exvi_free_registers(void);
 void exvi_set_pending_status(const char *msg);
 int exvi_take_pending_status(char *buf, size_t buf_size);
 void exvi_report_error(const char *msg);
+void exvi_note_error(void);
+int exvi_take_error(void);
 void exvi_report_errorf(const char *fmt, ...);
 void exvi_report_shell_forbidden(void);
 int exvi_restricted_filename_change(buffer_t *b, const char *target);

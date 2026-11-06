@@ -432,11 +432,7 @@ static void do_command(buffer_t *b, char *cmd) {
         &parse_error);
 
     if (parse_error) {
-        if (visual_mode) {
-            exvi_set_pending_status("Bad address");
-        } else {
-            fprintf(stderr, "Bad address\n");
-        }
+        exvi_report_error("Bad address");
         return;
     }
     
@@ -464,11 +460,7 @@ static void do_command(buffer_t *b, char *cmd) {
         return;
     }
 
-    if (visual_mode) {
-        exvi_set_pending_status("Unknown command");
-    } else {
-        fprintf(stderr, "Unknown command\n");
-    }
+    exvi_report_error("Unknown command");
 }
 
 void
@@ -663,7 +655,10 @@ enter_visual:
         }
     }
 
-    for (;;) {
+    /* only the commands read here end the session on an error */
+    (void)exvi_take_error();
+    /* (a -c q! has already asked to quit: read nothing) */
+    while (!exvi_exit_requested) {
         if (!batch_mode && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) && !input_mode) {
             fputs(":", stdout);
             fflush(stdout);
@@ -678,6 +673,11 @@ enter_visual:
             continue;
         }
         if (ret == -1) {
+            /* end of input is quit, which a modified buffer refuses */
+            if (buf.modified) {
+                exvi_report_error("No write since last change (add ! to override)");
+                status = 1;
+            }
             break;
         }
         if (ret > 0 && line[ret-1] == '\n') line[ret-1] = '\0';
@@ -698,6 +698,15 @@ enter_visual:
         if (*cmd_line == ':') cmd_line++;
         
         do_command(&buf, cmd_line);
+        if (exvi_take_error() && !isatty(STDIN_FILENO)) {
+            /*
+             * POSIX ex, Consequences of Errors: reading commands from
+             * something other than a terminal, a failed command ends the
+             * session -- nothing more is written -- with a failing status.
+             */
+            status = 1;
+            break;
+        }
         if (exvi_exit_requested) {
             break;
         }

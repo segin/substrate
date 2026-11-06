@@ -43,6 +43,33 @@ exvi_frontend_t exvi_frontend = EXVI_FRONTEND_EX;
 buffer_t regs[27];
 int reg_linewise[27];
 volatile sig_atomic_t exvi_interrupted = 0;
+/** a command has failed since exvi_take_error() last looked */
+static int exvi_error_seen = 0;
+
+/**
+ * Note that the command being run has failed: ex reading commands from
+ * something other than a terminal stops at it (POSIX ex, Consequences of
+ * Errors).  exvi_report_error() notes it; so does anything that reports a
+ * failure some other way.
+ */
+void
+exvi_note_error(void)
+{
+    exvi_error_seen = 1;
+}
+
+/**
+ * Take the note of a failed command.
+ * @return 1 if a command has failed since the last call (and clear it), else 0
+ */
+int
+exvi_take_error(void)
+{
+    int seen = exvi_error_seen;
+
+    exvi_error_seen = 0;
+    return seen;
+}
 buffer_t *global_buf_for_sighandler = NULL;
 int input_mode = 0;
 line_t *input_insert_pos = NULL;
@@ -776,6 +803,7 @@ exvi_restricted_filename_change(buffer_t *b, const char *target)
 void
 exvi_report_error(const char *msg)
 {
+    exvi_note_error();
     if (visual_mode) {
         exvi_set_pending_status(msg);
     } else {

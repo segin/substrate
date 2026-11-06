@@ -281,10 +281,10 @@ The number is not reused.
 
 ### EXVI-15 — in batch mode an error neither stops ex nor sets its exit status — *High*
 
-- [ ] **EXVI-15.1** (State-driven) While standard input is not a terminal, if a
+- [x] **EXVI-15.1** (State-driven) While standard input is not a terminal, if a
   command fails, then the editor shall exit with a non-zero status without
   writing any file.
-- [ ] **EXVI-15.2** (Unwanted behaviour) If input ends while the buffer is
+- [x] **EXVI-15.2** (Unwanted behaviour) If input ends while the buffer is
   modified, then the editor shall exit with a non-zero status.
 
 - **Where**: `exvi.c` main loop.

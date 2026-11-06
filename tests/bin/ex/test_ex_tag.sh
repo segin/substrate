@@ -29,7 +29,9 @@ if ! grep -q 'Bad tag address' <<<"$out"; then
 	fail "a tags entry that is not an address was not reported: [$out]"
 fi
 
-out=$(printf 'tag wipe\nw g.c\nq!\n' | "$EX_BIN" -s 2>&1)
+# (with -c: a command read from a pipe that fails ends the session, and
+# w g.c would never run)
+out=$("$EX_BIN" -s -c 'tag wipe' -c 'w g.c' -c 'q!' </dev/null 2>&1)
 if ! cmp -s f.c g.c; then
 	fail "a tags entry ran an ex command: [$(cat g.c 2>/dev/null)]"
 fi

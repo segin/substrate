@@ -1260,13 +1260,21 @@ exvi_write_args(buffer_t *b, const char *args, int explicit_range, int addr1,
         }
         rc = buf_write_range(b, target, append, write_addr1, write_addr2);
         free(target);
+        if (rc != 0) {
+            exvi_note_error();
+        }
         return rc;
     }
     if (b->filename) {
         if (!exvi_write_allowed(b, b->filename, force)) {
             return -1;
         }
-        return buf_write_range(b, b->filename, append, write_addr1, write_addr2);
+        rc = buf_write_range(b, b->filename, append, write_addr1, write_addr2);
+        if (rc != 0) {
+            /* (reported with perror and the like, not exvi_report_error) */
+            exvi_note_error();
+        }
+        return rc;
     }
     exvi_report_error("No current filename");
     return -1;
@@ -1453,6 +1461,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
         free(expanded_name);
     } else {
         perror(expanded_name ? expanded_name : ptr);
+        exvi_note_error();
         free(expanded_name);
     }
     return 1;

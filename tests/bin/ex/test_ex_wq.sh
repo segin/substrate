@@ -24,10 +24,12 @@ cd "$T" || exit 1
 # a failed wq! does not quit: the commands after it still run.  (A file
 # size limit, SIGXFSZ ignored, makes the write fail with EFBIG.)
 seq 1 2000 >big
+# (with -c: a command read from a pipe that fails ends the session, and
+# 1p would never run)
 out=$(
 	trap '' XFSZ
 	ulimit -f 4
-	printf '1s/1/R/\nwq!\n1p\nq!\n' | "$EX_BIN" -s big 2>&1
+	"$EX_BIN" -s -c '1s/1/R/' -c 'wq!' -c 1p -c 'q!' big </dev/null 2>&1
 )
 if ! grep -qx R <<<"$out"; then
 	fail "wq! quit although its write failed: [$out]"

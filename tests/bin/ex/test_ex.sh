@@ -1085,13 +1085,13 @@ gamma"
 
 run_nofile_stderr_status_test "Write rejects missing current filename" \
     ":w\n:q!\n" \
-    0 \
+    1 \
     "No current filename"
 
 run_write_side_effect_test "Readonly current-file write is blocked" \
     "alpha\n" \
     ":1s/a/A/\n:w\n:q!\n" \
-    0 \
+    1 \
     "File is read only (add ! to override)" \
     "alpha" \
     "__ABSENT__" \
@@ -1118,7 +1118,7 @@ run_write_side_effect_test "Readonly write to another file is allowed" \
 run_write_side_effect_test "Invalid file write range leaves target absent" \
     "alpha\n" \
     ":2,3w __OUT_FILE__\n:q!\n" \
-    0 \
+    1 \
     "Invalid write range" \
     "alpha" \
     "__ABSENT__"
@@ -1197,21 +1197,21 @@ run_stderr_status_with_fileargs_test "Next reports end of argument list" \
     "one\n" \
     "two\n" \
     ":next\n:next\n:q!\n" \
-    0 \
+    1 \
     "No more files"
 
 run_stderr_status_with_fileargs_test "Prev reports start of argument list" \
     "one\n" \
     "two\n" \
     ":prev\n:q!\n" \
-    0 \
+    1 \
     "No previous files"
 
 run_stderr_status_with_fileargs_test "Next rejects modified buffer" \
     "one\n" \
     "two\n" \
     ":1change\nchanged\n.\n:next\n:q!\n" \
-    0 \
+    1 \
     "No write since last change (add ! to override)"
 
 run_stdout_with_fileargs_test "Forced next discards modified buffer and advances" \
@@ -1446,14 +1446,14 @@ run_oracle_test "Substitute no-match keeps repeat state aligned with vim" \
 run_file_stderr_status_test "Substitute rejects unknown flags" \
     "a a\n" \
     ":1s/a/A/z\n:q!\n" \
-    0 \
+    1 \
     "Bad substitute flags" \
     "a a\n"
 
 run_file_stderr_status_test "Repeat substitute rejects unknown flags" \
     "a a\na a\n" \
     ":1s/a/A/\n:2&z\n:q!\n" \
-    0 \
+    1 \
     "Bad substitute flags" \
     "a a\na a\n"
 
@@ -1524,117 +1524,117 @@ run_startup_directory_policy_test "Unsafe home directory .exrc is ignored" \
 run_stderr_status_test "Quit rejects modified buffer" \
     "one\ntwo\n" \
     ":1d\n:q\n" \
-    0 \
+    1 \
     "No write since last change (add ! to override)"
 
 run_stderr_status_test "Set rejects unknown option" \
     "one\ntwo\n" \
     ":set frobnicate\n:q!\n" \
-    0 \
+    1 \
     "Unknown option: frobnicate"
 
 run_stderr_status_test "Set abbreviation rejects unknown option" \
     "one\ntwo\n" \
     ":se frobnicate\n:q!\n" \
-    0 \
+    1 \
     "Unknown option: frobnicate"
 
 run_stderr_status_test "Set magic query remains unsupported by policy" \
     "one\ntwo\n" \
     ":set magic?\n:q!\n" \
-    0 \
+    1 \
     "Unknown option: magic?"
 
 run_stderr_status_test "Print rejects empty buffer" \
     "" \
     ":p\n:q!\n" \
-    0 \
+    1 \
     "No current line"
 
 run_stderr_status_test "Number rejects empty buffer" \
     "" \
     ":#\n:q!\n" \
-    0 \
+    1 \
     "No current line"
 
 run_stderr_status_test "List rejects empty buffer" \
     "" \
     ":l\n:q!\n" \
-    0 \
+    1 \
     "No current line"
 
 run_stderr_status_test "Empty command rejects empty buffer" \
     "" \
     ":\n:q!\n" \
-    0 \
+    1 \
     "No current line"
 
 run_nofile_stderr_status_test "File percent rejects missing current filename" \
     ":file %\n:q!\n" \
-    0 \
+    1 \
     "No current filename"
 
 run_nofile_stderr_status_test "File hash rejects missing alternate filename" \
     ":file #\n:q!\n" \
-    0 \
+    1 \
     "No alternate filename"
 
 run_nofile_stderr_status_test "Recover percent reports missing current filename once" \
     ":recover %\n:q!\n" \
-    0 \
+    1 \
     "No current filename"
 
 run_nofile_stderr_status_test "Recover hash reports missing alternate filename once" \
     ":recover #\n:q!\n" \
-    0 \
+    1 \
     "No alternate filename"
 
 run_stderr_status_test "Copy requires destination" \
     "one\ntwo\n" \
     ":1copy\n:q!\n" \
-    0 \
+    1 \
     "Destination required"
 
 run_stderr_status_with_outfile_test "Write to another file keeps buffer modified" \
     "one\ntwo\n" \
     ":1change\nchanged\n.\n:w __OUT_FILE__\n:q\n" \
-    0 \
+    1 \
     "No write since last change (add ! to override)"
 
 run_stderr_status_test "Move rejects destination inside range" \
     "one\ntwo\nthree\n" \
     ":1,2move1\n:q!\n" \
-    0 \
+    1 \
     "Destination not outside move range"
 
 run_stderr_status_test "Malformed range reports bad address" \
     "one\ntwo\nthree\n" \
     ":1,?p\n:q!\n" \
-    0 \
+    1 \
     "Bad address"
 
 run_stderr_status_test "Bad mark reports bad address" \
     "one\ntwo\nthree\n" \
     ":'zp\n:q!\n" \
-    0 \
+    1 \
     "Bad address"
 
 run_stderr_status_test "Tag abbreviation requires operand" \
     "one\ntwo\nthree\n" \
     ":ta\n:q!\n" \
-    0 \
+    1 \
     "Usage: tag <name>"
 
 run_stderr_status_test "Mark abbreviation requires mark name" \
     "one\ntwo\nthree\n" \
     ":ma 1\n:q!\n" \
-    0 \
+    1 \
     "Usage: mark <a-z>"
 
 run_stderr_status_test "Unknown command reports diagnostic" \
     "one\ntwo\n" \
     ":bogus\n:q!\n" \
-    0 \
+    1 \
     "Unknown command"
 
 run_stdout_test "Set number query reports state" \
@@ -1737,11 +1737,12 @@ run_stdout_test "Undo with empty history is a no-op" \
     "one
 two"
 
+# (in batch the malformed range ends the session, POSIX ex Consequences of
+# Errors, so :p never runs; vi's test of the same keeps the second half)
 run_stdout_test "Malformed range leaves current line unchanged" \
     "one\ntwo\nthree\n" \
     ":2p\n:1,?p\n:p\n:q!\n" \
-    "two
-two"
+    "two"
 
 run_stdout_oracle_test "Percent print matches vim" \
     "alpha\nbeta\ngamma\n" \

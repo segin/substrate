@@ -18,7 +18,9 @@ fail() {
 }
 
 seq 1 50000 >"$T/big"
-out=$(printf 'w !true\n$=\nq!\n' | "$EX_BIN" -s "$T/big" 2>&1)
+# (with -c: a command read from a pipe that fails ends the session, and
+# the next would never run)
+out=$("$EX_BIN" -s -c 'w !true' -c '$=' -c 'q!' "$T/big" </dev/null 2>&1)
 status=$?
 if [ "$status" -ge 128 ]; then
 	fail "w !true killed ex with signal $((status - 128))"
