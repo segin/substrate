@@ -117,6 +117,7 @@ static int restore_registered = 0;
 static volatile sig_atomic_t vi_resize_pending = 0;
 
 static int vi_first_nonblank_col(line_t *cur);
+static int vi_normalize_char_index(line_t *cur, int idx);
 static int vi_display_col_for_index(line_t *cur, int idx);
 static line_t *vi_ensure_current_line(buffer_t *b);
 static int vi_replace_current_text(buffer_t *b, const char *text);
@@ -927,10 +928,7 @@ vi_clamp_cursor(buffer_t *b, vi_visual_t *vis)
     if (vis->cursor_col < 0) {
         vis->cursor_col = 0;
     } else if ((size_t)vis->cursor_col < cur->len) {
-        while (vis->cursor_col > 0 &&
-            (((unsigned char)cur->text[vis->cursor_col]) & 0xc0) == 0x80) {
-            vis->cursor_col--;
-        }
+        vis->cursor_col = vi_normalize_char_index(cur, vis->cursor_col);
     }
 }
 
@@ -948,17 +946,15 @@ vi_is_utf8_continuation_byte(unsigned char c)
     return (c & 0xc0) == 0x80;
 }
 
+static int vi_char_start(const char *text, size_t len, int idx);
+
 size_t
 vi_utf8_prev_offset(const char *buf, size_t pos)
 {
     if (pos == 0) {
         return 0;
     }
-    pos--;
-    while (pos > 0 && vi_is_utf8_continuation_byte((unsigned char)buf[pos])) {
-        pos--;
-    }
-    return pos;
+    return (size_t)vi_char_start(buf, strlen(buf), (int)pos - 1);
 }
 
 static int
@@ -1014,6 +1010,30 @@ vi_utf8_decode_text_at(const char *text, size_t len, int idx, unsigned int *cp_o
     return need;
 }
 
+/**
+ * The start of the character the byte at idx belongs to.  A continuation
+ * byte belongs to the lead byte up to three before it only if the valid
+ * sequence that lead byte starts reaches it; any other byte is a character
+ * of its own -- a stray 0x80-0xbf, as in Latin-1 text, too, or stepping
+ * forward from it would come back to the same place.
+ */
+static int
+vi_char_start(const char *text, size_t len, int idx)
+{
+    if (idx <= 0 || (size_t)idx >= len
+            || !vi_is_utf8_continuation_byte((unsigned char)text[idx])) {
+        return idx;
+    }
+    for (int back = 1; back <= 3 && idx - back >= 0; back++) {
+        int s = idx - back;
+
+        if (!vi_is_utf8_continuation_byte((unsigned char)text[s])) {
+            return vi_utf8_decode_text_at(text, len, s, NULL) > back ? s : idx;
+        }
+    }
+    return idx;
+}
+
 static int
 vi_normalize_char_index(line_t *cur, int idx)
 {
@@ -1023,10 +1043,7 @@ vi_normalize_char_index(line_t *cur, int idx)
     if ((size_t)idx >= cur->len) {
         return (int)cur->len;
     }
-    while (idx > 0 && vi_is_utf8_continuation_byte((unsigned char)cur->text[idx])) {
-        idx--;
-    }
-    return idx;
+    return vi_char_start(cur->text, cur->len, idx);
 }
 
 static int
@@ -1039,11 +1056,7 @@ vi_prev_char_index(line_t *cur, int idx)
     if (idx <= 0) {
         return 0;
     }
-    idx--;
-    while (idx > 0 && vi_is_utf8_continuation_byte((unsigned char)cur->text[idx])) {
-        idx--;
-    }
-    return idx;
+    return vi_char_start(cur->text, cur->len, idx - 1);
 }
 
 static int

@@ -20,7 +20,8 @@ test:
 	python3 ./test_vi_exit_paths.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_interrupt.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_tag.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_zz_fail.py $(abspath $(TOP)/bin/vi/vi)
+	python3 ./test_vi_zz_fail.py $(abspath $(TOP)/bin/vi/vi); \
+	python3 ./test_vi_utf8_stray.py $(abspath $(TOP)/bin/vi/vi)
 
 oracle:
 	@mkdir -p $(TOP)/.locks

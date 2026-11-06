@@ -422,12 +422,14 @@ The number is not reused.
 
 ### EXVI-25 — a stray UTF-8 continuation byte hangs vi — *High*
 
-- [ ] **EXVI-25.1** (Ubiquitous) The editor shall treat each byte that is not
+- [x] **EXVI-25.1** (Ubiquitous) The editor shall treat each byte that is not
   part of a valid UTF-8 sequence as one character.
 
 - **Where**: `exvi_visual.c:1002-1054` (`vi_normalize_char_index`,
   `vi_next_char_index`) returns the same index at a stray 0x80–0xBF byte, so
-  the loops at `:1242`, `:1257`, `:1280`, `:1300` never end.  Raw mode is on,
+  the loops at `:1242`, `:1257`, `:1280`, `:1300` never end.  (Found while
+  fixing: `vi_clamp_cursor` had its own copy of the loop, which pulled the
+  cursor back off a stray byte: `l` could not reach one.)  Raw mode is on,
   so ^C cannot stop it.  Deleting by byte (EXVI-56) creates such bytes from
   valid text.
 - **Evidence**: `printf 'temp 20\xb0C\n' > f; vi f`, then `$` or `Ax<ESC>`:
