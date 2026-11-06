@@ -1,5 +1,6 @@
 #include "exvi_internal.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -389,6 +390,11 @@ buf_read_file(buffer_t *b, const char *filename)
     b->modified = 0;
 }
 
+/**
+ * Write lines addr1..addr2 of b to f (-1, -1: the whole buffer).
+ * @return 0; -1 if the range is not valid, nothing written; -2 if a write
+ *         failed, errno saying why
+ */
 static int
 write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
 {
@@ -427,11 +433,41 @@ write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
         && !synthetic_empty_with_content);
     curr = buf_get_line(b, addr1);
     for (int line = addr1; line <= addr2 && curr; line++) {
-        fputs(curr->text, f);
-        if (!(omit_final_newline && line == addr2)) {
-            fputc('\n', f);
+        if (fputs(curr->text, f) == EOF) {
+            return -2;
+        }
+        if (!(omit_final_newline && line == addr2) && fputc('\n', f) == EOF) {
+            return -2;
         }
         curr = curr->next;
+    }
+    return 0;
+}
+
+/**
+ * Flush and close a stream the buffer was written to, and report the first
+ * failure: of the writes (write_errno), the flush or the close.  A full disk
+ * or a file size limit shows only here, so a write is not done until this
+ * says so.
+ * @param f the stream; closed in every case
+ * @param name the file name to report
+ * @param write_errno errno of a failed write, or 0
+ * @return 0 if everything reached the file, -1 (reported) if not
+ */
+static int
+finish_written_stream(FILE *f, const char *name, int write_errno)
+{
+    int err = write_errno;
+
+    if (!err && fflush(f) != 0) {
+        err = errno ? errno : EIO;
+    }
+    if (fclose(f) != 0 && !err) {
+        err = errno ? errno : EIO;
+    }
+    if (err) {
+        fprintf(stderr, "%s: %s\n", name, strerror(err));
+        return -1;
     }
     return 0;
 }
@@ -477,21 +513,27 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
 
     if (append) {
         FILE *f = fopen(filename, "a");
+        int rc;
 
         if (!f) {
             perror(filename);
             return;
         }
-        if (write_range_to_stream(b, f, addr1, addr2) != 0) {
+        errno = 0;
+        rc = write_range_to_stream(b, f, addr1, addr2);
+        if (rc == -1) {
             fclose(f);
             fprintf(stderr, "Invalid write range\n");
             return;
         }
-        fclose(f);
+        if (finish_written_stream(f, filename, rc == -2 ? (errno ? errno : EIO) : 0) != 0) {
+            return;
+        }
     } else {
         char *tmp;
         int fd;
         FILE *f;
+        int rc;
 
         if (asprintf(&tmp, "%s.tmp.XXXXXX", filename) < 0) {
             perror("asprintf");
@@ -536,14 +578,21 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
             return;
         }
 
-        if (write_range_to_stream(b, f, addr1, addr2) != 0) {
+        errno = 0;
+        rc = write_range_to_stream(b, f, addr1, addr2);
+        if (rc == -1) {
             fclose(f);
             remove(tmp);
             free(tmp);
             fprintf(stderr, "Invalid write range\n");
             return;
         }
-        fclose(f);
+        /* the original is replaced only by a copy known to be whole */
+        if (finish_written_stream(f, filename, rc == -2 ? (errno ? errno : EIO) : 0) != 0) {
+            remove(tmp);
+            free(tmp);
+            return;
+        }
         if (rename(tmp, filename) < 0) {
             perror("rename");
             remove(tmp);

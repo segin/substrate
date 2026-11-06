@@ -160,11 +160,11 @@ The number is not reused.
 
 ### EXVI-07 — a failed write replaces the file with a truncated copy and reports success — *Critical*
 
-- [ ] **EXVI-07.1** (Unwanted behaviour) If any write, flush or close of the
+- [x] **EXVI-07.1** (Unwanted behaviour) If any write, flush or close of the
   output file fails, then the editor shall report the error.
-- [ ] **EXVI-07.2** (Unwanted behaviour) If any write, flush or close of the
+- [x] **EXVI-07.2** (Unwanted behaviour) If any write, flush or close of the
   output file fails, then the editor shall leave the original file unchanged.
-- [ ] **EXVI-07.3** (Unwanted behaviour) If any write, flush or close of the
+- [x] **EXVI-07.3** (Unwanted behaviour) If any write, flush or close of the
   output file fails, then the editor shall keep the buffer marked modified.
 
 - **Where**: `exvi_buffer.c:430-432`, `539-553`: `fputs`/`fputc`/`fclose`
