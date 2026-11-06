@@ -30,4 +30,8 @@
 # ask for; test_x86_32_corpus_intel_roundtrip was refused `monitor` with
 # its registers, `data16` before an instruction of general registers,
 # and `rep xstore-rng`.
-test_unit_matrix.sh	one of the tests it runs, test_i386_refactor_tail.sh, is handed the tree's own assembler, which is built for the target and does not run here
+#
+# 2026-11-06: test_unit_matrix came off, the last.  It ran its tests as
+# programs, and two of them are not executable; it runs them with sh, as
+# run-suite.sh does.  (The reason it was listed for, the tree's target
+# assembler, had gone: run-suite.sh hands every test its host-built $AS.)
