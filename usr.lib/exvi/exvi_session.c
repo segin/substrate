@@ -458,6 +458,9 @@ print_enabled_set_options(int include_numeric_defaults)
     if (option_wrapscan) {
         printf("wrapscan\n");
     }
+    if (option_exrc) {
+        printf("exrc\n");
+    }
     if (include_numeric_defaults || option_scroll != EXVI_DEFAULT_SCROLL) {
         printf("scroll=%d\n", option_scroll);
     }
@@ -792,6 +795,19 @@ handle_set_command(const char *args)
                 printf("%s\n", option_wrapscan ? "nowrapscan" : "wrapscan");
             } else {
                 option_wrapscan = 0;
+            }
+        } else if ((len == 2 && strncmp(ptr, "ex", 2) == 0)
+                || (len == 4 && strncmp(ptr, "exrc", 4) == 0)
+                || (len == 4 && strncmp(ptr, "noex", 4) == 0)
+                || (len == 6 && strncmp(ptr, "noexrc", 6) == 0)) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_exrc ? "exrc" : "noexrc");
+            } else {
+                option_exrc = (ptr[0] != 'n');
             }
         } else if ((len == 2 && strncmp(ptr, "ts", 2) == 0)
                 || (len == 7 && strncmp(ptr, "tabstop", 7) == 0)) {

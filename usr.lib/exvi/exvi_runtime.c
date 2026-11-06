@@ -26,6 +26,7 @@ int option_showmode = 1;
 int option_scroll = EXVI_DEFAULT_SCROLL;
 int option_scroll_explicit = 0;
 int option_wrapscan = 1;
+int option_exrc = 0;
 char *option_tags = NULL;
 char *last_search_pattern = NULL;
 char *last_sub_pattern = NULL;
@@ -428,38 +429,47 @@ exvi_add_startup_command(const char *cmd)
     return 0;
 }
 
+/**
+ * Run the startup files and the -c commands, as POSIX ex's Initialization
+ * orders them.  With -s (batch_mode) no startup file is read at all.
+ * Otherwise EXINIT runs, or failing that $HOME/.exrc; then ./.exrc -- but
+ * only if one of those set the exrc option, since a directory's .exrc
+ * comes with whatever was unpacked or cloned there, and only if it is not
+ * $HOME/.exrc again.  Secure mode (-S) reads no .exrc.
+ */
 void
 load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
 {
     char *exinit = getenv("EXINIT");
+    char *home = getenv("HOME");
+    char home_exrc[1024];
+    int have_home_exrc = 0;
 
-    if (exinit && *exinit) {
-        char *exinit_cpy = strdup(exinit);
+    if (home && snprintf(home_exrc, sizeof(home_exrc), "%s/.exrc", home)
+            < (int)sizeof(home_exrc)) {
+        have_home_exrc = 1;
+    }
 
-        if (exinit_cpy) {
-            command_fn(b, exinit_cpy);
-            free(exinit_cpy);
+    if (!batch_mode) {
+        if (exinit && *exinit) {
+            char *exinit_cpy = strdup(exinit);
+
+            if (exinit_cpy) {
+                command_fn(b, exinit_cpy);
+                free(exinit_cpy);
+            }
+        } else if (!secure_mode && have_home_exrc) {
+            load_exrc_file(b, command_fn, home_exrc, NULL, NULL);
         }
-    } else if (!secure_mode) {
-        char *home = getenv("HOME");
-        dev_t home_dev = 0;
-        ino_t home_ino = 0;
-        int loaded_home = 0;
 
-        if (home) {
-            char path[1024];
-
-            snprintf(path, sizeof(path), "%s/.exrc", home);
-            loaded_home = load_exrc_file(b, command_fn, path, &home_dev, &home_ino);
-        }
-
-        {
+        if (!secure_mode && option_exrc) {
             struct stat st;
+            struct stat home_st;
 
-            if (stat(".exrc", &st) == 0) {
-                if (!(loaded_home && st.st_dev == home_dev && st.st_ino == home_ino)) {
-                    load_exrc_file(b, command_fn, ".exrc", NULL, NULL);
-                }
+            if (stat(".exrc", &st) == 0
+                    && !(have_home_exrc && stat(home_exrc, &home_st) == 0
+                        && st.st_dev == home_st.st_dev && st.st_ino == home_st.st_ino)) {
+                load_exrc_file(b, command_fn, ".exrc", NULL, NULL);
             }
         }
     }
@@ -632,6 +642,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     option_scroll = EXVI_DEFAULT_SCROLL;
     option_scroll_explicit = 0;
     option_wrapscan = 1;
+    option_exrc = 0;
     replace_saved_string(&option_tags, EXVI_DEFAULT_TAGS);
     free(last_search_pattern);
     last_search_pattern = NULL;
@@ -667,6 +678,7 @@ exvi_cleanup_runtime(void)
     option_scroll = EXVI_DEFAULT_SCROLL;
     option_scroll_explicit = 0;
     option_wrapscan = 1;
+    option_exrc = 0;
     free(option_tags);
     option_tags = NULL;
     free(last_search_pattern);

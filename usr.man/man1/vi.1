@@ -148,7 +148,15 @@ Plain writes are rejected unless forced with
 .It Fl r
 Recover the named file from a preserved recovery image.
 .It Fl s
-Suppress interactive diagnostics where possible.
+Suppress interactive diagnostics where possible, and read no startup
+commands from
+.Ev EXINIT ,
+.Pa ~/.exrc
+or
+.Pa ./.exrc .
+Commands given with
+.Fl c
+still run.
 .It Fl S
 Start in secure mode.
 Shell escapes and shell-capable commands are disabled.
@@ -202,6 +210,14 @@ Mark the session readonly.
 Show or suppress insert and replace mode banners.
 .It Ic wrapscan , ws
 Wrap searches at buffer boundaries.
+.It Ic exrc , ex
+Read
+.Pa ./.exrc
+at startup.
+It is off by default and has effect only when set by
+.Ev EXINIT
+or
+.Pa ~/.exrc .
 .It Ic tabstop= , ts=
 Set tab rendering width.
 The default is 8.
@@ -216,24 +232,35 @@ and
 .Sh ENVIRONMENT
 .Bl -tag -width indent
 .It Ev EXINIT
-If set, supplies startup commands.
-When
-.Ev EXINIT
-is present, home and local
-.Pa .exrc
-files are not loaded.
+If set, supplies startup commands, and
+.Pa ~/.exrc
+is not loaded.
+Ignored with
+.Fl s .
 .El
 .Sh FILES
 .Bl -tag -width indent
 .It Pa ~/.exrc
-Per-user startup commands, loaded only when ownership and directory safety
-checks pass.
+Per-user startup commands, loaded when
+.Ev EXINIT
+is not set, and only when ownership and directory safety checks pass.
 .It Pa ./.exrc
 Per-directory startup commands, loaded after
-.Pa ~/.exrc
-when safe and when
 .Ev EXINIT
-is not set.
+or
+.Pa ~/.exrc
+only if one of them set the
+.Ic exrc
+option, only when the ownership and directory safety checks pass, and not
+when it is
+.Pa ~/.exrc
+itself.
+Neither
+.Pa .exrc
+is loaded with
+.Fl s
+or
+.Fl S .
 .It Pa tags
 Default tag file name when the
 .Ic tags

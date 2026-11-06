@@ -81,11 +81,11 @@ regex, and every finding that touches a regex was re-run on them.
 
 ### EXVI-01 — `./.exrc` runs without the `exrc` option, and `-s` reads startup files — *Critical*
 
-- [ ] **EXVI-01.1** (Optional feature) Where the `exrc` option is unset, the
+- [x] **EXVI-01.1** (Optional feature) Where the `exrc` option is unset, the
   editor shall not read `./.exrc`.
-- [ ] **EXVI-01.2** (Ubiquitous) The editor shall provide the boolean option
+- [x] **EXVI-01.2** (Ubiquitous) The editor shall provide the boolean option
   `exrc`, off by default.
-- [ ] **EXVI-01.3** (Optional feature) Where `-s` is given, the editor shall
+- [x] **EXVI-01.3** (Optional feature) Where `-s` is given, the editor shall
   not read `EXINIT`, `$HOME/.exrc` or `./.exrc`.
 
 - **Where**: `exvi_runtime.c:456-464` (`load_startup_commands`); there is no

@@ -649,7 +649,8 @@ run_startup_test() {
     printf "%b" "$exrc_text" >"$tmpdir/.exrc"
     printf "%b" "$script" >"$script_file"
     chmod "$exrc_mode" "$tmpdir/.exrc"
-    output=$(env HOME="$tmpdir" "$EX_BIN" -s "$file" <"$script_file" 2>/dev/null || true)
+    # not -s: -s reads no startup file at all
+    output=$(env HOME="$tmpdir" "$EX_BIN" "$file" <"$script_file" 2>/dev/null || true)
 
     if [ "$output" != "$expected" ]; then
         fail "$name"
@@ -697,9 +698,10 @@ run_startup_precedence_test() {
         chmod 600 "$work_dir/.exrc"
     fi
 
+    # not -s: -s reads no startup file at all
     # shellcheck disable=SC2086
     output=$(cd "$work_dir" && env HOME="$home_dir" EXINIT="$exinit_text" \
-        "$EX_BIN" -s $cli_args "$file" <"$script_file" 2>/dev/null || true)
+        "$EX_BIN" $cli_args "$file" <"$script_file" 2>/dev/null || true)
 
     if [ "$output" != "$expected" ]; then
         fail "$name"
@@ -749,7 +751,8 @@ run_startup_directory_policy_test() {
         chmod 600 "$work_dir/.exrc"
     fi
 
-    output=$(cd "$work_dir" && env HOME="$home_dir" "$EX_BIN" -s "$file" <"$script_file" \
+    # not -s: -s reads no startup file at all
+    output=$(cd "$work_dir" && env HOME="$home_dir" "$EX_BIN" "$file" <"$script_file" \
         2>/dev/null || true)
 
     if [ "$output" != "$expected" ]; then
@@ -1446,7 +1449,7 @@ run_startup_test "Group-writable .exrc is ignored" \
 
 run_startup_precedence_test "Home .exrc loads before local .exrc" \
     "alpha\nbeta\n" \
-    "set number\n" \
+    "set number\nset exrc\n" \
     "set nonumber\nset list\n" \
     "" \
     "" \
@@ -1477,7 +1480,7 @@ readonly"
 
 run_startup_directory_policy_test "Unsafe local directory .exrc is ignored" \
     "alpha\nbeta\n" \
-    "set number\n" \
+    "set number\nset exrc\n" \
     700 \
     "set nonumber\nset list\n" \
     777 \

@@ -86,6 +86,7 @@ extern int option_showmode;
 extern int option_scroll;
 extern int option_scroll_explicit;
 extern int option_wrapscan;
+extern int option_exrc;
 extern char *option_tags;
 extern exvi_history_t undo_history;
 extern exvi_history_t redo_history;
