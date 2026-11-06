@@ -73,7 +73,7 @@ for m in $modes; do
 	if [ "$m" = 32 ]; then sse2="-march=pentium4 -msse2"; fi
 	for flags in -O0 -O2 "-O2 -fPIC"; do
 		# shellcheck disable=SC2086
-		CC_MIR_STATS=1 "$CC_BIN" -m$m $sse2 $flags -c -o "$CC_TMP/h.o" "$CC_TMP/h.c" 2>"$CC_TMP/stats" || {
+		CC_MIR_STATS=2 "$CC_BIN" -m$m $sse2 $flags -c -o "$CC_TMP/h.o" "$CC_TMP/h.c" 2>"$CC_TMP/stats" || {
 			cat "$CC_TMP/stats"
 			exit 1
 		}

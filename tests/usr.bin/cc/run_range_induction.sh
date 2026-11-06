@@ -147,7 +147,7 @@ for m in 64 32; do
 		want=$(undefined "$CC_TMP/g.o")
 		gcc -m$m $o -fno-pie -no-pie -o "$CC_TMP/g" "$CC_TMP/p.c"
 		want_run=$("$CC_TMP/g")
-		if ! env CC_MIR_STATS=1 "$CC_BIN" -m$m $o -c -o "$CC_TMP/c.o" "$CC_TMP/u.c" 2>"$CC_TMP/c.err"; then
+		if ! env CC_MIR_STATS=2 "$CC_BIN" -m$m $o -c -o "$CC_TMP/c.o" "$CC_TMP/u.c" 2>"$CC_TMP/c.err"; then
 			echo "run_range_induction: $what refused: $(grep error "$CC_TMP/c.err" | head -1)"
 			exit 1
 		fi
@@ -160,7 +160,7 @@ for m in 64 32; do
 			echo "run_range_induction: $what leaves [$(echo $got)] undefined, gcc [$(echo $want)]"
 			fail=1
 		fi
-		if ! env CC_MIR_STATS=1 "$CC_BIN" -m$m $o -c -o "$CC_TMP/p.o" "$CC_TMP/p.c" 2>"$CC_TMP/c.err"; then
+		if ! env CC_MIR_STATS=2 "$CC_BIN" -m$m $o -c -o "$CC_TMP/p.o" "$CC_TMP/p.c" 2>"$CC_TMP/c.err"; then
 			echo "run_range_induction: $what refused the program: $(grep error "$CC_TMP/c.err" | head -1)"
 			exit 1
 		fi

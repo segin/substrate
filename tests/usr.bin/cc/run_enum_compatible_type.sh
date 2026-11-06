@@ -182,7 +182,7 @@ for m in 64 32; do
 	want=$(und "$CC_TMP/g.o")
 	for o in O1 O2; do
 		what="-m$m -$o"
-		if ! env CC_MIR_STATS=1 "$CC_BIN" -m$m -$o -c -o "$CC_TMP/c.o" "$CC_TMP/f.c" 2>"$CC_TMP/c.err"; then
+		if ! env CC_MIR_STATS=2 "$CC_BIN" -m$m -$o -c -o "$CC_TMP/c.o" "$CC_TMP/f.c" 2>"$CC_TMP/c.err"; then
 			echo "run_enum_compatible_type: $what refused: $(grep error "$CC_TMP/c.err" | head -1)"
 			exit 1
 		fi

@@ -52,7 +52,7 @@ for path in mir legacy; do
 	if [ $path = legacy ]; then run="env CC_NO_MIR=1"; fi
 	for o in O0 O2; do
 		for f in lib main ar; do
-			if ! $run CC_MIR_STATS=1 "$CC_BIN" -m32 -march=pentium4 -msse2 -mfpmath=387 -mno-80387 -$o -c \
+			if ! $run CC_MIR_STATS=2 "$CC_BIN" -m32 -march=pentium4 -msse2 -mfpmath=387 -mno-80387 -$o -c \
 				-o "$CC_TMP/c$f.o" "$CC_TMP/$f.c" 2>"$CC_TMP/c.err"; then
 				echo "run_i386_soft_float16_abi: $path -$o $f.c refused: $(grep -v '^mir:' "$CC_TMP/c.err" | head -1)"
 				exit 1

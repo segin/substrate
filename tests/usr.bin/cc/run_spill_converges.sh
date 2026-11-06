@@ -150,7 +150,7 @@ for m in -m64 -m32; do
 		echo "run_spill_converges: $m: skip (no gcc $m)"
 		continue
 	fi
-	got=$(CC_MIR_STATS=2 "$CC_BIN" $m -O2 -c -o "$CC_TMP/cs.o" "$CC_TMP/cs.c" 2>&1)
+	got=$(CC_MIR_STATS=1 "$CC_BIN" $m -O2 -c -o "$CC_TMP/cs.o" "$CC_TMP/cs.c" 2>&1)
 	if [ -n "$got" ]; then
 		echo "run_spill_converges: $m: [$got]"
 		exit 1

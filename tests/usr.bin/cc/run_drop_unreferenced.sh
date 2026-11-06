@@ -102,7 +102,7 @@ for m in 64 32; do
 		want=$(syms "$CC_TMP/g.o")
 		for g in "" -g; do
 			what="-m$m -$o $g"
-			if ! env CC_MIR_STATS=1 "$CC_BIN" -m$m -$o $g -c -o "$CC_TMP/c.o" "$CC_TMP/d.c" 2>"$CC_TMP/c.err"; then
+			if ! env CC_MIR_STATS=2 "$CC_BIN" -m$m -$o $g -c -o "$CC_TMP/c.o" "$CC_TMP/d.c" 2>"$CC_TMP/c.err"; then
 				echo "run_drop_unreferenced: $what refused: $(grep error "$CC_TMP/c.err" | head -1)"
 				exit 1
 			fi

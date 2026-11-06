@@ -37,7 +37,7 @@ for arch in i686 pentium4; do
 	for o in O0 O2; do
 		for mix in main lib; do
 			if [ $mix = main ]; then other=lib; else other=main; fi
-			CC_MIR_STATS=1 "$CC_BIN" $flags -$o -c -o "$CC_TMP/ours.o" "$BASE/abi_$mix.c" 2>"$CC_TMP/stats"
+			CC_MIR_STATS=2 "$CC_BIN" $flags -$o -c -o "$CC_TMP/ours.o" "$BASE/abi_$mix.c" 2>"$CC_TMP/stats"
 			if grep "^mir: .*not taken" "$CC_TMP/stats"; then
 				echo "run_i386_abi_regs: -march=$arch -$o abi_$mix.c: the above do not go through the allocator"
 				exit 1

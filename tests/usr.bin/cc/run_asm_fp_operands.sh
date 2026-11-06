@@ -126,7 +126,7 @@ check() {
 				CC_NO_MIR=1 "$CC_BIN" -m$m $@ -$o -o "$CC_TMP/ac" "$CC_TMP/a.c"
 			else
 				# shellcheck disable=SC2068
-				CC_MIR_STATS=1 "$CC_BIN" -m$m $@ -$o -o "$CC_TMP/ac" "$CC_TMP/a.c" 2>"$CC_TMP/stats"
+				CC_MIR_STATS=2 "$CC_BIN" -m$m $@ -$o -o "$CC_TMP/ac" "$CC_TMP/a.c" 2>"$CC_TMP/stats"
 				if grep "^mir: .*not taken" "$CC_TMP/stats"; then
 					echo "run_asm_fp_operands: -m$m $* -$o: the above do not go through the allocator"
 					exit 1

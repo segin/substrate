@@ -168,7 +168,7 @@ check() {
 	gcc -m$mode $march -O2 -fexcess-precision=standard -w -o "$CC_TMP/g" "$src"
 	"$CC_TMP/g" >"$CC_TMP/want"
 	for o in O0 O2; do
-		CC_MIR_STATS=1 "$CC_BIN" -m$mode -$o -c -o "$CC_TMP/c.o" "$src" 2>"$CC_TMP/stats"
+		CC_MIR_STATS=2 "$CC_BIN" -m$mode -$o -c -o "$CC_TMP/c.o" "$src" 2>"$CC_TMP/stats"
 		if grep "^mir: .*not taken" "$CC_TMP/stats"; then
 			echo "run_x87_stack: $name -m$mode -$o: the above do not go through the allocator"
 			exit 1

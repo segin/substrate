@@ -1,11 +1,11 @@
 #!/bin/sh
-# CC_MIR_STATS=2 prints only the functions the register allocator does not
-# take, the fallbacks; 1 prints every function, taken or not; unset, 0 or
-# anything else prints nothing.
+# CC_MIR_STATS=1 prints only the functions the register allocator does not
+# take, the fallbacks; 2 prints every function, taken or not; unset, 0 or
+# anything else prints nothing.  The higher level says more.
 #
-# There was only 1: a Linux build printed some sixty thousand "taken"
-# lines, every static inline of every header once for each file, around
-# the handful of fallbacks that are the point.
+# 1 once printed every function: a Linux build printed some sixty thousand
+# "taken" lines, every static inline of every header once for each file,
+# around the handful of fallbacks that are the point.
 #
 # gpr() falls back: it reads a global register variable other than the
 # stack or frame pointer, which only the older path does.  plain() is taken.
@@ -37,22 +37,22 @@ stats() {
 
 # (the reason names a line of the selector; only its start is checked)
 fallback='mir: gpr: not taken: '
-got=$(stats 2)
+got=$(stats 1)
 case "$got" in
 "$fallback"*)
 	if [ "$(printf '%s\n' "$got" | wc -l)" -ne 1 ]; then
-		echo "run_mir_stats_fallbacks: CC_MIR_STATS=2 printed [$got], not only gpr()"
+		echo "run_mir_stats_fallbacks: CC_MIR_STATS=1 printed [$got], not only gpr()"
 		exit 1
 	fi
 	;;
 *)
-	echo "run_mir_stats_fallbacks: CC_MIR_STATS=2 printed [$got], not only [$fallback...]"
+	echo "run_mir_stats_fallbacks: CC_MIR_STATS=1 printed [$got], not only [$fallback...]"
 	exit 1
 	;;
 esac
-got=$(stats 1)
+got=$(stats 2)
 if ! printf '%s\n' "$got" | grep -q "^$fallback" || ! printf '%s\n' "$got" | grep -qx 'mir: plain: taken'; then
-	echo "run_mir_stats_fallbacks: CC_MIR_STATS=1 printed [$got], not both functions"
+	echo "run_mir_stats_fallbacks: CC_MIR_STATS=2 printed [$got], not both functions"
 	exit 1
 fi
 for v in - 0 x; do

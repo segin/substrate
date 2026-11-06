@@ -79,7 +79,7 @@ for m in $modes; do
 	gcc -m$m -O1 -o "$CC_TMP/sg" "$CC_TMP/s.c"
 	want=$("$CC_TMP/sg")
 	for o in O0 O2; do
-		CC_MIR_STATS=1 "$CC_BIN" -m$m -$o -o "$CC_TMP/sc" "$CC_TMP/s.c" 2>"$CC_TMP/stats"
+		CC_MIR_STATS=2 "$CC_BIN" -m$m -$o -o "$CC_TMP/sc" "$CC_TMP/s.c" 2>"$CC_TMP/stats"
 		if grep "^mir: .*not taken" "$CC_TMP/stats"; then
 			echo "run_small_struct_regs: -m$m -$o: the above do not go through the allocator"
 			exit 1

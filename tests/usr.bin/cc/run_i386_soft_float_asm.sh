@@ -104,7 +104,7 @@ for path in mir legacy; do
 	run="env"
 	if [ $path = legacy ]; then run="env CC_NO_MIR=1"; fi
 	for o in O0 O2; do
-		if ! $run CC_MIR_STATS=1 "$CC_BIN" -m32 -$o -mno-80387 -c -o "$CC_TMP/c.o" "$CC_TMP/v.c" 2>"$CC_TMP/c.err"; then
+		if ! $run CC_MIR_STATS=2 "$CC_BIN" -m32 -$o -mno-80387 -c -o "$CC_TMP/c.o" "$CC_TMP/v.c" 2>"$CC_TMP/c.err"; then
 			echo "run_i386_soft_float_asm: $path -$o refused: $(grep -v '^mir:' "$CC_TMP/c.err" | head -1)"
 			exit 1
 		fi

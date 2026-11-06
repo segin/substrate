@@ -83,7 +83,7 @@ for m in 64 32; do
 			gcc -m$m -$o $pic -c -o "$CC_TMP/g.o" "$CC_TMP/u.c"
 			want=$(bindings "$CC_TMP/g.o")
 			for path in mir legacy; do
-				run="env CC_MIR_STATS=1"
+				run="env CC_MIR_STATS=2"
 				if [ $path = legacy ]; then run="env CC_NO_MIR=1"; fi
 				what="-m$m -$o $pic $path"
 				rm -f "$CC_TMP/c0" "$CC_TMP/c1" "$CC_TMP/cs" "$CC_TMP/csd"

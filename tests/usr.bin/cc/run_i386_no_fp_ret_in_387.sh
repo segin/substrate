@@ -88,7 +88,7 @@ for path in mir legacy; do
 	if [ $path = legacy ]; then run="env CC_NO_MIR=1"; fi
 	for o in O0 O2; do
 		for f in lib main; do
-			if ! $run CC_MIR_STATS=1 "$CC_BIN" -m32 -$o -mno-fp-ret-in-387 -c -o "$CC_TMP/c$f.o" "$CC_TMP/$f.c" \
+			if ! $run CC_MIR_STATS=2 "$CC_BIN" -m32 -$o -mno-fp-ret-in-387 -c -o "$CC_TMP/c$f.o" "$CC_TMP/$f.c" \
 				2>"$CC_TMP/c.err"; then
 				echo "run_i386_no_fp_ret_in_387: $path -$o $f.c refused: $(grep -v '^mir:' "$CC_TMP/c.err" | head -1)"
 				exit 1

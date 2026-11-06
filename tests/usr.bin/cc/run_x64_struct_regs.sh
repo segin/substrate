@@ -41,7 +41,7 @@ long pass(struct timespec64 *p, struct small s) {
 }
 EOF2
 for o in O1 O2; do
-	CC_MIR_STATS=1 "$CC_BIN" -m64 -$o -c -o "$CC_TMP/ts.o" "$CC_TMP/ts.c" 2> "$CC_TMP/stats"
+	CC_MIR_STATS=2 "$CC_BIN" -m64 -$o -c -o "$CC_TMP/ts.o" "$CC_TMP/ts.c" 2> "$CC_TMP/stats"
 	for fn in sec_of pass; do
 		if ! grep -q "^mir: $fn: taken" "$CC_TMP/stats"; then
 			echo "run_x64_struct_regs: -$o: $fn is not taken by the register allocator:"

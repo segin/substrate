@@ -68,7 +68,7 @@ for FLAGS in "-m32 -march=pentium4 -msse2 -mfpmath=387 -mno-80387" "-m32 -march=
 	want=$("$CC_TMP/g")
 	for o in O0 O2; do
 		# shellcheck disable=SC2086
-		if ! CC_MIR_STATS=1 "$CC_BIN" $FLAGS -$o -c -o "$CC_TMP/c.o" "$CC_TMP/v.c" 2>"$CC_TMP/c.err"; then
+		if ! CC_MIR_STATS=2 "$CC_BIN" $FLAGS -$o -c -o "$CC_TMP/c.o" "$CC_TMP/v.c" 2>"$CC_TMP/c.err"; then
 			echo "run_i386_soft_float16: [$FLAGS] -$o refused: $(grep -v '^mir:' "$CC_TMP/c.err" | head -1)"
 			exit 1
 		fi

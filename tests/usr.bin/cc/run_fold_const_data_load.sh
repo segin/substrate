@@ -161,7 +161,7 @@ for m in 64 32; do
 	want_run=$("$CC_TMP/g")
 	for o in O1 O2; do
 		for path in mir legacy; do
-			run="env CC_MIR_STATS=1"
+			run="env CC_MIR_STATS=2"
 			if [ $path = legacy ]; then run="env CC_NO_MIR=1"; fi
 			# (an exported const definition folds under -fPIC too, as gcc folds it)
 			for pic in no -fPIC; do

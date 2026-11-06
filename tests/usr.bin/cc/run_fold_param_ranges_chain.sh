@@ -191,7 +191,7 @@ for m in 64 32; do
 	gcc -m$m -O2 -fno-pie -no-pie -o "$CC_TMP/g" "$CC_TMP/p.c"
 	want_run=$("$CC_TMP/g")
 	for path in mir legacy; do
-		run="env CC_MIR_STATS=1"
+		run="env CC_MIR_STATS=2"
 		if [ $path = legacy ]; then run="env CC_NO_MIR=1"; fi
 		what="-m$m -O2 $path"
 		if ! $run "$CC_BIN" -m$m -O2 -c -o "$CC_TMP/c.o" "$CC_TMP/u.c" 2>"$CC_TMP/c.err"; then

@@ -56,7 +56,7 @@ for m in $modes; do
 	gcc -m$m -O1 -o "$CC_TMP/g" "$CC_TMP/a.c"
 	want=$("$CC_TMP/g")
 	for o in O0 O1 O2 Os; do
-		CC_MIR_STATS=1 "$CC_BIN" -m$m -$o -o "$CC_TMP/c" "$CC_TMP/a.c" 2>"$CC_TMP/stats"
+		CC_MIR_STATS=2 "$CC_BIN" -m$m -$o -o "$CC_TMP/c" "$CC_TMP/a.c" 2>"$CC_TMP/stats"
 		if grep -q "not taken" "$CC_TMP/stats"; then
 			echo "run_i386_array_init_wide: -m$m -$o: $(grep -m1 'not taken' "$CC_TMP/stats")"
 			exit 1

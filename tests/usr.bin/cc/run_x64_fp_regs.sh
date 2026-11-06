@@ -122,7 +122,7 @@ EOF2
 gcc -O1 -o "$CC_TMP/fg" "$CC_TMP/f.c"
 want=$("$CC_TMP/fg")
 for o in O0 O2; do
-	CC_MIR_STATS=1 "$CC_BIN" -m64 -$o -o "$CC_TMP/fc" "$CC_TMP/f.c" 2>"$CC_TMP/stats"
+	CC_MIR_STATS=2 "$CC_BIN" -m64 -$o -o "$CC_TMP/fc" "$CC_TMP/f.c" 2>"$CC_TMP/stats"
 	if grep "^mir: .*not taken" "$CC_TMP/stats"; then
 		echo "run_x64_fp_regs: -$o: the above do not go through the allocator"
 		exit 1

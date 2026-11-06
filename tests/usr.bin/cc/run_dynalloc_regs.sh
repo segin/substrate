@@ -95,7 +95,7 @@ for m in $modes; do
 	gcc -m$m -O1 -o "$CC_TMP/dg" "$CC_TMP/d.c"
 	want=$("$CC_TMP/dg")
 	for o in O0 O2; do
-		CC_MIR_STATS=1 "$CC_BIN" -m$m -$o -o "$CC_TMP/dc" "$CC_TMP/d.c" 2>"$CC_TMP/stats"
+		CC_MIR_STATS=2 "$CC_BIN" -m$m -$o -o "$CC_TMP/dc" "$CC_TMP/d.c" 2>"$CC_TMP/stats"
 		for fn in loop blocks matrix; do
 			if ! grep -q "^mir: $fn: taken" "$CC_TMP/stats"; then
 				echo "run_dynalloc_regs: -m$m -$o: $fn does not go through the allocator:"

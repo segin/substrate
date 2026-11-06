@@ -80,7 +80,7 @@ for m in $modes; do
 	gcc -m$m -O1 -o "$CC_TMP/gg" "$CC_TMP/g.c"
 	want=$("$CC_TMP/gg")
 	for o in O0 O2; do
-		CC_MIR_STATS=1 "$CC_BIN" -m$m -$o -o "$CC_TMP/gc" "$CC_TMP/g.c" 2>"$CC_TMP/stats"
+		CC_MIR_STATS=2 "$CC_BIN" -m$m -$o -o "$CC_TMP/gc" "$CC_TMP/g.c" 2>"$CC_TMP/stats"
 		for fn in run pick; do
 			if ! grep -q "^mir: $fn: taken" "$CC_TMP/stats"; then
 				echo "run_computed_goto_regs: -m$m -$o: $fn does not go through the allocator:"

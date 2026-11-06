@@ -63,7 +63,7 @@ for m in $modes; do
 	gcc -m$m -O1 -o "$CC_TMP/ag" "$CC_TMP/a.c"
 	want=$("$CC_TMP/ag")
 	for o in O0 O2; do
-		CC_MIR_STATS=1 "$CC_BIN" -m$m -$o -o "$CC_TMP/ac" "$CC_TMP/a.c" 2>"$CC_TMP/stats"
+		CC_MIR_STATS=2 "$CC_BIN" -m$m -$o -o "$CC_TMP/ac" "$CC_TMP/a.c" 2>"$CC_TMP/stats"
 		for fn in twice_or_neg count; do
 			if ! grep -q "^mir: $fn: taken" "$CC_TMP/stats"; then
 				echo "run_asm_goto_out_regs: -m$m -$o: $fn does not go through the allocator:"

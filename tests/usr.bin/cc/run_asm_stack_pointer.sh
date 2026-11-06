@@ -101,7 +101,7 @@ for m in $modes; do
 			exit 1
 		fi
 	done
-	if CC_MIR_STATS=1 "$CC_BIN" -m$m -O2 -S -o "$CC_TMP/s.s" "$CC_TMP/s.c" 2>&1 | grep 'not taken'; then
+	if CC_MIR_STATS=2 "$CC_BIN" -m$m -O2 -S -o "$CC_TMP/s.s" "$CC_TMP/s.c" 2>&1 | grep 'not taken'; then
 		echo "run_asm_stack_pointer: -m$m: a function goes the old way"
 		exit 1
 	fi

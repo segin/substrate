@@ -50,7 +50,7 @@ for m in $modes; do
 	want=$("$CC_TMP/mg")
 	for o in O0 O2; do
 		if [ $m = 32 ]; then
-			CC_MIR_STATS=1 "$CC_BIN" -m32 -mregparm=3 -$o -c -o "$CC_TMP/rp.o" "$CC_TMP/m.c" 2>"$CC_TMP/stats"
+			CC_MIR_STATS=2 "$CC_BIN" -m32 -mregparm=3 -$o -c -o "$CC_TMP/rp.o" "$CC_TMP/m.c" 2>"$CC_TMP/stats"
 			if grep "^mir: fill: not taken" "$CC_TMP/stats"; then
 				echo "run_mem_builtin_size_t: -m32 -mregparm=3 -$o: fill does not go through the allocator"
 				exit 1

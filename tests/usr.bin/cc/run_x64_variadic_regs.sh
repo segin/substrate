@@ -111,7 +111,7 @@ EOF2
 gcc -O1 -o "$CC_TMP/vg" "$CC_TMP/v.c"
 want=$("$CC_TMP/vg")
 for o in O0 O2; do
-	CC_MIR_STATS=1 "$CC_BIN" -m64 -$o -o "$CC_TMP/vc" "$CC_TMP/v.c" 2>"$CC_TMP/stats"
+	CC_MIR_STATS=2 "$CC_BIN" -m64 -$o -o "$CC_TMP/vc" "$CC_TMP/v.c" 2>"$CC_TMP/stats"
 	for fn in sum late pairs fmt; do
 		if ! grep -q "^mir: $fn: taken" "$CC_TMP/stats"; then
 			echo "run_x64_variadic_regs: -$o: $fn does not go through the allocator:"

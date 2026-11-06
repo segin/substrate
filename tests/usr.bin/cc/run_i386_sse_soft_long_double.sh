@@ -108,7 +108,7 @@ for FLAGS in "$FLAGS" "-m32 -march=pentium4 -msse2 -mno-80387"; do
 	for o in O0 O2; do
 		for f in lib main; do
 			# shellcheck disable=SC2086
-			if ! CC_MIR_STATS=1 "$CC_BIN" $FLAGS -$o -c -o "$CC_TMP/c$f.o" "$CC_TMP/$f.c" 2>"$CC_TMP/c.err"; then
+			if ! CC_MIR_STATS=2 "$CC_BIN" $FLAGS -$o -c -o "$CC_TMP/c$f.o" "$CC_TMP/$f.c" 2>"$CC_TMP/c.err"; then
 				echo "run_i386_sse_soft_long_double: [$FLAGS] -$o $f.c refused: $(grep -v '^mir:' "$CC_TMP/c.err" | head -1)"
 				exit 1
 			fi

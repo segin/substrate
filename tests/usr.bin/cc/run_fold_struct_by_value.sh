@@ -162,7 +162,7 @@ for m in 64 32; do
 	for f in small big; do
 		gcc -m$m -O2 -c -o "$CC_TMP/g_$f.o" -I"$CC_TMP" "$CC_TMP/$f.c"
 		want=$(undefs "$CC_TMP/g_$f.o")
-		if ! env CC_MIR_STATS=1 "$CC_BIN" -m$m -O2 -I"$CC_TMP" -c -o "$CC_TMP/c_$f.o" "$CC_TMP/$f.c" \
+		if ! env CC_MIR_STATS=2 "$CC_BIN" -m$m -O2 -I"$CC_TMP" -c -o "$CC_TMP/c_$f.o" "$CC_TMP/$f.c" \
 			2>"$CC_TMP/c.err"; then
 			echo "run_fold_struct_by_value: -m$m $f.c refused: $(grep error "$CC_TMP/c.err" | head -1)"
 			exit 1

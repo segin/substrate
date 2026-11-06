@@ -86,7 +86,7 @@ gcc -m32 -O1 -fPIC -shared -o "$d/libg.so" "$d/lib.c"
 gcc -m32 -O1 -o "$d/main_g" "$d/main.c" "$d/libg.so" -Wl,-rpath,"$d"
 want=$("$d/main_g")
 for o in O0 O2; do
-	CC_MIR_STATS=1 "$CC_BIN" -m32 -$o -fPIC -c -o "$d/lib.o" "$d/lib.c" 2>"$d/stats"
+	CC_MIR_STATS=2 "$CC_BIN" -m32 -$o -fPIC -c -o "$d/lib.o" "$d/lib.c" 2>"$d/stats"
 	if grep "^mir: .*not taken" "$d/stats"; then
 		echo "run_pic_i386_regs: -$o: the above do not go through the allocator"
 		exit 1

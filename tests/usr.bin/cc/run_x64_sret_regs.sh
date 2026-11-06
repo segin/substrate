@@ -116,7 +116,7 @@ EOF2
 gcc -O1 -o "$CC_TMP/rg" "$CC_TMP/r.c"
 want=$("$CC_TMP/rg")
 for o in O0 O2; do
-	CC_MIR_STATS=1 "$CC_BIN" -m64 -$o -o "$CC_TMP/rc" "$CC_TMP/r.c" 2>"$CC_TMP/stats"
+	CC_MIR_STATS=2 "$CC_BIN" -m64 -$o -o "$CC_TMP/rc" "$CC_TMP/r.c" 2>"$CC_TMP/stats"
 	for fn in mk named odd chain vmk; do
 		if ! grep -q "^mir: $fn: taken" "$CC_TMP/stats"; then
 			echo "run_x64_sret_regs: -$o: $fn does not go through the allocator:"

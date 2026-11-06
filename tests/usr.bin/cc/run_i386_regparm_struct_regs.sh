@@ -68,7 +68,7 @@ want=$("$CC_TMP/ref")
 gcc $F -O1 -fno-pie -c -o "$CC_TMP/main.o" "$CC_TMP/main.c"
 for o in O0 O2; do
 	# shellcheck disable=SC2086
-	CC_MIR_STATS=1 "$CC_BIN" $F -$o -c -o "$CC_TMP/lib.o" "$CC_TMP/lib.c" 2>"$CC_TMP/stats"
+	CC_MIR_STATS=2 "$CC_BIN" $F -$o -c -o "$CC_TMP/lib.o" "$CC_TMP/lib.c" 2>"$CC_TMP/stats"
 	if grep "^mir: .*not taken" "$CC_TMP/stats"; then
 		echo "run_i386_regparm_struct_regs: -$o: the above do not go through the allocator"
 		exit 1
