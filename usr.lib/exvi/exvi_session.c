@@ -1144,11 +1144,25 @@ int
 handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr1,
     int addr2, int force)
 {
+    (void)exvi_write_args(b, args, explicit_range, addr1, addr2, force);
+    return 1;
+}
+
+/**
+ * Carry out a write command's arguments -- `[>>] [file]`, the range if
+ * explicit_range -- as `write` does; `wq` and `xit` write the same way.
+ * @return 0 if the buffer was written, -1 (reported) if not
+ */
+int
+exvi_write_args(buffer_t *b, const char *args, int explicit_range, int addr1,
+    int addr2, int force)
+{
     char *ptr = (char *)args;
     char *target = NULL;
     int append = 0;
     int write_addr1 = 1;
     int write_addr2 = b->line_count;
+    int rc;
 
     if (explicit_range) {
         write_addr1 = addr1;
@@ -1167,27 +1181,28 @@ handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr
     if (*ptr) {
         target = expand_filename_refs(b, ptr);
         if (!target) {
-            return 1;
+            return -1;
         }
         if (exvi_restricted_filename_change(b, target)) {
             free(target);
-            return 1;
+            return -1;
         }
         if (!exvi_write_allowed(b, target, force)) {
             free(target);
-            return 1;
+            return -1;
         }
-        buf_write_range(b, target, append, write_addr1, write_addr2);
+        rc = buf_write_range(b, target, append, write_addr1, write_addr2);
         free(target);
-    } else if (b->filename) {
-        if (!exvi_write_allowed(b, b->filename, force)) {
-            return 1;
-        }
-        buf_write_range(b, b->filename, append, write_addr1, write_addr2);
-    } else {
-        exvi_report_error("No current filename");
+        return rc;
     }
-    return 1;
+    if (b->filename) {
+        if (!exvi_write_allowed(b, b->filename, force)) {
+            return -1;
+        }
+        return buf_write_range(b, b->filename, append, write_addr1, write_addr2);
+    }
+    exvi_report_error("No current filename");
+    return -1;
 }
 
 int

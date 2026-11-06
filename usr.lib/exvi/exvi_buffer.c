@@ -513,13 +513,18 @@ finish_written_stream(FILE *f, const char *name, int write_errno)
     return 0;
 }
 
-void
+int
 buf_write_file(buffer_t *b, const char *filename, int append)
 {
-    buf_write_range(b, filename, append, 1, b->line_count);
+    return buf_write_range(b, filename, append, 1, b->line_count);
 }
 
-void
+/**
+ * Write lines addr1..addr2 of b to filename (appending if append), or to
+ * the command after a leading `!`.
+ * @return 0 if it was written, -1 (reported) if not
+ */
+int
 buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2)
 {
     int wrote_current_file = 0;
@@ -530,19 +535,19 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
 
         if (secure_mode || restricted_mode) {
             exvi_report_shell_forbidden();
-            return;
+            return -1;
         }
         f = exvi_popen(filename + 1, "w");
         if (!f) {
-            return;
+            return -1;
         }
         if (write_range_to_stream(b, f, addr1, addr2) != 0) {
             exvi_pclose(f);
             fprintf(stderr, "Invalid write range\n");
-            return;
+            return -1;
         }
         exvi_pclose(f);
-        return;
+        return 0;
     }
 
     if (b->filename && strcmp(filename, b->filename) == 0) {
@@ -558,17 +563,17 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
 
         if (!f) {
             perror(filename);
-            return;
+            return -1;
         }
         errno = 0;
         rc = write_range_to_stream(b, f, addr1, addr2);
         if (rc == -1) {
             fclose(f);
             fprintf(stderr, "Invalid write range\n");
-            return;
+            return -1;
         }
         if (finish_written_stream(f, filename, rc == -2 ? (errno ? errno : EIO) : 0) != 0) {
-            return;
+            return -1;
         }
     } else {
         char *tmp;
@@ -578,14 +583,14 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
 
         if (asprintf(&tmp, "%s.tmp.XXXXXX", filename) < 0) {
             perror("asprintf");
-            return;
+            return -1;
         }
 
         fd = mkstemp(tmp);
         if (fd < 0) {
             perror(tmp);
             free(tmp);
-            return;
+            return -1;
         }
 
         /*
@@ -616,7 +621,7 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
             close(fd);
             remove(tmp);
             free(tmp);
-            return;
+            return -1;
         }
 
         errno = 0;
@@ -626,19 +631,19 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
             remove(tmp);
             free(tmp);
             fprintf(stderr, "Invalid write range\n");
-            return;
+            return -1;
         }
         /* the original is replaced only by a copy known to be whole */
         if (finish_written_stream(f, filename, rc == -2 ? (errno ? errno : EIO) : 0) != 0) {
             remove(tmp);
             free(tmp);
-            return;
+            return -1;
         }
         if (rename(tmp, filename) < 0) {
             perror("rename");
             remove(tmp);
             free(tmp);
-            return;
+            return -1;
         }
         free(tmp);
     }
@@ -647,6 +652,7 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
         b->read_failed = 0;
         exvi_cleanup_buffer_recover_file(b);
     }
+    return 0;
 }
 
 line_t *

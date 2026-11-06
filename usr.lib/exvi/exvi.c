@@ -269,6 +269,7 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
 {
     const char *args = NULL;
     int force = 0;
+    int is_xit = 0;
 
     (void)b;
     (void)explicit_range;
@@ -325,20 +326,25 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         }
         exvi_exit_requested = 1;
         return 1;
-    } else if (match_command(cmd, "xit", "x", &args, &force)
+    } else if ((is_xit = match_command(cmd, "xit", "x", &args, &force))
         || match_command(cmd, "wq", NULL, &args, &force)) {
-        if (!b->filename) {
-            exvi_report_error("No current filename");
-            return 1;
+        /*
+         * POSIX: wq is write then quit (wq!, write! then quit!), with
+         * write's range, `>>` and file; xit quits at once if the buffer has
+         * not been modified since it was last written whole.  A failed
+         * write never quits; nor, without `!`, does a write that leaves the
+         * buffer modified (a range, another file), as quit would not.
+         */
+        if (!(is_xit && !b->modified)) {
+            if (exvi_write_args(b, args, explicit_range, addr1, addr2, force) != 0) {
+                return 1;
+            }
+            if (b->modified && !force) {
+                exvi_report_error("No write since last change (add ! to override)");
+                return 1;
+            }
         }
-        if (!exvi_write_allowed(b, b->filename, force)) {
-            return 1;
-        }
-        buf_write_file(b, b->filename, 0);
-        if (!b->modified || force) {
-            exvi_exit_requested = 1;
-            return 1;
-        }
+        exvi_exit_requested = 1;
         return 1;
     } else if (match_command(cmd, "write", "w", &args, &force)) {
         return handle_write_command(b, args, explicit_range, addr1, addr2, force);

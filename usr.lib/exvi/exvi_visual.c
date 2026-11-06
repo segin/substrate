@@ -7769,7 +7769,11 @@ process_normal_key:
                         (void)!write(STDOUT_FILENO, "\a", 1);
                         break;
                     }
-                    buf_write_file(b, b->filename, 0);
+                    /* ZZ is xit: a failed write does not quit */
+                    if (buf_write_file(b, b->filename, 0) != 0) {
+                        (void)!write(STDOUT_FILENO, "\a", 1);
+                        break;
+                    }
                 }
                 goto done;
             case 'Q':

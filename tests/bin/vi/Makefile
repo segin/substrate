@@ -19,7 +19,8 @@ test:
 	python3 ./test_vi_replace_ctrl_o.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_exit_paths.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_interrupt.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_tag.py $(abspath $(TOP)/bin/vi/vi)
+	python3 ./test_vi_tag.py $(abspath $(TOP)/bin/vi/vi); \
+	python3 ./test_vi_zz_fail.py $(abspath $(TOP)/bin/vi/vi)
 
 oracle:
 	@mkdir -p $(TOP)/.locks

@@ -133,8 +133,8 @@ int exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src);
 int exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out);
 void buf_read_file(buffer_t *b, const char *filename);
 int buf_read_stream(buffer_t *b, FILE *f);
-void buf_write_file(buffer_t *b, const char *filename, int append);
-void buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
+int buf_write_file(buffer_t *b, const char *filename, int append);
+int buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);
 int buf_current_line(buffer_t *b);
 int exvi_regex_flags(void);
@@ -198,6 +198,8 @@ int handle_preserve_command(buffer_t *b);
 int handle_recover_command(buffer_t *b, const char *args);
 int exvi_write_allowed(buffer_t *b, const char *filename, int force);
 int handle_write_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2, int force);
+int exvi_write_args(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2, int force);
 int handle_edit_command(buffer_t *b, const char *args, int force);
 int handle_read_command(buffer_t *b, const char *args, int addr2);

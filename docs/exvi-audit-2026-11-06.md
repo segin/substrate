@@ -197,7 +197,7 @@ The number is not reused.
 
 ### EXVI-09 — `:wq!`, `:x!` and `ZZ` quit after a failed write — *High*
 
-- [ ] **EXVI-09.1** (Unwanted behaviour) If the write performed by `wq`, `xit`
+- [x] **EXVI-09.1** (Unwanted behaviour) If the write performed by `wq`, `xit`
   or `ZZ` fails, then the editor shall not exit.
 
 - **Where**: `buf_write_file` returns `void`; `exvi.c:322-336` takes `!` to
@@ -208,9 +208,9 @@ The number is not reused.
 
 ### EXVI-10 — `:wq file` and `:x file` ignore the file — *High*
 
-- [ ] **EXVI-10.1** (Event-driven) When `wq` or `xit` is given a file name, the
+- [x] **EXVI-10.1** (Event-driven) When `wq` or `xit` is given a file name, the
   editor shall write the addressed lines to that file.
-- [ ] **EXVI-10.2** (State-driven) While the buffer is unmodified, the editor
+- [x] **EXVI-10.2** (State-driven) While the buffer is unmodified, the editor
   shall exit on `xit` without writing.
 
 - **Where**: `exvi.c:322-336`.  `:x` rewrites an unmodified buffer (the
