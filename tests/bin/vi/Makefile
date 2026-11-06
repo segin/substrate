@@ -15,7 +15,8 @@ test:
 	python3 ./test_vi_pty.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_oracle.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_stress.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_frontend.py $(abspath $(TOP)/bin/vi/vi)
+	python3 ./test_vi_frontend.py $(abspath $(TOP)/bin/vi/vi); \
+	python3 ./test_vi_replace_ctrl_o.py $(abspath $(TOP)/bin/vi/vi)
 
 oracle:
 	@mkdir -p $(TOP)/.locks

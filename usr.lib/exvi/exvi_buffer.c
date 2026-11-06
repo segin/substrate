@@ -126,9 +126,12 @@ exvi_discard_pending_undo(void)
     pending_undo_valid = 0;
 }
 
+unsigned long exvi_buffer_generation = 0;
+
 void
 exvi_note_buffer_change(void)
 {
+    exvi_buffer_generation++;
     if (exvi_history_suspended || !pending_undo_valid) {
         return;
     }
@@ -289,6 +292,7 @@ buf_free(buffer_t *b)
 {
     line_t *curr = b->head;
 
+    exvi_buffer_generation++;
     while (curr) {
         line_t *next = curr->next;
 

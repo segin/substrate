@@ -7416,6 +7416,7 @@ exvi_visual_main(buffer_t *b)
     int key;
     int resume_insert_mode = 0;
     int resume_replace_mode = 0;
+    unsigned long replace_suspended_at = 0;
 
     memset(&vis, 0, sizeof(vis));
     vis.top_line = 1;
@@ -7485,6 +7486,7 @@ exvi_visual_main(buffer_t *b)
                 resume_replace_mode = 1;
                 resume_insert_mode = 0;
                 vis.replace_mode = 0;
+                replace_suspended_at = exvi_buffer_generation;
                 key = vi_read_visual_key(b, &vis, ':', NULL);
                 if (key == -1) {
                     goto done;
@@ -8593,6 +8595,14 @@ maybe_restore_insert_mode:
             resume_insert_mode = 0;
         } else if (resume_replace_mode && !vis.insert_mode && !vis.replace_mode &&
             !vis.pending_op && !vis.pending_z && !vis.pending_big_z && !vis.pending_g) {
+            /*
+             * The replace history holds line pointers and columns: once the
+             * ^O command has changed the buffer (dd, u, :e! free lines), a
+             * backspace must not reach back past it.
+             */
+            if (exvi_buffer_generation != replace_suspended_at) {
+                vi_clear_replace_edits(&vis);
+            }
             vis.replace_mode = 1;
             vi_set_insert_anchor(b, &vis);
             resume_replace_mode = 0;

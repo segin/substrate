@@ -329,7 +329,7 @@ The number is not reused.
 
 ### EXVI-20 — use after free: backspace in `R` mode after a `^O` command that freed lines — *Critical*
 
-- [ ] **EXVI-20.1** (Event-driven) When a `^O` command from replace mode
+- [x] **EXVI-20.1** (Event-driven) When a `^O` command from replace mode
   changes the buffer, the editor shall discard the replace-edit history.
 
 - **Where**: `exvi_visual.c:7484-7492` (`^O`) keeps the stack of `line_t *`;
