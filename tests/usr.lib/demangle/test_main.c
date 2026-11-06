@@ -108,13 +108,13 @@ test_9e(void)
 {
     expect_contains("9e-1", "_ZN1AIiE1BIS_IjEE3fooEv", DEMANGLE_AUTO, "A<int>::B<");
     expect_contains("9e-2", "_Z3fooILi42EEvv", DEMANGLE_AUTO, "foo<42>");
-    expect_null("9e-3", "_Z3fooIJiiEEvDpT_", DEMANGLE_AUTO);
+    expect_eq("9e-3", "_Z3fooIJiiEEvDpT_", DEMANGLE_AUTO, "void foo<int, int>(int, int)");
 }
 
 static void
 test_9f(void)
 {
-    expect_not_null("9f-1", "_ZN3Foo3barES0_", DEMANGLE_AUTO);
+    expect_null("9f-1", "_ZN3Foo3barES0_", DEMANGLE_AUTO);
     expect_not_null("9f-2", "_ZNSt6vectorIiSaIiEEC1Ev", DEMANGLE_AUTO);
     expect_eq("9f-3", "_ZNSsC1Ev", DEMANGLE_AUTO, "std::string::std::string()");
 }
@@ -256,7 +256,7 @@ static void
 test_9q(void)
 {
     expect_eq("9q-1", "_ZN7mycrate3foo17h1234567890abcdefE", DEMANGLE_AUTO, "mycrate::foo");
-    expect_contains("9q-2", "_ZN47_$LT$mycrate..Foo$u20$as$u20$mycrate..Trait$GT$3qux17hfa7523f5fb2df040E", DEMANGLE_AUTO, "<mycrate..Foo as mycrate..Trait>");
+    expect_contains("9q-2", "_ZN47_$LT$mycrate..Foo$u20$as$u20$mycrate..Trait$GT$3qux17hfa7523f5fb2df040E", DEMANGLE_AUTO, "<mycrate::Foo as mycrate::Trait>::qux");
     expect_contains("9q-3", "_ZN3foo3bar17h1234567890abcdefE", DEMANGLE_AUTO, "foo::bar");
     expect_eq("9q-4", "_ZN3Foo3barEv", DEMANGLE_AUTO, "Foo::bar()");
 }
