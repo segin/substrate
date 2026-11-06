@@ -265,6 +265,13 @@ or
 Default tag file name when the
 .Ic tags
 option is left at its default value.
+Each line is a tag name, a file name and an address, separated by tabs.
+The address is a line number or a
+.Li / Ns Ar pattern Ns Li /
+or
+.Li \&? Ns Ar pattern Ns Li \&?
+search, and nothing else: any other address is reported as a bad tag
+address, never run as a command.
 .It Pa .*.recover
 Preserved recovery images written for interrupted sessions.
 .El

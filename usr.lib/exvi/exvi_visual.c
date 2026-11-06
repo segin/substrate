@@ -146,7 +146,6 @@ static char *vi_current_word_text(buffer_t *b, vi_visual_t *vis);
 static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
 static int vi_search_current_word_target(buffer_t *b, vi_visual_t *vis, int forward,
     int count, line_t **line_out, int *col_out);
-static void vi_visual_apply_tag_target(buffer_t *b, char *cmd);
 static void vi_reset_replace_mode(vi_visual_t *vis);
 static void vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis);
 static void vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis);
@@ -7400,31 +7399,6 @@ vi_search_current_word_target(buffer_t *b, vi_visual_t *vis, int forward, int co
 }
 
 static void
-vi_visual_apply_tag_target(buffer_t *b, char *cmd)
-{
-    char *ptr = cmd;
-    int addr = -1;
-
-    while (*ptr && isspace((unsigned char)*ptr)) {
-        ptr++;
-    }
-    if (!*ptr) {
-        return;
-    }
-
-    addr = parse_address(b, &ptr);
-    while (*ptr && isspace((unsigned char)*ptr)) {
-        ptr++;
-    }
-    if (*ptr == '\0' && addr > 0) {
-        b->cur = buf_get_line(b, addr);
-        return;
-    }
-
-    exvi_execute_command(b, cmd);
-}
-
-static void
 vi_search_current_word(buffer_t *b, vi_visual_t *vis, int forward, int count)
 {
     line_t *target_line;
@@ -8420,7 +8394,7 @@ process_normal_key:
                     (void)!write(STDOUT_FILENO, "\a", 1);
                     break;
                 }
-                handle_tag_command(b, tag, vi_visual_apply_tag_target);
+                handle_tag_command(b, tag);
                 free(tag);
                 if (b->cur) {
                     vis.cursor_col = vi_first_nonblank_col(b->cur);

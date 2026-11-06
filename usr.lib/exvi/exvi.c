@@ -315,7 +315,7 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     } else if (match_command(cmd, "tags", NULL, &args, NULL)) {
         return handle_tags_command(b);
     } else if (match_command(cmd, "tag", "ta", &args, NULL)) {
-        return handle_tag_command(b, args, do_command);
+        return handle_tag_command(b, args);
     } else if (match_command(cmd, "set", "se", &args, NULL)) {
         return handle_set_command(args);
     } else if (match_command(cmd, "quit", "q", &args, &force)) {

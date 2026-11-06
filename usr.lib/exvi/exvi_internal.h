@@ -178,7 +178,7 @@ int exvi_take_interrupt(void);
 void exvi_catch_signal(int sig, void (*fn)(int));
 void handle_sigterm(int sig);
 int handle_pop_command(buffer_t *b, int force);
-int handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *, char *));
+int handle_tag_command(buffer_t *b, const char *args);
 int handle_tags_command(buffer_t *b);
 int handle_set_command(const char *args);
 int handle_args_command(const char *args);

@@ -342,8 +342,45 @@ handle_tags_command(buffer_t *b)
     return 1;
 }
 
+/**
+ * Move to the address of a tags entry: a line number, or a /pattern/ or
+ * ?pattern? search -- and nothing else.  A tags file is data, often from
+ * the directory being edited; its address field must never run a command.
+ * @return 0, or -1 (reported) if the field is not such an address or names
+ *         no line
+ */
+static int
+apply_tag_address(buffer_t *b, char *addr_text)
+{
+    char *p = addr_text;
+    int err = 0;
+    int line;
+
+    while (*p && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (!(isdigit((unsigned char)*p) || *p == '/' || *p == '?')) {
+        exvi_report_error("Bad tag address");
+        return -1;
+    }
+    line = parse_address_checked(b, &p, &err);
+    while (*p && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (err || *p != '\0' || line < 1 || line > b->line_count) {
+        exvi_report_error("Bad tag address");
+        return -1;
+    }
+    b->cur = buf_get_line(b, line);
+    /* ex shows the line, as historic ex did running the address as a command */
+    if (!visual_mode) {
+        print_range(b, line, line, option_number, option_list);
+    }
+    return 0;
+}
+
 int
-handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *, char *))
+handle_tag_command(buffer_t *b, const char *args)
 {
     char *ptr = (char *)args;
     FILE *f;
@@ -419,7 +456,7 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
                     *tcmt = '\0';
                 }
             }
-            command_fn(b, tcmd);
+            apply_tag_address(b, tcmd);
             replace_saved_string(&current_tag_name, ptr);
             found = 1;
             break;

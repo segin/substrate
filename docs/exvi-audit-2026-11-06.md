@@ -98,13 +98,14 @@ regex, and every finding that touches a regex was re-run on them.
 
 ### EXVI-02 — `:tag` runs the tags file's address field as an ex command — *High*
 
-- [ ] **EXVI-02.1** (Event-driven) When `:tag` reads a tags entry, the editor
+- [x] **EXVI-02.1** (Event-driven) When `:tag` reads a tags entry, the editor
   shall interpret the entry's third field only as a line number or a search
   pattern.
 
 - **Where**: `exvi_session.c:422` passes the field to `do_command`.  vi's own
-  path, `vi_visual_apply_tag_target` (`exvi_visual.c:7369`), already parses
-  only an address.
+  path, `vi_visual_apply_tag_target` (`exvi_visual.c:7369`), took it as an
+  address only when it was nothing else, and otherwise ran it too (found
+  while fixing: `^]` on a word with such a tag ran the shell command).
 - **Evidence**: tags line `foo<TAB>f.c<TAB>!touch TAGPWNED`;
   `printf 'tag foo\nq!\n' | ex -s` creates `TAGPWNED`.
 - **Basis**: reproduced.
