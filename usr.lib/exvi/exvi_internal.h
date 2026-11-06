@@ -222,7 +222,7 @@ int handle_copy_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2);
 int handle_move_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2);
-int handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2);
+int handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2, int force);
 int handle_yank_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2);
 

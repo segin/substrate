@@ -591,8 +591,8 @@ The number is not reused.
 
 ### EXVI-37 — `g!` acts as `g`, and `j!` inserts spaces — *High*
 
-- [ ] **EXVI-37.1** (Ubiquitous) The editor shall treat `global!` as `v`.
-- [ ] **EXVI-37.2** (Ubiquitous) The editor shall join lines given to `join!`
+- [x] **EXVI-37.1** (Ubiquitous) The editor shall treat `global!` as `v`.
+- [x] **EXVI-37.2** (Ubiquitous) The editor shall join lines given to `join!`
   without adding or removing white space.
 
 - **Where**: `exvi.c:174` inverts only on `cmd[0] == 'v'`; `exvi.c:381`,

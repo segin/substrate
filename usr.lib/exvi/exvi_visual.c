@@ -6864,11 +6864,11 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
     case VI_REPEAT_J:
         last = vi_clamp_line_target(b, line_no + count - 1);
         if (b->cur && b->cur->next && last > line_no) {
-            handle_join_command(b, 1, line_no, last);
+            handle_join_command(b, 1, line_no, last, 0);
             vi_clamp_cursor(b, vis);
             vi_mark_body_dirty_through_eof(vis, line_no);
         } else if (b->cur && b->cur->next) {
-            handle_join_command(b, 1, line_no, line_no + 1);
+            handle_join_command(b, 1, line_no, line_no + 1, 0);
             vi_clamp_cursor(b, vis);
             vi_mark_body_dirty_through_eof(vis, line_no);
         } else {
@@ -8344,11 +8344,11 @@ process_normal_key:
                 int last = vi_clamp_line_target(b, line_no + count - 1);
 
                 if (b->cur && b->cur->next && last > line_no) {
-                    handle_join_command(b, 1, line_no, last);
+                    handle_join_command(b, 1, line_no, last, 0);
                     vi_clamp_cursor(b, &vis);
                     vi_mark_body_dirty_through_eof(&vis, line_no);
                 } else if (b->cur && b->cur->next) {
-                    handle_join_command(b, 1, line_no, line_no + 1);
+                    handle_join_command(b, 1, line_no, line_no + 1, 0);
                     vi_clamp_cursor(b, &vis);
                     vi_mark_body_dirty_through_eof(&vis, line_no);
                 } else {

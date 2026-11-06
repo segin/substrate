@@ -578,7 +578,7 @@ handle_move_command(buffer_t *b, const char *args, int explicit_range, int addr1
 }
 
 int
-handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2)
+handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2, int force)
 {
     if (!explicit_range) {
         int cur = buf_current_line(b);
@@ -621,7 +621,8 @@ handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2)
             line_t *to_delete = nxt;
 
             nxt = nxt->next;
-            if (cur_len > 0 && joined[cur_len - 1] != ' '
+            /* join! joins the lines as they are */
+            if (!force && cur_len > 0 && joined[cur_len - 1] != ' '
                 && joined[cur_len - 1] != '\t' && to_delete->text[0] != ' '
                 && to_delete->text[0] != '\t' && to_delete->text[0] != ')') {
                 joined[cur_len++] = ' ';

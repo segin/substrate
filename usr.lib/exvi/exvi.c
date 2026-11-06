@@ -168,11 +168,11 @@ replace_saved_string(char **dst, const char *src)
 }
 
 static int
-handle_global_command(buffer_t *b, const char *cmd, const char *args,
+handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
     int explicit_range, int addr1, int addr2)
 {
     char *ptr = (char *)args;
-    int inverted = (cmd[0] == 'v');
+    int inverted = (cmd[0] == 'v') || force;
     char delim;
     char *re_str;
     char *end_re;
@@ -362,6 +362,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     int addr2)
 {
     const char *args = NULL;
+    int force = 0;
 
     if (match_command(cmd, "delete", "d", &args, NULL)) {
         return handle_delete_command(b, explicit_range, addr1, addr2);
@@ -390,17 +391,18 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_copy_command(b, args, explicit_range, addr1, addr2);
     } else if (match_command(cmd, "move", "m", &args, NULL)) {
         return handle_move_command(b, args, explicit_range, addr1, addr2);
-    } else if (match_command(cmd, "join", "j", &args, NULL)) {
-        return handle_join_command(b, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "join", "j", &args, &force)) {
+        return handle_join_command(b, explicit_range, addr1, addr2, force);
     } else if (match_command(cmd, "yank", "y", &args, NULL)) {
         return handle_yank_command(b, args, explicit_range, addr1, addr2);
     } else if (match_command(cmd, "substitute", "s", &args, NULL)) {
         return handle_substitute_command(b, args, addr1, addr2);
     } else if (cmd[0] == '&') {
         return handle_repeat_substitute_command(b, cmd + 1, addr1, addr2);
-    } else if (match_command(cmd, "global", "g", &args, NULL)
-        || match_command(cmd, "global", "v", &args, NULL)) {
-        return handle_global_command(b, cmd, args, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "global", "g", &args, &force)
+        || match_command(cmd, "global", "v", &args, &force)) {
+        /* global! is v */
+        return handle_global_command(b, cmd, args, force, explicit_range, addr1, addr2);
     } else if (cmd[0] == '!') {
         return handle_shell_command(cmd);
     }
