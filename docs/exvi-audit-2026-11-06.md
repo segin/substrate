@@ -629,7 +629,7 @@ The number is not reused.
 
 ### EXVI-40 — `t`/`co` into its own range copies lines it has just inserted — *High*
 
-- [ ] **EXVI-40.1** (Ubiquitous) The editor's `copy` shall copy the addressed
+- [x] **EXVI-40.1** (Ubiquitous) The editor's `copy` shall copy the addressed
   lines as they were before the command.
 
 - **Where**: `exvi_cmd.c:504-510` (`src = src->next` walks onto new lines).

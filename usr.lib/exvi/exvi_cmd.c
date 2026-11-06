@@ -501,13 +501,30 @@ handle_copy_command(buffer_t *b, const char *args, int explicit_range, int addr1
 
     save_undo(b);
     if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
+        int n = addr2 - addr1 + 1;
+        line_t **src = malloc(sizeof(*src) * (size_t)n);
         line_t *pos = buf_get_line(b, dest);
-        line_t *src = buf_get_line(b, addr1);
+        line_t *l = buf_get_line(b, addr1);
 
-        for (int i = 0; i < (addr2 - addr1 + 1) && src; i++) {
-            pos = buf_insert_after(b, pos, src->text);
-            src = src->next;
+        if (!src) {
+            exvi_report_error("out of memory");
+            return 1;
         }
+        /*
+         * The lines as they are before the copy: with the destination
+         * inside the range, walking ->next would run onto lines the copy
+         * has just put there.
+         */
+        int got = 0;
+
+        while (got < n && l) {
+            src[got++] = l;
+            l = l->next;
+        }
+        for (int i = 0; i < got; i++) {
+            pos = buf_insert_after(b, pos, src[i]->text);
+        }
+        free(src);
     }
     return 1;
 }
