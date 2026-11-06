@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 static char **ex_args = NULL;
 static int ex_argc = 0;
@@ -498,6 +500,9 @@ print_enabled_set_options(int include_numeric_defaults)
     if (option_exrc) {
         printf("exrc\n");
     }
+    if (option_writeany) {
+        printf("writeany\n");
+    }
     if (include_numeric_defaults || option_scroll != EXVI_DEFAULT_SCROLL) {
         printf("scroll=%d\n", option_scroll);
     }
@@ -851,6 +856,19 @@ handle_set_command(const char *args)
             } else {
                 option_exrc = (ptr[0] != 'n');
             }
+        } else if ((len == 2 && strncmp(ptr, "wa", 2) == 0)
+                || (len == 8 && strncmp(ptr, "writeany", 8) == 0)
+                || (len == 4 && strncmp(ptr, "nowa", 4) == 0)
+                || (len == 10 && strncmp(ptr, "nowriteany", 10) == 0)) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_writeany ? "writeany" : "nowriteany");
+            } else {
+                option_writeany = (ptr[0] != 'n');
+            }
         } else if ((len == 2 && strncmp(ptr, "ts", 2) == 0)
                 || (len == 7 && strncmp(ptr, "tabstop", 7) == 0)) {
             if (query || (!eq && !query)) {
@@ -1149,6 +1167,26 @@ handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr
 }
 
 /**
+ * Whether path names b's current file: the same name, or the same file
+ * under another name (./f for f, a link).
+ */
+static int
+is_current_file(buffer_t *b, const char *path)
+{
+    struct stat a;
+    struct stat c;
+
+    if (!b->filename) {
+        return 0;
+    }
+    if (strcmp(path, b->filename) == 0) {
+        return 1;
+    }
+    return stat(path, &a) == 0 && stat(b->filename, &c) == 0
+        && a.st_dev == c.st_dev && a.st_ino == c.st_ino;
+}
+
+/**
  * Carry out a write command's arguments -- `[>>] [file]`, the range if
  * explicit_range -- as `write` does; `wq` and `xit` write the same way.
  * @return 0 if the buffer was written, -1 (reported) if not
@@ -1188,6 +1226,13 @@ exvi_write_args(buffer_t *b, const char *args, int explicit_range, int addr1,
             return -1;
         }
         if (!exvi_write_allowed(b, target, force)) {
+            free(target);
+            return -1;
+        }
+        if (!force && !append && !option_writeany && !is_current_file(b, target)
+                && access(target, F_OK) == 0) {
+            /* POSIX write: an existing file other than the current one needs ! */
+            exvi_report_errorf("%s: File exists (add ! to override)", target);
             free(target);
             return -1;
         }

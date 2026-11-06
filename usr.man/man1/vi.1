@@ -210,6 +210,12 @@ Mark the session readonly.
 Show or suppress insert and replace mode banners.
 .It Ic wrapscan , ws
 Wrap searches at buffer boundaries.
+.It Ic writeany , wa
+Let
+.Ic :write
+replace an existing file other than the current one without
+.Ql \&! .
+It is off by default.
 .It Ic exrc , ex
 Read
 .Pa ./.exrc

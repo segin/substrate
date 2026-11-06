@@ -566,10 +566,11 @@ run_write_file_test() {
     file=$(mktemp)
     out_file=$(mktemp)
     printf "%b" "$init_text" >"$file"
-    : >"$out_file"
+    # a new file: writing over an existing one other than the current needs !
+    rm -f "$out_file"
     script=${script_template//__OUT_FILE__/$out_file}
     printf "%b" "$script" | "$EX_BIN" -s "$file" >/dev/null 2>&1 || true
-    actual_output=$(cat "$out_file")
+    actual_output=$(cat "$out_file" 2>/dev/null || true)
 
     if [ "$actual_output" != "$expected_output" ]; then
         fail "$name"
@@ -915,7 +916,8 @@ run_stderr_status_with_outfile_test() {
     stdout_file=$(mktemp)
     stderr_file=$(mktemp)
     printf "%b" "$init_text" >"$file"
-    : >"$out_file"
+    # a new file: writing over an existing one other than the current needs !
+    rm -f "$out_file"
     script=${script_template//__OUT_FILE__/$out_file}
 
     set +e

@@ -221,10 +221,10 @@ The number is not reused.
 
 ### EXVI-11 — `:w` overwrites an existing file other than the current one without `!` — *High*
 
-- [ ] **EXVI-11.1** (State-driven) While the `writeany` option is unset, if
+- [x] **EXVI-11.1** (State-driven) While the `writeany` option is unset, if
   `write` without `!` names an existing file other than the current file,
   then the editor shall refuse the write.
-- [ ] **EXVI-11.2** (Ubiquitous) The editor shall provide the boolean option
+- [x] **EXVI-11.2** (Ubiquitous) The editor shall provide the boolean option
   `writeany`, off by default.
 
 - **Where**: `exvi_buffer.c` write path; `writeany` does not exist.
