@@ -40,6 +40,19 @@ if [ "$out" != "$(printf 'three\n3\nbaz\n4')" ]; then
 	fail "tags entries with a line number and a pattern: [$out]"
 fi
 
+# the tags option's files are searched in turn, not only the first that
+# opens; and with no file having the tag, "Tag not found" once
+printf 'other\tf.c\t1\n' >first.tags
+printf 'later\tf.c\t2\n' >second.tags
+out=$(printf 'set tags=missing.tags,first.tags,second.tags\ntag later\n.=\nq!\n' | "$EX_BIN" -s 2>&1)
+if [ "$out" != "$(printf 'two\n2')" ]; then
+	fail "a tag in the second tags file: [$out]"
+fi
+out=$(printf 'set tags=first.tags,second.tags\ntag nowhere\nq!\n' | "$EX_BIN" -s 2>&1)
+if [ "$(grep -c 'Tag not found' <<<"$out")" -ne 1 ]; then
+	fail "a tag in no tags file: [$out]"
+fi
+
 if [ "$fails" -ne 0 ]; then
 	exit 1
 fi

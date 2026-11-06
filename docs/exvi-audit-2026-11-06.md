@@ -74,6 +74,7 @@ regex, and every finding that touches a regex was re-run on them.
 7. [vi](#7-vi) — EXVI-56 .. 70
 8. [Performance](#8-performance) — EXVI-71 .. 73
 9. [Build, tests, ABI and documentation](#9-build-tests-abi-and-documentation) — EXVI-74 .. 81
+10. [Found while fixing](#10-found-while-fixing) — EXVI-82 ..
 
 ---
 
@@ -1168,4 +1169,21 @@ The number is not reused.
 - **Evidence**: `ex.1` documents `-s` as suppressing only interactive
   diagnostics and lists 11 options; `exvi_conformance.md:30` marks `-s`, and
   `:42` substitute, as supported.
+- **Basis**: reproduced.
+
+---
+
+## 10. Found while fixing
+
+### EXVI-82 — `:tag` searches only the first tags file that opens — *Medium*
+
+- [x] **EXVI-82.1** (Event-driven) When a tag is not in a tags file, the editor
+  shall search the next file of the `tags` option.
+
+- **Where**: `exvi_session.c:184` (`open_tags_file`) returned the first file
+  of the option it could open, and `handle_tag_command` searched only that.
+- **Evidence**: `set tags=first.tags,second.tags`, `tag later` with `later`
+  in `second.tags` → "Tag not found".  test_ex.sh's "Tag uses tags option
+  search path" passed only because its `:=` printed the last line number,
+  3, whatever `:tag` did; EXVI-15's stop-on-error exposed it.
 - **Basis**: reproduced.

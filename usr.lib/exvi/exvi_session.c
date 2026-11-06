@@ -180,11 +180,18 @@ tag_display_filename(buffer_t *b)
     return "[No Name]";
 }
 
+/**
+ * Open the next readable file of the tags option.
+ * @param cursor where in the option to go on from: NULL at first, then as
+ *        this call leaves it
+ * @param path_out its path (to free), or NULL
+ * @return the file, or NULL when no more can be opened
+ */
 static FILE *
-open_tags_file(char **path_out)
+open_tags_file(const char **cursor, char **path_out)
 {
     const char *spec = (option_tags && *option_tags) ? option_tags : EXVI_DEFAULT_TAGS;
-    const char *p = spec;
+    const char *p = *cursor ? *cursor : spec;
 
     if (path_out) {
         *path_out = NULL;
@@ -229,11 +236,13 @@ open_tags_file(char **path_out)
             } else {
                 free(path);
             }
+            *cursor = p;
             return f;
         }
         free(path);
     }
 
+    *cursor = p;
     return NULL;
 }
 
@@ -388,6 +397,8 @@ handle_tag_command(buffer_t *b, const char *args)
     FILE *f;
     char *line = NULL;
     char *tags_path = NULL;
+    const char *tags_cursor = NULL;
+    int opened = 0;
     size_t cap = 0;
     ssize_t ret;
     int found = 0;
@@ -400,11 +411,19 @@ handle_tag_command(buffer_t *b, const char *args)
         return 1;
     }
 
-    f = open_tags_file(&tags_path);
+    /* each file of the tags option in turn, until one has the tag */
+next_file:
+    f = open_tags_file(&tags_cursor, &tags_path);
     if (!f) {
-        exvi_report_error("No tags file");
+        free(line);
+        if (!opened) {
+            exvi_report_error("No tags file");
+        } else {
+            exvi_report_errorf("Tag not found: %s", ptr);
+        }
         return 1;
     }
+    opened = 1;
 
     while ((ret = getline(&line, &cap, f)) != -1) {
         if (ret > 0 && line[ret - 1] == '\n') {
@@ -425,12 +444,14 @@ handle_tag_command(buffer_t *b, const char *args)
                 exvi_report_error("No write since last change");
                 free(line);
                 fclose(f);
+                free(tags_path);
                 return 1;
             }
             if (push_tag_frame(b) != 0) {
                 exvi_report_error("Out of memory");
                 free(line);
                 fclose(f);
+                free(tags_path);
                 return 1;
             }
             old_filename = b->filename ? strdup(b->filename) : NULL;
@@ -464,12 +485,13 @@ handle_tag_command(buffer_t *b, const char *args)
             break;
         }
     }
-    free(line);
     fclose(f);
     free(tags_path);
+    tags_path = NULL;
     if (!found) {
-        exvi_report_errorf("Tag not found: %s", ptr);
+        goto next_file;
     }
+    free(line);
     return 1;
 }
 

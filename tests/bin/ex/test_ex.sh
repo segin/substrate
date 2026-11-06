@@ -1379,7 +1379,8 @@ run_tag_searchpath_test "Tag uses tags option search path" \
     "second.tags" \
     "beta\tsample.txt\t3\n" \
     ":set tags=missing.tags,first.tags,second.tags\n:tag beta\n:=\n:q!\n" \
-    "3"
+    "three
+3"
 
 run_oracle_test "Substitute empty pattern reuses previous regex" \
     "alpha beta\nbeta beta\n" \
