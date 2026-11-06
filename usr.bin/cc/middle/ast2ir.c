@@ -6634,20 +6634,9 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         }
 
         /*
-         * Array indexing canonicalization can surface as pointer arithmetic
-         * over a dereferenced array base. Use the underlying base address,
-         * not the loaded first element value.
+         * (a row, `a[i]` of an array of arrays, is the row's address as a value already: its operand is
+         * not lowered again, which would run its side effects once more at each level -- `f()[i][j][k]`)
          */
-        if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_DEREF && ptr_expr->lhs != NULL &&
-            ct_has_kind(ptr_expr->ctype, CC_CT_ARRAY) &&
-            expr_is_array_pointer_chain(tu, vars, var_count, depth, ptr_expr->lhs)) {
-            int basev = lower_expr(tu, sf, ctx, vars, var_count, depth, ptr_expr->lhs, diag);
-            if (basev < 0) {
-                return -1;
-            }
-            ptrv = basev;
-        }
-
         ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
         idxv = cast_value(sf, idxv, CC_VAL_I64, diag);
         if (ptrv < 0 || idxv < 0) {
