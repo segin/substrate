@@ -112,6 +112,8 @@ typedef struct {
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
+/** vi_restore_terminal is registered with atexit (once per process) */
+static int restore_registered = 0;
 static volatile sig_atomic_t vi_resize_pending = 0;
 
 static int vi_first_nonblank_col(line_t *cur);
@@ -868,8 +870,23 @@ vi_enable_raw(vi_visual_t *vis)
     vis->raw_active = 1;
     active_visual = vis;
     (void)!write(STDOUT_FILENO, enter_seq, sizeof(enter_seq) - 1);
-    atexit(vi_restore_terminal);
+    if (!restore_registered) {
+        atexit(vi_restore_terminal);
+        restore_registered = 1;
+    }
     return 0;
+}
+
+/**
+ * Restore the terminal and forget vis: active_visual points into
+ * exvi_visual_main's frame, which is gone once it returns, and the atexit
+ * handler must not read it then.
+ */
+static void
+vi_leave_terminal(void)
+{
+    vi_restore_terminal();
+    active_visual = NULL;
 }
 
 static void
@@ -8620,7 +8637,7 @@ done:
     vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
-    vi_restore_terminal();
+    vi_leave_terminal();
     return 0;
 
 ex_mode:
@@ -8630,6 +8647,6 @@ ex_mode:
     vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
-    vi_restore_terminal();
+    vi_leave_terminal();
     return EXVI_EXIT_EX_HANDOFF;
 }

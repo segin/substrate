@@ -343,9 +343,9 @@ The number is not reused.
 
 ### EXVI-21 — every vi exit reads a dead stack frame — *High*
 
-- [ ] **EXVI-21.1** (Ubiquitous) The editor shall not access the frame of
+- [x] **EXVI-21.1** (Ubiquitous) The editor shall not access the frame of
   `exvi_visual_main` after that function returns.
-- [ ] **EXVI-21.2** (Ubiquitous) The editor shall register its terminal-restore
+- [x] **EXVI-21.2** (Ubiquitous) The editor shall register its terminal-restore
   exit handler at most once per process.
 
 - **Where**: `exvi_visual.c:114`, `797-807`, `848-871`: `active_visual`
@@ -1095,6 +1095,11 @@ The number is not reused.
   builds.
 - [ ] **EXVI-76.3** (Ubiquitous) The tree's test suite shall run
   `tests/bin/ex`, `tests/bin/vi` and `tests/usr.lib/exvi`.
+- [ ] **EXVI-76.4** (Ubiquitous) The ex and vi test targets shall also run
+  their tests on an AddressSanitizer build of ex and vi.  (Added while
+  fixing: `test_vi_exit_paths.py` (EXVI-21) fails on the old code only under
+  ASan, and `test_vi_replace_ctrl_o.py` (EXVI-20) on a plain build only
+  because glibc's heap checks happen to abort.)
 
 - **Where**: `tests/bin/ex/Makefile:11-20`, `tests/bin/vi/Makefile:12-18`:
   one `;`-joined command without `set -e`, so only the last status counts
