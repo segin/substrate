@@ -40,7 +40,7 @@ const char *exvi_progname = "ex";
 exvi_frontend_t exvi_frontend = EXVI_FRONTEND_EX;
 buffer_t regs[27];
 int reg_linewise[27];
-jmp_buf main_loop_jmp;
+volatile sig_atomic_t exvi_interrupted = 0;
 buffer_t *global_buf_for_sighandler = NULL;
 int input_mode = 0;
 line_t *input_insert_pos = NULL;
@@ -567,12 +567,48 @@ exvi_report_errorf(const char *fmt, ...)
     exvi_report_error(msg);
 }
 
+/**
+ * SIGINT: only note it.  The editor acts on it where its state is whole --
+ * the ex prompt, between the commands of a global, in vi as <ESC> -- so an
+ * interrupted command leaves no half-made change, undo or global mark
+ * behind, and SIGINT is never left blocked.
+ */
 void
 handle_sigint(int sig)
 {
     (void)sig;
-    write(STDOUT_FILENO, "\nInterrupt\n", 11);
-    longjmp(main_loop_jmp, 1);
+    exvi_interrupted = 1;
+}
+
+/**
+ * Take a pending interrupt.
+ * @return 1 if SIGINT arrived since the last call (and clear it), else 0
+ */
+int
+exvi_take_interrupt(void)
+{
+    if (!exvi_interrupted) {
+        return 0;
+    }
+    exvi_interrupted = 0;
+    return 1;
+}
+
+/**
+ * Catch sig with fn, without SA_RESTART: a read waiting for input returns
+ * EINTR, so the editor sees the signal at once instead of after the next
+ * line or key.
+ */
+void
+exvi_catch_signal(int sig, void (*fn)(int))
+{
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = fn;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(sig, &sa, NULL);
 }
 
 /*

@@ -2,7 +2,6 @@
 #define _EXVI_INTERNAL_H
 
 #include <stddef.h>
-#include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
 
@@ -102,7 +101,8 @@ extern const char *exvi_progname;
 extern exvi_frontend_t exvi_frontend;
 extern buffer_t regs[27];
 extern int reg_linewise[27];
-extern jmp_buf main_loop_jmp;
+/** set by SIGINT's handler, and nothing else; taken by exvi_take_interrupt() */
+extern volatile sig_atomic_t exvi_interrupted;
 extern buffer_t *global_buf_for_sighandler;
 extern int input_mode;
 extern line_t *input_insert_pos;
@@ -174,6 +174,8 @@ int exvi_visual_main(buffer_t *b);
 void exvi_visual_shell_suspend(void);
 void exvi_visual_shell_resume(void);
 void handle_sigint(int sig);
+int exvi_take_interrupt(void);
+void exvi_catch_signal(int sig, void (*fn)(int));
 void handle_sigterm(int sig);
 int handle_pop_command(buffer_t *b, int force);
 int handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *, char *));

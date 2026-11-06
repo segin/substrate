@@ -970,16 +970,25 @@ handle_shell_command(char *cmd)
         exit(127);
     } else {
         int status;
-        void (*old_int)(int) = signal(SIGINT, SIG_IGN);
-        void (*old_quit)(int) = signal(SIGQUIT, SIG_IGN);
+        struct sigaction ign;
+        struct sigaction old_int;
+        struct sigaction old_quit;
+
+        /* sigaction, not signal(): restoring with signal() would bring
+         * SA_RESTART back to SIGINT, and an interrupt would wait for input */
+        memset(&ign, 0, sizeof(ign));
+        ign.sa_handler = SIG_IGN;
+        sigemptyset(&ign.sa_mask);
+        sigaction(SIGINT, &ign, &old_int);
+        sigaction(SIGQUIT, &ign, &old_quit);
 
         while (waitpid(pid, &status, 0) == -1) {
             if (errno != EINTR) {
                 break;
             }
         }
-        signal(SIGINT, old_int);
-        signal(SIGQUIT, old_quit);
+        sigaction(SIGINT, &old_int, NULL);
+        sigaction(SIGQUIT, &old_quit, NULL);
     }
     if (visual_mode) {
         exvi_visual_shell_resume();

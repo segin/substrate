@@ -255,6 +255,19 @@ option is left at its default value.
 .It Pa .*.recover
 Preserved recovery images written for interrupted sessions.
 .El
+.Sh ASYNCHRONOUS EVENTS
+.Dv SIGINT
+stops the current command (a
+.Ic global
+between the commands it runs) and ends text input;
+.Nm
+writes
+.Ql Interrupt
+and returns to the command prompt with the buffer as the command left it.
+.Dv SIGHUP
+and
+.Dv SIGTERM
+preserve a modified buffer and end the session.
 .Sh EXIT STATUS
 The
 .Nm

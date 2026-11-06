@@ -268,6 +268,23 @@ option is left at its default value.
 .It Pa .*.recover
 Preserved recovery images written for interrupted sessions.
 .El
+.Sh ASYNCHRONOUS EVENTS
+In visual mode
+.Ql Ctrl-C
+is an ordinary key.
+A
+.Dv SIGINT
+sent to
+.Nm
+acts as
+.Aq ESC :
+it ends text input, and cancels a partial command or a
+.Ql \&:
+or search prompt.
+.Dv SIGHUP
+and
+.Dv SIGTERM
+preserve a modified buffer and end the session.
 .Sh EXIT STATUS
 The
 .Nm

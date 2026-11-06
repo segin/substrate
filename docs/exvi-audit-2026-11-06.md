@@ -358,11 +358,11 @@ The number is not reused.
 
 ### EXVI-22 — SIGINT jumps through an uninitialised `jmp_buf` — *High*
 
-- [ ] **EXVI-22.1** (Event-driven) When SIGINT arrives during an ex command,
+- [x] **EXVI-22.1** (Event-driven) When SIGINT arrives during an ex command,
   the editor shall stop that command and return to the ex command prompt.
-- [ ] **EXVI-22.2** (Event-driven) When SIGINT arrives during vi text input,
+- [x] **EXVI-22.2** (Event-driven) When SIGINT arrives during vi text input,
   the editor shall end text input as `<ESC>` does.
-- [ ] **EXVI-22.3** (Event-driven) When SIGINT arrives during a vi command, the
+- [x] **EXVI-22.3** (Event-driven) When SIGINT arrives during a vi command, the
   editor shall stop that command and remain in vi with the terminal in vi's
   mode.
 
@@ -377,10 +377,11 @@ The number is not reused.
 ### EXVI-23 — the SIGINT handler `longjmp`s, so SIGINT stays blocked and state is left half-changed — *High*
 
 - [ ] **EXVI-23.1** (Ubiquitous) The editor's signal handlers shall call only
-  async-signal-safe functions.
-- [ ] **EXVI-23.2** (Event-driven) When an interrupted command has stopped, the
+  async-signal-safe functions.  (SIGINT's handler only sets a flag now;
+  SIGTERM/SIGHUP's still walks the buffer — EXVI-03, EXVI-24.)
+- [x] **EXVI-23.2** (Event-driven) When an interrupted command has stopped, the
   editor shall accept further SIGINTs.
-- [ ] **EXVI-23.3** (Event-driven) When a command is interrupted, the editor
+- [x] **EXVI-23.3** (Event-driven) When a command is interrupted, the editor
   shall leave its undo history and `global` marks as they were before the
   command.
 

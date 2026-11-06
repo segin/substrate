@@ -12,7 +12,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <signal.h>
-#include <setjmp.h>
 #include <sys/wait.h>
 #include <errno.h>
 
@@ -22,6 +21,8 @@ buffer_t pending_undo_buf;
 int pending_undo_valid = 0;
 int exvi_history_suspended = 0;
 int exvi_exit_requested = 0;
+/** `visual` asked for visual mode; the caller of do_command enters it */
+static int exvi_visual_requested = 0;
 
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
@@ -240,7 +241,7 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args,
             }
             do_command(b, cmd_cpy);
             free(cmd_cpy);
-            if (exvi_exit_requested) {
+            if (exvi_exit_requested || exvi_visual_requested || exvi_interrupted) {
                 break;
             }
             /*
@@ -252,6 +253,10 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args,
             continue;
         }
         curr = curr->next;
+    }
+    /* stopped early (an interrupt, out of memory): no mark outlives the command */
+    for (curr = b->head; curr; curr = curr->next) {
+        curr->global_mark = 0;
     }
 
     free(re_str);
@@ -282,7 +287,8 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         if (exvi_frontend == EXVI_FRONTEND_EX) {
             set_visual_handoff_file(b->filename);
         }
-        longjmp(main_loop_jmp, EXVI_EXIT_VISUAL_HANDOFF);
+        exvi_visual_requested = 1;
+        return 1;
     } else if (match_command(cmd, "version", "ver", &args, NULL)) {
         const char *version = "Substrate vi v0.1";
 
@@ -469,9 +475,8 @@ int
 exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 {
     int opt;
-    int jump_status;
     int scan_plus_args;
-    volatile int status = 0;
+    int status = 0;
     char **file_args = NULL;
     int file_argc = 0;
     char *line = NULL;
@@ -613,11 +618,16 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     if (!(frontend == EXVI_FRONTEND_EX && visual_mode)) {
         load_startup_commands(&buf, do_command);
     }
+    if (exvi_visual_requested) {
+        /* `-c vi` and the like */
+        exvi_visual_requested = 0;
+        visual_mode = 1;
+    }
 
     global_buf_for_sighandler = &buf;
-    signal(SIGINT, handle_sigint);
-    signal(SIGHUP, handle_sigterm);
-    signal(SIGTERM, handle_sigterm);
+    exvi_catch_signal(SIGINT, handle_sigint);
+    exvi_catch_signal(SIGHUP, handle_sigterm);
+    exvi_catch_signal(SIGTERM, handle_sigterm);
 
 enter_visual:
     if (visual_mode) {
@@ -642,21 +652,6 @@ enter_visual:
         }
     }
 
-    jump_status = setjmp(main_loop_jmp);
-    if (jump_status == EXVI_EXIT_VISUAL_HANDOFF) {
-        free(line);
-        line = NULL;
-        cap = 0;
-        if (frontend == EXVI_FRONTEND_VI) {
-            visual_mode = 1;
-            input_mode = 0;
-            input_insert_pos = NULL;
-            goto enter_visual;
-        }
-        status = EXVI_EXIT_VISUAL_HANDOFF;
-        goto out;
-    }
-
     for (;;) {
         if (!batch_mode && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) && !input_mode) {
             fputs(":", stdout);
@@ -664,6 +659,13 @@ enter_visual:
         }
 
         ret = getline(&line, &cap, stdin);
+        if (exvi_take_interrupt()) {
+            /* POSIX ex: an interrupt stops the command, and text input */
+            clearerr(stdin);
+            input_mode = 0;
+            printf("\nInterrupt\n");
+            continue;
+        }
         if (ret == -1) {
             break;
         }
@@ -687,6 +689,23 @@ enter_visual:
         do_command(&buf, cmd_line);
         if (exvi_exit_requested) {
             break;
+        }
+        if (exvi_visual_requested) {
+            exvi_visual_requested = 0;
+            free(line);
+            line = NULL;
+            cap = 0;
+            if (frontend == EXVI_FRONTEND_VI) {
+                visual_mode = 1;
+                input_mode = 0;
+                input_insert_pos = NULL;
+                goto enter_visual;
+            }
+            status = EXVI_EXIT_VISUAL_HANDOFF;
+            goto out;
+        }
+        if (exvi_take_interrupt()) {
+            printf("\nInterrupt\n");
         }
     }
     free(line);

@@ -1785,9 +1785,26 @@ vi_read_key(void)
 {
     char c;
 
-    if (read(STDIN_FILENO, &c, 1) != 1) {
-        if (errno == EINTR && vi_resize_pending) {
-            return VI_KEY_RESIZE;
+    for (;;) {
+        ssize_t n;
+
+        /*
+         * SIGINT reads as <ESC>: it ends text input (POSIX vi) and cancels a
+         * partial command or prompt.  It interrupts read() too, so it is
+         * seen at once.
+         */
+        if (exvi_take_interrupt()) {
+            return '\x1b';
+        }
+        n = read(STDIN_FILENO, &c, 1);
+        if (n == 1) {
+            break;
+        }
+        if (n < 0 && errno == EINTR) {
+            if (vi_resize_pending) {
+                return VI_KEY_RESIZE;
+            }
+            continue;
         }
         return -1;
     }
