@@ -72,6 +72,9 @@ typedef unsigned long long cc_attr_flags_t;
 #define CC_ATTR_NOCF_CHECK (1ULL << 35) /* nocf_check: no endbr at its entry under -fcf-protection (Linux's __noendbr) */
 #define CC_ATTR_NO_STACK_PROTECTOR (1ULL << 36) /* no_stack_protector: no canary whatever -fstack-protector says */
 #define CC_ATTR_STACK_PROTECT (1ULL << 37) /* stack_protect: a canary under any -fstack-protector (-explicit's) */
+/* ms_abi: the function type's (CC_CQ_MS_ABI), as gcc has it: x86-64 calls through it, and the function itself,
+ * use the Microsoft x64 convention (UEFI's: Linux's __efiapi) */
+#define CC_ATTR_MS_ABI (1ULL << 39)
 /* weakref("target"), or weakref with alias("target"): a static name for a weak reference to target, defining
  * nothing (`.weakref name, target`); attr_alias holds the target, and the parser makes it CC_ATTR_WEAK too */
 #define CC_ATTR_WEAKREF (1ULL << 38)

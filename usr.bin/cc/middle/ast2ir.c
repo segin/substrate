@@ -17216,6 +17216,34 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 cc_ir_set_size(sf, in.dst, cc_target_pointer_size());
             }
         }
+        if (cc_abi_x86_64_function_ms_abi(tu, af->name)) {
+            /*
+             * ms_abi: its parameters come as the Microsoft x64 convention passes them -- what it passes as this
+             * compiler passes it, or an error rather than wrong code
+             */
+            const char *bad = NULL;
+
+            if (af->is_variadic) {
+                bad = "a variadic ms_abi function";
+            } else if (cc_abi_x86_64_ms_abi_type_ok(af->ret_ctype) != 0) {
+                bad = "an ms_abi function returning this type";
+            }
+            for (j = 0; bad == NULL && j < af->param_count; ++j) {
+                if (cc_abi_x86_64_ms_abi_type_ok(lower_param_ctype(&af->params[j])) != 0) {
+                    bad = "an ms_abi function with a parameter of this type";
+                }
+            }
+            if (bad != NULL) {
+                char msg[160];
+
+                snprintf(msg, sizeof(msg), "%s is not supported: '%s'", bad, af->name);
+                cc_diag_set(diag, "", af->name_line != 0 ? af->name_line : af->line,
+                            af->name_line != 0 ? af->name_col : af->col, msg);
+                cc_ssa_module_free(out);
+                return -1;
+            }
+            sf->ms_abi = 1;
+        }
         if (cc_target_current()->id == CC_TARGET_I386) {
             /*
              * -mregparm / regparm(N): the first integer parameters arrive in

@@ -1099,6 +1099,7 @@ static int has_gnu_attribute_name(const char *name) {
         strcmp(name, "transparent_union") == 0 || strcmp(name, "may_alias") == 0 ||
         strcmp(name, "vector_size") == 0 || strcmp(name, "ext_vector_type") == 0 ||
         strcmp(name, "no_instrument_function") == 0 || strcmp(name, "nocf_check") == 0 ||
+        strcmp(name, "ms_abi") == 0 || strcmp(name, "sysv_abi") == 0 ||
         strcmp(name, "patchable_function_entry") == 0 || strcmp(name, "no_stack_protector") == 0 ||
         strcmp(name, "stack_protect") == 0 || strcmp(name, "constructor") == 0 ||
         strcmp(name, "destructor") == 0 || strcmp(name, "counted_by") == 0 || strcmp(name, "gnu_inline") == 0 ||

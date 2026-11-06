@@ -143,6 +143,38 @@ as in gcc.
 Two enumerations compatible with one integer type are compatible with
 each other here, which in gcc they are not.
 .Pp
+On x86-64 gcc's
+.Sq Li ms_abi
+attribute gives a function type the Microsoft x64 calling convention,
+UEFI's: on the function itself or on a pointer, typedef or member, as
+in
+.Li "long (__attribute__((ms_abi)) *op)(long)" .
+Its arguments go by position in
+.Li %rcx , %rdx , %r8 , %r9
+or
+.Li %xmm0 Ns \(en Ns Li 3 ,
+the rest on the stack past a 32-byte shadow area the caller leaves,
+and such a function keeps
+.Li %rdi , %rsi
+and
+.Li %xmm6 Ns \(en Ns Li 15
+for its caller.
+Integers, pointers,
+.Vt float
+and
+.Vt double
+pass so; a structure, union,
+.Vt long double ,
+complex,
+.Vt __int128
+or vector argument or result, a variadic
+.Sq Li ms_abi
+function definition and a floating argument to a variadic one are
+errors.
+.Sq Li sysv_abi
+names the default.
+On i386 both mean nothing, as with gcc.
+.Pp
 gcc's
 .Sq Li counted_by Ns Pq Ar m
 on a flexible array member or a pointer member names the member holding

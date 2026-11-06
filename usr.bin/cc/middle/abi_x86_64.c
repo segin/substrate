@@ -261,6 +261,57 @@ int cc_abi_x86_64_aggregate_return(const cc_translation_unit_t *tu, int sid, lon
     return c >= 0 ? c : (size <= 16 ? CC_ABI_RET_MEMORY : 0);
 }
 
+int cc_abi_x86_64_function_ms_abi(const cc_translation_unit_t *tu, const char *name) {
+    size_t k;
+
+    if (cc_target_current()->id != CC_TARGET_X86_64) {
+        return 0;
+    }
+    for (k = 0; tu != NULL && name != NULL && k < tu->func_count; ++k) {
+        if ((tu->funcs[k].attr_flags & CC_ATTR_MS_ABI) != 0 && tu->funcs[k].name != NULL &&
+            strcmp(tu->funcs[k].name, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int cc_abi_x86_64_type_ms_abi(const cc_ctype_t *t) {
+    return t != NULL && cc_target_current()->id == CC_TARGET_X86_64 && (t->quals & CC_CQ_MS_ABI) != 0;
+}
+
+int cc_abi_x86_64_ms_abi_type_ok(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return 0;
+    }
+    switch (t->unqual->kind) {
+    case CC_CT_VOID:
+    case CC_CT_BOOL:
+    case CC_CT_CHAR:
+    case CC_CT_SCHAR:
+    case CC_CT_UCHAR:
+    case CC_CT_SHORT:
+    case CC_CT_USHORT:
+    case CC_CT_INT:
+    case CC_CT_UINT:
+    case CC_CT_LONG:
+    case CC_CT_ULONG:
+    case CC_CT_LLONG:
+    case CC_CT_ULLONG:
+    case CC_CT_ENUM:
+    case CC_CT_POINTER:
+    case CC_CT_NULLPTR:
+    case CC_CT_FLOAT:
+    case CC_CT_DOUBLE:
+        return 0;
+    case CC_CT_BITINT:
+    case CC_CT_UBITINT:
+        return t->unqual->count <= 64 ? 0 : -1;
+    default:
+        return -1;
+    }
+}
+
 /** @p n rounded up to a multiple of @p a. */
 static long va_align_up(long n, long a) {
     return ((n + a - 1) / a) * a;

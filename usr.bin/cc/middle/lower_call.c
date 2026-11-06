@@ -3559,6 +3559,8 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
             ptr_fnt = ct != NULL && ct->unqual->kind == CC_CT_FUNCTION ? ct->unqual : NULL;
             /* through a nocf_check function type: a call IBT does not check, as gcc makes it */
             in.call_notrack = ptr_fnt != NULL && (ct->quals & CC_CQ_NOCF) != 0 ? 1 : 0;
+            /* through an ms_abi one: the Microsoft x64 convention */
+            in.call_ms_abi = ptr_fnt != NULL && cc_abi_x86_64_type_ms_abi(ct) ? 1 : 0;
         }
         /*
          * A pointer without a prototype may reach a variadic function;
@@ -3585,6 +3587,8 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         if (in.sym == NULL) {
             return -1;
         }
+        /* a function declared ms_abi: the Microsoft x64 convention */
+        in.call_ms_abi = cc_abi_x86_64_function_ms_abi(tu, e->ident) ? 1 : 0;
     }
     if (in.op == CC_SSA_CALL && ident_var_idx < 0) {
         /* a GNU nested function using the caller's variables: their addresses in the static chain */
@@ -3818,6 +3822,46 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         }
         in.call_arg_sizes[i] =
             (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_needs_float_abi || arg_needs_half_abi ? 4 : arg_size);
+    }
+    if (in.call_ms_abi) {
+        /*
+         * The Microsoft x64 convention: what it passes as this compiler passes it, or an error rather than
+         * wrong code.  A variadic argument is one past the prototype's parameters (a pointer's type's or a
+         * declared function's), every one with no prototype; a floating one would go in a general register
+         * too, which this compiler does not do.
+         */
+        const char *bad = cc_abi_x86_64_ms_abi_type_ok(lower_value_ctype(e)) != 0 ? "returning this type" : NULL;
+        size_t fixed = in.op == CC_SSA_CALLI ? (ptr_fnt != NULL && ptr_fnt->prototyped ? ptr_fnt->param_count : 0)
+                       : (callee != NULL && callee->has_prototype) ? callee->param_count
+                                                                   : 0;
+        int any_variadic = in.op == CC_SSA_CALLI ? (ptr_fnt == NULL || !ptr_fnt->prototyped || ptr_fnt->variadic)
+                                                 : (callee == NULL || !callee->has_prototype || callee->is_variadic);
+
+        for (i = 0; bad == NULL && i < in.arg_count; ++i) {
+            const cc_ctype_t *at = (callee != NULL && callee->has_prototype && i < callee->param_count)
+                                       ? lower_param_ctype(&callee->params[i])
+                                   : (in.op == CC_SSA_CALLI && ptr_fnt != NULL && ptr_fnt->prototyped &&
+                                      i < ptr_fnt->param_count)
+                                       ? ptr_fnt->params[i]
+                                       : lower_value_ctype(e->args[i]);
+
+            if (cc_abi_x86_64_ms_abi_type_ok(at) != 0) {
+                bad = "with an argument of this type";
+            } else if (any_variadic && i >= fixed && cc_ct_is_floating(at)) {
+                bad = "with a floating variadic argument";
+            }
+        }
+        if (bad != NULL) {
+            char msg[128];
+
+            free(in.sym);
+            free(in.args);
+            free(in.call_arg_abi);
+            free(in.call_arg_sizes);
+            snprintf(msg, sizeof(msg), "a call of an ms_abi function %s is not supported", bad);
+            cc_diag_set(diag, "", e->line, e->col, msg);
+            return -1;
+        }
     }
     if (cc_target_current()->id == CC_TARGET_I386) {
         /*

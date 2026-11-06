@@ -219,6 +219,9 @@ typedef struct {
     int call_chain;    /**< CALL: one more than the value to pass in the static chain register; 0 for none */
     unsigned char call_notrack; /**< CALLI: through a nocf_check function type (CC_CQ_NOCF): `notrack call`
                                      under -fcf-protection=branch, the _nt_ thunk under -mindirect-branch */
+    unsigned char call_ms_abi;  /**< CALL, CALLI: to an ms_abi function type (CC_CQ_MS_ABI): x86-64's Microsoft x64
+                                     convention, its arguments in %rcx, %rdx, %r8, %r9 and the stack past a 32-byte
+                                     shadow area */
     unsigned src_line; /**< ASM, CALL, CALLI: the statement's or the call's line, for the backend's errors;
                             0 for none (then the function's) */
     unsigned src_col;  /**< and its column */
@@ -336,6 +339,9 @@ typedef struct cc_ssa_function {
     unsigned char *param_abi;
     unsigned char ret_abi;
     int sret_reg; /**< i386 regparm: the hidden pointer of a structure result came in %eax, not on the stack */
+    /** defined ms_abi (CC_CQ_MS_ABI): x86-64, its parameters come as the Microsoft x64 convention passes them, and
+     *  it keeps %rdi, %rsi and %xmm6-15 for its caller */
+    unsigned char ms_abi;
 
     cc_ssa_instr_t *instrs;
     size_t instr_count;

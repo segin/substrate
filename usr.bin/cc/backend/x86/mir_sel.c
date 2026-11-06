@@ -3467,6 +3467,8 @@ static int sel_init(xsel_t *s) {
     xf_init(&s->xf);
     s->xf.nlabels = f->label_count;
     s->hidden = XR_NONE;
+    s->ms_keep[0] = XR_NONE;
+    s->ms_keep[1] = XR_NONE;
     s->va_save = -1;
     s->va_state = -1;
     s->got = XR_NONE;
@@ -4483,8 +4485,9 @@ static int print_function(FILE *fp, xsel_t *s, int emit_debug, cc_diag_t *diag) 
         }
     }
     /* tail calls, where nothing the callee may reach is in this frame (no frame object's address made) */
+    /* (nor from an ms_abi function, whose caller's %rdi and %rsi a System V callee would not keep) */
     tail_ok = !emit_debug && !s->has_goto && !s->has_dynalloc && s->nbind == 0 && !(s->ssp_obj >= 0 && w == 4) &&
-              !cc_options_current()->no_sibling_calls;
+              !cc_options_current()->no_sibling_calls && !f->ms_abi;
     for (i = 0; tail_ok && i < s->xf.nins; ++i) {
         const xinst_t *in = &s->xf.ins[i];
 

@@ -1850,18 +1850,18 @@ static int parser_vector_struct(parser_t *p, const cc_ctype_t *elem, long n) {
 }
 
 /**
- * The type a declaration of type @p t has with gcc's nocf_check
- * attribute, which is the function type's: the function type @p t is, or
- * the one a pointer to it (or an array of them) leads to, made
- * CC_CQ_NOCF, so that a call through it is `notrack`.  A function
- * declaration's own type is left be, as cc keeps the attribute on the
- * declaration (CC_ATTR_NOCF_CHECK, no endbr at its entry).
+ * The type a declaration of type @p t has with a function type attribute
+ * of gcc's -- nocf_check (CC_CQ_NOCF: a call through it is `notrack`),
+ * ms_abi (CC_CQ_MS_ABI: the Microsoft x64 convention) -- which is the
+ * function type's: the function type @p t is, or the one a pointer to it
+ * (or an array of them) leads to, given @p quals.
  *
- * @param t  the declared type
- * @return   the type, @p t itself where there is no function type in it,
- *           or NULL when out of memory
+ * @param t      the declared type
+ * @param quals  the CC_CQ_* bits the attributes stand for
+ * @return       the type, @p t itself where there is no function type in
+ *               it, or NULL when out of memory
  */
-static const cc_ctype_t *parser_nocf_type(const cc_ctype_t *t) {
+static const cc_ctype_t *parser_fn_attr_type(const cc_ctype_t *t, unsigned quals) {
     const cc_ctype_t *of;
 
     if (t == NULL) {
@@ -1869,10 +1869,10 @@ static const cc_ctype_t *parser_nocf_type(const cc_ctype_t *t) {
     }
     switch (t->kind) {
     case CC_CT_FUNCTION:
-        return cc_ct_qualified(t, CC_CQ_NOCF);
+        return cc_ct_qualified(t, quals);
     case CC_CT_POINTER:
     case CC_CT_ARRAY:
-        of = parser_nocf_type(t->of);
+        of = parser_fn_attr_type(t->of, quals);
         if (of == NULL) {
             return NULL;
         }
@@ -1883,6 +1883,14 @@ static const cc_ctype_t *parser_nocf_type(const cc_ctype_t *t) {
     default:
         return t;
     }
+}
+
+/**
+ * The CC_CQ_* bits the function type attributes among @p flags (CC_ATTR_*)
+ * stand for: nocf_check, ms_abi.
+ */
+static unsigned parser_fn_attr_quals(unsigned long long flags) {
+    return ((flags & CC_ATTR_NOCF_CHECK) != 0 ? CC_CQ_NOCF : 0u) | ((flags & CC_ATTR_MS_ABI) != 0 ? CC_CQ_MS_ABI : 0u);
 }
 
 /**
@@ -2928,7 +2936,8 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 const cc_ctype_t *mspec = NULL;
                 const cc_dtype_t *mspec_d = NULL; /* the specifiers' type as spelled, for debug information */
                 decl_attrs_t mspec_attrs;
-                int mspec_nocf = 0; /* nocf_check among the specifiers: each member's function type's */
+                /* nocf_check, ms_abi among the specifiers: each member's function type's */
+                unsigned mspec_fnq = 0;
                 long mspec_align = 0;
                 long mtypedef_align = 0; /* the alignment of a typedef name among the specifiers, or 0 */
                 if (p->structs[sid].has_flexible_array) {
@@ -2982,7 +2991,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 /* `_Alignas(T) char x;`: the specifiers' alignment applies to each member they declare */
                 mspec_align = (mspec_attrs.flags & CC_ATTR_ALIGNED) != 0 ? mspec_attrs.align : 0;
                 mtypedef_align = p->last_spec_align;
-                mspec_nocf = (mspec_attrs.flags & CC_ATTR_NOCF_CHECK) != 0;
+                mspec_fnq = parser_fn_attr_quals(mspec_attrs.flags);
                 decl_attrs_clear(&mspec_attrs);
                 if (mtypedef) {
                     decl_attrs_clear(&struct_attrs);
@@ -3050,8 +3059,10 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         decl_attrs_clear(&mdecl_attrs);
                         return -1;
                     }
-                    if ((mspec_nocf || (mdecl_attrs.flags & CC_ATTR_NOCF_CHECK) != 0) && md.ctype != NULL &&
-                        (md.ctype = parser_nocf_type(md.ctype)) == NULL) {
+                    if ((mspec_fnq | parser_fn_attr_quals(mdecl_attrs.flags)) != 0 && md.ctype != NULL &&
+                        (md.ctype = parser_fn_attr_type(md.ctype,
+                                                        mspec_fnq | parser_fn_attr_quals(mdecl_attrs.flags))) ==
+                            NULL) {
                         free(mname);
                         decl_attrs_clear(&mdecl_attrs);
                         return -1;
@@ -5472,6 +5483,8 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_regparm;
     int is_no_instrument;
     int is_nocf_check;
+    int is_ms_abi;
+    int is_sysv_abi;
     int is_patchable;
     int is_no_stack_protector;
     int is_stack_protect;
@@ -5532,6 +5545,8 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_regparm = tok_is_gnu_attr_name(p, "regparm");
     is_no_instrument = tok_is_gnu_attr_name(p, "no_instrument_function");
     is_nocf_check = tok_is_gnu_attr_name(p, "nocf_check");
+    is_ms_abi = tok_is_gnu_attr_name(p, "ms_abi");
+    is_sysv_abi = tok_is_gnu_attr_name(p, "sysv_abi");
     is_patchable = tok_is_gnu_attr_name(p, "patchable_function_entry");
     is_no_stack_protector = tok_is_gnu_attr_name(p, "no_stack_protector");
     is_stack_protect = tok_is_gnu_attr_name(p, "stack_protect");
@@ -5542,7 +5557,8 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
                 is_constructor ||
                 is_destructor || is_transparent_union ||
                 is_vector_size || is_ext_vector_type || is_may_alias || is_mode || is_regparm || is_no_instrument ||
-                is_nocf_check || is_patchable || is_no_stack_protector || is_stack_protect;
+                is_nocf_check || is_ms_abi || is_sysv_abi || is_patchable || is_no_stack_protector ||
+                is_stack_protect;
 
     if (next_tok(p) != 0) {
         return -1;
@@ -5689,6 +5705,10 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         }
         if (is_nocf_check) {
             out_attrs->flags |= CC_ATTR_NOCF_CHECK;
+        }
+        /* sysv_abi: x86-64's default convention, which a function has without saying so */
+        if (is_ms_abi) {
+            out_attrs->flags |= CC_ATTR_MS_ABI;
         }
         if (is_no_stack_protector) {
             out_attrs->flags |= CC_ATTR_NO_STACK_PROTECTOR;
@@ -6006,6 +6026,12 @@ typedef struct {
      * gcc gives the declaration, as it does those after the name.
      */
     decl_attrs_t *attrs;
+    /**
+     * CC_CQ_MS_ABI when an ms_abi is written anywhere in the declarator -- `long (__attribute__((ms_abi)) *op)(long)`,
+     * as Linux declares the firmware's tables -- which declarator_type() gives the function type it builds; in a
+     * member, a parameter or a cast too, which have no attributes of their own to keep it in
+     */
+    unsigned fn_quals;
 } declarator_t;
 
 /** How parse_declarator_into() reads a declarator. */
@@ -6095,6 +6121,9 @@ static const cc_ctype_t *declarator_type(const declarator_t *d, const cc_ctype_t
             t = cc_ct_function(t, op->params, op->param_count, op->variadic, op->prototyped);
             break;
         }
+    }
+    if (t != NULL && d->fn_quals != 0) {
+        t = parser_fn_attr_type(t, d->fn_quals);
     }
     return t;
 }
@@ -6378,10 +6407,19 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
     declarator_t inner;
     size_t i;
     int rc = -1;
+    /* where the declarator's attributes go when its caller keeps none (a member's, a parameter's) */
+    decl_attrs_t own_attrs;
+    int owns_attrs = d->attrs == NULL;
+    cc_attr_flags_t flags_before;
 
     memset(&inner, 0, sizeof(inner));
     memset(&ptrs, 0, sizeof(ptrs));
     memset(&suffix, 0, sizeof(suffix));
+    if (owns_attrs) {
+        decl_attrs_reset(&own_attrs);
+        d->attrs = &own_attrs;
+    }
+    flags_before = d->attrs->flags;
     /* GNU attributes may open a declarator, before its `*`s: `(__attribute__((regparm(0))) *fn)(void)` */
     if (skip_decl_gnu_suffix(p, d->attrs) != 0) {
         goto out;
@@ -6519,6 +6557,15 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
     }
     rc = 0;
 out:
+    /* an ms_abi written in it, or in a nested declarator: the function type's */
+    if ((d->attrs->flags & ~flags_before & CC_ATTR_MS_ABI) != 0) {
+        d->fn_quals |= CC_CQ_MS_ABI;
+    }
+    d->fn_quals |= inner.fn_quals;
+    if (owns_attrs) {
+        decl_attrs_clear(&own_attrs);
+        d->attrs = NULL;
+    }
     declarator_free(&inner);
     declarator_free(&ptrs);
     declarator_free(&suffix);
@@ -10370,13 +10417,23 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         merged_format_index = merged_attrs.format_index;
         merged_format_first_to_check = merged_attrs.format_first_to_check;
         s.attr_flags = with_pragma_visibility(merged_attrs.flags, start_vis);
-        if ((merged_attrs.flags & CC_ATTR_NOCF_CHECK) != 0 && s.ctype != NULL &&
-            (is_typedef || s.ctype->kind != CC_CT_FUNCTION)) {
-            /* a pointer's, a typedef's: the function type's, as gcc has it (a function's own: its declaration's) */
-            s.ctype = parser_nocf_type(s.ctype);
-            if (s.ctype == NULL) {
-                free_stmt(&s);
-                return -1;
+        {
+            /*
+             * nocf_check on a pointer's, a typedef's: the function type's, as gcc has it (a function's own: its
+             * declaration's); ms_abi the function type's always, a function's own type included
+             */
+            unsigned fnq = (merged_attrs.flags & CC_ATTR_MS_ABI) != 0 ? CC_CQ_MS_ABI : 0u;
+
+            if ((merged_attrs.flags & CC_ATTR_NOCF_CHECK) != 0 && s.ctype != NULL &&
+                (is_typedef || s.ctype->kind != CC_CT_FUNCTION)) {
+                fnq |= CC_CQ_NOCF;
+            }
+            if (fnq != 0 && s.ctype != NULL) {
+                s.ctype = parser_fn_attr_type(s.ctype, fnq);
+                if (s.ctype == NULL) {
+                    free_stmt(&s);
+                    return -1;
+                }
             }
         }
         if (p->scope_depth == 0 && !is_typedef && s.ctype != NULL && s.ctype->kind != CC_CT_FUNCTION &&
@@ -10600,9 +10657,9 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                     free_stmt(&s);
                     return -1;
                 }
-                /* nocf_check, before or after: the function type's, as gcc has it */
-                if (((s.attr_flags | fn_attrs.flags) & CC_ATTR_NOCF_CHECK) != 0) {
-                    s.ctype = cc_ct_qualified(s.ctype, CC_CQ_NOCF);
+                /* nocf_check, ms_abi, before or after: the function type's, as gcc has it */
+                if (parser_fn_attr_quals(s.attr_flags | fn_attrs.flags) != 0) {
+                    s.ctype = cc_ct_qualified(s.ctype, parser_fn_attr_quals(s.attr_flags | fn_attrs.flags));
                 }
                 decl_attrs_clear(&fn_attrs);
                 if (s.ctype == NULL) {

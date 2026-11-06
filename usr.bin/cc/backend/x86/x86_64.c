@@ -39,6 +39,29 @@ static size_t abi64_stack_align(unsigned char abi, long size) {
     return 8;
 }
 
+/**
+ * Where the Microsoft x64 convention passes argument @p pos (from 0): the
+ * first four by position in %rcx, %rdx, %r8, %r9 (ABI_LOC_GPR, an index
+ * into abi64_ms_arg_regs) or, a floating one, in %xmm0-3; the rest on the
+ * stack, past the 32-byte shadow area the caller leaves for the first four.
+ * Only scalars of 8 bytes or fewer come here (cc_abi_x86_64_ms_abi_type_ok()).
+ */
+static abi_loc_t abi64_ms_loc(size_t pos, int is_fp) {
+    abi_loc_t loc;
+
+    loc.size = 8;
+    loc.xmm_index = 0;
+    loc.sse = 0;
+    if (pos < ABI64_MS_REG_ARGS) {
+        loc.kind = is_fp ? ABI_LOC_XMM : ABI_LOC_GPR;
+        loc.index = pos;
+    } else {
+        loc.kind = ABI_LOC_STACK;
+        loc.index = ABI64_MS_SHADOW + 8 * (pos - ABI64_MS_REG_ARGS);
+    }
+    return loc;
+}
+
 abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gpr_start) {
     abi_loc_t loc;
     size_t gpr = gpr_start;
@@ -50,6 +73,10 @@ abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gp
     loc.size = 8;
     loc.xmm_index = 0;
     loc.sse = 0;
+
+    if (f->ms_abi) {
+        return abi64_ms_loc((size_t)param_index, f->param_types[param_index] == CC_VAL_F64);
+    }
 
     for (i = 0; i <= param_index; ++i) {
         int is_ldouble = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) ? 1 : 0;
@@ -170,6 +197,20 @@ void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_instr_t *
     size_t stack_bytes = 0;
     size_t i;
 
+    if (in->call_ms_abi) {
+        /* by position; the caller's area holds the shadow of the first four whatever their number */
+        for (i = 0; i < in->arg_count; ++i) {
+            locs[i] = abi64_ms_loc(i, cc_ssa_value_class(f, in->args[i]) == CC_VAL_F64);
+            if (locs[i].kind == ABI_LOC_XMM) {
+                xmm++;
+            }
+        }
+        *out_stack_bytes = ABI64_MS_SHADOW + 8 * (in->arg_count > ABI64_MS_REG_ARGS
+                                                      ? in->arg_count - ABI64_MS_REG_ARGS
+                                                      : 0);
+        *out_xmm_regs = xmm;
+        return;
+    }
     for (i = 0; i < in->arg_count; ++i) {
         cc_value_type_t vt = cc_ssa_value_class(f, in->args[i]);
         if (in->call_arg_abi != NULL && in->call_arg_abi[i] == CC_CALL_ARG_ABI_ZERO) {
@@ -765,7 +806,7 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
         return 0;
     }
     if (loc->kind == ABI_LOC_GPR) {
-        const char *reg = arg_reg64_gpr(loc->index);
+        const char *reg = in->call_ms_abi ? arg_reg64_ms_gpr(loc->index) : arg_reg64_gpr(loc->index);
         int off;
         if (reg == NULL && !call_arg_is_agg_reg_abi(in, arg_index)) {
             set_diag(diag, "call with unsupported integer argument index");
@@ -1047,6 +1088,10 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         }
         abi64_classify_call_args(f, in, gpr_start, locs, &abi_stack_bytes, &xmm_regs);
     }
+    if (in->call_ms_abi && abi_stack_bytes < ABI64_MS_SHADOW) {
+        /* the callee's to use, with no argument too */
+        abi_stack_bytes = ABI64_MS_SHADOW;
+    }
 
     stack_bytes = abi_stack_bytes;
     stack_pad = (stack_bytes & 0xF) == 0 ? 0 : (16 - (stack_bytes & 0xF));
@@ -1222,6 +1267,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         long inferred_sret_size = x86_64_infer_sret_size_from_calls(m, f);
         int has_sret;
         int sret_ptr_off = 0;
+        int ms_save_off = 0; /* ms_abi: where %rdi, %rsi and %xmm6-15 are kept for its caller */
         int param_gpr_bias;
         int ssp; /* -fstack-protector guards it: its canary at -8(%rbp) */
 
@@ -1289,6 +1335,16 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             raw_frame += 24;
             va_regsave_off = -(raw_frame + 176);
             raw_frame += 176;
+        }
+        if (f->ms_abi) {
+            /*
+             * ms_abi: %rdi and %rsi are its caller's, and %xmm6-15 too (none touched under -mno-sse), which the
+             * System V code of the body is free to use; kept 16-aligned below the rest
+             */
+            int need = 16 + (cc_options_current()->no_sse ? 0 : 160);
+
+            raw_frame = (raw_frame + need + 15) & ~15;
+            ms_save_off = -raw_frame;
         }
         /*
          * SysV AMD64 call-site rule: before executing "call", %rsp must be
@@ -1358,6 +1414,17 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         }
         if (has_sret) {
             fprintf(fp, "\tmovq %%rdi, %d(%%rbp)\n", sret_ptr_off);
+        }
+        if (f->ms_abi) {
+            fprintf(fp, "\tmovq %%rdi, %d(%%rbp)\n", ms_save_off);
+            fprintf(fp, "\tmovq %%rsi, %d(%%rbp)\n", ms_save_off + 8);
+            if (!cc_options_current()->no_sse) {
+                int k;
+
+                for (k = 6; k < 16; ++k) {
+                    fprintf(fp, "\tmovaps %%xmm%d, %d(%%rbp)\n", k, ms_save_off + 16 + 16 * (k - 6));
+                }
+            }
         }
         if (f->is_variadic) {
             fprintf(fp, "\tmovq %%rdi, %d(%%rbp)\n", va_regsave_off + 0);
@@ -1545,7 +1612,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                     }
                     fprintf(fp, "\tmovsd %s, %d(%%rbp)\n", reg, slot_off(&lay, in->dst));
                 } else if (loc.kind == ABI_LOC_GPR) {
-                    const char *reg = arg_reg64_gpr(loc.index);
+                    const char *reg = f->ms_abi ? arg_reg64_ms_gpr(loc.index) : arg_reg64_gpr(loc.index);
                     int rd;
                     int phys;
                     if (reg == NULL) {
@@ -2192,6 +2259,18 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                 }
                 if (ssp) {
                     x86_emit_ssp_check_at(fp, -8, f->name);
+                }
+                if (f->ms_abi) {
+                    /* its caller's registers back (the result is in %rax or %xmm0, neither among them) */
+                    fprintf(fp, "\tmovq %d(%%rbp), %%rdi\n", ms_save_off);
+                    fprintf(fp, "\tmovq %d(%%rbp), %%rsi\n", ms_save_off + 8);
+                    if (!cc_options_current()->no_sse) {
+                        int k;
+
+                        for (k = 6; k < 16; ++k) {
+                            fprintf(fp, "\tmovaps %d(%%rbp), %%xmm%d\n", ms_save_off + 16 + 16 * (k - 6), k);
+                        }
+                    }
                 }
                 fprintf(fp, "\tleave\n");
                 if (emit_debug) {

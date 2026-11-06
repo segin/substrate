@@ -1197,6 +1197,7 @@ static int bound_copy(const cc_ssa_module_t *m, const cc_ssa_function_t *f, cons
     h->param_abi = g->param_abi;
     h->ret_abi = g->ret_abi;
     h->sret_reg = g->sret_reg;
+    h->ms_abi = g->ms_abi;
     h->value_count = g->value_count;
     h->label_count = g->label_count;
     h->value_cap = g->value_count > 0 ? (size_t)g->value_count : 1;

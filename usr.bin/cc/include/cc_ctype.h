@@ -66,7 +66,13 @@ enum {
      * through it `notrack` under -fcf-protection=branch; part of the type, as gcc has it (a pointer to such a
      * function and a plain one are not compatible)
      */
-    CC_CQ_NOCF = 64u
+    CC_CQ_NOCF = 64u,
+    /**
+     * a function type's: gcc's ms_abi type attribute, on the function itself or on a pointer, typedef or member;
+     * calls through it, and the function so defined, use the Microsoft x64 convention rather than the System V
+     * one (UEFI's, Linux's __efiapi); part of the type, as gcc has it
+     */
+    CC_CQ_MS_ABI = 128u
 };
 
 /** The named address space bits of a set of qualifiers. */

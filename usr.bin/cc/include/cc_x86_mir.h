@@ -457,6 +457,8 @@ struct xsel {
     int fp_saved[XR_NPHYS];   /**< (fpo) the callee-saved registers the prologue pushes: the target's and %ebp */
     int fp_nsaved;
     int hidden;               /**< a structure result: the register holding the caller's buffer's address */
+    int ms_keep[2];           /**< an x86-64 ms_abi function: the registers holding its caller's %rdi and %rsi from
+                                   entry, put back at each return; XR_NONE otherwise */
     int pop;                  /**< the bytes of arguments the return pops (an i386 hidden pointer) */
     int got;                  /**< i386 -fPIC: the register holding the GOT's address, from entry; or XR_NONE */
     int va_save;              /**< an x86-64 variadic function: the frame object of its register save area, or -1 */

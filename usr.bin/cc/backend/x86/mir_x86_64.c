@@ -51,6 +51,14 @@ static const int x64_saved[] = {XR_BX, XR_R12, XR_R13, XR_R14, XR_R15};
 /** The integer argument registers, in order. */
 static const int x64_arg_regs[6] = {XR_DI, XR_SI, XR_DX, XR_CX, XR_R8, XR_R9};
 
+/** The Microsoft x64 convention's (ms_abi), by position. */
+static const int x64_ms_arg_regs[ABI64_MS_REG_ARGS] = {XR_CX, XR_DX, XR_R8, XR_R9};
+
+/** Integer argument register @p k of a call or function with the System V convention, or (@p ms) Microsoft's. */
+static int x64_gpr_arg(int ms, size_t k) {
+    return ms ? x64_ms_arg_regs[k] : x64_arg_regs[k];
+}
+
 /** Whether this compilation is position-independent, as emit_x86_64() was told. */
 static int x64_pic;
 
@@ -280,6 +288,10 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         }
         abi64_classify_call_args(f, in, sret ? 1 : 0, locs, &stack_bytes, &xmm);
     }
+    if (in->call_ms_abi && stack_bytes < ABI64_MS_SHADOW) {
+        /* the callee's to use, with no argument too */
+        stack_bytes = ABI64_MS_SHADOW;
+    }
     for (a = 0; a < in->arg_count; ++a) {
         int v = in->args[a];
         unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
@@ -395,9 +407,9 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
             load_agg_regs(s, in->args[a], &locs[a], &used);
             continue;
         }
-        d = xop_reg(x64_arg_regs[locs[a].index], 8);
+        d = xop_reg(x64_gpr_arg(in->call_ms_abi, locs[a].index), 8);
         xs_move_word_to(s, in->args[a], 0, &d);
-        used |= XR_BIT(x64_arg_regs[locs[a].index]);
+        used |= XR_BIT(x64_gpr_arg(in->call_ms_abi, locs[a].index));
     }
     free(locs);
     free(half_bits);
@@ -680,6 +692,26 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
  * A return: the value in %rax, a structure's second eightbyte in %rdx; a structure returned through memory copied
  * to the caller's buffer, whose address is returned.
  */
+/**
+ * Emit return @p x: in an ms_abi function, its caller's %rdi and %rsi put back first (kept by x64_begin()), which
+ * the return then reads, so that they live to it.
+ */
+static void x64_emit_ret(xsel_t *s, xinst_t *x) {
+    static const int keep[2] = {XR_DI, XR_SI};
+    int k;
+
+    for (k = 0; k < 2; ++k) {
+        if (s->ms_keep[k] != XR_NONE) {
+            xop_t from = xop_reg(s->ms_keep[k], 8);
+            xop_t to = xop_reg(keep[k], 8);
+
+            xs_emit(s, XI_MOV, 8, 2, &from, &to, NULL);
+            x->imp_use |= XR_BIT(keep[k]);
+        }
+    }
+    xf_emit(&s->xf, x);
+}
+
 static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
     const cc_ssa_function_t *f = s->f;
     xinst_t x = xi_make(XI_RET, 8, 0, NULL, NULL, NULL);
@@ -710,7 +742,7 @@ static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
         }
         xs_emit(s, XI_MOV, 8, 2, &h, &rax, NULL);
         x.imp_use = XR_BIT(XR_AX);
-        xf_emit(&s->xf, &x);
+        x64_emit_ret(s, &x);
         return;
     }
     if ((in->agg_class & ~(int)(X64_RET_CLASSES | CC_ABI_RET_FLOAT)) != 0 ||
@@ -729,7 +761,7 @@ static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
 
             xs_emit(s, XI_FLD, 8, 1, &m, NULL, NULL);
         }
-        xf_emit(&s->xf, &x);
+        x64_emit_ret(s, &x);
         return;
     }
     if (in->lhs >= 0 && xs_fp_kind(s, in->lhs) != XFP_NONE) {
@@ -748,7 +780,7 @@ static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
             }
             x.imp_use = XR_BIT(XR_XMM0);
         }
-        xf_emit(&s->xf, &x);
+        x64_emit_ret(s, &x);
         return;
     }
     if (in->lhs >= 0 && (in->agg_class & CC_ABI_RET_VEC128) != 0) {
@@ -765,7 +797,7 @@ static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
         }
         xs_emit(s, XI_MOV, 8, 2, &all, &x0, NULL);
         x.imp_use = XR_BIT(XR_XMM0);
-        xf_emit(&s->xf, &x);
+        x64_emit_ret(s, &x);
         return;
     }
     if (in->lhs >= 0) {
@@ -801,7 +833,7 @@ static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
             x.imp_use |= XR_BIT(reg);
         }
     }
-    xf_emit(&s->xf, &x);
+    x64_emit_ret(s, &x);
 }
 
 /** Whether the function is one this path takes on x86-64: NULL, or why not. */
@@ -821,6 +853,10 @@ static const char *x64_function_ok(const xsel_t *s) {
                                                CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM && !agg_in_regs(abi))) {
             return "a parameter's ABI";
         }
+    }
+    if (f->ms_abi && !cc_options_current()->no_sse) {
+        /* its caller's %xmm6-15 are kept whole, 16 bytes each, which this path's 8-byte vector values do not */
+        return "an ms_abi function with SSE";
     }
     return NULL;
 }
@@ -927,6 +963,22 @@ static int x64_begin(xsel_t *s) {
     if (f->is_variadic) {
         save_va_regs(s);
     }
+    if (f->ms_abi) {
+        /*
+         * its caller's %rdi and %rsi, which the System V code of the body (and every call it makes) is free to
+         * clobber: kept from entry, put back at each return (x64_ret()); the allocator finds them a place
+         */
+        static const int keep[2] = {XR_DI, XR_SI};
+        int k;
+
+        for (k = 0; k < 2; ++k) {
+            xop_t from = xop_reg(keep[k], 8);
+            xop_t to = xs_temp(s);
+
+            xs_emit(s, XI_MOV, 8, 2, &from, &to, NULL);
+            s->ms_keep[k] = to.reg;
+        }
+    }
     for (i = 0; i < f->instr_count; ++i) {
         const cc_ssa_instr_t *in = &f->instrs[i];
 
@@ -964,7 +1016,7 @@ static int x64_begin(xsel_t *s) {
 
             for (k = 0; k < (agg_in_regs(abi) && loc.size > 8 && (loc.sse & ABI_SSE_WHOLE) == 0 ? 2 : 1); ++k) {
                 int sse = agg_in_regs(abi) && (loc.sse & (ABI_SSE_WHOLE | (1u << k))) != 0;
-                xop_t from = xop_reg(sse ? xmm_arg(xi++) : x64_arg_regs[gi++], 8);
+                xop_t from = xop_reg(sse ? xmm_arg(xi++) : x64_gpr_arg(f->ms_abi, gi++), 8);
                 xop_t to = sse ? xop_reg(xf_new_xvreg(&s->xf), 8) : xs_temp(s);
 
                 xs_emit(s, XI_MOV, 8, 2, &from, &to, NULL);

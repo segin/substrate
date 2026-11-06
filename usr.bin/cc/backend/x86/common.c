@@ -76,6 +76,14 @@ const char *arg_reg64_gpr(size_t idx) {
     return regs[idx];
 }
 
+const char *arg_reg64_ms_gpr(size_t idx) {
+    static const char *regs[] = {"%rcx", "%rdx", "%r8", "%r9"};
+    if (idx >= sizeof(regs) / sizeof(regs[0])) {
+        return NULL;
+    }
+    return regs[idx];
+}
+
 const char *arg_reg64_xmm(size_t idx) {
     static const char *regs[] = {"%xmm0", "%xmm1", "%xmm2", "%xmm3",
                                  "%xmm4", "%xmm5", "%xmm6", "%xmm7"};

@@ -98,6 +98,37 @@ int cc_abi_x86_64_aggregate_arg(const cc_translation_unit_t *tu, int sid, long s
 int cc_abi_x86_64_aggregate_return(const cc_translation_unit_t *tu, int sid, long size);
 
 /**
+ * Whether the function named @p name is ms_abi: one of its declarations
+ * says so, and the target is x86-64 (gcc ignores the attribute on i386).
+ *
+ * @param tu    the translation unit
+ * @param name  the function
+ * @return      1 if calls of it, and its body, use the Microsoft x64
+ *              convention; else 0
+ */
+int cc_abi_x86_64_function_ms_abi(const cc_translation_unit_t *tu, const char *name);
+
+/**
+ * Whether a function type is ms_abi, on x86-64: CC_CQ_MS_ABI on @p t.
+ *
+ * @param t  a function type, possibly qualified; NULL for none
+ * @return   1 for the Microsoft x64 convention, else 0
+ */
+int cc_abi_x86_64_type_ms_abi(const cc_ctype_t *t);
+
+/**
+ * Check that a call of, or a function with, the Microsoft x64 convention
+ * passes only what this compiler passes so: integers, pointers and enums of
+ * at most 8 bytes, float and double -- not a structure or union, long
+ * double, a complex, an __int128, a _BitInt wider than 64 bits or a vector,
+ * which it would get wrong.
+ *
+ * @param t  an argument, parameter or return type
+ * @return   0 if it can be passed, else -1
+ */
+int cc_abi_x86_64_ms_abi_type_ok(const cc_ctype_t *t);
+
+/**
  * How the i386 System V ABI passes an aggregate argument, as gcc does:
  * on the stack, except that vectors take %xmm0-2 and %mm0-2 while they
  * last, and one of 4 bytes or fewer travels as an integer.

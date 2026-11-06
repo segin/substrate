@@ -108,6 +108,8 @@ const char *reg32_to8(const char *r);
 const char *reg32_to16(const char *r);
 /** The x86-64 general and xmm argument registers, by position. */
 const char *arg_reg64_gpr(size_t idx);
+/** The Microsoft x64 convention's (ms_abi) integer argument register @p idx: %rcx, %rdx, %r8, %r9; NULL past them. */
+const char *arg_reg64_ms_gpr(size_t idx);
 const char *arg_reg64_xmm(size_t idx);
 
 /* common.c: the x86-64 aggregate ABI bytes */
@@ -336,6 +338,11 @@ void i386_note_pc_thunk(const char *reg);
 int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a);
 
 /* x86_64.c: what mir_x86_64.c shares with the x86-64 emitter */
+
+/** The Microsoft x64 convention (ms_abi): how many arguments go in registers, by position. */
+#define ABI64_MS_REG_ARGS 4u
+/** and the shadow area a caller leaves above its return address for them, whatever their number */
+#define ABI64_MS_SHADOW 32u
 
 /** Where parameter @p param_index of @p f comes, the general registers taken from @p gpr_start on. */
 abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gpr_start);
