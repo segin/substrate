@@ -22,6 +22,7 @@ test:
 	bash ./test_ex_exrc.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_interrupt.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_tag.sh $(abspath $(TOP)/bin/ex/ex); \
+	bash ./test_ex_recover.sh $(abspath $(TOP)/bin/ex/ex); \
 	python3 ./test_ex_frontend.py $(abspath $(TOP)/bin/ex/ex)
 
 clean:

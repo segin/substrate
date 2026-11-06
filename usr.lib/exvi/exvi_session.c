@@ -508,6 +508,11 @@ print_enabled_set_options(int include_numeric_defaults)
             || (option_tags && strcmp(option_tags, EXVI_DEFAULT_TAGS) != 0)) {
         printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
     }
+    if (include_numeric_defaults
+            || (option_directory && strcmp(option_directory, EXVI_DEFAULT_DIRECTORY) != 0)) {
+        printf("directory=%s\n",
+            option_directory ? option_directory : EXVI_DEFAULT_DIRECTORY);
+    }
 }
 
 int
@@ -913,6 +918,28 @@ handle_set_command(const char *args)
                 replace_saved_string(&option_tags, copy);
                 free(copy);
             }
+        } else if ((len == 3 && strncmp(ptr, "dir", 3) == 0)
+                || (len == 9 && strncmp(ptr, "directory", 9) == 0)) {
+            if (query || (!eq && !query)) {
+                printf("directory=%s\n",
+                    option_directory ? option_directory : EXVI_DEFAULT_DIRECTORY);
+            } else {
+                char *copy;
+
+                if (!value || value_len == 0) {
+                    exvi_report_error("Bad directory value");
+                    return 1;
+                }
+                copy = malloc(value_len + 1);
+                if (!copy) {
+                    perror("malloc");
+                    return 1;
+                }
+                memcpy(copy, value, value_len);
+                copy[value_len] = '\0';
+                replace_saved_string(&option_directory, copy);
+                free(copy);
+            }
         } else {
             exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
             return 1;
@@ -1058,13 +1085,13 @@ handle_preserve_command(buffer_t *b)
             exvi_report_error("Out of memory");
             return 1;
         }
-        if (exvi_write_recover_snapshot(b, path) != 0) {
-            exvi_report_error("Could not preserve file");
+        if (exvi_write_recover_snapshot(b) != 0) {
+            exvi_report_errorf("Could not preserve file in %s", path);
             free(path);
             return 1;
         }
         exvi_note_recover_file(b, b->filename);
-        printf("File preserved as %s\n", path);
+        printf("File preserved\n");
         free(path);
     } else {
         exvi_report_error("No modifications or filename to preserve");

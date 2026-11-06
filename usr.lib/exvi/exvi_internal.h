@@ -14,6 +14,8 @@
 #define EXVI_MIN_SCROLL 1
 #define EXVI_MAX_SCROLL 999
 #define EXVI_DEFAULT_TAGS "tags"
+/** the directory option's default: recover files go in <it>/exvi-<uid> */
+#define EXVI_DEFAULT_DIRECTORY "/var/tmp"
 
 typedef struct line {
     struct line *prev;
@@ -87,6 +89,7 @@ extern int option_scroll_explicit;
 extern int option_wrapscan;
 extern int option_exrc;
 extern char *option_tags;
+extern char *option_directory;
 extern exvi_history_t undo_history;
 extern exvi_history_t redo_history;
 extern buffer_t pending_undo_buf;
@@ -126,6 +129,7 @@ void exvi_reset_undo_state(void);
 int exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src);
 int exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out);
 void buf_read_file(buffer_t *b, const char *filename);
+void buf_read_stream(buffer_t *b, FILE *f);
 void buf_write_file(buffer_t *b, const char *filename, int append);
 void buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);
@@ -146,13 +150,15 @@ void print_range(buffer_t *b, int addr1, int addr2, int numbered, int listed);
 char *expand_filename_refs(buffer_t *b, const char *arg);
 char *recover_path_for(const char *filename);
 int load_recover_into_buffer(buffer_t *b, const char *filename);
-int exvi_write_recover_snapshot(buffer_t *b, const char *path);
+int exvi_write_recover_snapshot(buffer_t *b);
+void exvi_note_recover_cwd(void);
 void exvi_cleanup_recover_file(const char *filename);
 void exvi_note_recover_file(buffer_t *b, const char *filename);
 void exvi_retarget_recover_file(buffer_t *b, const char *filename);
 void exvi_cleanup_buffer_recover_file(buffer_t *b);
 int exvi_add_startup_command(const char *cmd);
-void load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *));
+void load_startup_files(buffer_t *b, void (*command_fn)(buffer_t *, char *));
+void run_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *));
 void set_visual_handoff_file(const char *filename);
 void exvi_reset_runtime(exvi_frontend_t frontend);
 void exvi_cleanup_runtime(void);

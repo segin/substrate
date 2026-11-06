@@ -574,6 +574,11 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     exvi_reset_undo_state();
     exvi_init_registers();
 
+    /* startup files before the file: what they set applies to loading it */
+    if (!(frontend == EXVI_FRONTEND_EX && visual_mode)) {
+        load_startup_files(&buf, do_command);
+    }
+
     if (recover_mode && file_argc == 0) {
         fprintf(stderr, "%s: -r requires a file operand\n", exvi_progname);
         free(file_args);
@@ -616,7 +621,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     }
     
     if (!(frontend == EXVI_FRONTEND_EX && visual_mode)) {
-        load_startup_commands(&buf, do_command);
+        run_startup_commands(&buf, do_command);
     }
     if (exvi_visual_requested) {
         /* `-c vi` and the like */

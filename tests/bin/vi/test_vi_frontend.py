@@ -27,6 +27,31 @@ def load_pty_helpers():
     return module
 
 
+# Recover images go in <directory>/exvi-<uid>; EXINIT points the directory
+# option at a scratch directory, for this script and the vi it runs, so that
+# nothing is left in /var/tmp.
+RECOVER_ROOT = tempfile.mkdtemp(prefix="exvi-recover-")
+os.environ["EXINIT"] = "set dir=" + RECOVER_ROOT
+RECOVER_DIR = os.path.join(RECOVER_ROOT, "exvi-%d" % os.getuid())
+
+
+def read_recover_image():
+    """Return the text of the one recover image there (left in place), or None."""
+    names = os.listdir(RECOVER_DIR) if os.path.isdir(RECOVER_DIR) else []
+    if len(names) != 1:
+        return None
+    path = os.path.join(RECOVER_DIR, names[0])
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+    return text
+
+
+def clear_recover_images():
+    if os.path.isdir(RECOVER_DIR):
+        for name in os.listdir(RECOVER_DIR):
+            os.unlink(os.path.join(RECOVER_DIR, name))
+
+
 def interrupt_vi_session(helpers, vi_path, initial_text, key_steps, extra_args=None):
     temp_dir = tempfile.mkdtemp(prefix="exvi-")
     temp_path = os.path.join(temp_dir, "buffer.txt")
@@ -52,11 +77,7 @@ def interrupt_vi_session(helpers, vi_path, initial_text, key_steps, extra_args=N
     _, status = os.waitpid(pid, 0)
     os.close(master_fd)
 
-    recover_path = temp_path + ".recover"
-    recovered = None
-    if os.path.exists(recover_path):
-        with open(recover_path, "r", encoding="utf-8") as f:
-            recovered = f.read()
+    recovered = read_recover_image()
 
     return (os.waitstatus_to_exitcode(status), output.decode("latin1", "replace"),
             recovered, temp_path, temp_dir)
@@ -89,6 +110,7 @@ def main():
     require(proc.stderr.decode("latin1", "replace") == "vi: -r requires a file operand\n",
             f"vi -r missing-file stderr mismatch: {proc.stderr!r}")
 
+    # a buffer.txt.recover beside the file is anyone's: it is not recovered
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\n",
@@ -97,8 +119,8 @@ def main():
         extra_args=["-r"],
         extra_files={"buffer.txt.recover": "RECOVERED\n"},
     )
-    require(exit_code == 0, f"vi -r recovery exited with status {exit_code}")
-    require("recovered, 1 lines" in decoded, "vi -r missing recovered status")
+    require(exit_code == 1, f"vi -r of a planted recover file exited with status {exit_code}")
+    require("no recover file" in decoded, "vi -r recovered a file planted beside the file")
     require(saved == "one\n", f"vi -r unexpectedly modified file: {saved!r}")
 
     exit_code, decoded, recovered, path, temp_dir = interrupt_vi_session(
@@ -128,8 +150,7 @@ def main():
         require("recovered, 1 lines" in recover_output.decode("latin1", "replace"),
                 "interrupted vi -r missing recovered status")
     finally:
-        if os.path.exists(path + ".recover"):
-            os.unlink(path + ".recover")
+        clear_recover_images()
         shutil.rmtree(temp_dir)
 
     exit_code, decoded, recovered, path, temp_dir = interrupt_vi_session(
@@ -144,8 +165,7 @@ def main():
         require(recovered == "One",
                 f"interrupted no-eol vi recover contents mismatch: {recovered!r}")
     finally:
-        if os.path.exists(path + ".recover"):
-            os.unlink(path + ".recover")
+        clear_recover_images()
         shutil.rmtree(temp_dir)
 
     temp_dir = tempfile.mkdtemp(prefix="exvi-")
@@ -169,8 +189,9 @@ def main():
         os.close(master_fd)
         require(os.waitstatus_to_exitcode(status) == 0,
                 "vi stale-recover cleanup status mismatch")
-        require(not os.path.exists(path + ".recover"),
-                "vi successful write did not remove stale recover file")
+        # it is not a recover file of this editor's, nor this session's
+        require(os.path.exists(path + ".recover"),
+                "vi :wq removed a buffer.txt.recover it did not make")
     finally:
         if os.path.exists(path + ".recover"):
             os.unlink(path + ".recover")
@@ -731,4 +752,7 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    finally:
+        shutil.rmtree(RECOVER_ROOT, ignore_errors=True)

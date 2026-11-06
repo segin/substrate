@@ -28,6 +28,7 @@ int option_scroll_explicit = 0;
 int option_wrapscan = 1;
 int option_exrc = 0;
 char *option_tags = NULL;
+char *option_directory = NULL;
 char *last_search_pattern = NULL;
 char *last_sub_pattern = NULL;
 char *last_sub_replacement = NULL;
@@ -227,32 +228,209 @@ expand_filename_refs(buffer_t *b, const char *arg)
     return out;
 }
 
+/*
+ * Recover files live in a directory of the user's own, <directory>/exvi-<uid>
+ * (mode 0700), never beside the file: in a directory others can write, a
+ * name there could be planted -- a symbolic link the save would write
+ * through, or a file recovery would load.  Each file's recover file is
+ * named for the hash of its full path, then its base name for people to
+ * read.  The functions that name and open them use only async-signal-safe
+ * calls, as SIGTERM's handler saves the buffer through them.
+ */
+
+/** the directory a relative file name is taken from, for recover names */
+static char recover_cwd[4096];
+
+/** append s to out (cap bytes, *len used), stopping when full; async-signal-safe */
+static void
+recover_append(char *out, size_t cap, size_t *len, const char *s)
+{
+    while (*s && *len + 1 < cap) {
+        out[(*len)++] = *s++;
+    }
+    out[*len] = '\0';
+}
+
+/**
+ * Write the name of filename's recover file into out: 16 hex digits of the
+ * FNV-1a hash of its full path (with `.` components and repeated slashes
+ * dropped), a dot, and its base name.  Async-signal-safe.
+ * @return 0, or -1 if there is no file name or out is too small
+ */
+static int
+recover_name_into(const char *filename, char *out, size_t cap)
+{
+    static const char hex[] = "0123456789abcdef";
+    unsigned long long h = 0xcbf29ce484222325ULL;
+    const char *parts[2];
+    const char *base;
+    size_t len = 0;
+    int at_start = 1;
+
+    if (!filename || !*filename || cap < 20) {
+        return -1;
+    }
+    parts[0] = filename[0] == '/' ? "" : recover_cwd;
+    parts[1] = filename;
+    /* hash "/a/b/c" from the components of both parts */
+    for (int i = 0; i < 2; i++) {
+        const char *p = parts[i];
+
+        while (*p) {
+            const char *seg;
+            size_t seg_len;
+
+            while (*p == '/') {
+                p++;
+            }
+            seg = p;
+            while (*p && *p != '/') {
+                p++;
+            }
+            seg_len = (size_t)(p - seg);
+            if (seg_len == 0 || (seg_len == 1 && seg[0] == '.')) {
+                continue;
+            }
+            h = (h ^ '/') * 0x100000001b3ULL;
+            for (size_t k = 0; k < seg_len; k++) {
+                h = (h ^ (unsigned char)seg[k]) * 0x100000001b3ULL;
+            }
+            at_start = 0;
+        }
+    }
+    if (at_start) {
+        h = (h ^ '/') * 0x100000001b3ULL;
+    }
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        out[len++] = hex[(h >> shift) & 0xf];
+    }
+    out[len++] = '.';
+    out[len] = '\0';
+    base = strrchr(filename, '/');
+    base = base ? base + 1 : filename;
+    if (!*base) {
+        base = "file";
+    }
+    recover_append(out, cap < len + 201 ? cap : len + 201, &len, base);
+    return 0;
+}
+
+/**
+ * Write the path of the user's recover directory into out.
+ * Async-signal-safe.
+ * @return 0, or -1 if it does not fit
+ */
+static int
+recover_dir_into(char *out, size_t cap)
+{
+    char digits[24];
+    size_t nd = 0;
+    unsigned long uid = (unsigned long)getuid();
+    size_t len = 0;
+
+    do {
+        digits[nd++] = (char)('0' + uid % 10);
+        uid /= 10;
+    } while (uid && nd < sizeof(digits));
+    recover_append(out, cap, &len,
+        option_directory && *option_directory ? option_directory : EXVI_DEFAULT_DIRECTORY);
+    recover_append(out, cap, &len, "/exvi-");
+    while (nd > 0 && len + 1 < cap) {
+        out[len++] = digits[--nd];
+    }
+    out[len] = '\0';
+    return len + 1 < cap ? 0 : -1;
+}
+
+/**
+ * Open the user's recover directory, creating it (mode 0700) if create is
+ * set.  It must be a directory, not a link to one, owned by the user and
+ * closed to everyone else.  Async-signal-safe.
+ * @return a descriptor for it, or -1
+ */
+static int
+recover_dir_open(int create)
+{
+    char dir[4096];
+    struct stat st;
+    int fd;
+
+    if (recover_dir_into(dir, sizeof(dir)) != 0) {
+        return -1;
+    }
+    if (create) {
+        (void)mkdir(dir, 0700);
+    }
+    fd = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (fd < 0) {
+        return -1;
+    }
+    if (fstat(fd, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid()
+            || (st.st_mode & 077) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
 char *
 recover_path_for(const char *filename)
 {
+    char dir[4096];
+    char name[256];
     char *path = NULL;
 
-    if (!filename) {
+    if (recover_dir_into(dir, sizeof(dir)) != 0
+            || recover_name_into(filename, name, sizeof(name)) != 0) {
         return NULL;
     }
-    if (asprintf(&path, "%s.recover", filename) < 0) {
+    if (asprintf(&path, "%s/%s", dir, name) < 0) {
         return NULL;
     }
     return path;
 }
 
+/**
+ * Note the directory relative file names are taken from (the editor's
+ * working directory, at startup or after a change of directory).
+ */
+void
+exvi_note_recover_cwd(void)
+{
+    if (!getcwd(recover_cwd, sizeof(recover_cwd))) {
+        recover_cwd[0] = '\0';
+    }
+}
+
 int
 load_recover_into_buffer(buffer_t *b, const char *filename)
 {
-    char *path;
+    char name[256];
     struct stat st;
+    int dirfd;
+    int fd;
+    FILE *f;
 
-    path = recover_path_for(filename);
-    if (!path) {
+    if (recover_name_into(filename, name, sizeof(name)) != 0) {
         return -1;
     }
-    if (stat(path, &st) != 0) {
-        free(path);
+    dirfd = recover_dir_open(0);
+    if (dirfd < 0) {
+        return -1;
+    }
+    fd = openat(dirfd, name, O_RDONLY | O_NOFOLLOW);
+    close(dirfd);
+    if (fd < 0) {
+        return -1;
+    }
+    /* only the user's own: anything else was not written by this editor */
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != getuid()) {
+        close(fd);
+        return -1;
+    }
+    f = fdopen(fd, "r");
+    if (!f) {
+        close(fd);
         return -1;
     }
 
@@ -260,13 +438,13 @@ load_recover_into_buffer(buffer_t *b, const char *filename)
     buf_init(b);
     b->filename = strdup(filename);
     if (!b->filename) {
-        free(path);
+        fclose(f);
         return -1;
     }
-    buf_read_file(b, path);
+    buf_read_stream(b, f);
+    fclose(f);
     b->modified = 1;
     exvi_note_recover_file(b, filename);
-    free(path);
     return 0;
 }
 
@@ -317,18 +495,49 @@ write_recover_stream(buffer_t *b, FILE *f)
     return fflush(f);
 }
 
+/**
+ * Open filename's recover file for writing: created afresh (O_EXCL), mode
+ * 0600, never through a symbolic link.  Async-signal-safe.
+ * @return a descriptor, or -1
+ */
+static int
+recover_file_create(const char *filename)
+{
+    char name[256];
+    int dirfd;
+    int fd;
+
+    if (recover_name_into(filename, name, sizeof(name)) != 0) {
+        return -1;
+    }
+    dirfd = recover_dir_open(1);
+    if (dirfd < 0) {
+        return -1;
+    }
+    (void)unlinkat(dirfd, name, 0);
+    fd = openat(dirfd, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    close(dirfd);
+    return fd;
+}
+
 int
-exvi_write_recover_snapshot(buffer_t *b, const char *path)
+exvi_write_recover_snapshot(buffer_t *b)
 {
     FILE *f;
+    int fd;
     int rc;
 
-    if (!b || !path) {
+    if (!b || !b->filename) {
         return -1;
     }
 
-    f = fopen(path, "w");
+    fd = recover_file_create(b->filename);
+    if (fd < 0) {
+        return -1;
+    }
+    f = fdopen(fd, "w");
     if (!f) {
+        close(fd);
         return -1;
     }
 
@@ -342,14 +551,18 @@ exvi_write_recover_snapshot(buffer_t *b, const char *path)
 void
 exvi_cleanup_recover_file(const char *filename)
 {
-    char *path;
+    char name[256];
+    int dirfd;
 
-    path = recover_path_for(filename);
-    if (!path) {
+    if (recover_name_into(filename, name, sizeof(name)) != 0) {
         return;
     }
-    unlink(path);
-    free(path);
+    dirfd = recover_dir_open(0);
+    if (dirfd < 0) {
+        return;
+    }
+    (void)unlinkat(dirfd, name, 0);
+    close(dirfd);
 }
 
 void
@@ -375,10 +588,14 @@ exvi_retarget_recover_file(buffer_t *b, const char *filename)
         return;
     }
 
+    /* both in the user's own directory, so a plain rename is safe */
     old_path = recover_path_for(b->recover_filename);
     new_path = recover_path_for(filename);
     if (old_path && new_path && strcmp(old_path, new_path) != 0) {
-        if (access(old_path, F_OK) == 0) {
+        int dirfd = recover_dir_open(0);
+
+        if (dirfd >= 0) {
+            close(dirfd);
             rename(old_path, new_path);
         }
     }
@@ -393,13 +610,15 @@ exvi_cleanup_buffer_recover_file(buffer_t *b)
     if (!b) {
         return;
     }
+    /*
+     * Only a recover file this session wrote or recovered from: any other
+     * is from an earlier session, still to be recovered.
+     */
     if (b->recover_filename) {
         exvi_cleanup_recover_file(b->recover_filename);
         free(b->recover_filename);
         b->recover_filename = NULL;
-        return;
     }
-    exvi_cleanup_recover_file(b->filename);
 }
 
 int
@@ -430,15 +649,16 @@ exvi_add_startup_command(const char *cmd)
 }
 
 /**
- * Run the startup files and the -c commands, as POSIX ex's Initialization
- * orders them.  With -s (batch_mode) no startup file is read at all.
- * Otherwise EXINIT runs, or failing that $HOME/.exrc; then ./.exrc -- but
- * only if one of those set the exrc option, since a directory's .exrc
+ * Run the startup files, as POSIX ex's Initialization orders them: before
+ * the file is loaded, so that what they set (the directory option, for -r)
+ * applies to loading it.  With -s (batch_mode) no startup file is read at
+ * all.  Otherwise EXINIT runs, or failing that $HOME/.exrc; then ./.exrc --
+ * but only if one of those set the exrc option, since a directory's .exrc
  * comes with whatever was unpacked or cloned there, and only if it is not
  * $HOME/.exrc again.  Secure mode (-S) reads no .exrc.
  */
 void
-load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
+load_startup_files(buffer_t *b, void (*command_fn)(buffer_t *, char *))
 {
     char *exinit = getenv("EXINIT");
     char *home = getenv("HOME");
@@ -473,7 +693,14 @@ load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
             }
         }
     }
+}
 
+/**
+ * Run the -c commands (and -t's tag), once the file is loaded.
+ */
+void
+run_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
+{
     for (int i = 0; i < startup_command_count; i++) {
         command_fn(b, startup_commands[i]);
     }
@@ -618,25 +845,13 @@ exvi_catch_signal(int sig, void (*fn)(int))
 static void
 recover_signal_save(buffer_t *b)
 {
-    const char *suffix = ".recover";
-    char path[4096];
-    size_t flen;
-    size_t slen;
     int fd;
     line_t *l;
 
     if (!b || !b->modified || !b->filename || !b->head) {
         return;
     }
-    flen = strlen(b->filename);
-    slen = strlen(suffix);
-    if (flen + slen >= sizeof(path)) {
-        return;
-    }
-    memcpy(path, b->filename, flen);
-    memcpy(path + flen, suffix, slen + 1);
-
-    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    fd = recover_file_create(b->filename);
     if (fd < 0) {
         return;
     }
@@ -680,6 +895,8 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     option_wrapscan = 1;
     option_exrc = 0;
     replace_saved_string(&option_tags, EXVI_DEFAULT_TAGS);
+    replace_saved_string(&option_directory, EXVI_DEFAULT_DIRECTORY);
+    exvi_note_recover_cwd();
     free(last_search_pattern);
     last_search_pattern = NULL;
     free(last_sub_pattern);
@@ -717,6 +934,8 @@ exvi_cleanup_runtime(void)
     option_exrc = 0;
     free(option_tags);
     option_tags = NULL;
+    free(option_directory);
+    option_directory = NULL;
     free(last_search_pattern);
     last_search_pattern = NULL;
     free(last_sub_pattern);

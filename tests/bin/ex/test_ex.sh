@@ -3,6 +3,27 @@ set -eu
 
 EX_BIN="${1:-./bin/ex/ex}"
 
+# The preserve and recover cases run with -s, which reads no startup file,
+# so they use the default recover directory, /var/tmp/exvi-<uid>: remove
+# what this run leaves there, and only that.
+RECOVER_DIR="/var/tmp/exvi-$(id -u)"
+RECOVER_HAD_DIR=0
+[ -d "$RECOVER_DIR" ] && RECOVER_HAD_DIR=1
+RECOVER_BEFORE=$(ls "$RECOVER_DIR" 2>/dev/null || true)
+cleanup_recover_dir() {
+    local f
+
+    for f in $(ls "$RECOVER_DIR" 2>/dev/null || true); do
+        if ! grep -qxF -- "$f" <<<"$RECOVER_BEFORE"; then
+            rm -f -- "$RECOVER_DIR/$f"
+        fi
+    done
+    if [ "$RECOVER_HAD_DIR" -eq 0 ]; then
+        rmdir "$RECOVER_DIR" 2>/dev/null || true
+    fi
+}
+trap cleanup_recover_dir EXIT
+
 TEST_FAILS=0
 TEST_PASS=0
 
@@ -1254,7 +1275,7 @@ two"
 run_stdout_with_path_template_test "Recover percent reloads preserved current file" \
     "one\ntwo\n" \
     ":1change\nRECOVERED\n.\n:preserve\n:recover %\n:1,2p\n:q!\n" \
-    "File preserved as __FILE__.recover
+    "File preserved
 \"__FILE__\" recovered, 2 lines
 RECOVERED
 two"
@@ -1852,7 +1873,8 @@ showmode
 wrapscan
 scroll=12
 tabstop=8
-tags=tags"
+tags=tags
+directory=/var/tmp"
 
 run_stdout_test "Set noreadonly disables readonly option" \
     "one\ntwo\n" \

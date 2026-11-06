@@ -9,6 +9,28 @@ import sys
 import tempfile
 import time
 
+# Recover images go in <directory>/exvi-<uid>; EXINIT points the directory
+# option at a scratch directory, for this script and the ex it runs, so that
+# nothing is left in /var/tmp.
+RECOVER_ROOT = tempfile.mkdtemp(prefix="exvi-recover-")
+os.environ["EXINIT"] = "set dir=" + RECOVER_ROOT
+RECOVER_DIR = os.path.join(RECOVER_ROOT, "exvi-%d" % os.getuid())
+
+
+def read_recover_image():
+    """Return the text of the one recover image there (left in place), or None."""
+    names = os.listdir(RECOVER_DIR) if os.path.isdir(RECOVER_DIR) else []
+    if len(names) != 1:
+        return None
+    with open(os.path.join(RECOVER_DIR, names[0]), "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def clear_recover_images():
+    if os.path.isdir(RECOVER_DIR):
+        for name in os.listdir(RECOVER_DIR):
+            os.unlink(os.path.join(RECOVER_DIR, name))
+
 
 def read_some(fd, timeout):
     out = bytearray()
@@ -131,19 +153,27 @@ def main():
     require(proc.stderr.decode("latin1", "replace") == "ex: -r requires a file operand\n",
             f"ex -r missing-file stderr mismatch: {proc.stderr!r}")
 
+    # :preserve, then ex -r: the recover image is in <directory>/exvi-<uid>
+    # (EXINIT points directory at a scratch directory), and a .recover
+    # planted beside the file is not what comes back
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write("one\n")
         path = f.name
+    env = os.environ
     try:
         with open(path + ".recover", "w", encoding="utf-8") as f2:
-            f2.write("RECOVERED\n")
+            f2.write("PLANTED\n")
+        proc = subprocess.run([ex_path, path], input=b"1c\nRECOVERED\n.\npreserve\nq!\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        require(proc.returncode == 0, f"ex preserve status mismatch: {proc.returncode}")
         proc = subprocess.run([ex_path, "-r", path], input=b"1p\nq!\n",
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         require(proc.returncode == 0, f"ex -r status mismatch: {proc.returncode}")
         decoded = proc.stdout.decode("latin1", "replace")
         require(f"\"{path}\" recovered, 1 lines" in decoded,
                 f"ex -r missing recovered banner: {decoded!r}")
         require("RECOVERED\n" in decoded, f"ex -r missing recovered line print: {decoded!r}")
+        require("PLANTED" not in decoded, f"ex -r recovered a file planted beside it: {decoded!r}")
         require(proc.stderr == b"", f"ex -r stderr mismatch: {proc.stderr!r}")
         with open(path, "r", encoding="utf-8") as f2:
             saved = f2.read()
@@ -152,6 +182,7 @@ def main():
         if os.path.exists(path + ".recover"):
             os.unlink(path + ".recover")
         os.unlink(path)
+        clear_recover_images()
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write("one\n")
@@ -163,10 +194,8 @@ def main():
             b"1change\nINTERRUPTED\n.\n",
         )
         require(exit_code == 1, f"interrupted ex status mismatch: {exit_code}")
-        require(os.path.exists(path + ".recover"),
-                "interrupted ex did not create a recover file")
-        with open(path + ".recover", "r", encoding="utf-8") as f2:
-            recovered = f2.read()
+        recovered = read_recover_image()
+        require(recovered is not None, "interrupted ex did not create a recover file")
         require(recovered == "INTERRUPTED\n",
                 f"interrupted ex recover contents mismatch: {recovered!r}")
 
@@ -177,8 +206,7 @@ def main():
         require("INTERRUPTED\n" in recover_output,
                 f"interrupted ex -r missing recovered content: {recover_output!r}")
     finally:
-        if os.path.exists(path + ".recover"):
-            os.unlink(path + ".recover")
+        clear_recover_images()
         os.unlink(path)
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
@@ -191,15 +219,12 @@ def main():
             b"1s/o/O/\n",
         )
         require(exit_code == 1, f"interrupted no-eol ex status mismatch: {exit_code}")
-        require(os.path.exists(path + ".recover"),
-                "interrupted no-eol ex did not create a recover file")
-        with open(path + ".recover", "r", encoding="utf-8") as f2:
-            recovered = f2.read()
+        recovered = read_recover_image()
+        require(recovered is not None, "interrupted no-eol ex did not create a recover file")
         require(recovered == "One",
                 f"interrupted no-eol ex recover contents mismatch: {recovered!r}")
     finally:
-        if os.path.exists(path + ".recover"):
-            os.unlink(path + ".recover")
+        clear_recover_images()
         os.unlink(path)
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
@@ -211,8 +236,9 @@ def main():
         proc = subprocess.run([ex_path, "-s", path], input=b"wq\n",
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         require(proc.returncode == 0, f"ex stale-recover cleanup status mismatch: {proc.returncode}")
-        require(not os.path.exists(path + ".recover"),
-                "ex successful write did not remove stale recover file")
+        # it is not a recover file of this editor's, nor this session's
+        require(os.path.exists(path + ".recover"),
+                "ex :wq removed a .recover beside the file it did not make")
     finally:
         if os.path.exists(path + ".recover"):
             os.unlink(path + ".recover")
@@ -224,8 +250,9 @@ def main():
         with open(source_path, "w", encoding="utf-8") as f:
             f.write("one\n")
 
+        # (not -s, which would skip EXINIT and the scratch recover directory)
         proc = subprocess.run(
-            [ex_path, "-s", source_path],
+            [ex_path, source_path],
             input=b"1s/o/O/\npreserve\nfile renamed.txt\nq!\n",
             cwd=temp_dir,
             stdout=subprocess.PIPE,
@@ -233,10 +260,11 @@ def main():
         )
         require(proc.returncode == 0,
                 f"ex preserve-retarget status mismatch: {proc.returncode}")
-        require(not os.path.exists(source_path + ".recover"),
-                "old recover file remained after :file rename")
-        require(os.path.exists(renamed_path + ".recover"),
-                "renamed recover file missing after :file rename")
+        require(len(os.listdir(RECOVER_DIR)) == 1,
+                f"recover images after :file rename: {os.listdir(RECOVER_DIR)!r}")
+        proc = subprocess.run([ex_path, "-r", source_path], input=b"q!\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode == 1, "old recover file remained after :file rename")
 
         proc = subprocess.run([ex_path, "-r", renamed_path], input=b"1p\nq!\n",
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -246,6 +274,7 @@ def main():
                 f"ex renamed recover missing banner: {decoded!r}")
         require("One\n" in decoded,
                 f"ex renamed recover missing contents: {decoded!r}")
+        clear_recover_images()
 
     with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
         source_path = os.path.join(temp_dir, "source.txt")
@@ -254,7 +283,7 @@ def main():
             f.write("one\n")
 
         proc = subprocess.run(
-            [ex_path, "-s", source_path],
+            [ex_path, source_path],
             input=b"1s/o/O/\npreserve\nfile renamed.txt\nwq!\n",
             cwd=temp_dir,
             stdout=subprocess.PIPE,
@@ -262,10 +291,8 @@ def main():
         )
         require(proc.returncode == 0,
                 f"ex renamed write-cleanup status mismatch: {proc.returncode}")
-        require(not os.path.exists(source_path + ".recover"),
-                "old recover file remained after renamed write")
-        require(not os.path.exists(renamed_path + ".recover"),
-                "renamed recover file remained after successful write")
+        require(os.listdir(RECOVER_DIR) == [],
+                f"recover image remained after a successful write: {os.listdir(RECOVER_DIR)!r}")
         with open(renamed_path, "r", encoding="utf-8") as f:
             saved = f.read()
         require(saved == "One\n",
@@ -456,4 +483,7 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    finally:
+        subprocess.run(["rm", "-rf", RECOVER_ROOT])

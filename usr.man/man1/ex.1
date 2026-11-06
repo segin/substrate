@@ -215,6 +215,12 @@ Set the visual frontend's half-page scroll amount once explicitly configured.
 Set the comma-separated tag-file search path used by
 .Ic tag
 and related visual commands.
+.It Ic directory= , dir=
+The directory under which the user's recovery directory,
+.Pa exvi- Ns Ar uid ,
+is kept.
+The default is
+.Pa /var/tmp .
 .El
 .Sh ENVIRONMENT
 .Bl -tag -width indent
@@ -259,8 +265,20 @@ or
 .Li \&? Ns Ar pattern Ns Li \&?
 search, and nothing else: any other address is reported as a bad tag
 address, never run as a command.
-.It Pa .*.recover
-Preserved recovery images written for interrupted sessions.
+.It Pa /var/tmp/exvi- Ns Ar uid
+The user's recovery directory, under the
+.Ic directory
+option's value: preserved recovery images, one per file, written by
+.Ic preserve
+and for sessions ended by
+.Dv SIGHUP
+or
+.Dv SIGTERM .
+It is created with mode 0700 and used only while it is the user's, not a
+symbolic link and closed to everyone else; each image is created afresh
+with mode 0600, and only an image the user owns is recovered.
+Writing the file removes an image only if this session wrote or recovered
+from it.
 .El
 .Sh ASYNCHRONOUS EVENTS
 .Dv SIGINT

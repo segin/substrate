@@ -112,12 +112,16 @@ regex, and every finding that touches a regex was re-run on them.
 
 ### EXVI-03 — recover files: predictable names beside the file, symlinks followed, umask modes, any owner — *High*
 
-- [ ] **EXVI-03.1** (Ubiquitous) The editor shall create recover files in the
+- [x] **EXVI-03.1** (Ubiquitous) The editor shall create recover files in the
   directory named by the `directory` option.
-- [ ] **EXVI-03.2** (Ubiquitous) The editor shall create each recover file
+- [x] **EXVI-03.2** (Ubiquitous) The editor shall create each recover file
   with `O_CREAT|O_EXCL|O_NOFOLLOW` and mode 0600.
-- [ ] **EXVI-03.3** (Unwanted behaviour) If a recover file is not owned by the
+- [x] **EXVI-03.3** (Unwanted behaviour) If a recover file is not owned by the
   user, then the editor shall refuse to recover from it.
+- [x] **EXVI-03.4** (Event-driven) When the editor starts, it shall run its
+  startup files before loading the file to be edited.  (Found while fixing:
+  `-r` loaded the recover file before EXINIT or `.exrc` could set
+  `directory`.)
 
 - **Where**: `exvi_runtime.c:237`, `:329` (`:preserve`, `fopen(path, "w")`),
   `:593` (save on a signal); `load_recover_into_buffer` `:253` and `ex -r`
@@ -131,7 +135,7 @@ regex, and every finding that touches a regex was re-run on them.
 
 ### EXVI-04 — `:w` deletes a `<file>.recover` the session did not create — *High*
 
-- [ ] **EXVI-04.1** (Event-driven) When the current file is written, the
+- [x] **EXVI-04.1** (Event-driven) When the current file is written, the
   editor shall remove only a recover file that the same session created.
 
 - **Where**: `exvi_runtime.c:401`, called from `exvi_buffer.c:557`.

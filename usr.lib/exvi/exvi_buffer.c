@@ -361,15 +361,27 @@ void
 buf_read_file(buffer_t *b, const char *filename)
 {
     FILE *f = fopen(filename, "r");
+
+    if (!f) {
+        return;
+    }
+    buf_read_stream(b, f);
+    fclose(f);
+}
+
+/**
+ * Append the lines of f to b, and mark b as just read: unmodified, with the
+ * current line its first.  f is left open.
+ */
+void
+buf_read_stream(buffer_t *b, FILE *f)
+{
     char *line = NULL;
     size_t cap = 0;
     ssize_t ret;
     line_t *pos = b->tail;
     int last_had_newline = 0;
 
-    if (!f) {
-        return;
-    }
     while ((ret = getline(&line, &cap, f)) != -1) {
         if (ret > 0 && line[ret - 1] == '\n') {
             line[ret - 1] = '\0';
@@ -380,7 +392,6 @@ buf_read_file(buffer_t *b, const char *filename)
         pos = buf_insert_after(b, pos, line);
     }
     free(line);
-    fclose(f);
     if (b->line_count == 0) {
         b->empty_origin = 1;
         b->started_empty = 1;
