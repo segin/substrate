@@ -4785,8 +4785,8 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
     const char *env = getenv("CC_NO_MIR");
     const char *limit = getenv("CC_MIR_LIMIT");
     const char *stats_env = getenv("CC_MIR_STATS");
-    /* CC_MIR_STATS: 1, each function this path takes and why it does not take the others; 2, only the
-     * others (a Linux build is some sixty thousand lines of "taken" and a handful of the rest) */
+    /* CC_MIR_STATS: 1, why this path does not take each function it does not (a Linux build is some sixty
+     * thousand lines of "taken" and a handful of the rest); 2, those and each function it takes */
     int stats = stats_env == NULL ? 0 : stats_env[0] == '1' ? 1 : stats_env[0] == '2' ? 2 : 0;
     const char *why;
     xsel_t s;
@@ -4898,7 +4898,7 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
     }
     if (stats != 0) {
         if (rc == 0) {
-            if (stats == 1) {
+            if (stats == 2) {
                 fprintf(stderr, "mir: %s: taken\n", f->name);
             }
         } else if (s.unsupported) {

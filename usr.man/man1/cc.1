@@ -1365,12 +1365,11 @@ only the first
 functions the register allocator would take go through it, to
 find a function it miscompiles by bisection.
 .It Ev CC_MIR_STATS
-With the value 1, print to the standard error each function the
-register allocator takes
-.Pq Dq mir: Ar f : No taken ,
-and why it does not take each other one
+With the value 1, print to the standard error why the register
+allocator does not take each function it does not
 .Pq Dq mir: Ar f : No not taken: Ar why ;
-with the value 2, only those it does not take.
+with the value 2, also each function it takes
+.Pq Dq mir: Ar f : No taken .
 Unset, or any other value, prints nothing.
 .El
 .Sh EXIT STATUS
