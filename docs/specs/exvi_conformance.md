@@ -76,10 +76,9 @@ If a behavior is not listed here, it is not part of the supported contract yet.
 
 These areas remain intentionally outside full-conformance claims today:
 
-- POSIX ex commands not implemented: `abbreviate`/`unabbreviate`, `map`/`unmap`,
-  `chdir`, `shell`, `source`, `suspend`/`stop`, `open`, `z`, `<`, `>`, `^D`,
-  `~`, `@`, `*`, `ex` (docs/exvi-audit-2026-11-06.md, EXVI-49)
-- options accepted and reported but without their effect (EXVI-53, EXVI-54)
+- `open` is visual mode, not a one-line open mode
+- options without effect: `terse` (POSIX: messages "may" be shorter) and
+  `redraw` (only for terminals that cannot do visual mode)
 - full multi-change undo / redo transaction parity
 - fully historical `.` repeat for insert / change / replace text replays
 - complete motion/operator coverage across every classic `vi` family
