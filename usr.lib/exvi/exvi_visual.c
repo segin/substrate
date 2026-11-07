@@ -9933,6 +9933,8 @@ process_normal_key:
             vis.pending_g = 0;
             vis.screen_dirty = 0;
             vi_page_scroll(b, &vis, vi_take_count(&vis));
+            /* onto the first non-blank (POSIX vi); it kept the column */
+            vis.cursor_col = vi_first_nonblank_col(b->cur);
             break;
         case 0x15:
             vis.pending_g = 0;

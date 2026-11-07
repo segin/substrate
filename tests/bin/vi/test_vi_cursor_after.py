@@ -6,7 +6,8 @@ end, where r found nothing, and j kept that column.  yy, Y and a line
 yank toward the end (yj, yG, yL) moved the cursor to column 1; they leave
 it where it was.  A yank toward the start (yk) goes to the region's first
 line at its first character, where POSIX and Vim (which keeps the column)
-part: the expected result is POSIX's.
+part: the expected result is POSIX's.  ^F kept the column; it goes to
+the first non-blank.
 
 Usage: test_vi_cursor_after.py path/to/vi
 """
@@ -17,6 +18,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_vi_pty import run_vi_session  # noqa: E402
 
 VI = os.path.abspath(sys.argv[1])
+INDENTED = "".join(f"  l{i}\n" for i in range(1, 61))
+
+
+def changed(text):
+    """The lines r changed: where the cursor was."""
+    return [line for line in text.split("\n") if "Z" in line]
 
 CASES = [
     # x: onto the new last character when it took the last
@@ -38,6 +45,9 @@ CASES = [
     ("yk", "abc\nabc\n", [b"jllykrZ"], "Zbc\nabc\n"),
     ("y'a backward", "abc\nabc\nabc\n", [b"llmajjly'arZ"],
      "Zbc\nabc\nabc\n"),
+    # ^F: the first non-blank
+    ("^F", INDENTED, [b"\x06rZ"], None),
+    ("^F from a later column", INDENTED, [b"$\x06rZ"], None),
 ]
 
 
@@ -45,7 +55,12 @@ def main():
     fails = 0
     for name, text, keys, want in CASES:
         status, _, saved = run_vi_session(VI, text, keys)
-        if status != 0 or saved != want:
+        if want is None:
+            # which line ^F lands on is not what this checks
+            ok = len(changed(saved)) == 1 and changed(saved)[0].startswith("  Z")
+        else:
+            ok = saved == want
+        if status != 0 or not ok:
             print(f"FAIL: {name}: status {status}, {saved!r}, want {want!r}")
             fails += 1
     if fails:
