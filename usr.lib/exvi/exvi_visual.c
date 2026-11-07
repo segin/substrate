@@ -5052,11 +5052,18 @@ vi_linewise_yank(buffer_t *b, vi_visual_t *vis, int start, int end)
 
     vi_take_register_arg(vis, regarg);
     handle_yank_command(b, regarg, 1, start, end);
-    orig = buf_get_line(b, start);
-    if (orig) {
-        b->cur = orig;
+    /*
+     * POSIX vi: yy, Y and a yank toward the end leave the cursor where it
+     * was; one toward the start goes to the region's first line, at its
+     * first character.  Every line yank went to column 1.
+     */
+    if (start != buf_current_line(b)) {
+        orig = buf_get_line(b, start);
+        if (orig) {
+            b->cur = orig;
+            vis->cursor_col = 0;
+        }
     }
-    vis->cursor_col = 0;
     exvi_report_lines(end - start + 1, "lines yanked");
 }
 
