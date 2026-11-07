@@ -470,6 +470,9 @@ and restricted entry points such as
 .Ql rex
 are implemented through the shared frontend parser even though they are not
 separate binaries today.
+.Pp
+A file whose last line has no newline is edited as if it had one, and is
+written back with it.
 .Sh SEE ALSO
 .Xr vi 1 ,
 .Xr regex 3

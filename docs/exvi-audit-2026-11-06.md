@@ -318,7 +318,7 @@ The number is not reused.
 
 ### EXVI-18 — an incomplete last line is written back without its newline — *Low*
 
-- [ ] **EXVI-18.1** (Event-driven) When a file's last line has no newline, the
+- [x] **EXVI-18.1** (Event-driven) When a file's last line has no newline, the
   editor shall write that line with a newline.
 
 - **Where**: `exvi_buffer.c:426-433`.

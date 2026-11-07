@@ -1282,10 +1282,12 @@ run_stdout_with_path_template_test "Recover percent reloads preserved current fi
 RECOVERED
 two"
 
-run_file_bytes_test "Write preserves missing trailing newline" \
+# POSIX ex, INPUT FILES: an incomplete last line is completed, and written
+# back with its newline
+run_file_bytes_test "Write completes an incomplete last line" \
     "abc" \
     ":wq!\n" \
-    "616263"
+    "6162630a"
 
 run_file_bytes_test "Write preserves empty file bytes" \
     "" \
@@ -1307,11 +1309,11 @@ run_file_bytes_test "Append blank line to empty file creates one-byte newline fi
     ":a\n\n.\n:wq!\n" \
     "0a"
 
-run_recover_bytes_test "Recover preserves missing trailing newline" \
+run_recover_bytes_test "Recovered incomplete last line is written completed" \
     "abc" \
     ":1s/c/C/\n:preserve\n:q!\n" \
     ":wq!\n" \
-    "616243"
+    "6162430a"
 
 run_tag_test "Tag jump and pop restore prior location" \
     "alpha\nbeta\ngamma\n" \

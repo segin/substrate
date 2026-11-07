@@ -550,9 +550,6 @@ int
 write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
 {
     line_t *curr;
-    int omit_final_newline;
-    int synthetic_empty_with_content;
-    int has_nonempty_line = 0;
 
     if (!range_writable(b, addr1, addr2)) {
         return -1;
@@ -571,24 +568,16 @@ write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
         return 0;
     }
 
-    for (curr = b->head; curr; curr = curr->next) {
-        if (curr->len > 0) {
-            has_nonempty_line = 1;
-            break;
-        }
-    }
-    synthetic_empty_with_content = b->started_empty
-        && b->line_count > 0
-        && has_nonempty_line;
-    omit_final_newline = (addr2 == b->line_count && !b->trailing_newline
-        && !synthetic_empty_with_content);
+    /* Every line is written with its newline -- an incomplete last line
+     * read from the file too (POSIX ex, INPUT FILES).  Only the empty
+     * file's placeholder line, above, writes as nothing. */
     curr = buf_get_line(b, addr1);
     for (int line = addr1; line <= addr2 && curr; line++) {
         /* the line's length, not its text up to a NUL in it */
         if (curr->len > 0 && fwrite(curr->text, 1, curr->len, f) != curr->len) {
             return -2;
         }
-        if (!(omit_final_newline && line == addr2) && fputc('\n', f) == EOF) {
+        if (fputc('\n', f) == EOF) {
             return -2;
         }
         curr = curr->next;
