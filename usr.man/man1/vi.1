@@ -178,6 +178,27 @@ sequence, or one of a C1 control's \(em as
 .Ql \e Ns Ar ooo ,
 its octal value: no byte of a file reaches the terminal as one it would
 act on.
+.Pp
+Text input,
+.Ql r
+and
+.Ql R
+take any character typed, UTF-8 included;
+.Ql r
+and
+.Ql R
+replace the whole character under the cursor, and in
+.Ql R
+backspace restores it.
+An
+.Aq ESC
+followed within 50 milliseconds by keys that make no terminal key sequence
+(an arrow key is
+.Aq ESC
+.Ql \&[C )
+is an
+.Aq ESC
+and then those keys, so typing fast or pasting loses nothing.
 .Sh OPTIONS
 .Bl -tag -width indent
 .It Fl R

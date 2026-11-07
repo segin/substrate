@@ -24,7 +24,6 @@ test_vi_record_replace_char_basic(void)
     vi_visual_t vis;
     line_t dummy_line;
     int test_col = 5;
-    char test_ch = 'x';
 
     memset(&vis, 0, sizeof(vis));
     memset(&dummy_line, 0, sizeof(dummy_line));
@@ -36,7 +35,8 @@ test_vi_record_replace_char_basic(void)
     assert(vis.replace_edits == NULL);
     assert(vis.replace_edit_cap == 0);
 
-    vi_record_replace_char(&vis, &dummy_line, test_col, test_ch);
+    /* a 1-byte character typed over the 1-byte 'w' */
+    vi_record_replace_char(&vis, &dummy_line, test_col, "w", 1, 1);
 
     assert(vis.replace_edit_count == 1);
     assert(vis.replace_edit_cap >= 1);
@@ -46,10 +46,13 @@ test_vi_record_replace_char_basic(void)
     assert(vis.replace_edits[0].line == &dummy_line);
     assert(vis.replace_edits[0].aux_line == NULL);
     assert(vis.replace_edits[0].col == test_col);
-    assert(vis.replace_edits[0].ch == test_ch);
+    assert(vis.replace_edits[0].old_len == 1);
+    assert(vis.replace_edits[0].old[0] == 'w');
+    assert(vis.replace_edits[0].new_len == 1);
 
     // Add a second edit to ensure appending works and capacity management
-    vi_record_replace_char(&vis, &dummy_line, test_col + 1, 'y');
+    /* a 2-byte character typed past the end: nothing replaced */
+    vi_record_replace_char(&vis, &dummy_line, test_col + 1, "", 0, 2);
 
     assert(vis.replace_edit_count == 2);
     assert(vis.replace_edit_cap >= 2);
@@ -58,7 +61,8 @@ test_vi_record_replace_char_basic(void)
     assert(vis.replace_edits[1].line == &dummy_line);
     assert(vis.replace_edits[1].aux_line == NULL);
     assert(vis.replace_edits[1].col == test_col + 1);
-    assert(vis.replace_edits[1].ch == 'y');
+    assert(vis.replace_edits[1].old_len == 0);
+    assert(vis.replace_edits[1].new_len == 2);
 
     free(vis.replace_edits);
 }

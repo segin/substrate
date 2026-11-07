@@ -47,17 +47,21 @@ typedef enum {
 } vi_repeat_kind_t;
 
 typedef enum {
-    VI_REPLACE_EDIT_CHAR = 0,
-    VI_REPLACE_EDIT_INSERT,
+    VI_REPLACE_EDIT_CHAR = 0,   /* a character typed over old[], or past the end */
     VI_REPLACE_EDIT_SPLIT,
 } vi_replace_edit_kind_t;
 
+/* one R-mode edit, for backspace to undo: at col, new_len bytes were
+ * written where the old_len bytes old[] were -- one character each, of
+ * any length; old_len is 0 past the end of the line */
 typedef struct {
     vi_replace_edit_kind_t kind;
     line_t *line;
     line_t *aux_line;
     int col;
-    char ch;
+    char old[4];
+    int old_len;
+    int new_len;
 } vi_replace_edit_t;
 
 #define VI_PROMPT_HISTORY_MAX 32
@@ -128,6 +132,8 @@ static int vi_compare_positions(buffer_t *b, line_t *left, int left_col, line_t 
     int right_col);
 static void vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch);
 static void vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch);
+static void vi_replace_insert_bytes(buffer_t *b, vi_visual_t *vis, const char *bytes, int n);
+static int vi_utf8_decode_text_at(const char *text, size_t len, int idx, unsigned int *cp_out);
 static void vi_split_line(buffer_t *b, vi_visual_t *vis);
 static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
@@ -407,7 +413,12 @@ vi_replay_insert_text(buffer_t *b, vi_visual_t *vis, const char *text)
         if (*p == '\n') {
             vi_split_line(b, vis);
         } else if (vis->replace_mode) {
-            vi_replace_insert_char(b, vis, *p);
+            /* a whole character over a whole character */
+            int n = vi_utf8_decode_text_at((const char *)p, strlen((const char *)p), 0, NULL);
+
+            vi_replace_insert_bytes(b, vis, (const char *)p, n);
+            p += n;
+            continue;
         } else {
             vi_insert_char(b, vis, *p);
         }
@@ -529,30 +540,22 @@ vi_push_replace_edit(vi_visual_t *vis, const vi_replace_edit_t *edit)
 }
 
 static void
-vi_record_replace_char(vi_visual_t *vis, line_t *line, int col, char ch)
+vi_record_replace_char(vi_visual_t *vis, line_t *line, int col, const char *old,
+    int old_len, int new_len)
 {
     vi_replace_edit_t edit = {
         .kind = VI_REPLACE_EDIT_CHAR,
         .line = line,
         .aux_line = NULL,
         .col = col,
-        .ch = ch,
+        .old_len = old_len,
+        .new_len = new_len,
     };
 
-    vi_push_replace_edit(vis, &edit);
-}
-
-static void
-vi_record_replace_insert(vi_visual_t *vis, line_t *line, int col)
-{
-    vi_replace_edit_t edit = {
-        .kind = VI_REPLACE_EDIT_INSERT,
-        .line = line,
-        .aux_line = NULL,
-        .col = col,
-        .ch = '\0',
-    };
-
+    if (old_len > (int)sizeof(edit.old)) {
+        old_len = edit.old_len = (int)sizeof(edit.old);
+    }
+    memcpy(edit.old, old, (size_t)old_len);
     vi_push_replace_edit(vis, &edit);
 }
 
@@ -564,7 +567,6 @@ vi_record_replace_split(vi_visual_t *vis, line_t *left, line_t *right, int col)
         .line = left,
         .aux_line = right,
         .col = col,
-        .ch = '\0',
     };
 
     vi_push_replace_edit(vis, &edit);
@@ -584,42 +586,29 @@ vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
 
     edit = vis->replace_edits[--vis->replace_edit_count];
     switch (edit.kind) {
-    case VI_REPLACE_EDIT_CHAR:
+    case VI_REPLACE_EDIT_CHAR: {
+        size_t tail;
+        size_t new_text_len;
+
         line = edit.line;
-        if (!line || edit.col < 0 || (size_t)edit.col >= line->len) {
+        if (!line || edit.col < 0 || edit.new_len < 0 ||
+            (size_t)edit.col + (size_t)edit.new_len > line->len) {
             return -1;
         }
-        text = malloc(line->len + 1);
-        if (!text) {
-            vis->replace_edit_count++;
-            return -1;
-        }
-        memcpy(text, line->text, line->len + 1);
-        text[edit.col] = edit.ch;
-        b->cur = line;
-        if (vi_replace_current_text(b, text, line->len) != 0) {
-            free(text);
-            vis->replace_edit_count++;
-            return -1;
-        }
-        free(text);
-        vis->cursor_col = edit.col;
-        return 0;
-    case VI_REPLACE_EDIT_INSERT:
-        line = edit.line;
-        if (!line || edit.col < 0 || (size_t)edit.col >= line->len) {
-            return -1;
-        }
-        text = malloc(line->len);
+        /* the typed character's bytes give way to those it replaced */
+        tail = line->len - (size_t)edit.col - (size_t)edit.new_len;
+        new_text_len = (size_t)edit.col + (size_t)edit.old_len + tail;
+        text = malloc(new_text_len + 1);
         if (!text) {
             vis->replace_edit_count++;
             return -1;
         }
         memcpy(text, line->text, (size_t)edit.col);
-        memcpy(text + edit.col, line->text + edit.col + 1,
-            line->len - (size_t)edit.col);
+        memcpy(text + edit.col, edit.old, (size_t)edit.old_len);
+        memcpy(text + edit.col + edit.old_len, line->text + edit.col + edit.new_len,
+            tail + 1);
         b->cur = line;
-        if (vi_replace_current_text(b, text, line->len - 1) != 0) {
+        if (vi_replace_current_text(b, text, new_text_len) != 0) {
             free(text);
             vis->replace_edit_count++;
             return -1;
@@ -627,6 +616,7 @@ vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
         free(text);
         vis->cursor_col = edit.col;
         return 0;
+    }
     case VI_REPLACE_EDIT_SPLIT:
         if (!edit.line || !edit.aux_line) {
             return -1;
@@ -1954,11 +1944,92 @@ exvi_decode_terminal_key_sequence(char prefix, const char *seq)
     return VI_KEY_UNKNOWN;
 }
 
+/*
+ * Bytes read after an ESC that made no terminal key sequence: they are
+ * keys of their own, read before the terminal again.  ESC and the byte
+ * after it were both dropped, so ifoo<ESC>Obar<ESC> typed fast or pasted
+ * left fooar, and Ay<ESC>:wq never left text input.
+ */
+static unsigned char vi_unread_bytes[40];
+static size_t vi_unread_head;
+static size_t vi_unread_len;
+
+/* a key read too far -- one that ended a UTF-8 character early, perhaps
+ * a special key -- read again first; -2 when there is none */
+static int vi_unread_key_value = -2;
+
+static void
+vi_unread_key(int key)
+{
+    vi_unread_key_value = key;
+}
+
+/* put bytes back in front of those still unread: they were read first */
+static void
+vi_unread(const char *bytes, size_t len)
+{
+    if (len > sizeof(vi_unread_bytes) - vi_unread_len) {
+        len = sizeof(vi_unread_bytes) - vi_unread_len;   /* not reached: one
+                                                            sequence's bytes */
+    }
+    if (len > vi_unread_head) {
+        memmove(vi_unread_bytes + len, vi_unread_bytes + vi_unread_head, vi_unread_len);
+        vi_unread_head = len;
+    }
+    vi_unread_head -= len;
+    memcpy(vi_unread_bytes + vi_unread_head, bytes, len);
+    vi_unread_len += len;
+}
+
+/* the next byte, from those unread first, waiting at most timeout_ms */
+static int
+vi_next_byte(char *out, int timeout_ms)
+{
+    if (vi_unread_len > 0) {
+        *out = (char)vi_unread_bytes[vi_unread_head++];
+        vi_unread_len--;
+        return 1;
+    }
+    return vi_read_timed_byte(out, timeout_ms);
+}
+
+/*
+ * After ESC, the bytes [ or O and seq: a key when it decodes as one, and
+ * an unknown key -- swallowed -- when it is a CSI with parameters, which
+ * only a terminal sends (F5 is ESC [ 1 5 ~).  Anything else is typed keys.
+ */
+static int
+vi_seq_is_terminal_key(char prefix, const char *seq, size_t len)
+{
+    if (exvi_decode_terminal_key_sequence(prefix, seq) != VI_KEY_UNKNOWN) {
+        return 1;
+    }
+    if (prefix != '[' || len < 2) {
+        return 0;
+    }
+    for (size_t i = 0; i + 1 < len; i++) {
+        if ((unsigned char)seq[i] < 0x20 || (unsigned char)seq[i] > 0x3f) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int
 vi_read_key(void)
 {
     char c;
 
+    if (vi_unread_key_value != -2) {
+        int key = vi_unread_key_value;
+
+        vi_unread_key_value = -2;
+        return key;
+    }
+    if (vi_unread_len > 0) {
+        (void)vi_next_byte(&c, 0);
+        goto have_byte;
+    }
     for (;;) {
         ssize_t n;
 
@@ -1987,33 +2058,41 @@ vi_read_key(void)
         }
         return -1;
     }
+have_byte:
     if (c == '\x1b') {
-        char prefix;
-        char seq[32];
+        char buf[32];       /* the prefix, then the sequence */
+        char *seq = buf + 1;
         size_t len = 0;
 
-        if (!vi_read_timed_byte(&prefix, 50)) {
+        if (!vi_next_byte(&buf[0], 50)) {
             return '\x1b';
         }
-        if (prefix == '[' || prefix == 'O') {
-            for (;;) {
-                if (!vi_read_timed_byte(&seq[len], 50)) {
-                    return VI_KEY_UNKNOWN;
-                }
-                if ((unsigned char)seq[len] >= 0x40 &&
-                    (unsigned char)seq[len] <= 0x7e) {
-                    len++;
-                    break;
-                }
-                len++;
-                if (len + 1 >= sizeof(seq)) {
-                    break;
-                }
-            }
-            seq[len] = '\0';
-            return exvi_decode_terminal_key_sequence(prefix, seq);
+        if (buf[0] != '[' && buf[0] != 'O') {
+            vi_unread(buf, 1);
+            return '\x1b';
         }
-        return VI_KEY_UNKNOWN;
+        for (;;) {
+            if (!vi_next_byte(&seq[len], 50)) {
+                /* no more within the time: the ESC was typed */
+                vi_unread(buf, len + 1);
+                return '\x1b';
+            }
+            len++;
+            /* a final byte ends it; a byte no sequence holds ends it too */
+            if ((unsigned char)seq[len - 1] < 0x20 ||
+                (unsigned char)seq[len - 1] >= 0x40) {
+                break;
+            }
+            if (len + 2 >= sizeof(buf)) {
+                break;
+            }
+        }
+        seq[len] = '\0';
+        if (vi_seq_is_terminal_key(buf[0], seq, len)) {
+            return exvi_decode_terminal_key_sequence(buf[0], seq);
+        }
+        vi_unread(buf, len + 1);
+        return '\x1b';
     }
     return (unsigned char)c;
 }
@@ -2064,6 +2143,9 @@ vi_read_char_arg(buffer_t *b, vi_visual_t *vis)
         int next = vi_read_visual_key(b, vis, ':', NULL);
 
         if (next < 0x80 || next > 0xbf) {
+            if (next != -1) {
+                vi_unread_key(next);    /* a key of its own */
+            }
             return VI_RAW_BYTE(key);
         }
         bytes[i] = (char)next;
@@ -2072,6 +2154,45 @@ vi_read_char_arg(buffer_t *b, vi_visual_t *vis)
         return (int)cp;
     }
     return VI_RAW_BYTE(key);
+}
+
+/*
+ * A key typed as text: a tab, or a byte that is not a control character.
+ * Text input and r took only what isprint() passed, and under the C
+ * locale vi runs in that is no byte above 0x7f: aé<ESC> on ab left ab.
+ */
+static int
+vi_key_is_text(int key)
+{
+    return key == '\t' || (key >= 0x20 && key != 0x7f && key <= 0xff);
+}
+
+/*
+ * The bytes of the character a typed key starts: key, and when it is the
+ * lead byte of a UTF-8 sequence the rest of the sequence.  A key that
+ * ends it early is read again later, as a key of its own.  Returns the
+ * number of bytes in bytes[] (at most 4).
+ */
+static int
+vi_read_char_bytes(buffer_t *b, vi_visual_t *vis, int key, char *bytes)
+{
+    int need = key >= 0xf0 && key <= 0xf4 ? 4 : key >= 0xe0 && key <= 0xef ? 3 :
+        key >= 0xc2 && key <= 0xdf ? 2 : 1;
+    int n = 1;
+
+    bytes[0] = (char)key;
+    while (n < need) {
+        int next = vi_read_visual_key(b, vis, ':', NULL);
+
+        if (next < 0x80 || next > 0xbf) {
+            if (next != -1) {
+                vi_unread_key(next);
+            }
+            break;
+        }
+        bytes[n++] = (char)next;
+    }
+    return n;
 }
 
 static void
@@ -6480,38 +6601,62 @@ vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
     free(text);
 }
 
+/*
+ * R: the character typed, bytes[0..n), over the character under the
+ * cursor, or after the end of the line.  Each is a whole character of
+ * any length: R wrote a byte over a byte, so é over abc left a broken
+ * sequence and a, and x over é half of é.
+ */
 static void
-vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
+vi_replace_insert_bytes(buffer_t *b, vi_visual_t *vis, const char *bytes, int n)
 {
     line_t *cur = vi_ensure_current_line(b);
+    char old[4];
+    int old_len = 0;
+    int col;
+    size_t new_len;
     char *text;
-    size_t old_len;
-    char replaced;
 
-    if (!cur) {
+    if (!cur || n < 1) {
         return;
     }
-    if ((size_t)vis->cursor_col >= cur->len) {
-        old_len = cur->len;
-        vi_insert_char(b, vis, ch);
-        if (cur->len == old_len + 1 && (size_t)(vis->cursor_col - 1) == old_len) {
-            vi_record_replace_insert(vis, cur, (int)old_len);
+    col = vis->cursor_col;
+    if ((size_t)col < cur->len) {
+        old_len = vi_next_char_index(cur, col) - col;
+        if (old_len < 1) {
+            old_len = 1;
         }
-        return;
+        if (old_len > (int)sizeof(old)) {
+            old_len = (int)sizeof(old);
+        }
+        memcpy(old, cur->text + col, (size_t)old_len);
     }
-    replaced = cur->text[vis->cursor_col];
-    text = malloc(cur->len + 1);
+    new_len = cur->len - (size_t)old_len + (size_t)n;
+    text = malloc(new_len + 1);
     if (!text) {
         return;
     }
-    memcpy(text, cur->text, cur->len + 1);
-    text[vis->cursor_col] = (char)ch;
-    if (vi_replace_current_text(b, text, cur->len) == 0) {
-        vi_record_replace_char(vis, cur, vis->cursor_col, replaced);
-        vis->cursor_col++;
+    memcpy(text, cur->text, (size_t)col);
+    memcpy(text + col, bytes, (size_t)n);
+    memcpy(text + col + n, cur->text + col + old_len, cur->len - (size_t)col - (size_t)old_len + 1);
+    if (vi_replace_current_text(b, text, new_len) == 0) {
+        if (b->empty_origin && b->line_count == 1 && b->head == cur
+                && b->tail == cur && cur->len > 0) {
+            b->trailing_newline = 1;
+        }
+        vi_record_replace_char(vis, cur, col, old, old_len, n);
+        vis->cursor_col = col + n;
         vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
+}
+
+static void
+vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
+{
+    char c = (char)ch;
+
+    vi_replace_insert_bytes(b, vis, &c, 1);
 }
 
 static void
@@ -6695,24 +6840,73 @@ vi_erase_to_insert_anchor(buffer_t *b, vi_visual_t *vis)
     vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
 }
 
+/*
+ * The bytes of a character value as vi_read_char_arg() gives it: a code
+ * point, or VI_RAW_BYTE() of a byte in no valid sequence.  Returns their
+ * number.
+ */
+static int
+vi_char_value_bytes(int value, char *out)
+{
+    unsigned int cp = (unsigned int)value;
+
+    if (value >= VI_RAW_BYTE(0)) {
+        out[0] = (char)(value - VI_RAW_BYTE(0));
+        return 1;
+    }
+    if (cp < 0x80) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        out[0] = (char)(0xc0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3f));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xe0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3f));
+        out[2] = (char)(0x80 | (cp & 0x3f));
+        return 3;
+    }
+    out[0] = (char)(0xf0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3f));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3f));
+    out[3] = (char)(0x80 | (cp & 0x3f));
+    return 4;
+}
+
+/*
+ * r: the character under the cursor, whole, becomes the one with value
+ * `value` (a vi_read_char_arg() value).  It wrote one byte over one, so
+ * r with é on abc cut é in two, and r on é left half of it.
+ */
 static void
-vi_replace_char(buffer_t *b, vi_visual_t *vis, int ch)
+vi_replace_char(buffer_t *b, vi_visual_t *vis, int value)
 {
     line_t *cur = b->cur;
+    char bytes[4];
+    int n = vi_char_value_bytes(value, bytes);
+    int col = vis->cursor_col;
+    int end;
+    size_t new_len;
     char *text;
 
-    if (!cur || (size_t)vis->cursor_col >= cur->len) {
+    if (!cur || (size_t)col >= cur->len) {
         (void)!write(STDOUT_FILENO, "\a", 1);
         return;
     }
+    end = vi_next_char_index(cur, col);
+    new_len = cur->len - (size_t)(end - col) + (size_t)n;
     save_undo(b);
-    text = malloc(cur->len + 1);
+    text = malloc(new_len + 1);
     if (!text) {
         return;
     }
-    memcpy(text, cur->text, cur->len + 1);
-    text[vis->cursor_col] = (char)ch;
-    if (vi_replace_current_text(b, text, cur->len) == 0) {
+    memcpy(text, cur->text, (size_t)col);
+    memcpy(text + col, bytes, (size_t)n);
+    memcpy(text + col + n, cur->text + end, cur->len - (size_t)end + 1);
+    if (vi_replace_current_text(b, text, new_len) == 0) {
         vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
@@ -7866,8 +8060,11 @@ exvi_visual_main(buffer_t *b)
                 vi_set_insert_anchor(b, &vis);
                 break;
             default:
-                if (isprint(key) || key == '\t') {
-                    vi_replace_insert_char(b, &vis, key);
+                if (vi_key_is_text(key)) {
+                    char bytes[4];
+                    int n = vi_read_char_bytes(b, &vis, key, bytes);
+
+                    vi_replace_insert_bytes(b, &vis, bytes, n);
                 }
                 break;
             }
@@ -7953,8 +8150,13 @@ exvi_visual_main(buffer_t *b)
                 vi_set_insert_anchor(b, &vis);
                 break;
             default:
-                if (isprint(key) || key == '\t') {
-                    vi_insert_char(b, &vis, key);
+                if (vi_key_is_text(key)) {
+                    char bytes[4];
+                    int n = vi_read_char_bytes(b, &vis, key, bytes);
+
+                    for (int i = 0; i < n; i++) {
+                        vi_insert_char(b, &vis, (unsigned char)bytes[i]);
+                    }
                 }
                 break;
             }
@@ -8538,9 +8740,21 @@ process_normal_key:
                 (void)!write(STDOUT_FILENO, "\a", 1);
                 break;
             }
-            if (isprint(key) || key == '\t') {
-                vi_replace_char(b, &vis, key);
-                vi_set_last_change(&vis, VI_REPEAT_R, 1, key);
+            if (vi_key_is_text(key)) {
+                /* the whole character typed, as a value: its code point,
+                 * or a byte in no valid sequence VI_RAW_BYTE() of it */
+                char bytes[4];
+                int n = vi_read_char_bytes(b, &vis, key, bytes);
+                unsigned int cp;
+                int value = VI_RAW_BYTE(bytes[0]);
+
+                if (n == 1 && key < 0x80) {
+                    value = key;
+                } else if (vi_utf8_decode_text_at(bytes, (size_t)n, 0, &cp) == n && n > 1) {
+                    value = (int)cp;
+                }
+                vi_replace_char(b, &vis, value);
+                vi_set_last_change(&vis, VI_REPEAT_R, 1, value);
             }
             break;
         case '~':

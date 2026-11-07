@@ -32,10 +32,13 @@ test_undo_replace_edit_char(void)
     memset(&vis, 0, sizeof(vis));
 
     /* Push a replace edit char */
+    memset(&edit, 0, sizeof(edit));
     edit.kind = VI_REPLACE_EDIT_CHAR;
     edit.line = b.cur;
     edit.col = 1;
-    edit.ch = 'e';
+    edit.old[0] = 'e';
+    edit.old_len = 1;
+    edit.new_len = 1;
     vi_push_replace_edit(&vis, &edit);
 
     /* Modify the buffer to simulate a replace */
@@ -62,10 +65,13 @@ test_undo_replace_edit_insert(void)
     fill_buffer(&b, lines, 1);
     memset(&vis, 0, sizeof(vis));
 
-    /* Push a replace edit insert */
-    edit.kind = VI_REPLACE_EDIT_INSERT;
+    /* a character typed past the end: it replaced nothing */
+    memset(&edit, 0, sizeof(edit));
+    edit.kind = VI_REPLACE_EDIT_CHAR;
     edit.line = b.cur;
     edit.col = 5;
+    edit.old_len = 0;
+    edit.new_len = 1;
     vi_push_replace_edit(&vis, &edit);
 
     /* Modify the buffer to simulate an insert */
@@ -78,6 +84,43 @@ test_undo_replace_edit_insert(void)
     assert(strcmp(b.cur->text, "hello world") == 0);
     assert(vis.cursor_col == 5);
     assert(vis.replace_edit_count == 0);
+
+    buf_free(&b);
+    vi_clear_replace_edits(&vis);
+}
+
+/* x typed over the two bytes of é, and 日 (three) over l: each restored whole */
+static void
+test_undo_replace_edit_multibyte(void)
+{
+    buffer_t b;
+    vi_visual_t vis;
+    const char *lines[] = {"hx\xe6\x97\xa5lo"};
+    vi_replace_edit_t edit;
+
+    fill_buffer(&b, lines, 1);
+    memset(&vis, 0, sizeof(vis));
+
+    memset(&edit, 0, sizeof(edit));
+    edit.kind = VI_REPLACE_EDIT_CHAR;
+    edit.line = b.cur;
+    edit.col = 1;
+    memcpy(edit.old, "\xc3\xa9", 2);
+    edit.old_len = 2;
+    edit.new_len = 1;
+    vi_push_replace_edit(&vis, &edit);
+    edit.col = 2;
+    edit.old[0] = 'l';
+    edit.old_len = 1;
+    edit.new_len = 3;
+    vi_push_replace_edit(&vis, &edit);
+
+    assert(vi_undo_replace_edit(&b, &vis) == 0);
+    assert(strcmp(b.cur->text, "hxllo") == 0);
+    assert(vis.cursor_col == 2);
+    assert(vi_undo_replace_edit(&b, &vis) == 0);
+    assert(strcmp(b.cur->text, "h\xc3\xa9llo") == 0);
+    assert(vis.cursor_col == 1);
 
     buf_free(&b);
     vi_clear_replace_edits(&vis);
@@ -136,10 +179,13 @@ test_undo_replace_edit_errors(void)
     buf_init(&b);
 
     /* Out of bounds column for CHAR */
+    memset(&edit, 0, sizeof(edit));
     edit.kind = VI_REPLACE_EDIT_CHAR;
     edit.line = buf_insert_after(&b, NULL, "test");
     edit.col = 10;
-    edit.ch = 'x';
+    edit.old[0] = 'x';
+    edit.old_len = 1;
+    edit.new_len = 1;
     vi_push_replace_edit(&vis, &edit);
     assert(vi_undo_replace_edit(&b, &vis) == -1);
 
@@ -158,6 +204,7 @@ main(void)
 {
     test_undo_replace_edit_char();
     test_undo_replace_edit_insert();
+    test_undo_replace_edit_multibyte();
     test_undo_replace_edit_split();
     test_undo_replace_edit_errors();
     puts("exvi visual tests: ok");

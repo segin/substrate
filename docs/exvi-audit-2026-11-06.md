@@ -858,26 +858,27 @@ The number is not reused.
 
 ### EXVI-57 — insert and replace drop every byte ≥ 0x80 — *Medium*
 
-- [ ] **EXVI-57.1** (Ubiquitous) The editor shall insert each character typed in
+- [x] **EXVI-57.1** (Ubiquitous) The editor shall insert each character typed in
   text input, UTF-8 included.
-- [ ] **EXVI-57.2** (Ubiquitous) The editor's `r` shall accept any character,
+- [x] **EXVI-57.2** (Ubiquitous) The editor's `r` shall accept any character,
   UTF-8 included.
 
 - **Where**: `exvi_visual.c:7549`, `7636` (`isprint(key) || key == '\t'`
   under `setlocale(LC_CTYPE, "C")`, `exvi.c:566`); `r` at `:8211`.
-- **Evidence**: `aé<ESC>` on `ab` leaves `ab`.
-- **Basis**: reproduced.
+- **Evidence**: `aé<ESC>` on `ab` leaves `ab`.  `r` and `R` also wrote one
+  byte over one, cutting a character of another length in two.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_utf8_input.py`.
 
 ### EXVI-58 — ESC and the next key within 50 ms are both lost — *Medium*
 
-- [ ] **EXVI-58.1** (Event-driven) When ESC is not followed by a known key
+- [x] **EXVI-58.1** (Event-driven) When ESC is not followed by a known key
   sequence, the editor shall act on ESC and then on each following key.
 
 - **Where**: `exvi_visual.c:1777-1803` (`vi_read_key`).
 - **Evidence**: `ifoo<ESC>Obar<ESC>:wq\r` in one write leaves `fooarwq`;
   `Ay<ESC>:wq\r` never leaves insert mode.  Fast typing, pastes and slow
   links all hit it.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_esc_burst.py`.
 
 ### EXVI-59 — counts on `i a I A R o O r s S` are ignored, and carry over — *Medium*
 

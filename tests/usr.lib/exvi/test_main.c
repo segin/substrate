@@ -616,21 +616,24 @@ test_vi_record_replace_insert(void)
     assert(vis.replace_edit_count == 0);
     assert(vis.replace_edits == NULL);
 
-    vi_record_replace_insert(&vis, &mock_line, 5);
+    /* a character typed past the end of the line replaces nothing */
+    vi_record_replace_char(&vis, &mock_line, 5, "", 0, 1);
 
     assert(vis.replace_edit_count == 1);
     assert(vis.replace_edits != NULL);
-    assert(vis.replace_edits[0].kind == VI_REPLACE_EDIT_INSERT);
+    assert(vis.replace_edits[0].kind == VI_REPLACE_EDIT_CHAR);
     assert(vis.replace_edits[0].line == &mock_line);
     assert(vis.replace_edits[0].col == 5);
-    assert(vis.replace_edits[0].ch == '\0');
+    assert(vis.replace_edits[0].old_len == 0);
+    assert(vis.replace_edits[0].new_len == 1);
 
-    vi_record_replace_insert(&vis, &mock_line, 10);
+    vi_record_replace_char(&vis, &mock_line, 6, "", 0, 3);
     assert(vis.replace_edit_count == 2);
-    assert(vis.replace_edits[1].kind == VI_REPLACE_EDIT_INSERT);
+    assert(vis.replace_edits[1].kind == VI_REPLACE_EDIT_CHAR);
     assert(vis.replace_edits[1].line == &mock_line);
-    assert(vis.replace_edits[1].col == 10);
-    assert(vis.replace_edits[1].ch == '\0');
+    assert(vis.replace_edits[1].col == 6);
+    assert(vis.replace_edits[1].old_len == 0);
+    assert(vis.replace_edits[1].new_len == 3);
 
     vi_clear_replace_edits(&vis);
     assert(vis.replace_edit_count == 0);
