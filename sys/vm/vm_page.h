@@ -54,6 +54,7 @@ typedef struct vm_page {
     #define PG_NEEDSYNC  0x0400 // Needs writeback to swap/file
     #define PG_PMM_ALLOC 0x0800 // Buddy allocator: page is handed out
     #define PG_HASHED    0x1000 // In the (object, pindex) lookup hash
+    #define PG_LAUNDRY   0x2000 // On the laundry queue (vm_page_launder)
 
     // Reference count (number of mappings)
     uint16_t wire_count;  // Wired down (cannot be paged out)

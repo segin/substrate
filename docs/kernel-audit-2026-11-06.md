@@ -76,7 +76,8 @@
     - **If** `addr + length` overflows, crosses `KERNEL_VA_START`, or collides with existing `vm_map` entries in `sys_msync()` or `sys_brk()`, **then** the **VM Syscall Layer** **shall** reject the request with `-EINVAL` or `-ENOMEM`.
     - **If** `read_fs()` returns an error in `vnode_pager_getpages()`, **then** the **Vnode Pager** **shall** zero the page and return an error rather than marking uninitialized memory valid.
 
-- [ ] **[REQ-SYS-VM-005]** *(High — Wired Queue Corruption in `vm_page_free()` and `VM_INHERIT_ZERO` Handling in `vm_map_fork()`)*
+- [x] **[REQ-SYS-VM-005]** *(High — Wired Queue Corruption in `vm_page_free()` and `VM_INHERIT_ZERO` Handling in `vm_map_fork()`)*
+  - **Resolution (2026-11-06):** `vm_page_free()` unlinks a wired page from the wired queue and a laundering one (new `PG_LAUNDRY`) from the laundry queue, and `vm_page_launder()` does not requeue a page freed during its write; `vm_map_fork()` tears the cloned PTEs of a `VM_INHERIT_ZERO` entry out of the child (unreachable until REQ-SYS-VM-006: nothing sets that inheritance); the contiguous allocators refuse a count past the largest buddy block.
   - **Location:** `sys/vm/vm_page.c:618-670` (`vm_page_free`), `sys/vm/vm_map.c:1496-1610` (`vm_map_fork`), `sys/vm/phys_mem.c:473-540` (`vm_phys_alloc_contiguous`, `vm_phys_free_contiguous`)
   - **Finding:**
     1. `vm_page_free()` removes pages from `active_queue` (`PG_ACTIVE`) and `inactive_queue` (`PG_INACTIVE`), but never checks or removes pages from `wired_queue` (`m->wire_count > 0`) or `laundry_queue`, corrupting global page doubly-linked lists if a wired page is freed on process teardown.
@@ -215,6 +216,16 @@
   - **Finding:** Several subsystems define module-internal structs, typedefs, and macros directly inside `.c` implementation files rather than companion `.h` headers (e.g., `vnode_pager_t` / `swap_pager_t` in `sys/vm/vm_pager.c`, `shared_file_obj_entry_t` in `sys/vm/vm_syscalls.c`, `afi_sock_t` in `sys/net/af_inet.c`, and duplicate conflicting prototypes for `vm_swapon`/`vm_swapoff` between `sys/vm/vm_swap.h` and `sys/vm/vm_pager.h`).
   - **Requirement (Ubiquitous):**
     - The **Kernel Codebase** **shall** place shared and subsystem structure, typedef, and macro definitions in header files under `sys/` and maintain a single canonical prototype for `vm_swapon()` / `vm_swapoff()`.
+
+---
+
+## 7. Found while fixing
+
+- [ ] **[REQ-SYS-VM-006]** *(Medium — `minherit()` accepted and ignored)*
+  - **Location:** `sys/exec/perso/compat.c` (`sys_minherit`)
+  - **Finding:** the BSD personalities' `minherit()` returns 0 for any inheritance and records none, so `INHERIT_NONE` (FreeBSD's `arc4random` pool) and `INHERIT_ZERO` regions are copied into a `fork()` child; `vm_map_inherit()`, which `vm_map_fork()` honours, is never called.
+  - **Requirement (Ubiquitous):**
+    - The **VM Syscall Layer** **shall** record a `minherit()` request on the range's `vm_map` entries (`vm_map_inherit()`), and reject an unknown inheritance value with `-EINVAL`.
 
 ---
 

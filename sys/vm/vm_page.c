@@ -633,6 +633,14 @@ void vm_page_free(vm_page_t *m) {
 	} else if(m->flags & PG_INACTIVE) {
 		dequeue(&inactive_queue, m);
 		m->flags &= ~PG_INACTIVE;
+	} else if(m->wire_count > 0) {
+		// A wired page is on the wired queue (vm_page_wire()); freed still
+		// linked there -- a process torn down with wired pages -- it left
+		// the queue running through a free page.
+		dequeue(&wired_queue, m);
+	} else if(m->flags & PG_LAUNDRY) {
+		dequeue(&laundry_queue, m);
+		m->flags &= ~PG_LAUNDRY;
 	}
 	spinlock_release_irq(&vm_page_queue_lock, qf);
 
@@ -1033,6 +1041,7 @@ void vm_page_launder(vm_page_t *m) {
 		m->flags &= ~PG_INACTIVE;
 	}
 	enqueue(&laundry_queue, m);
+	m->flags |= PG_LAUNDRY;
 	spinlock_release_irq(&vm_page_queue_lock, f);
 
 	// Perform writeback via pager (OUTSIDE the queue lock — pager I/O may
@@ -1049,7 +1058,14 @@ void vm_page_launder(vm_page_t *m) {
 
 	// Move laundry -> inactive (clean) or -> active (retry) under the lock.
 	f = spinlock_acquire_irq(&vm_page_queue_lock);
+	if(!(m->flags & PG_LAUNDRY)) {
+		// Freed while being written: vm_page_free() took it off the
+		// laundry queue; it is on no queue now, and goes on none.
+		spinlock_release_irq(&vm_page_queue_lock, f);
+		return;
+	}
 	dequeue(&laundry_queue, m);
+	m->flags &= ~PG_LAUNDRY;
 	if(success) {
 		// Mark clean, move to inactive queue (next scan can free it).
 		m->flags &= ~PG_DIRTY;

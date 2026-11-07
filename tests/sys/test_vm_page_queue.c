@@ -105,6 +105,31 @@ static void test_page_wire(void) {
     TEST_PASS("page_wire");
 }
 
+/*
+ * Test: a page freed while wired leaves the wired queue.  vm_page_free()
+ * took a page off the active and inactive queues alone, so a wired one --
+ * a process torn down with wired pages -- stayed linked on the wired
+ * queue, freed, and the queue ran through a free page.
+ */
+static void test_page_free_wired(void) {
+    vm_page_t *page = vm_page_alloc(NULL, 0, 0);
+    TEST_ASSERT(page != NULL, "free_wired: alloc failed");
+
+    vm_page_wire(page);
+    TEST_ASSERT(vm_page_check_queues(), "free_wired: queues sound while wired");
+    vm_page_free(page);
+    TEST_ASSERT(vm_page_check_queues(), "free_wired: queues sound after the free");
+    TEST_PASS("page_free_wired");
+}
+
+/* Test: a contiguous run past the largest buddy block is refused, not an
+ * order loop shifting 1UL by its own width. */
+static void test_contiguous_too_large(void) {
+    TEST_ASSERT(vm_phys_alloc_contiguous((size_t)-1) == NULL, "contig: SIZE_MAX refused");
+    TEST_ASSERT(vm_phys_alloc_contiguous((size_t)1 << 20) == NULL, "contig: 2^20 pages refused");
+    TEST_PASS("contiguous_too_large");
+}
+
 /* Test: vm_page_unwire decrements wire_count */
 static void test_page_unwire(void) {
     vm_page_t *page = vm_page_alloc(NULL, 0, 0);
@@ -516,6 +541,8 @@ void test_vm_page_queue(void) {
     test_page_activate();
     test_page_deactivate();
     test_page_wire();
+    test_page_free_wired();
+    test_contiguous_too_large();
     test_page_unwire();
     test_page_hold();
     test_page_unhold();

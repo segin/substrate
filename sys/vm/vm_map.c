@@ -1641,8 +1641,15 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
                              src_entry->protection & ~VM_PROT_WRITE);
             }
         } else if (src_entry->inheritance == VM_INHERIT_ZERO) {
-            // Child gets new zero-filled object
-            new_obj = NULL; // Lazy allocation
+            /* Child gets a new zero-filled object, allocated lazily.  But
+             * pmap_fork() already cloned the parent's PTEs for this range
+             * into the child, and those, left, let the child read the
+             * parent's memory instead of zeros (its writes faulted with no
+             * object).  Tear them out, as for VM_INHERIT_NONE, so its first
+             * touch faults in a zero page. */
+            pmap_fork_clear_range(dst_pmap, (uint32_t)src_entry->start,
+                                  (uint32_t)src_entry->end);
+            new_obj = NULL;
         }
         
         if (vm_map_insert(dst_map, new_obj, new_offset, src_entry->start, src_entry->end, src_entry->protection, src_entry->max_protection, src_entry->inheritance) != 0) {

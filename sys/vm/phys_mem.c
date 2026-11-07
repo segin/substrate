@@ -471,7 +471,9 @@ void vm_phys_free_page(vm_page_t *page) {
 }
 
 vm_page_t *vm_phys_alloc_contiguous(size_t count) {
-    if (count == 0) return NULL;
+    /* past the largest block there is no such run; and the order loop
+     * below would shift 1UL by its own width, undefined */
+    if (count == 0 || count > (1UL << (PMM_MAX_ORDER - 1))) return NULL;
 
     int order = 0;
     while ((1UL << order) < count) order++;
@@ -496,7 +498,7 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
 }
 
 vm_page_t *vm_phys_alloc_contiguous_below(size_t count, uintptr_t phys_limit) {
-    if (count == 0) return NULL;
+    if (count == 0 || count > (1UL << (PMM_MAX_ORDER - 1))) return NULL;
 
     int order = 0;
     while ((1UL << order) < count) order++;
@@ -520,7 +522,7 @@ vm_page_t *vm_phys_alloc_contiguous_below(size_t count, uintptr_t phys_limit) {
 }
 
 void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
-     if (!page || count == 0) return;
+     if (!page || count == 0 || count > (1UL << (PMM_MAX_ORDER - 1))) return;
      int order = 0;
      while ((1UL << order) < count) order++;
 
