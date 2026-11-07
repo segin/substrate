@@ -267,7 +267,11 @@ int main(int argc, char **argv, char **envp) {
             signal(SIGTTOU, SIG_IGN);
             
             shell_pgid = getpid();
-            if (setpgid(shell_pgid, shell_pgid) < 0) {
+            /* Already leading its own group -- a login shell, which is a
+             * session leader, always is -- it has nothing to change, and a
+             * session leader may not call setpgid() at all (EPERM). */
+            if (getpgrp() != shell_pgid &&
+                setpgid(shell_pgid, shell_pgid) < 0) {
                 perror("Couldn't put the shell in its own process group");
                 exit(1);
             }
