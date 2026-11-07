@@ -688,15 +688,15 @@ test_set_extended_options(void)
     reset_shared_state();
 
     assert(option_autoindent == 0);
-    assert(option_showmode == 1);
+    assert(option_showmode == 0);      /* POSIX: noshowmode */
     assert(option_readonly == 0);
     assert(option_tabstop == EXVI_DEFAULT_TABSTOP);
     assert(option_scroll == EXVI_DEFAULT_SCROLL);
     assert(strcmp(option_tags, EXVI_DEFAULT_TAGS) == 0);
 
-    assert(handle_set_command("autoindent noreadonly noshowmode tabstop=4 scroll=7 tags=tags,./TAGS") == 1);
+    assert(handle_set_command("autoindent noreadonly showmode tabstop=4 scroll=7 tags=tags,./TAGS") == 1);
     assert(option_autoindent == 1);
-    assert(option_showmode == 0);
+    assert(option_showmode == 1);
     assert(option_readonly == 0);
     assert(option_tabstop == 4);
     assert(option_scroll == 7);
