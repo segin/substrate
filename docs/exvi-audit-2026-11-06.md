@@ -954,12 +954,13 @@ The number is not reused.
 
 ### EXVI-63 — `U` is not implemented — *Medium*
 
-- [ ] **EXVI-63.1** (Ubiquitous) The editor's `U` shall restore the current line
+- [x] **EXVI-63.1** (Ubiquitous) The editor's `U` shall restore the current line
   to its state when it last became the current line.
 
 - **Where**: falls to `default:` (`exvi_visual.c:8583`).
 - **Evidence**: `xxU` on `abc` leaves `c`.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_undo_line.py`.  POSIX's
+  current line, not Vim's line of the latest change.
 
 ### EXVI-64 — `%` from a non-bracket, across lines — *Low*
 

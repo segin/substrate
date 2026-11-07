@@ -107,6 +107,10 @@ typedef struct {
     int last_change_char;
     int last_change_aux;
     int last_change_op;                 /* VI_REPEAT_OPERATOR's operator */
+    /* U: the current line as it was when it became the current line */
+    unsigned long u_line_id;
+    char *u_text;
+    size_t u_len;
     int last_change_keys[64];           /* ... and the keys it read after the motion key */
     int last_change_nkeys;
     char status_msg[256];
@@ -8027,6 +8031,62 @@ vi_search_current_word(buffer_t *b, vi_visual_t *vis, int forward, int count)
     vi_set_status(vis, NULL);
 }
 
+/*
+ * The line that has become the current line, as it is now: what U puts
+ * back (POSIX vi).  U fell to the unknown-command beep.
+ */
+static void
+vi_note_current_line(vi_visual_t *vis, line_t *line)
+{
+    char *copy = malloc(line->len + 1);
+
+    if (!copy) {
+        return;
+    }
+    memcpy(copy, line->text, line->len + 1);
+    free(vis->u_text);
+    vis->u_text = copy;
+    vis->u_len = line->len;
+    vis->u_line_id = line->id;
+}
+
+/*
+ * U: the current line as it was when it last became the current line.  It
+ * is a change of its own -- u undoes it -- and U again undoes it too: the
+ * text it replaced is what U puts back next.
+ */
+static void
+vi_undo_line(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    size_t was_len;
+    char *was;
+
+    if (!cur || !vis->u_text || cur->id != vis->u_line_id) {
+        (void)!write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    if (cur->len == vis->u_len && memcmp(cur->text, vis->u_text, cur->len) == 0) {
+        return;                 /* nothing to put back */
+    }
+    was_len = cur->len;
+    was = malloc(was_len + 1);
+    if (!was) {
+        return;
+    }
+    memcpy(was, cur->text, was_len + 1);
+    save_undo(b);
+    if (vi_replace_current_text(b, vis->u_text, vis->u_len) != 0) {
+        free(was);
+        return;
+    }
+    free(vis->u_text);
+    vis->u_text = was;
+    vis->u_len = was_len;
+    vi_clamp_cursor(b, vis);
+    vi_mark_body_dirty_current_line(b, vis);
+}
+
 int
 exvi_visual_main(buffer_t *b)
 {
@@ -8089,6 +8149,9 @@ exvi_visual_main(buffer_t *b)
         cur = b->cur ? b->cur : b->head;
         if (!cur) {
             cur = b->head;
+        }
+        if (cur && (cur->id != vis.u_line_id || !vis.u_text)) {
+            vi_note_current_line(&vis, cur);
         }
         if (key != 'Z' && !vis.pending_big_z) {
             vis.zq_pending = 0;
@@ -8921,6 +8984,14 @@ process_normal_key:
                 vi_set_last_change(&vis, VI_REPEAT_S_LINE, count, 0);
             }
             break;
+        case 'U':
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            if (vis.replace_mode) {
+                vi_clear_replace_edits(&vis);
+            }
+            vi_undo_line(b, &vis);
+            break;
         case 'u':
             vis.pending_g = 0;
             vis.pending_count = 0;
@@ -9309,6 +9380,7 @@ done:
         sigaction(SIGCONT, &old_cont, NULL);
     }
     free(vis.last_insert_text);
+    free(vis.u_text);
     vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
