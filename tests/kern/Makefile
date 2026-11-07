@@ -393,6 +393,19 @@ pktrebind: pktrebind.c
 	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ptylinger: a slave's output left behind a full master ring at close
+# survives the slave being opened, written and closed again.  Substrate only.
+ptylinger: ptylinger.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
+# ptyclose: a master read asleep while another thread closes the master
+# does not wake on (and steal from) a pair that reused the freed one.
+# Substrate only.
+ptyclose: ptyclose.c
+	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # netpeer: a hostile peer played through a second NIC on the same QEMU hub
 # (MSS-1 SYN, Neighbor Solicitations at the wrong hop limit or with a bad
 # checksum, connect() across a close()).  Substrate only; run as root with
@@ -523,6 +536,6 @@ clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm utimeperm brkover shmgrow \
 	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault \
-	      sigretsel.linux execipc linkfollow.linux walkrecycle ptsrace netpeer
+	      sigretsel.linux execipc linkfollow.linux walkrecycle ptsrace netpeer ptylinger ptyclose
 
 .PHONY: all clean

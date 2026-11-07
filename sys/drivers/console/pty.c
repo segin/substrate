@@ -53,6 +53,7 @@ typedef struct pty_pair {
     int             master_open;     /* fd-count proxy for master */
     int             slave_open;      /* fd-count proxy for slave */
     int             destroying;      /* claimed for teardown (once) */
+    int             ops;             /* master reads/writes in progress */
     int             dead;            /* either side hung up */
     int             master_nonblock; /* O_NONBLOCK on the master fd */
     int             is_bsd;          /* BSD-grid pair: static nodes, persistent */
@@ -224,7 +225,19 @@ static void pty_slave_drv_close(struct tty *slave_tty) {
 
     char *free_lb = NULL;
     spinlock_acquire(&p->lock);
-    if (lb && ln > 0) {
+    if (lb && ln > 0 && p->linger) {
+        /* An earlier close's residue the master has not drained -- the
+         * slave was opened, written and closed again meanwhile.  It was
+         * replaced, leaking it and losing what it held: append to it
+         * instead, as much as one buffer holds, and keep it. */
+        int rem = p->linger_len - p->linger_pos;
+        memmove(p->linger, p->linger + p->linger_pos, (size_t)rem);
+        int add = ln < TTY_BUF_SIZE - rem ? ln : TTY_BUF_SIZE - rem;
+        memcpy(p->linger + rem, lb, (size_t)add);
+        p->linger_len = rem + add;
+        p->linger_pos = 0;
+        free_lb = lb;
+    } else if (lb && ln > 0) {
         p->linger     = lb;
         p->linger_len = ln;
         p->linger_pos = 0;
@@ -567,12 +580,47 @@ static void pty_destroy(pty_pair_t *p) {
 static int pty_claim_destroy(pty_pair_t *p) {
     int win = 0;
     spinlock_acquire(&p->lock);
-    if (!p->master_open && !p->slave_open && !p->destroying) {
+    /* Not while a master read or write is in progress -- asleep for data
+     * or for room, with another thread closing the master: the last of
+     * them claims the teardown on its way out (pty_master_rele()). */
+    if (!p->master_open && !p->slave_open && !p->destroying && p->ops == 0) {
         p->destroying = 1;
         win = 1;
     }
     spinlock_release(&p->lock);
     return win;
+}
+
+/*
+ * Hold the pair for a master read or write, which may sleep: a close() on
+ * another thread then hangs the pair up and wakes the call, but leaves the
+ * freeing to its pty_master_rele().  NULL if the pair is gone or going.
+ */
+static pty_pair_t *pty_master_hold(fs_node_t *node) {
+    pty_pair_t *p = (pty_pair_t *)node->ptr;
+
+    if (!p || p->magic != PTY_MAGIC) return NULL;
+    spinlock_acquire(&p->lock);
+    if (p->destroying) {
+        spinlock_release(&p->lock);
+        return NULL;
+    }
+    p->ops++;
+    spinlock_release(&p->lock);
+    return p;
+}
+
+static void pty_master_rele(pty_pair_t *p) {
+    int win = 0;
+
+    spinlock_acquire(&p->lock);
+    p->ops--;
+    if (p->ops == 0 && !p->master_open && !p->slave_open && !p->destroying) {
+        p->destroying = 1;
+        win = 1;
+    }
+    spinlock_release(&p->lock);
+    if (win) pty_destroy(p);
 }
 
 /*
@@ -635,14 +683,22 @@ static void pty_slave_node_close(fs_node_t *node) {
 /* Master file ops                                                    */
 /* ------------------------------------------------------------------ */
 
+static size_t pty_master_read(pty_pair_t *p, size_t size, uint8_t *buffer);
+static size_t pty_master_write(pty_pair_t *p, size_t size, const uint8_t *buffer);
+
 size_t pty_master_node_read(fs_node_t *node, off_t offset, size_t size,
                             uint8_t *buffer) {
-    pty_pair_t *p = (pty_pair_t *)node->ptr;
-    size_t n = 0;
     (void)offset;
-
-    if (!p || p->magic != PTY_MAGIC) return 0;
     if (size == 0) return 0;
+    pty_pair_t *p = pty_master_hold(node);
+    if (!p) return 0;
+    size_t r = pty_master_read(p, size, buffer);
+    pty_master_rele(p);
+    return r;
+}
+
+static size_t pty_master_read(pty_pair_t *p, size_t size, uint8_t *buffer) {
+    size_t n = 0;
 
     spinlock_acquire(&p->lock);
 
@@ -726,10 +782,16 @@ size_t pty_master_node_read(fs_node_t *node, off_t offset, size_t size,
 
 size_t pty_master_node_write(fs_node_t *node, off_t offset, size_t size,
                              const uint8_t *buffer) {
-    pty_pair_t *p = (pty_pair_t *)node->ptr;
     (void)offset;
+    pty_pair_t *p = pty_master_hold(node);
+    if (!p) return 0;
+    size_t r = pty_master_write(p, size, buffer);
+    pty_master_rele(p);
+    return r;
+}
 
-    if (!p || p->magic != PTY_MAGIC || p->dead) return 0;
+static size_t pty_master_write(pty_pair_t *p, size_t size, const uint8_t *buffer) {
+    if (p->dead) return 0;
 
     /*
      * Forward each byte through the slave's line discipline, waiting for

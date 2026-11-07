@@ -198,7 +198,8 @@
     - **If** a remote TCP peer advertises an MSS below `TCP_MIN_MSS` (64 bytes) or before sequence validation succeeds, **then** the **TCP Stack** **shall** clamp `snd_mss` and ignore unvalidated SYN MSS options.
     - **If** an incoming ICMPv6 packet fails checksum verification or an NS/NA packet has `hop_limit != 255`, **then** `icmp6_input()` **shall** drop the packet.
 
-- [ ] **[REQ-SYS-DRV-002]** *(High — Master/Slave Use-After-Free & Linger Buffer Leak in `sys/drivers/devices/pty.c`)*
+- [x] **[REQ-SYS-DRV-002]** *(High — Master/Slave Use-After-Free & Linger Buffer Leak in `sys/drivers/devices/pty.c`)*
+  - **Resolution (2026-11-07):** (the file is `sys/drivers/console/pty.c`.) A slave close that finds an undrained linger buffer appends its tail to it instead of replacing (and leaking) it; master reads and writes hold the pair (`ops`, `pty_master_hold()`/`pty_master_rele()`), `pty_claim_destroy()` does not tear down while one is in progress, and the last one out does. `tests/kern/ptylinger.c` (the old kernel loses the first session's 1000-byte tail) and `tests/kern/ptyclose.c` (the old kernel's reader of a closed master woke on a new pair that reused the freed one and took its data) fail on the old kernel and pass.
   - **Location:** `sys/drivers/devices/pty.c` (`pty_slave_drv_close`, `pty_master_node_read`, `pty_master_node_write`)
   - **Finding:**
     1. In `pty_slave_drv_close()`, repeatedly opening, writing to, and closing the slave while the master has not drained `p->linger` overwrites `p->linger` with a newly `kmalloc`ed `TTY_BUF_SIZE` buffer without freeing the previous `p->linger` buffer.
