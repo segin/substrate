@@ -440,7 +440,7 @@ The number is not reused.
 
 ### EXVI-26 — a long `|` chain overflows the stack — *Low*
 
-- [ ] **EXVI-26.1** (Ubiquitous) The editor shall run a `|`-separated command
+- [x] **EXVI-26.1** (Ubiquitous) The editor shall run a `|`-separated command
   list in stack space independent of its length.
 
 - **Where**: `exvi.c:399-415` recurses once per `|`.
@@ -449,9 +449,9 @@ The number is not reused.
 
 ### EXVI-27 — signed overflow in addresses and `%` counts — *Low*
 
-- [ ] **EXVI-27.1** (Unwanted behaviour) If an address or count does not fit in
+- [x] **EXVI-27.1** (Unwanted behaviour) If an address or count does not fit in
   the editor's line-number type, then the editor shall report an error.
-- [ ] **EXVI-27.2** (Unwanted behaviour) If a count given to `%` exceeds 100,
+- [x] **EXVI-27.2** (Unwanted behaviour) If a count given to `%` exceeds 100,
   then the editor shall report an error.
 
 - **Where**: `exvi_parse.c:397`, `476-478` (`strtol` truncated to `int`;
@@ -462,8 +462,10 @@ The number is not reused.
 
 ### EXVI-28 — leaks — *Low*
 
-- [ ] **EXVI-28.1** (Ubiquitous) The editor shall free every allocation it
-  makes before the allocation becomes unreachable.
+- [x] **EXVI-28.1** (Ubiquitous) The editor shall free every allocation it
+  makes before the allocation becomes unreachable.  (The `tags_path` leak
+  went with EXVI-82's rewrite of the tag search; the `Q` path frees
+  `last_insert_text` now.)
 
 - **Where**: `exvi_session.c:386-395` (`tags_path` on two error returns;
   ASan: 5 bytes from `open_tags_file` `:216`); `exvi_visual.c:8616-8624`

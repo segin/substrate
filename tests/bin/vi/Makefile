@@ -26,7 +26,8 @@ test:
 	python3 ./test_vi_utf8_ops.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_hostile_bytes.py $(abspath $(TOP)/bin/vi/vi) $(abspath $(TOP)/bin/ex/ex); \
 	python3 ./test_vi_nul.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_signals.py $(abspath $(TOP)/bin/vi/vi)
+	python3 ./test_vi_signals.py $(abspath $(TOP)/bin/vi/vi); \
+	python3 ./test_vi_limits.py $(abspath $(TOP)/bin/vi/vi)
 
 oracle:
 	@mkdir -p $(TOP)/.locks

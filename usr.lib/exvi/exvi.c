@@ -414,25 +414,44 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     return 0;
 }
 
+static void do_single_command(buffer_t *b, char *cmd);
+
+/*
+ * Run a command line: its `|`-separated commands one after another, in a
+ * loop.  This recursed once per `|`, so a long enough line -- 300,000
+ * `p|` -- ran off the stack.
+ */
 static void do_command(buffer_t *b, char *cmd) {
     exvi_command_break_t break_kind;
     char *break_pos;
+
+    for (;;) {
+        char *rest = NULL;
+
+        while (*cmd && isspace((unsigned char)*cmd)) cmd++;
+        if (*cmd == '"') return;
+
+        break_pos = find_command_break(b, cmd, &break_kind);
+        if (break_pos) {
+            *break_pos = '\0';
+            if (break_kind == EXVI_COMMAND_BREAK_SEPARATOR) {
+                rest = break_pos + 1;
+            }
+        }
+        do_single_command(b, cmd);
+        if (!rest) {
+            return;
+        }
+        cmd = rest;
+    }
+}
+
+/* One command of a command line, its `|` and what follows cut off. */
+static void do_single_command(buffer_t *b, char *cmd) {
     int parse_error = 0;
 
     while (*cmd && isspace((unsigned char)*cmd)) cmd++;
 
-    if (*cmd == '"') return;
-
-    break_pos = find_command_break(b, cmd, &break_kind);
-    if (break_pos) {
-        *break_pos = '\0';
-        if (break_kind == EXVI_COMMAND_BREAK_SEPARATOR) {
-            do_command(b, cmd);
-            do_command(b, break_pos + 1);
-            return;
-        }
-    }
-    
     int addr1, addr2;
     int explicit_range = parse_range_checked(b, &cmd, &addr1, &addr2,
         &parse_error);

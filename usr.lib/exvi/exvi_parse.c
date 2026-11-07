@@ -1,6 +1,8 @@
 #include "exvi_internal.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <regex.h>
 #include <stdlib.h>
 #include <string.h>
@@ -411,7 +413,17 @@ parse_address_atom(buffer_t *b, char **cmd_ptr)
     }
 
     if (isdigit((unsigned char)*p)) {
-        addr = strtol(p, &p, 10);
+        long v;
+
+        /* a number past int is no line, not the line its low bits name
+         * (4294967297p printed line 1) */
+        errno = 0;
+        v = strtol(p, &p, 10);
+        if (errno == ERANGE || v > INT_MAX) {
+            *cmd_ptr = p;
+            return -1;
+        }
+        addr = (int)v;
     } else if (*p == '.') {
         addr = buf_current_line(b);
         p++;
@@ -490,9 +502,19 @@ parse_address(buffer_t *b, char **cmd_ptr)
                 p++;
             }
             if (isdigit((unsigned char)*p)) {
+                errno = 0;
                 offset = strtol(p, &p, 10);
+                if (errno == ERANGE) {
+                    return -1;
+                }
             }
-            addr += sign * (int)offset;
+            /* in a wider type: an offset past int is an error, not a
+             * wrap to some other line */
+            long long sum = (long long)addr + (long long)sign * offset;
+            if (sum < INT_MIN || sum > INT_MAX) {
+                return -1;
+            }
+            addr = (int)sum;
             if (buf_clamp_line(b, addr) == -1) {
                 return -1;
             }

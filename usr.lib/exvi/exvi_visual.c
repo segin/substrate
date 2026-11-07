@@ -4209,9 +4209,11 @@ vi_move_to_percent(buffer_t *b, vi_visual_t *vis, int percent)
         percent = 1;
     }
     if (percent > 100) {
-        percent = 100;
+        /* no such percentage: an error, not the last line */
+        (void)!write(STDOUT_FILENO, "\a", 1);
+        return;
     }
-    target = (percent * b->line_count + 99) / 100;
+    target = (int)(((long long)percent * b->line_count + 99) / 100);
     if (target < 1) {
         target = 1;
     }
@@ -6280,8 +6282,12 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int percent_count = (raw_count > 0) ? raw_count :
             ((vis->pending_op_count > 1) ? vis->pending_op_count : 0);
 
-        if (percent_count > 0) {
-            int target = (percent_count * b->line_count + 99) / 100;
+        if (percent_count > 100) {
+            /* N% with N past 100 names no line: an error.  The product
+             * below overflowed for a large N (999999999d% deleted line 1) */
+            (void)!write(STDOUT_FILENO, "\a", 1);
+        } else if (percent_count > 0) {
+            int target = (int)(((long long)percent_count * b->line_count + 99) / 100);
             int start = line_no;
             int end_line;
 
@@ -8892,6 +8898,7 @@ ex_mode:
     if (have_cont) {
         sigaction(SIGCONT, &old_cont, NULL);
     }
+    free(vis.last_insert_text);         /* as done: does; Q leaked it */
     vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
