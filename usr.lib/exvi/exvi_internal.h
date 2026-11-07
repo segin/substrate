@@ -284,8 +284,10 @@ int handle_print_command(buffer_t *b, const char *cmd, int explicit_range,
 int handle_equal_command(buffer_t *b, int explicit_range, int addr2);
 int handle_mark_command(buffer_t *b, const char *cmd, const char *args, int addr2);
 int handle_file_command(buffer_t *b, const char *args);
-int handle_input_command(buffer_t *b, int mode, int explicit_range, int addr1,
+int handle_input_command(buffer_t *b, int mode, int force, int explicit_range, int addr1,
     int addr2);
+line_t *exvi_input_line(buffer_t *b, const char *text);
+void exvi_input_indent_free(void);
 int handle_copy_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2);
 int handle_move_command(buffer_t *b, const char *args, int explicit_range,

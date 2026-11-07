@@ -810,9 +810,9 @@ The number is not reused.
 
 ### EXVI-54 — options accepted but without effect, and wrong defaults — *Medium*
 
-- [ ] **EXVI-54.1** (Optional feature) Where `autoindent` is set, the editor
+- [x] **EXVI-54.1** (Optional feature) Where `autoindent` is set, the editor
   shall indent ex text input as POSIX describes.
-- [ ] **EXVI-54.2** (Ubiquitous) The editor's `append!`, `change!` and
+- [x] **EXVI-54.2** (Ubiquitous) The editor's `append!`, `change!` and
   `insert!` shall toggle `autoindent` for that command.
 - [ ] **EXVI-54.3** (Optional feature) Where `scroll` is set, the editor shall
   use it for ex's `^D` and `z`.

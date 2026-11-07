@@ -442,7 +442,27 @@ Number printed output in
 .It Ic list , li
 Render tabs and line endings in list form.
 .It Ic autoindent , ai
-Shared option state used by the visual frontend's indentation helpers.
+Each line of text input starts with the indent of the line before it:
+the line appended after
+.Pq Ic append ,
+inserted before
+.Pq Ic insert
+or first changed
+.Pq Ic change ,
+then each line entered.
+A
+.Ql ^D
+at the start of a line takes the indent back one
+.Ic shiftwidth ;
+.Ql 0^D
+takes it all away, and
+.Ql ^^D
+takes it away for that line only.
+.Ic append! ,
+.Ic insert!
+and
+.Ic change!
+turn autoindent the other way for that input.
 .It Ic ignorecase , ic
 Make searches,
 .Ic global ,

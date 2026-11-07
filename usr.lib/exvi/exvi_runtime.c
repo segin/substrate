@@ -1376,6 +1376,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
 void
 exvi_cleanup_runtime(void)
 {
+    exvi_input_indent_free();
     secure_mode = 0;
     restricted_mode = 0;
     batch_mode = 0;

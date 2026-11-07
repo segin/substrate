@@ -949,14 +949,148 @@ handle_file_command(buffer_t *b, const char *args)
     return 1;
 }
 
+/*
+ * Autoindent in ex's text input (POSIX ex, autoindent): each line entered
+ * starts with the indent the line before it has -- the line appended
+ * after (a), the line inserted before (i), the first line changed (c),
+ * then each line entered.  A ^D at the start of a line takes it back one
+ * shiftwidth; 0^D takes it all away; ^^D takes it away for that line only.
+ * a!, i! and c! turn autoindent the other way for that input.  ex took
+ * the lines as typed whatever autoindent was.
+ */
+static int input_ai;                    /* autoindent for this input */
+static char *input_indent;              /* the next line's */
+
+static char *
+leading_blanks(const line_t *l)
+{
+    size_t n = 0;
+    char *s;
+
+    while (l && n < l->len && (l->text[n] == ' ' || l->text[n] == '\t')) {
+        n++;
+    }
+    s = malloc(n + 1);
+    if (s) {
+        if (n > 0) {
+            memcpy(s, l->text, n);
+        }
+        s[n] = '\0';
+    }
+    return s;
+}
+
+static void
+begin_input_indent(const line_t *from, int force)
+{
+    input_ai = option_autoindent ? !force : force;
+    free(input_indent);
+    input_indent = (input_ai && from) ? leading_blanks(from) : NULL;
+}
+
+/* at the end of the session */
+void
+exvi_input_indent_free(void)
+{
+    free(input_indent);
+    input_indent = NULL;
+}
+
+/* an indent of @p cols columns, of tabs (tabstop wide) and spaces */
+static char *
+indent_of_cols(int cols)
+{
+    int ts = option_tabstop > 0 ? option_tabstop : 8;
+    int tabs = cols / ts;
+    int spaces = cols % ts;
+    char *s = malloc((size_t)(tabs + spaces) + 1);
+
+    if (s) {
+        memset(s, '\t', (size_t)tabs);
+        memset(s + tabs, ' ', (size_t)spaces);
+        s[tabs + spaces] = '\0';
+    }
+    return s;
+}
+
+static int
+indent_cols(const char *s)
+{
+    int ts = option_tabstop > 0 ? option_tabstop : 8;
+    int cols = 0;
+
+    for (; *s == ' ' || *s == '\t'; s++) {
+        cols = (*s == '\t') ? (cols / ts + 1) * ts : cols + 1;
+    }
+    return cols;
+}
+
+/* a line of ex text input, after the line input_insert_pos, with its
+ * autoindent; the new line */
+line_t *
+exvi_input_line(buffer_t *b, const char *text)
+{
+    const char *indent = (input_ai && input_indent) ? input_indent : "";
+    char *made = NULL;
+    char *line;
+    size_t ilen;
+    size_t tlen;
+    int keep_indent = 0;
+    line_t *l;
+
+    if (input_ai) {
+        if (text[0] == '0' && text[1] == 0x04) {
+            indent = "";        /* 0^D: no indent, from here on */
+            text += 2;
+        } else if (text[0] == '^' && text[1] == 0x04) {
+            indent = "";        /* ^^D: none for this line only */
+            text += 2;
+            keep_indent = 1;
+        } else if (text[0] == 0x04) {
+            int sw = option_shiftwidth > 0 ? option_shiftwidth : 8;
+            int cols = indent_cols(indent);
+
+            while (*text == 0x04) {
+                cols = cols > 0 ? ((cols - 1) / sw) * sw : 0;
+                text++;
+            }
+            made = indent_of_cols(cols);
+            indent = made ? made : "";
+        }
+    }
+    ilen = strlen(indent);
+    tlen = strlen(text);
+    line = malloc(ilen + tlen + 1);
+    if (!line) {
+        free(made);
+        return NULL;
+    }
+    memcpy(line, indent, ilen);
+    memcpy(line + ilen, text, tlen + 1);
+    l = buf_insert_after(b, input_insert_pos, line);
+    free(line);
+    free(made);
+    if (l && input_ai && !keep_indent) {
+        free(input_indent);
+        input_indent = leading_blanks(l);
+    }
+    if (l) {
+        input_insert_pos = l;
+        b->cur = l;
+    }
+    return l;
+}
+
 int
-handle_input_command(buffer_t *b, int mode, int explicit_range, int addr1, int addr2)
+handle_input_command(buffer_t *b, int mode, int force, int explicit_range, int addr1,
+    int addr2)
 {
     save_undo(b);
 
     if (mode == 1) {
         input_mode = 1;
         input_insert_pos = (addr2 != -1) ? buf_get_line(b, addr2) : b->cur;
+        begin_input_indent(input_insert_pos, force);
         return 1;
     }
 
@@ -965,12 +1099,14 @@ handle_input_command(buffer_t *b, int mode, int explicit_range, int addr1, int a
 
         input_mode = 2;
         input_insert_pos = pos ? pos->prev : NULL;
+        begin_input_indent(pos, force);
         return 1;
     }
 
     if (!explicit_range) {
         set_default_current_range(b, &addr1, &addr2);
     }
+    begin_input_indent(addr1 >= 1 ? buf_get_line(b, addr1) : NULL, force);
     handle_yank_command(b, "", 1, addr1, addr2);
     if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
         for (int i = 0; i < (addr2 - addr1 + 1); i++) {

@@ -212,8 +212,7 @@ run_global_list(buffer_t *b, const char *list)
             if (strcmp(line, ".") == 0) {
                 input_mode = 0;
             } else {
-                input_insert_pos = buf_insert_after(b, input_insert_pos, line);
-                b->cur = input_insert_pos;
+                (void)exvi_input_line(b, line);
             }
         } else {
             do_command(b, line);
@@ -475,12 +474,12 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_mark_command(b, cmd, args, addr2);
     } else if (match_command(cmd, "file", "f", &args, NULL)) {
         return handle_file_command(b, args);
-    } else if (match_command(cmd, "append", "a", &args, NULL)) {
-        return handle_input_command(b, 1, explicit_range, addr1, addr2);
-    } else if (match_command(cmd, "insert", "i", &args, NULL)) {
-        return handle_input_command(b, 2, explicit_range, addr1, addr2);
-    } else if (match_command(cmd, "change", "c", &args, NULL)) {
-        return handle_input_command(b, 3, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "append", "a", &args, &force)) {
+        return handle_input_command(b, 1, force, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "insert", "i", &args, &force)) {
+        return handle_input_command(b, 2, force, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "change", "c", &args, &force)) {
+        return handle_input_command(b, 3, force, explicit_range, addr1, addr2);
     } else if (match_command(cmd, "copy", "co", &args, NULL)
         || match_command(cmd, "copy", "t", &args, NULL)) {
         return handle_copy_command(b, args, explicit_range, addr1, addr2);
@@ -857,8 +856,7 @@ enter_visual:
             if (strcmp(line, ".") == 0) {
                 input_mode = 0;
             } else {
-                input_insert_pos = buf_insert_after(&buf, input_insert_pos, line);
-                buf.cur = input_insert_pos;
+                (void)exvi_input_line(&buf, line);
             }
             continue;
         }
