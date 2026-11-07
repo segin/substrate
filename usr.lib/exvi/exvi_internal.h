@@ -128,6 +128,8 @@ void buf_delete(buffer_t *b, line_t *l);
 void buf_free(buffer_t *b);
 void buf_copy(buffer_t *dst, buffer_t *src);
 void save_undo(buffer_t *current);
+void exvi_begin_undo_group(buffer_t *current);
+void exvi_end_undo_group(void);
 /** counts changes to any buffer's lines (a line's text, a line added or
  *  removed, a buffer freed): unchanged across an interval means no line
  *  pointer taken before it has gone stale */

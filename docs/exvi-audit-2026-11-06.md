@@ -602,7 +602,7 @@ The number is not reused.
 
 ### EXVI-38 — `u` after `:g` undoes only its last change — *High*
 
-- [ ] **EXVI-38.1** (Ubiquitous) The editor shall undo a `global` or `v`
+- [x] **EXVI-38.1** (Ubiquitous) The editor shall undo a `global` or `v`
   command, with every command it ran, as one change.
 
 - **Where**: `exvi.c:230-250`; each sub-command calls `save_undo`.

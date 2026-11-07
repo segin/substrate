@@ -106,9 +106,13 @@ exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out)
     return 0;
 }
 
+/* while above zero, the commands run are one change for undo: see exvi_begin_undo_group() */
+static int undo_group_depth = 0;
+
 void
 exvi_reset_undo_state(void)
 {
+    undo_group_depth = 0;
     exvi_history_free(&undo_history);
     exvi_history_free(&redo_history);
     buf_free(&pending_undo_buf);
@@ -352,9 +356,36 @@ buf_copy(buffer_t *dst, buffer_t *src)
     exvi_history_suspended--;
 }
 
+/**
+ * Make the commands run until exvi_end_undo_group() one change for undo,
+ * as POSIX has a global command and the commands it runs: the buffer as it
+ * is now is what undo gives back, and their own save_undo() calls keep
+ * nothing.  Groups nest; the outermost decides.
+ */
+void
+exvi_begin_undo_group(buffer_t *current)
+{
+    if (undo_group_depth == 0) {
+        save_undo(current);
+    }
+    undo_group_depth++;
+}
+
+/** End what exvi_begin_undo_group() began; a group that changed nothing leaves nothing to undo. */
+void
+exvi_end_undo_group(void)
+{
+    if (undo_group_depth > 0 && --undo_group_depth == 0) {
+        exvi_discard_pending_undo();
+    }
+}
+
 void
 save_undo(buffer_t *current)
 {
+    if (undo_group_depth > 0) {
+        return;
+    }
     exvi_discard_pending_undo();
     buf_copy(&pending_undo_buf, current);
     pending_undo_valid = 1;

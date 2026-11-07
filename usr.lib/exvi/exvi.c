@@ -228,6 +228,8 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
     }
     regfree(&re);
 
+    /* the command and every command it runs are one change for undo */
+    exvi_begin_undo_group(b);
     curr = b->head;
     while (curr) {
         if (curr->global_mark) {
@@ -254,6 +256,7 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
         }
         curr = curr->next;
     }
+    exvi_end_undo_group();
     /* stopped early (an interrupt, out of memory): no mark outlives the command */
     for (curr = b->head; curr; curr = curr->next) {
         curr->global_mark = 0;

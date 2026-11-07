@@ -36,6 +36,7 @@ test:
 	bash ./test_ex_replacement.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_sub_bol.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_shell.sh $(abspath $(TOP)/bin/ex/ex); \
+	bash ./test_ex_global_undo.sh $(abspath $(TOP)/bin/ex/ex); \
 	python3 ./test_ex_frontend.py $(abspath $(TOP)/bin/ex/ex)
 
 clean:
