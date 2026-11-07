@@ -44,6 +44,7 @@ typedef enum {
     VI_REPEAT_C_MARK_LINE,
     VI_REPEAT_C_MARK_EXACT,
     VI_REPEAT_C_LINE_MOTION,
+    VI_REPEAT_OPERATOR,         /* d, < or > and its motion: the keys replayed */
 } vi_repeat_kind_t;
 
 typedef enum {
@@ -105,6 +106,9 @@ typedef struct {
     int last_change_count;
     int last_change_char;
     int last_change_aux;
+    int last_change_op;                 /* VI_REPEAT_OPERATOR's operator */
+    int last_change_keys[64];           /* ... and the keys it read after the motion key */
+    int last_change_nkeys;
     char status_msg[256];
     int status_once;
     char *cmd_history[VI_PROMPT_HISTORY_MAX];
@@ -1978,10 +1982,27 @@ static size_t vi_unread_len;
  * a special key -- read again first; -2 when there is none */
 static int vi_unread_key_value = -2;
 
+/*
+ * The keys an operator reads after its motion key (a mark's name, a search
+ * pattern and its <CR>, the g of dgg), kept for . to replay; and the keys
+ * . is replaying, read before the terminal.  . repeated only the d forms
+ * with a record of their own, and no < or > at all: de. deleted one word,
+ * >j. repeated whatever change came before.
+ */
+static int vi_op_keys[64];
+static int vi_op_nkeys;
+static int vi_op_recording;
+static int vi_replay_keys[64];
+static int vi_replay_len;
+static int vi_replay_pos;
+
 static void
 vi_unread_key(int key)
 {
     vi_unread_key_value = key;
+    if (vi_op_recording && vi_op_nkeys > 0) {
+        vi_op_nkeys--;          /* recorded again when it is read again */
+    }
 }
 
 /* put bytes back in front of those still unread: they were read first */
@@ -2036,16 +2057,10 @@ vi_seq_is_terminal_key(char prefix, const char *seq, size_t len)
 }
 
 static int
-vi_read_key(void)
+vi_read_key_raw(void)
 {
     char c;
 
-    if (vi_unread_key_value != -2) {
-        int key = vi_unread_key_value;
-
-        vi_unread_key_value = -2;
-        return key;
-    }
     if (vi_unread_len > 0) {
         (void)vi_next_byte(&c, 0);
         goto have_byte;
@@ -2115,6 +2130,28 @@ have_byte:
         return '\x1b';
     }
     return (unsigned char)c;
+}
+
+/* the next key: one read too far, one . replays, or one from the terminal;
+ * kept while an operator records its keys */
+static int
+vi_read_key(void)
+{
+    int key;
+
+    if (vi_unread_key_value != -2) {
+        key = vi_unread_key_value;
+        vi_unread_key_value = -2;
+    } else if (vi_replay_pos < vi_replay_len) {
+        key = vi_replay_keys[vi_replay_pos++];
+    } else {
+        key = vi_read_key_raw();
+    }
+    if (vi_op_recording && key != -1 && key != VI_KEY_RESIZE &&
+        vi_op_nkeys < (int)(sizeof(vi_op_keys) / sizeof(vi_op_keys[0]))) {
+        vi_op_keys[vi_op_nkeys++] = key;
+    }
+    return key;
 }
 
 static int
@@ -4359,6 +4396,11 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
     memcpy(text + start, cur->text + end, cur->len - (size_t)end + 1);
     if (vi_replace_current_text(b, text, cur->len - (size_t)(end - start)) == 0) {
         vis->cursor_col = start;
+        if (!enter_insert && (size_t)start >= cur->len && cur->len > 0) {
+            /* D or d$: onto the line's new last character, not past it,
+             * where x and . found nothing to delete */
+            vis->cursor_col = vi_last_char_col(cur);
+        }
         vis->insert_mode = enter_insert;
         vis->replace_mode = 0;
         vi_mark_body_dirty_current_line(b, vis);
@@ -5445,7 +5487,7 @@ vi_apply_word_operator(buffer_t *b, vi_visual_t *vis, int key, int count)
 }
 
 static void
-vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
+vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 {
     int line_no = buf_current_line(b);
     int raw_count = vis->pending_count;
@@ -6551,6 +6593,38 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     vis->pending_reg = 0;
 }
 
+/*
+ * The operator pending, with its motion key.  d, < and > that change the
+ * buffer leave the operator, the count, the motion key and the keys read
+ * after it for . (c records its own: it replays the text it inserted).
+ */
+static void
+vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
+{
+    int op = vis->pending_op;
+    /* 0 for no count: dG is to the last line, d1G to the first.  The
+     * operator's own count is 1 when it was given none (vi_take_count()) */
+    int total = (vis->pending_op_count > 1 || vis->pending_count > 0) ?
+        vi_multiply_counts(vis->pending_op_count, vis->pending_count) : 0;
+    unsigned long generation = exvi_buffer_generation;
+    int record = (op == 'd' || op == '<' || op == '>');
+
+    if (record) {
+        vi_op_nkeys = 0;
+        vi_op_recording = 1;
+    }
+    vi_do_pending_operator(b, vis, key);
+    if (record) {
+        vi_op_recording = 0;
+        if (exvi_buffer_generation != generation) {
+            vi_set_last_change(vis, VI_REPEAT_OPERATOR, total, key);
+            vis->last_change_op = op;
+            memcpy(vis->last_change_keys, vi_op_keys, sizeof(vi_op_keys[0]) * (size_t)vi_op_nkeys);
+            vis->last_change_nkeys = vi_op_nkeys;
+        }
+    }
+}
+
 static void
 vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
 {
@@ -7300,6 +7374,7 @@ static void
 vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
 {
     line_t *cur = b->cur;
+    int dot_count = vis->pending_count;
     int count = vis->pending_count > 0 ? vis->pending_count : vis->last_change_count;
     int line_no = buf_current_line(b);
     int end;
@@ -7349,6 +7424,20 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             b->cur = b->head;
         }
         vis->cursor_col = 0;
+        break;
+    case VI_REPEAT_OPERATOR:
+        /* the operator again, its keys from the record, count the count
+         * given to . or the one it had */
+        memcpy(vi_replay_keys, vis->last_change_keys,
+            sizeof(vi_replay_keys[0]) * (size_t)vis->last_change_nkeys);
+        vi_replay_len = vis->last_change_nkeys;
+        vi_replay_pos = 0;
+        vis->pending_op = vis->last_change_op;
+        vis->pending_op_count = 0;
+        vis->pending_count = dot_count > 0 ? dot_count : vis->last_change_count;
+        vis->pending_reg = 0;
+        vi_handle_pending_operator(b, vis, vis->last_change_char);
+        vi_replay_len = vi_replay_pos = 0;      /* what it did not read goes */
         break;
     case VI_REPEAT_DW:
         vis->pending_op = 'd';

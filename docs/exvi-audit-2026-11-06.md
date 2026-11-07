@@ -943,14 +943,14 @@ The number is not reused.
 
 ### EXVI-62 — `.` cannot repeat most deletes and shifts — *Medium*
 
-- [ ] **EXVI-62.1** (Ubiquitous) The editor shall record every `d`, `c`, `<`,
+- [x] **EXVI-62.1** (Ubiquitous) The editor shall record every `d`, `c`, `<`,
   `>` and `!` command, with its count and motion, for `.`.
 
 - **Where**: no `vi_set_last_change` for `dl`, `dh`, `de`/`dE`, `db`/`dB`,
   `dW`, `d)`, `d}`, `d(`, `d{`, `d/`, `d?`, and every `<`/`>` motion
   (`exvi_visual.c:5067-5730`).
 - **Evidence**: `de.` deletes one word; `>j.` shifts the wrong lines.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_dot_ops.py`.
 
 ### EXVI-63 — `U` is not implemented — *Medium*
 
@@ -1275,3 +1275,14 @@ The number is not reused.
   (Vim: 20); `38Gz.H` to 18 (Vim: 27).  `test_vi_pty.py`'s z-position case
   had failed on it, unseen while nothing ran that test (EXVI-76).
 - **Basis**: reproduced; `tests/bin/vi/test_vi_pty.py`.
+
+### EXVI-88 — after `D` or `d$` the cursor is past the end of the line — *Low*
+
+- [x] **EXVI-88.1** (Event-driven) When `D` or `d$` deletes to the end of a
+  line, the editor shall put the cursor on the line's new last character.
+
+- **Where**: `exvi_visual.c`, `vi_delete_span` left the cursor at the
+  region's start, one past the shortened line's end.
+- **Evidence**: `wDx` on `aa bb` leaves `aa ` (Vim: `aa`); `wd$.` too.
+  Found fixing EXVI-62.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_dot_ops.py`.
