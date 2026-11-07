@@ -376,7 +376,7 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         /* the same buffer goes on in visual mode, modified or not */
         exvi_visual_requested = 1;
         return 1;
-    } else if (match_command(cmd, "version", "ver", &args, NULL)) {
+    } else if (match_command(cmd, "version", "ve", &args, NULL)) {
         const char *version = "Substrate vi v0.1";
 
         if (visual_mode) {
@@ -434,8 +434,19 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return 1;
     } else if (match_command(cmd, "write", "w", &args, &force)) {
         return handle_write_command(b, args, explicit_range, addr1, addr2, force);
-    } else if (match_command(cmd, "edit", "e", &args, &force)) {
+    } else if (match_command(cmd, "edit", "e", &args, &force)
+        || match_command(cmd, "ex", NULL, &args, &force)) {
         return handle_edit_command(b, args, force);
+    } else if (match_command(cmd, "chdir", "chd", &args, &force)
+        || match_command(cmd, "cd", NULL, &args, &force)) {
+        return handle_chdir_command(b, args, force);
+    } else if (match_command(cmd, "shell", "sh", &args, NULL)) {
+        return handle_shell_interactive();
+    } else if (match_command(cmd, "source", "so", &args, NULL)) {
+        return handle_source_command(b, args, do_command);
+    } else if (match_command(cmd, "suspend", "su", &args, &force)
+        || match_command(cmd, "stop", "st", &args, &force)) {
+        return handle_suspend_command();
     } else if (match_command(cmd, "read", "r", &args, NULL)) {
         return handle_read_command(b, args, addr2);
     }
@@ -493,6 +504,29 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_substitute_command(b, args, addr1, addr2);
     } else if (cmd[0] == '&') {
         return handle_repeat_substitute_command(b, cmd + 1, addr1, addr2);
+    } else if (cmd[0] == '~') {
+        /* ~: & with the last pattern used anywhere, as s's r option */
+        size_t n = strlen(cmd);
+        char *with_r = malloc(n + 1);
+        int rc;
+
+        if (!with_r) {
+            exvi_report_error("out of memory");
+            return 1;
+        }
+        with_r[0] = 'r';
+        memcpy(with_r + 1, cmd + 1, n);
+        rc = handle_repeat_substitute_command(b, with_r, addr1, addr2);
+        free(with_r);
+        return rc;
+    } else if (cmd[0] == '<' || cmd[0] == '>') {
+        return handle_shift_command(b, cmd, explicit_range, addr1, addr2);
+    } else if (cmd[0] == '@' || cmd[0] == '*') {
+        return handle_execute_command(b, cmd + 1, explicit_range, addr1, addr2, do_command);
+    } else if (cmd[0] == 0x04 && cmd[1] == '\0') {
+        return handle_scroll_command(b);
+    } else if (cmd[0] == 'z' && !isalpha((unsigned char)cmd[1])) {
+        return handle_z_command(b, cmd + 1, explicit_range, addr2);
     } else if (match_command(cmd, "global", "g", &args, &force)
         || match_command(cmd, "global", "v", &args, &force)) {
         /* global! is v */

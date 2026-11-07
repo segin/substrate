@@ -114,8 +114,73 @@ The current supported command contract includes:
 .Ic global ,
 .Ic g ,
 .Ic v ,
-.Ic \&!
+.Ic \&! ,
+.Ic ~ ,
+.Ic @ ,
+.Ic *
+.It display, shifting and session
+.Ic z ,
+.Ic Ctrl-D ,
+.Ic < ,
+.Ic > ,
+.Ic chdir ,
+.Ic cd ,
+.Ic shell ,
+.Ic sh ,
+.Ic source ,
+.Ic so ,
+.Ic suspend ,
+.Ic stop ,
+.Ic ex
 .El
+.Pp
+.Ic z Ns Oo Cm \&! Oc Ns Oo Ar type Oc Ns Oo Ar count Oc Ns Op Ar flags
+writes a window of
+.Ar count
+lines
+.Pq the Ic window No option, set by it; by default twice Ic scroll :
+from the line
+.Pq Cm + No or no type ,
+ending at it
+.Pq Cm \- ,
+around it
+.Pq Cm \&. ,
+or with a line of hyphens on each side
+.Pq Cm = ,
+or the window before the one ending at it
+.Pq Cm ^ .
+.Ic Ctrl-D
+writes the next
+.Ic scroll
+lines.
+.Ic <
+and
+.Ic >
+shift the lines' indents by
+.Ic shiftwidth
+for each
+.Ic <
+or
+.Ic >
+written.
+.Ic @ Ns Ar x
+and
+.Ic * Ns Ar x
+run the lines of buffer
+.Ar x
+as ex commands for each line addressed
+.Pq Ic @@ No the buffer run last ;
+.Ic ~
+is
+.Ic &
+with the last pattern used anywhere.
+The addresses
+.Ql \e/
+and
+.Ql \e?
+search on and back for the last pattern, and
+.Ql \e&
+on for the last substitute's.
 .Pp
 A command that would replace or abandon a modified buffer \(em
 .Ic edit ,

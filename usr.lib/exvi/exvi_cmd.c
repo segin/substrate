@@ -1639,7 +1639,7 @@ exvi_pclose(FILE *f)
  * sigaction, not signal(): restoring with signal() would bring SA_RESTART
  * back to SIGINT, and an interrupt would wait for input.
  */
-static void
+void
 exvi_wait_child(pid_t pid)
 {
     int status;

@@ -744,13 +744,13 @@ The number is not reused.
 
 - [ ] **EXVI-49.1** (Ubiquitous) The editor shall implement `abbreviate`,
   `unabbreviate`, `map` and `unmap`.
-- [ ] **EXVI-49.2** (Ubiquitous) The editor shall implement `chdir`, `shell`,
+- [x] **EXVI-49.2** (Ubiquitous) The editor shall implement `chdir`, `shell`,
   `source` and `suspend`/`stop`.
 - [ ] **EXVI-49.3** (Ubiquitous) The editor shall implement `open`, `z`, `<`,
   `>`, `^D`, `~`, `@`, `*` and `ex`.
-- [ ] **EXVI-49.4** (Ubiquitous) The editor shall accept every command
+- [x] **EXVI-49.4** (Ubiquitous) The editor shall accept every command
   abbreviation POSIX lists, `nu` and `ve` included.
-- [ ] **EXVI-49.5** (Ubiquitous) The editor shall accept the `\/`, `\?` and
+- [x] **EXVI-49.5** (Ubiquitous) The editor shall accept the `\/`, `\?` and
   `\&` addresses.
 
 - **Evidence** ("Unknown command"): each of the above; bare `su` does

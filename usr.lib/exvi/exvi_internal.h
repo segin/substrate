@@ -288,6 +288,16 @@ int handle_input_command(buffer_t *b, int mode, int force, int explicit_range, i
     int addr2);
 line_t *exvi_input_line(buffer_t *b, const char *text);
 void exvi_input_indent_free(void);
+void exvi_wait_child(pid_t pid);
+int handle_chdir_command(buffer_t *b, const char *args, int force);
+int handle_shell_interactive(void);
+int handle_source_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *, char *));
+int handle_suspend_command(void);
+int handle_z_command(buffer_t *b, const char *args, int explicit_range, int addr2);
+int handle_shift_command(buffer_t *b, const char *cmd, int explicit_range, int addr1, int addr2);
+int handle_scroll_command(buffer_t *b);
+int handle_execute_command(buffer_t *b, const char *args, int explicit_range, int addr1,
+    int addr2, void (*command_fn)(buffer_t *, char *));
 int handle_copy_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2);
 int handle_move_command(buffer_t *b, const char *args, int explicit_range,

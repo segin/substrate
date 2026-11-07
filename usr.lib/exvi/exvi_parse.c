@@ -105,6 +105,9 @@ skip_address_atom_syntax(char *p)
 
         return skip_delimited_syntax(p, delim);
     }
+    if (*p == '\\' && (p[1] == '/' || p[1] == '?' || p[1] == '&')) {
+        return p + 2;
+    }
     return NULL;
 }
 
@@ -118,6 +121,7 @@ address_maybe_starts(char *p)
         || *p == '\''
         || *p == '/'
         || *p == '?'
+        || (*p == '\\' && (p[1] == '/' || p[1] == '?' || p[1] == '&'))
         || *p == '+'
         || *p == '-';
 }
@@ -457,6 +461,20 @@ parse_address_atom(buffer_t *b, char **cmd_ptr)
         }
         addr = exvi_search(b, pattern, delim == '/');
         free(pattern);
+    } else if (*p == '\\' && (p[1] == '/' || p[1] == '?' || p[1] == '&')) {
+        /*
+         * \/ and \? search on and back for the last pattern, as // and ??
+         * do; \& on for the last substitute's (historic ex).  They were
+         * "Unknown command".
+         */
+        const char *last = p[1] == '&' ? last_sub_pattern : last_search_pattern;
+
+        if (!last) {
+            exvi_report_error("No previous regular expression");
+            return -1;
+        }
+        addr = exvi_search(b, last, p[1] != '?');
+        p += 2;
     }
 
     if (addr != -1) {

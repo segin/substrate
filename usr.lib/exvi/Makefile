@@ -6,7 +6,7 @@ include ../../Makefile.inc
 LIB   = libexvi.a
 SHLIB = libexvi.so.0
 SRCS  = exvi.c exvi_buffer.c exvi_parse.c exvi_runtime.c exvi_cmd.c exvi_session.c exvi_visual.c \
-        exvi_options.c
+        exvi_options.c exvi_excmds.c
 OBJS     = $(SRCS:%.c=$(O)%.o)
 PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
