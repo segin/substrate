@@ -818,7 +818,7 @@ The number is not reused.
   shall indent ex text input as POSIX describes.
 - [x] **EXVI-54.2** (Ubiquitous) The editor's `append!`, `change!` and
   `insert!` shall toggle `autoindent` for that command.
-- [ ] **EXVI-54.3** (Optional feature) Where `scroll` is set, the editor shall
+- [x] **EXVI-54.3** (Optional feature) Where `scroll` is set, the editor shall
   use it for ex's `^D` and `z`.
 - [x] **EXVI-54.4** (Ubiquitous) The editor shall default `showmode` to off.
 
