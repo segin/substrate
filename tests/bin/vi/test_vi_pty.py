@@ -5096,7 +5096,8 @@ def main():
         [b"0", b"%", b"r", b"Z"],
     )
     require(exit_code == 0, f"visual-percent-scan-cross vi exited with status {exit_code}")
-    require(saved == "if (x) Z\nalpha\n}\n",
+    # % off a bracket: to the match of the first bracket on the line (Vim)
+    require(saved == "if (xZ {\nalpha\n}\n",
             f"unexpected visual-percent-scan-cross buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -5105,7 +5106,7 @@ def main():
         [b"0", b"d", b"%"],
     )
     require(exit_code == 0, f"visual-percent-scan-cross-delete vi exited with status {exit_code}")
-    require(saved == "if (x) \n",
+    require(saved == " {\nalpha\n}\n",
             f"unexpected visual-percent-scan-cross-delete buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -5115,7 +5116,7 @@ def main():
     )
     require(exit_code == 0, f"visual-percent-scan-cross-change vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing visual-percent-scan-cross change insert status")
-    require(saved == "if (x) X\n",
+    require(saved == "X {\nalpha\n}\n",
             f"unexpected visual-percent-scan-cross-change buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -5124,7 +5125,7 @@ def main():
         [b"0", b"y", b"%", b"P"],
     )
     require(exit_code == 0, f"visual-percent-scan-cross-yank vi exited with status {exit_code}")
-    require(saved == "if (x) {\nalpha\n}{\nalpha\n}\n",
+    require(saved == "if (x)if (x) {\nalpha\n}\n",
             f"unexpected visual-percent-scan-cross-yank buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -5133,7 +5134,7 @@ def main():
         [b"0", b">", b"%"],
     )
     require(exit_code == 0, f"visual-percent-shift-scan vi exited with status {exit_code}")
-    require(saved == "\tif (x) {\n\t    one\n\t    two\n\t}\n",
+    require(saved == "\tif (x) {\n    one\n    two\n}\n",
             f"unexpected visual-percent-shift-scan buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
