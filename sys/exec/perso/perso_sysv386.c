@@ -742,7 +742,7 @@ static int64_t sysv386_sys_ioctl(struct sysv386_frame *f) {
 
     switch (cmd) {
     case SYSV_TCGETA:
-        rc = kern_ioctl(fd, TCGETS, &native);
+        rc = kern_ioctl_kbuf(fd, TCGETS, &native);
         if (rc != 0) {
             return rc;
         }
@@ -753,7 +753,7 @@ static int64_t sysv386_sys_ioctl(struct sysv386_frame *f) {
     case SYSV_TCSETAF:
         /* termio cannot express everything termios holds: start from what
          * the terminal has. */
-        rc = kern_ioctl(fd, TCGETS, &native);
+        rc = kern_ioctl_kbuf(fd, TCGETS, &native);
         if (rc != 0) {
             return rc;
         }
@@ -762,7 +762,7 @@ static int64_t sysv386_sys_ioctl(struct sysv386_frame *f) {
             return rc;
         }
         sysv_termio_to_termios(&native, &user);
-        return kern_ioctl(fd, cmd == SYSV_TCSETA ? TCSETS :
+        return kern_ioctl_kbuf(fd, cmd == SYSV_TCSETA ? TCSETS :
                               cmd == SYSV_TCSETAW ? TCSETSW : TCSETSF,
                           &native);
     case SYSV_TCSBRK:

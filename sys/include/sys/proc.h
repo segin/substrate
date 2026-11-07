@@ -402,6 +402,13 @@ typedef struct thread {
 #define THREAD_F_DETACHED      0x0008 // Detached LWP: self-reap on exit, no join
 #define THREAD_F_SUSPENDED     0x0010 // _lwp_suspend: off-CPU until _lwp_continue
 /*
+ * The ioctl this thread runs was given a KERNEL buffer, by kern_ioctl_kbuf()
+ * (a personality's translation of termios and the like).  An ioctl's pointer
+ * is a user one unless this is set: a driver must never decide by the
+ * address, as a user can pass any address.
+ */
+#define THREAD_F_IOCTL_KBUF    0x0080
+/*
  * Per-call MSG_DONTWAIT, scoped to the calling thread.
  *
  * recv/send used to implement MSG_DONTWAIT by OR-ing FNONBLOCK into the

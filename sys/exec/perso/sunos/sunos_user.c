@@ -759,7 +759,7 @@ static int termios_ioctl(int fd, uint32_t key, void *arg) {
     uint32_t set;
     int rc;
 
-    rc = kern_ioctl(fd, TCGETS, &n);
+    rc = kern_ioctl_kbuf(fd, TCGETS, &n);
     if (rc != 0) {
         return rc;
     }
@@ -794,7 +794,7 @@ static int termios_ioctl(int fd, uint32_t key, void *arg) {
         set = TCSETS + (key - SUNOS_TCSETS);
     }
     termios_in(&s, &n);
-    return kern_ioctl(fd, set, &n);
+    return kern_ioctl_kbuf(fd, set, &n);
 }
 
 /*

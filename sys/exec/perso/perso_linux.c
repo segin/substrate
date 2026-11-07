@@ -524,7 +524,7 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
     /* Handle TIOCGWINSZ / TIOCSWINSZ explicitly */
     if (request == 0x5413) { // TIOCGWINSZ
         struct winsize native;
-        int ret = kern_ioctl(fd, request, &native);
+        int ret = kern_ioctl_kbuf(fd, request, &native);
         if (ret == 0 && arg) {
             struct linux_winsize lw;
             /* Copy to Linux layout (compatible) */
@@ -550,7 +550,7 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
         native.ws_col = lw.ws_col;
         native.ws_xpixel = lw.ws_xpixel;
         native.ws_ypixel = lw.ws_ypixel;
-        return kern_ioctl(fd, request, &native);
+        return kern_ioctl_kbuf(fd, request, &native);
     }
 
     /* Termios Translation */
@@ -560,7 +560,7 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
             struct termios native;
             memset(&native, 0, sizeof(native));
             
-            int ret = kern_ioctl(fd, request, &native);
+            int ret = kern_ioctl_kbuf(fd, request, &native);
             if (ret == 0 && arg) {
                 struct linux_termios lt;
                 memset(&lt, 0, sizeof(lt));
@@ -601,7 +601,7 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
             }
             native.c_ispeed = 0;
             native.c_ospeed = 0;
-            return kern_ioctl(fd, request, &native);
+            return kern_ioctl_kbuf(fd, request, &native);
         }
     }
     

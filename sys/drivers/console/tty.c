@@ -1510,7 +1510,13 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     struct winsize k_winsize;
     int k_int;
     uintptr_t karg = 0;
-    int kernel_arg = ((uintptr_t)arg >= KERN_BASE);
+    /*
+     * A kernel buffer only when the caller said so (kern_ioctl_kbuf()):
+     * never by its address, which a user can choose -- an argument in the
+     * kernel half, through a personality's ioctl that skips sys_ioctl()'s
+     * range check, read and wrote kernel memory as termios.
+     */
+    int kernel_arg = current_thread && (current_thread->flags & THREAD_F_IOCTL_KBUF);
 
     /*
      * Copy-in phase (unlocked)

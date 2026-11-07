@@ -571,7 +571,7 @@ static int64_t svr4_sys_ioctl(struct sysv386_frame *f, int *known) {
     }
     switch (f->a[1]) {
     case SVR4_TCGETS:
-        rc = kern_ioctl(fd, TCGETS, &native);
+        rc = kern_ioctl_kbuf(fd, TCGETS, &native);
         if (rc != 0) {
             return rc;
         }
@@ -580,7 +580,7 @@ static int64_t svr4_sys_ioctl(struct sysv386_frame *f, int *known) {
     case SVR4_TCSETS:
     case SVR4_TCSETSW:
     case SVR4_TCSETSF:
-        rc = kern_ioctl(fd, TCGETS, &native);
+        rc = kern_ioctl_kbuf(fd, TCGETS, &native);
         if (rc != 0) {
             return rc;
         }
@@ -589,21 +589,21 @@ static int64_t svr4_sys_ioctl(struct sysv386_frame *f, int *known) {
             return rc;
         }
         svr4_termios_to_native(&native, &user);
-        return kern_ioctl(fd, f->a[1] == SVR4_TCSETS ? TCSETS :
+        return kern_ioctl_kbuf(fd, f->a[1] == SVR4_TCSETS ? TCSETS :
                               f->a[1] == SVR4_TCSETSW ? TCSETSW : TCSETSF,
                           &native);
     case SVR4_TIOCGWINSZ:
-        rc = kern_ioctl(fd, TIOCGWINSZ, &ws);
+        rc = kern_ioctl_kbuf(fd, TIOCGWINSZ, &ws);
         return rc != 0 ? rc : svr4_put(arg, &ws, sizeof(ws));
     case SVR4_TIOCSWINSZ:
         rc = svr4_get(arg, &ws, sizeof(ws));
-        return rc != 0 ? rc : kern_ioctl(fd, TIOCSWINSZ, &ws);
+        return rc != 0 ? rc : kern_ioctl_kbuf(fd, TIOCSWINSZ, &ws);
     case SVR4_TIOCGPGRP:
-        rc = kern_ioctl(fd, TIOCGPGRP, &pgrp);
+        rc = kern_ioctl_kbuf(fd, TIOCGPGRP, &pgrp);
         return rc != 0 ? rc : svr4_put(arg, &pgrp, sizeof(pgrp));
     case SVR4_TIOCSPGRP:
         rc = svr4_get(arg, &pgrp, sizeof(pgrp));
-        return rc != 0 ? rc : kern_ioctl(fd, TIOCSPGRP, &pgrp);
+        return rc != 0 ? rc : kern_ioctl_kbuf(fd, TIOCSPGRP, &pgrp);
     default:
         return -ENOTTY;
     }

@@ -72,6 +72,7 @@ int kern_connect(int fd, const struct sockaddr *addr, socklen_t addrlen);
 int kern_sockname(int fd, int peer, void *kaddr, socklen_t *len);
 int kern_fstat(int fd, struct stat *buf);
 int kern_ioctl(int fd, uint32_t request, void *arg);
+int kern_ioctl_kbuf(int fd, uint32_t request, void *karg);
 int kern_unlink(const char *path);
 int kern_unlinkat(int dirfd, const char *path, int flags);
 int kern_link(const char *oldpath, const char *newpath);

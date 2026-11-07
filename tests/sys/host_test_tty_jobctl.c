@@ -55,8 +55,21 @@ void spinlock_acquire(spinlock_t *lock) { (void)lock; }
 void spinlock_release(spinlock_t *lock) { (void)lock; }
 void *kmalloc(size_t size) { return calloc(1, size); }
 void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
-int copyin(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
-int copyout(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
+/* As the kernel's, these refuse the kernel half (0xC0000000 up, within the
+ * low 4 GiB this host test's own pointers are outside of). */
+static int user_addr_bad(const void *p) {
+    return (uintptr_t)p >= 0xC0000000U && (uintptr_t)p < 0x100000000ULL;
+}
+int copyin(const void *src, void *dst, size_t size) {
+    if (user_addr_bad(src)) return -1;
+    memcpy(dst, src, size);
+    return 0;
+}
+int copyout(const void *src, void *dst, size_t size) {
+    if (user_addr_bad(dst)) return -1;
+    memcpy(dst, src, size);
+    return 0;
+}
 int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     size_t n = strnlen((const char *)src, maxlen);
     if (n == maxlen) return -1;
@@ -332,6 +345,42 @@ static void test_tty_c_iflag_defaults_and_roundtrip(void) {
            (IGNBRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON));
 
     tty_free(tty);
+}
+
+/*
+ * tty_ioctl() takes its pointer as a user one, whatever its value: one in
+ * the kernel half is copied in and out as any other -- and refused --
+ * unless the caller said it is a kernel buffer (kern_ioctl_kbuf(),
+ * THREAD_F_IOCTL_KBUF).  It took any address at or above KERN_BASE for a
+ * kernel buffer, and a personality's ioctl, which skips sys_ioctl()'s range
+ * check, read and wrote kernel memory through TCGETS and TCSETS.
+ */
+static void test_tty_ioctl_kernel_address_is_user(void) {
+    struct tty *tty;
+    struct tty_driver driver = {0};
+    struct termios kbuf;
+    thread_t thread;
+
+    reset_env();
+    memset(&thread, 0, sizeof(thread));
+    current_thread = &thread;
+    tty = tty_alloc(&driver, 19);
+    assert(tty != NULL);
+
+    assert(tty_ioctl(tty, TCGETS, 0xC0001000UL) == -EFAULT);
+    assert(tty_ioctl(tty, TCSETS, 0xC0001000UL) == -EFAULT);
+    assert(tty_ioctl(tty, TIOCGWINSZ, 0xC0001000UL) == -EFAULT);
+    assert(tty_ioctl(tty, TIOCSPGRP, 0xC0001000UL) == -EFAULT);
+
+    /* a kernel buffer, as kern_ioctl_kbuf() marks one */
+    thread.flags |= THREAD_F_IOCTL_KBUF;
+    memset(&kbuf, 0, sizeof(kbuf));
+    assert(tty_ioctl(tty, TCGETS, (unsigned long)(uintptr_t)&kbuf) == 0);
+    assert((kbuf.c_iflag & ICRNL) != 0);
+    thread.flags &= ~THREAD_F_IOCTL_KBUF;
+
+    tty_free(tty);
+    current_thread = NULL;
 }
 
 static void test_tty_c_oflag_defaults_and_roundtrip(void) {
@@ -1373,6 +1422,7 @@ int main(void) {
     test_tty_canon_buffer_receives_cooked_line();
     test_tty_ixoff_high_and_low_water_marks();
     test_tty_c_iflag_defaults_and_roundtrip();
+    test_tty_ioctl_kernel_address_is_user();
     test_tty_c_oflag_defaults_and_roundtrip();
     test_tty_c_cflag_defaults_and_roundtrip();
     test_tty_c_lflag_defaults_and_roundtrip();

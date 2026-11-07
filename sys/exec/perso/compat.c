@@ -2029,7 +2029,7 @@ int perso_tty_ioctl(struct tty *tp, uint32_t request, void *arg, int *handled) {
     case FBSD_TIOCGETA: {
         struct termios native;
         memset(&native, 0, sizeof(native));
-        int ret = tty_ioctl(tp, TCGETS, (unsigned long)&native);
+        int ret = tty_ioctl_kern(tp, TCGETS, (uintptr_t)&native);
         if (ret == 0 && arg) {
             struct freebsd_termios fb;
             native_to_freebsd_termios(&native, &fb);
@@ -2046,8 +2046,8 @@ int perso_tty_ioctl(struct tty *tp, uint32_t request, void *arg, int *handled) {
         struct termios native;
         freebsd_termios_to_native(&fb, &native);
         /* Native TCSETS=0x5402, TCSETSW=0x5403, TCSETSF=0x5404. */
-        return tty_ioctl(tp, TCSETS + (request - FBSD_TIOCSETA),
-                         (unsigned long)&native);
+        return tty_ioctl_kern(tp, TCSETS + (request - FBSD_TIOCSETA),
+                              (uintptr_t)&native);
     }
     /* struct winsize layout (4 uint16) is identical; only the number differs. */
     case FBSD_TIOCGWINSZ: return tty_ioctl(tp, 0x5413, (unsigned long)arg);

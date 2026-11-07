@@ -222,7 +222,7 @@ static int ttcompat_ioctl(int fd, uint32_t request, uint32_t arg,
         if (rc == 0) {
             sgttyb_to_termios(t, &sg);
             /* TIOCSETP waits for output and throws input away. */
-            rc = kern_ioctl(fd, request == SVR4_TIOCSETP ? TCSETSF : TCSETS,
+            rc = kern_ioctl_kbuf(fd, request == SVR4_TIOCSETP ? TCSETSF : TCSETS,
                             t);
         }
         *result = rc;
@@ -245,7 +245,7 @@ static int ttcompat_ioctl(int fd, uint32_t request, uint32_t arg,
             t->c_cc[VSTOP] = tc.t_stopc;
             t->c_cc[VEOF] = tc.t_eofc;
             t->c_cc[VEOL] = tc.t_brkc;
-            rc = kern_ioctl(fd, TCSETS, t);
+            rc = kern_ioctl_kbuf(fd, TCSETS, t);
         }
         *result = rc;
         return 1;
@@ -266,7 +266,7 @@ static int ttcompat_ioctl(int fd, uint32_t request, uint32_t arg,
             t->c_cc[VDISCARD] = lt.t_flushc;
             t->c_cc[VWERASE] = lt.t_werasc;
             t->c_cc[VLNEXT] = lt.t_lnextc;
-            rc = kern_ioctl(fd, TCSETS, t);
+            rc = kern_ioctl_kbuf(fd, TCSETS, t);
         }
         *result = rc;
         return 1;
@@ -284,7 +284,7 @@ static int ttcompat_ioctl(int fd, uint32_t request, uint32_t arg,
             word = request == SVR4_TIOCLSET ? word
                  : request == SVR4_TIOCLBIS ? (now | word) : (now & ~word);
             local_to_termios(t, word);
-            rc = kern_ioctl(fd, TCSETS, t);
+            rc = kern_ioctl_kbuf(fd, TCSETS, t);
         }
         *result = rc;
         return 1;
@@ -363,7 +363,7 @@ int svr4_tty_ioctl(struct sysv386_frame *f, int64_t *result) {
         break;
     }
     is_master = pty_master_index(node) >= 0;
-    is_tty = kern_ioctl(fd, TCGETS, &t) == 0;
+    is_tty = kern_ioctl_kbuf(fd, TCGETS, &t) == 0;
     if (!is_master && !is_tty) {
         return 0;
     }
@@ -430,7 +430,7 @@ int svr4_tty_ioctl(struct sysv386_frame *f, int64_t *result) {
 int svr4_ttcompat(int fd, uint32_t request, uint32_t arg, int64_t *result) {
     struct termios t;
 
-    if (kern_ioctl(fd, TCGETS, &t) != 0) {
+    if (kern_ioctl_kbuf(fd, TCGETS, &t) != 0) {
         return 0;
     }
     return ttcompat_ioctl(fd, request, arg, &t, result);

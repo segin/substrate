@@ -1296,7 +1296,7 @@ static int64_t x286_ioctl_termio(struct x286_frame *f, int fd, uint16_t cmd) {
         return rc;
     }
     if (cmd == X286_TCGETA) {
-        rc = kern_ioctl(fd, TCGETS, &native);
+        rc = kern_ioctl_kbuf(fd, TCGETS, &native);
         if (rc != 0) {
             return rc;
         }
@@ -1307,7 +1307,7 @@ static int64_t x286_ioctl_termio(struct x286_frame *f, int fd, uint16_t cmd) {
 
     /* Read-modify-write: termio cannot express the speeds or the tail of
      * c_cc, so start from what the tty currently has. */
-    rc = kern_ioctl(fd, TCGETS, &native);
+    rc = kern_ioctl_kbuf(fd, TCGETS, &native);
     if (rc != 0) {
         return rc;
     }
@@ -1319,7 +1319,7 @@ static int64_t x286_ioctl_termio(struct x286_frame *f, int fd, uint16_t cmd) {
     case X286_TCSETAW: set_cmd = TCSETSW; break;
     default:           set_cmd = TCSETSF; break;
     }
-    return kern_ioctl(fd, set_cmd, &native);
+    return kern_ioctl_kbuf(fd, set_cmd, &native);
 }
 
 static int64_t x286_sys_ioctl(struct x286_frame *f) {
@@ -3326,7 +3326,7 @@ static int64_t venix_sys_ioctl(struct x286_frame *f) {
         return x286_fd_vnode(fd) ? -ENOTTY : -EBADF;
     }
     memset(&t, 0, sizeof(t));
-    rc = kern_ioctl(fd, TCGETS, &t);
+    rc = kern_ioctl_kbuf(fd, TCGETS, &t);
     if (rc != 0) {
         return rc;
     }
@@ -3366,7 +3366,7 @@ static int64_t venix_sys_ioctl(struct x286_frame *f) {
         t.c_cc[VMIN] = 1;
         t.c_cc[VTIME] = 0;
     }
-    return kern_ioctl(fd, f->cx == VENIX_TIOCSETP ? TCSETSW : TCSETS, &t);
+    return kern_ioctl_kbuf(fd, f->cx == VENIX_TIOCSETP ? TCSETSW : TCSETS, &t);
 }
 
 /*

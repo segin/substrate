@@ -2392,7 +2392,7 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
             if (!arg) {
                 return -EFAULT;
             }
-            ret = kern_ioctl((int)fd, request, &native);
+            ret = kern_ioctl_kbuf((int)fd, request, &native);
             if (ret != 0) {
                 return ret;
             }
@@ -2408,12 +2408,12 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
             if (!arg) {
                 return -EFAULT;
             }
-            ret = kern_ioctl((int)fd, TCGETS, &native);
+            ret = kern_ioctl_kbuf((int)fd, TCGETS, &native);
             if (ret != 0) {
                 return ret;
             }
             memcpy(&native, arg, ELKS_TERMIOS_BYTES);
-            return kern_ioctl((int)fd, request, &native);
+            return kern_ioctl_kbuf((int)fd, request, &native);
         }
         default:
             return kern_ioctl((int)fd, request, arg);

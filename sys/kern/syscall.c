@@ -3079,6 +3079,24 @@ int sys_ioctl(int fd, uint32_t request, void *arg) {
     return kern_ioctl(fd, request, arg);
 }
 
+/*
+ * kern_ioctl() with @p karg a KERNEL buffer -- a personality's native
+ * termios, winsize or the like -- which a driver may then use as it is
+ * (THREAD_F_IOCTL_KBUF).  kern_ioctl()'s own pointer is a user one,
+ * whatever its value.
+ */
+int kern_ioctl_kbuf(int fd, uint32_t request, void *karg) {
+    uint32_t was;
+    int ret;
+
+    if (!current_thread) return kern_ioctl(fd, request, karg);
+    was = current_thread->flags & THREAD_F_IOCTL_KBUF;
+    current_thread->flags |= THREAD_F_IOCTL_KBUF;
+    ret = kern_ioctl(fd, request, karg);
+    if (!was) current_thread->flags &= ~THREAD_F_IOCTL_KBUF;
+    return ret;
+}
+
 int kern_ioctl(int fd, uint32_t request, void *arg) {
     /* Substrate convention: kernel syscalls return -errno on
      * failure, libc negates that into errno.  Bare -1 here came

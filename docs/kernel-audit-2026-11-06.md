@@ -167,7 +167,8 @@
 
 ## 5. Networking & Device Drivers (`sys/net/` & `sys/drivers/`)
 
-- [ ] **[REQ-SYS-DRV-001]** *(Critical — Direct User-Pointer Dereference in `tty_ioctl_kern()` via `tty_ioctl()` Fallback)*
+- [x] **[REQ-SYS-DRV-001]** *(Critical — Direct User-Pointer Dereference in `tty_ioctl_kern()` via `tty_ioctl()` Fallback)*
+  - **Resolution (2026-11-06):** the hole was `tty_ioctl()` taking any argument `>= KERN_BASE` for a kernel buffer; `sys_ioctl()` refused such an argument, but personality ioctls (BSD `compat.c`, Xenix, ELKS, SVR4 streams) hand `kern_ioctl()` the user's.  A pointer is now a kernel buffer only when the caller says so: `kern_ioctl_kbuf()` sets `THREAD_F_IOCTL_KBUF`, which every personality's termios/winsize/pgrp translation now uses, and `compat.c`'s direct calls use `tty_ioctl_kern()`.
   - **Location:** `sys/drivers/console/tty.c:88-96` (`tty_node_ioctl`), `sys/drivers/console/tty.c:1320-1575` (`tty_ioctl_kern`, `tty_ioctl`)
   - **Finding:** While `tty_ioctl()` copies user arguments into a kernel stack buffer before calling `tty_ioctl_kern()`, it falls back to passing the raw user pointer `arg` directly to `tty_ioctl_kern()` whenever `copyin()` fails (such as when a user process passes a kernel address `>= 0xC0000000`). Inside `tty_ioctl_kern()`, `TCGETS`, `TCSETS*`, `TIOCGWINSZ`, `TIOCSWINSZ`, `TIOCGPGRP`, and `TIOCSPGRP` directly dereference `arg`, enabling arbitrary kernel memory read/write from ring 3.
   - **Requirement (Unwanted Behavior):**
