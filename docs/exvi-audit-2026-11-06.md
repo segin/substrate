@@ -1045,9 +1045,9 @@ The number is not reused.
 
 ### EXVI-70 — screen: wide and combining characters, `^Y` at the bottom row — *Low*
 
-- [ ] **EXVI-70.1** (Ubiquitous) The editor shall give each character its
+- [x] **EXVI-70.1** (Ubiquitous) The editor shall give each character its
   display width (0, 1 or 2 columns).
-- [ ] **EXVI-70.2** (Event-driven) When `^Y` scrolls the cursor's line off the
+- [x] **EXVI-70.2** (Event-driven) When `^Y` scrolls the cursor's line off the
   bottom of the screen, the editor shall make the last line shown the
   current line.
 
@@ -1055,7 +1055,10 @@ The number is not reused.
   for all); `vi_line_scroll` `2223-2243`.
 - **Evidence**: `$` on `日本語x` puts the cursor at column 4 (7); in a
   100-line file, `50Gz<CR>L^Y^Ydd` deletes line 72 (70).
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_columns.py`.  Widths from
+  a table of Kuhn's `mk_wcwidth()` ranges (vi runs under the C locale); a
+  base character and its combining marks are still separate cursor
+  positions.
 
 ---
 
@@ -1309,3 +1312,19 @@ The number is not reused.
 - **Evidence**: `d/three` on `one` / `two three` / `four` leaves `four`
   (Vim: `three` / `four`).  Found fixing EXVI-64.
 - **Basis**: reproduced; `tests/bin/vi/test_vi_percent.py`.
+
+### EXVI-90 — the cursor rests past the end of a line; `j` and `k` forget their column — *Medium*
+
+- [x] **EXVI-90.1** (Ubiquitous) In command mode the editor shall keep the
+  cursor on a character of a non-empty line.
+- [x] **EXVI-90.2** (Event-driven) When `j` or `k` follows a `j` or `k`
+  with the cursor where that one left it, the editor shall aim for the
+  column the earlier one aimed for.
+
+- **Where**: `exvi_visual.c`, `vi_move_vertical` and `l`.
+- **Evidence**: `lllljrZ` on `abcdef` / `ab` leaves `ab` (Vim: `aZ`), `llrZ`
+  on `ab` leaves `ab`: the cursor was at the line's end, where `r` and `x`
+  find nothing; `lllljj` on `abcdef` / `ab` / `abcdef` comes back at
+  column 2, not 4.  Found fixing EXVI-70 (a combining mark made the first
+  common).  Not done: `$` making `j` and `k` keep to the line's end.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_columns.py`.

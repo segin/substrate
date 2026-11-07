@@ -110,6 +110,11 @@ typedef struct {
     /* U: the current line as it was when it became the current line */
     unsigned long u_line_id;
     char *ai_restore;           /* after ^^D: the next line's autoindent */
+    /* the column j and k aim for, while the cursor stays where the last of
+     * them put it: that line (by id) and that column */
+    int want_col;
+    unsigned long want_line_id;
+    int want_at_col;
     char *u_text;
     size_t u_len;
     int last_change_keys[64];           /* ... and the keys it read after the motion key */
@@ -1202,6 +1207,84 @@ vi_inclusive_end(line_t *cur, int idx)
     return vi_next_char_index(cur, idx);
 }
 
+/*
+ * The columns a printable character takes on a terminal: 0 for a
+ * combining mark or a zero-width character, 2 for an East Asian wide or
+ * fullwidth one, 1 for the rest -- the ranges of Markus Kuhn's
+ * mk_wcwidth(), which libc's wcwidth() cannot give under the C locale vi
+ * runs in.  vi gave every one 1: $ on 日本語x put the cursor at column 4.
+ */
+static int
+vi_codepoint_width(unsigned int cp)
+{
+    static const struct {
+        unsigned int first;
+        unsigned int last;
+    } zero[] = {
+        { 0x0300, 0x036f }, { 0x0483, 0x0489 }, { 0x0591, 0x05bd }, { 0x05bf, 0x05bf },
+        { 0x05c1, 0x05c2 }, { 0x05c4, 0x05c5 }, { 0x05c7, 0x05c7 }, { 0x0610, 0x061a },
+        { 0x064b, 0x065f }, { 0x0670, 0x0670 }, { 0x06d6, 0x06dc }, { 0x06df, 0x06e4 },
+        { 0x06e7, 0x06e8 }, { 0x06ea, 0x06ed }, { 0x0711, 0x0711 }, { 0x0730, 0x074a },
+        { 0x07a6, 0x07b0 }, { 0x0901, 0x0902 }, { 0x093c, 0x093c }, { 0x0941, 0x0948 },
+        { 0x094d, 0x094d }, { 0x0951, 0x0954 }, { 0x0962, 0x0963 }, { 0x0981, 0x0981 },
+        { 0x09bc, 0x09bc }, { 0x09c1, 0x09c4 }, { 0x09cd, 0x09cd }, { 0x0a01, 0x0a02 },
+        { 0x0a3c, 0x0a3c }, { 0x0a41, 0x0a4d }, { 0x0a81, 0x0a82 }, { 0x0abc, 0x0abc },
+        { 0x0ac1, 0x0ac8 }, { 0x0acd, 0x0acd }, { 0x0b01, 0x0b01 }, { 0x0b3c, 0x0b3c },
+        { 0x0b3f, 0x0b3f }, { 0x0b41, 0x0b43 }, { 0x0b4d, 0x0b4d }, { 0x0b82, 0x0b82 },
+        { 0x0bc0, 0x0bc0 }, { 0x0bcd, 0x0bcd }, { 0x0c3e, 0x0c40 }, { 0x0c46, 0x0c56 },
+        { 0x0cbf, 0x0cbf }, { 0x0cc6, 0x0cc6 }, { 0x0ccc, 0x0ccd }, { 0x0d41, 0x0d43 },
+        { 0x0d4d, 0x0d4d }, { 0x0dca, 0x0dca }, { 0x0dd2, 0x0dd6 }, { 0x0e31, 0x0e31 },
+        { 0x0e34, 0x0e3a }, { 0x0e47, 0x0e4e }, { 0x0eb1, 0x0eb1 }, { 0x0eb4, 0x0ebc },
+        { 0x0ec8, 0x0ecd }, { 0x0f18, 0x0f19 }, { 0x0f35, 0x0f35 }, { 0x0f37, 0x0f37 },
+        { 0x0f39, 0x0f39 }, { 0x0f71, 0x0f7e }, { 0x0f80, 0x0f84 }, { 0x0f86, 0x0f87 },
+        { 0x0f90, 0x0fbc }, { 0x0fc6, 0x0fc6 }, { 0x102d, 0x1030 }, { 0x1032, 0x1037 },
+        { 0x1039, 0x103a }, { 0x1058, 0x1059 }, { 0x1160, 0x11ff }, { 0x135f, 0x135f },
+        { 0x1712, 0x1714 }, { 0x1732, 0x1734 }, { 0x1752, 0x1753 }, { 0x1772, 0x1773 },
+        { 0x17b4, 0x17b5 }, { 0x17b7, 0x17bd }, { 0x17c6, 0x17c6 }, { 0x17c9, 0x17d3 },
+        { 0x17dd, 0x17dd }, { 0x180b, 0x180d }, { 0x18a9, 0x18a9 }, { 0x1920, 0x1922 },
+        { 0x1927, 0x1928 }, { 0x1932, 0x1932 }, { 0x1939, 0x193b }, { 0x1a17, 0x1a18 },
+        { 0x1ab0, 0x1aff }, { 0x1b00, 0x1b03 }, { 0x1b34, 0x1b34 }, { 0x1b36, 0x1b3a },
+        { 0x1b3c, 0x1b3c }, { 0x1b42, 0x1b42 }, { 0x1b6b, 0x1b73 }, { 0x1dc0, 0x1dff },
+        { 0x200b, 0x200f }, { 0x202a, 0x202e }, { 0x2060, 0x2064 }, { 0x206a, 0x206f },
+        { 0x20d0, 0x20ff }, { 0x302a, 0x302f }, { 0x3099, 0x309a }, { 0xa806, 0xa806 },
+        { 0xa80b, 0xa80b }, { 0xa825, 0xa826 }, { 0xfb1e, 0xfb1e }, { 0xfe00, 0xfe0f },
+        { 0xfe20, 0xfe2f }, { 0xfeff, 0xfeff }, { 0xfff9, 0xfffb }, { 0x10a01, 0x10a0f },
+        { 0x10a38, 0x10a3f }, { 0x1d167, 0x1d169 }, { 0x1d173, 0x1d182 },
+        { 0x1d185, 0x1d18b }, { 0x1d1aa, 0x1d1ad }, { 0x1d242, 0x1d244 },
+        { 0xe0001, 0xe0001 }, { 0xe0020, 0xe007f }, { 0xe0100, 0xe01ef },
+    };
+    size_t lo = 0;
+    size_t hi = sizeof(zero) / sizeof(zero[0]);
+
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+
+        if (cp < zero[mid].first) {
+            hi = mid;
+        } else if (cp > zero[mid].last) {
+            lo = mid + 1;
+        } else {
+            return 0;
+        }
+    }
+    if (cp >= 0x1100 &&
+        (cp <= 0x115f || cp == 0x2329 || cp == 0x232a ||
+         (cp >= 0x2e80 && cp <= 0xa4cf && cp != 0x303f) ||
+         (cp >= 0xac00 && cp <= 0xd7a3) ||
+         (cp >= 0xf900 && cp <= 0xfaff) ||
+         (cp >= 0xfe10 && cp <= 0xfe19) ||
+         (cp >= 0xfe30 && cp <= 0xfe6f) ||
+         (cp >= 0xff00 && cp <= 0xff60) ||
+         (cp >= 0xffe0 && cp <= 0xffe6) ||
+         (cp >= 0x1f300 && cp <= 0x1f64f) ||
+         (cp >= 0x1f900 && cp <= 0x1f9ff) ||
+         (cp >= 0x20000 && cp <= 0x2fffd) ||
+         (cp >= 0x30000 && cp <= 0x3fffd))) {
+        return 2;
+    }
+    return 1;
+}
+
 static int
 vi_char_display_width(unsigned char c, int col)
 {
@@ -1259,10 +1342,15 @@ vi_char_display_width_at(line_t *cur, int idx, int col)
     if (c < 0x80) {
         return vi_char_display_width(c, col);
     }
-    bytes = vi_utf8_decode_text_at(cur->text, cur->len, idx, NULL);
-    if (bytes > 1) {
-        /* a C1 control's bytes, as vi_drawn_char_bytes() draws them, 4 columns each */
-        return vi_drawn_char_bytes(cur->text, cur->len, idx) > 1 ? 1 : 4 * bytes;
+    {
+        unsigned int cp = 0;
+
+        bytes = vi_utf8_decode_text_at(cur->text, cur->len, idx, &cp);
+        if (bytes > 1) {
+            /* a C1 control's bytes, as vi_drawn_char_bytes() draws them, 4 columns each */
+            return vi_drawn_char_bytes(cur->text, cur->len, idx) > 1 ?
+                vi_codepoint_width(cp) : 4 * bytes;
+        }
     }
     return vi_char_display_width(c, col);
 }
@@ -1653,7 +1741,10 @@ vi_draw_line(const line_t *line, int cols, int number, int line_no, int left_col
         } else {
             bytes = vi_drawn_char_bytes(text, len, (int)idx);
             if (bytes > 1) {
-                width = 1;
+                unsigned int cp = 0;
+
+                (void)vi_utf8_decode_text_at(text, len, (int)idx, &cp);
+                width = vi_codepoint_width(cp);
             } else {
                 width = vi_char_display_width(c, display_col);
             }
@@ -1671,7 +1762,10 @@ vi_draw_line(const line_t *line, int cols, int number, int line_no, int left_col
         } else {
             bytes = vi_drawn_char_bytes(text, len, (int)idx);
             if (bytes > 1) {
-                width = 1;
+                unsigned int cp = 0;
+
+                (void)vi_utf8_decode_text_at(text, len, (int)idx, &cp);
+                width = vi_codepoint_width(cp);
             } else {
                 width = vi_char_display_width(c, display_col);
             }
@@ -2542,6 +2636,15 @@ vi_move_vertical(buffer_t *b, vi_visual_t *vis, int delta)
 
     if (cur && vis) {
         display_col = vi_display_col_for_index(cur, vis->cursor_col);
+        /*
+         * The column the last vertical move aimed for, if the cursor is
+         * still where that move left it: lllljj on abcdef / ab / abcdef
+         * came back at column 2, not 4 (POSIX vi; Vim).
+         */
+        if (vis->want_col >= 0 && cur->id == vis->want_line_id &&
+            vis->cursor_col == vis->want_at_col) {
+            display_col = vis->want_col;
+        }
     }
 
     if (target < 1) {
@@ -2552,8 +2655,17 @@ vi_move_vertical(buffer_t *b, vi_visual_t *vis, int delta)
     }
     if (target >= 1) {
         b->cur = buf_get_line(b, target);
-        if (vis) {
+        if (vis && b->cur) {
             vis->cursor_col = vi_index_for_display_col(b->cur, display_col);
+            /* onto the last character of a shorter line, not past it,
+             * where r and x found nothing (text input may be there) */
+            if (!vis->insert_mode && !vis->replace_mode && b->cur->len > 0 &&
+                (size_t)vis->cursor_col >= b->cur->len) {
+                vis->cursor_col = vi_last_char_col(b->cur);
+            }
+            vis->want_col = display_col;
+            vis->want_line_id = b->cur->id;
+            vis->want_at_col = vis->cursor_col;
         }
     }
 }
@@ -2731,6 +2843,28 @@ vi_line_scroll(buffer_t *b, vi_visual_t *vis, int direction)
     }
 
     cur_line_no = buf_current_line(b);
+    if (direction < 0) {
+        /* ^Y: from where the screen is, z<CR> near the end included */
+        int last_shown;
+
+        old_top = vis->top_line;
+        new_top = old_top + direction;
+        if (new_top < 1) {
+            new_top = 1;
+        }
+        vis->top_line = new_top;
+        last_shown = new_top + (vis->rows - 1 > 1 ? vis->rows - 1 : 1) - 1;
+        if (cur_line_no > last_shown) {
+            /* the cursor's line went off the bottom: the last line shown
+             * becomes current (POSIX vi).  It stayed, and the screen
+             * scrolled back to it: 50Gz<CR>L^Y^Ydd deleted line 72, not 70 */
+            b->cur = buf_get_line(b, vi_clamp_line_target(b, last_shown));
+            if (b->cur && (size_t)vis->cursor_col > b->cur->len) {
+                vis->cursor_col = (int)b->cur->len;
+            }
+        }
+        return;
+    }
     old_top = vi_clamp_top_line(b, vis, vis->top_line);
     new_top = vi_clamp_top_line(b, vis, old_top + direction);
     vis->top_line = new_top;
@@ -8098,6 +8232,7 @@ exvi_visual_main(buffer_t *b)
 
     memset(&vis, 0, sizeof(vis));
     vis.top_line = 1;
+    vis.want_col = -1;
     vis.last_search_forward = 1;
     vis.screen_dirty = 1;
     vis.status_dirty = 1;
@@ -8541,7 +8676,10 @@ process_normal_key:
             {
                 int count = vi_take_count(&vis);
 
-                while (count-- > 0 && cur && vis.cursor_col < (int)cur->len) {
+                /* no further than the last character: l went past it,
+                 * where r and x found nothing (POSIX vi) */
+                while (count-- > 0 && cur &&
+                    (size_t)vi_next_char_col(cur, vis.cursor_col) < cur->len) {
                     vis.cursor_col = vi_next_char_col(cur, vis.cursor_col);
                 }
             }
