@@ -204,6 +204,13 @@ static void ptrace_link_child(process_t *parent, process_t *child) {
  * and data are demand-paged, but pmap_copyin/out_other only walk *present*
  * PTEs — so without this a PEEK/POKE into not-yet-touched memory (e.g. gdb
  * planting a breakpoint in code that hasn't run) spuriously fails. */
+/* Does [addr, addr+len) lie in the tracee's user space?  A PEEK or POKE of
+ * anything else is refused before anything is faulted in or copied: the
+ * kernel half is mapped in every pmap.  (pmap_copy*_other() refuse it too.) */
+static int ptrace_user_range(uint32_t addr, uint32_t len) {
+    return addr < USER32_VA_END && len <= USER32_VA_END - addr;
+}
+
 static void ptrace_fault_in(process_t *t, uint32_t addr, uint32_t len) {
     if (!t || !t->vm_map) return;
     vm_fault(t->vm_map, addr, VM_PROT_READ);
@@ -274,11 +281,16 @@ int sys_ptrace(int req, int pid, int addr, int data) {
     /* Everything else requires us to be this process's tracer. */
     if (tracee->p_tracer != me) return -ESRCH;
 
+    /* ...and, but to kill it, the tracee stopped: its registers and memory
+     * are not to be read or changed while it runs (Linux's ESRCH). */
+    if (req != PTRACE_KILL && tracee->state != SSTOP) return -ESRCH;
+
     frame = (registers_t *)ptrace_user_frame(tracee);
 
     switch (req) {
     case PTRACE_PEEKTEXT:
     case PTRACE_PEEKDATA: {
+        if (!ptrace_user_range((uint32_t)addr, sizeof(uint32_t))) return -EIO;
 #ifdef SUBSTRATE_ARCH_X86_64
         if (ptrace_tracer_is_amd64()) {
             /* A 64-bit tracer's word is 8 bytes.  libsys always passes an
@@ -324,6 +336,7 @@ int sys_ptrace(int req, int pid, int addr, int data) {
 
     case PTRACE_POKETEXT:
     case PTRACE_POKEDATA: {
+        if (!ptrace_user_range((uint32_t)addr, sizeof(uint32_t))) return -EIO;
 #ifdef SUBSTRATE_ARCH_X86_64
         if (ptrace_tracer_is_amd64()) {
             /* The dispatcher hands handlers the low word of each argument;

@@ -116,7 +116,8 @@
   - **Requirement (Ubiquitous):**
     - The **Turnstile and Sleepqueue Subsystems** **shall** use distinct intrusive list linkage fields on `thread_t` (e.g., `t_ts_next` vs `t_sleepq_next`) and **shall not** invoke sleeping allocators while holding an interrupt-disabled spinlock.
 
-- [ ] **[REQ-SYS-KERN-002]** *(High — Arbitrary Kernel Memory Read/Write via Unchecked `addr` in `sys_ptrace()`)*
+- [x] **[REQ-SYS-KERN-002]** *(High — Arbitrary Kernel Memory Read/Write via Unchecked `addr` in `sys_ptrace()`)*
+  - **Resolution (2026-11-06):** the kernel-memory read/write did not reproduce: `pmap_copyin_other()`/`pmap_copyout_other()` already refuse a range reaching `KERN_BASE` (i386) or `USER32_VA_END` (x86-64).  `sys_ptrace()` now refuses such a PEEK/POKE itself (`-EIO`), before `vm_fault()`, and every request but `PTRACE_KILL` on a tracee not stopped (`-ESRCH`).
   - **Location:** `sys/kern/ptrace.c:207-360` (`ptrace_fault_in`, `sys_ptrace`)
   - **Finding:** `ptrace_fault_in()` and the `PTRACE_PEEKTEXT`/`PTRACE_PEEKDATA`/`PTRACE_POKETEXT`/`PTRACE_POKEDATA` handlers pass `(uint32_t)addr` directly to `pmap_copyin_other()` / `pmap_copyout_other()` without verifying that `addr` and `addr + len` reside below `KERNEL_VA_START`. Because kernel mappings are shared across every process's `pmap`, a tracer can read or overwrite arbitrary kernel memory via its tracee. Additionally, `sys_ptrace()` does not verify that `tracee` is stopped (`SSTOP`) before reading or modifying its state.
   - **Requirement (Unwanted Behavior):**
