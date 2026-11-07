@@ -179,12 +179,6 @@ static void vi_insert_quoted_key(buffer_t *b, vi_visual_t *vis);
 static void vi_insert_register_text(buffer_t *b, vi_visual_t *vis);
 static int vi_find_match_for_bracket(line_t *line, int match_col, line_t **line_out,
     int *col_out);
-static int vi_find_scanned_bracket_target(line_t *line, int cursor_col, int motion_mode,
-    line_t **line_out, int *col_out);
-static int vi_find_scanned_cross_bracket_span(line_t *line, int cursor_col,
-    int *start_col_out, line_t **line_out, int *col_out);
-static int vi_match_operator_target(buffer_t *b, vi_visual_t *vis, line_t **line_out,
-    int *col_out);
 static int vi_is_word_char(int ch);
 static int vi_apply_charwise_linewise_motion(buffer_t *b, vi_visual_t *vis,
     int current_line_no, line_t *target_line, int target_col);
@@ -4083,44 +4077,6 @@ vi_find_match_for_bracket(line_t *line, int match_col, line_t **line_out, int *c
 }
 
 static int
-vi_find_scanned_bracket_target(line_t *line, int cursor_col, int motion_mode,
-    line_t **line_out, int *col_out)
-{
-    line_t *fallback_line = NULL;
-    int fallback_col = 0;
-    size_t i;
-
-    if (!line || cursor_col < 0 || (size_t)cursor_col >= line->len) {
-        return -1;
-    }
-
-    for (i = (size_t)cursor_col + 1; i < line->len; i++) {
-        line_t *candidate_line;
-        int candidate_col;
-
-        if (vi_find_match_for_bracket(line, (int)i, &candidate_line, &candidate_col) != 0) {
-            continue;
-        }
-        if (!fallback_line) {
-            fallback_line = candidate_line;
-            fallback_col = candidate_col;
-        }
-        if (candidate_line != line) {
-            *line_out = motion_mode ? line : candidate_line;
-            *col_out = motion_mode ? (int)i : candidate_col;
-            return 0;
-        }
-    }
-
-    if (fallback_line) {
-        *line_out = fallback_line;
-        *col_out = fallback_col;
-        return 0;
-    }
-    return -1;
-}
-
-static int
 vi_match_cursor_col(line_t *line, int cursor_col)
 {
     if (!line || line->len == 0 || cursor_col < 0) {
@@ -4132,59 +4088,31 @@ vi_match_cursor_col(line_t *line, int cursor_col)
     return vi_normalize_char_index(line, cursor_col);
 }
 
-static int
-vi_find_scanned_cross_bracket_span(line_t *line, int cursor_col, int *start_col_out,
-    line_t **line_out, int *col_out)
-{
-    int forward;
-    int match_ch;
-    size_t i;
-
-    cursor_col = vi_match_cursor_col(line, cursor_col);
-    if (cursor_col < 0) {
-        return -1;
-    }
-    if (vi_match_bracket((unsigned char)line->text[cursor_col], &forward, &match_ch) == 0) {
-        return -1;
-    }
-    for (i = (size_t)cursor_col + 1; i < line->len; i++) {
-        if (vi_find_match_for_bracket(line, (int)i, line_out, col_out) == 0 &&
-            *line_out != line) {
-            *start_col_out = (int)i;
-            return 0;
-        }
-    }
-    return -1;
-}
-
+/*
+ * %: on a bracket, its match; elsewhere, the match of the first bracket
+ * after the cursor on the line, wherever that is (POSIX vi).  It went to
+ * that bracket itself, or past brackets with no match to one that had one
+ * -- %x on x (a / b) y deleted the (, and % on ((a) went to the ).
+ */
 static int
 vi_match_motion_target(buffer_t *b, vi_visual_t *vis, line_t **line_out, int *col_out)
 {
     line_t *line = b->cur;
-    int cursor_col = vi_match_cursor_col(line, vis->cursor_col);
+    int col = vi_match_cursor_col(line, vis->cursor_col);
+    int forward;
+    int match_ch;
 
-    if (cursor_col < 0) {
+    if (col < 0) {
         return -1;
     }
-    if (vi_find_match_for_bracket(line, cursor_col, line_out, col_out) == 0) {
-        return 0;
+    while ((size_t)col < line->len &&
+        vi_match_bracket((unsigned char)line->text[col], &forward, &match_ch) != 0) {
+        col++;
     }
-    return vi_find_scanned_bracket_target(line, cursor_col, 1, line_out, col_out);
-}
-
-static int
-vi_match_operator_target(buffer_t *b, vi_visual_t *vis, line_t **line_out, int *col_out)
-{
-    line_t *line = b->cur;
-    int cursor_col = vi_match_cursor_col(line, vis->cursor_col);
-
-    if (cursor_col < 0) {
+    if ((size_t)col >= line->len) {
         return -1;
     }
-    if (vi_find_match_for_bracket(line, cursor_col, line_out, col_out) == 0) {
-        return 0;
-    }
-    return vi_find_scanned_bracket_target(line, cursor_col, 0, line_out, col_out);
+    return vi_find_match_for_bracket(line, col, line_out, col_out);
 }
 
 static void
@@ -4931,6 +4859,28 @@ vi_apply_charwise_motion(buffer_t *b, vi_visual_t *vis, line_t *target_line,
         end_col = (int)end_line->len;
     }
 
+    /*
+     * d over more than one line that starts in its line's indent and
+     * leaves only blanks after its end takes the whole lines (Vim's
+     * op_delete; POSIX is silent): d% on x { / y / } deletes all three
+     * rather than leave an empty line.
+     */
+    if (vis->pending_op == 'd' && start_line != end_line &&
+        start_col <= vi_first_nonblank_col(start_line)) {
+        size_t i = (size_t)end_col;
+
+        while (i < end_line->len && (end_line->text[i] == ' ' || end_line->text[i] == '\t')) {
+            i++;
+        }
+        if (i >= end_line->len) {
+            int first = vi_line_number_for_mark(b, start_line);
+            int last = vi_line_number_for_mark(b, end_line);
+
+            if (first >= 1 && last >= first) {
+                return vi_apply_linewise_operator(b, vis, first, last);
+            }
+        }
+    }
     if (vis->pending_op == 'y') {
         int rc = vi_yank_range(b, vis, start_line, start_col, end_line, end_col);
 
@@ -5422,7 +5372,7 @@ vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_
         return -1;
     }
     if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
-        (vis->cursor_col != 0 || target_line_no <= current_line_no)) {
+        (vis->cursor_col != 0 || target_line_no <= current_line_no || target_col != 0)) {
         /*
          * Real vi only coerces search motions linewise for delete/change/yank
          * when a column-zero search target lands on a later line.
@@ -6523,47 +6473,15 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 vi_linewise_change(b, vis, start, end_line);
             }
         } else {
+            /* the cursor to the match, both included; the lines they are
+             * on for < and > */
             line_t *target_line;
             int target_col;
             int target_no;
-            int scan_start_col;
             int start;
             int end_line;
 
-            if (vi_find_scanned_cross_bracket_span(b->cur, vis->cursor_col, &scan_start_col,
-                &target_line, &target_col) == 0) {
-                if (vis->pending_op == '>' || vis->pending_op == '<') {
-                    target_no = vi_line_number_for_mark(b, target_line);
-                    if (target_no < 1) {
-                        (void)!write(STDOUT_FILENO, "\a", 1);
-                    } else {
-                        start = line_no;
-                        end_line = target_no;
-                        if (start > end_line) {
-                            int tmp = start;
-
-                            start = end_line;
-                            end_line = tmp;
-                        }
-                        if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
-                            (void)!write(STDOUT_FILENO, "\a", 1);
-                        }
-                    }
-                } else if (vis->pending_op == 'y') {
-                    if (vi_yank_range(b, vis, b->cur, scan_start_col, target_line,
-                        target_col + 1) != 0) {
-                        (void)!write(STDOUT_FILENO, "\a", 1);
-                    } else {
-                        vis->cursor_col = scan_start_col;
-                    }
-                } else {
-                    vi_delete_range(b, vis, b->cur, scan_start_col, target_line,
-                        target_col + 1, vis->pending_op == 'c');
-                    if (vis->pending_op == 'c') {
-                        vi_set_last_change(vis, VI_REPEAT_C_PERCENT, 1, 0);
-                    }
-                }
-            } else if (vi_match_operator_target(b, vis, &target_line, &target_col) != 0 ||
+            if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0 ||
                 !target_line) {
                 (void)!write(STDOUT_FILENO, "\a", 1);
             } else if (vis->pending_op == '>' || vis->pending_op == '<') {
@@ -7739,18 +7657,13 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             int saved_op = vis->pending_op;
             line_t *target_line;
             int target_col;
-            int scan_start_col;
 
             if (!b->cur) {
                 (void)!write(STDOUT_FILENO, "\a", 1);
                 return;
             }
             vis->pending_op = 'c';
-            if (vi_find_scanned_cross_bracket_span(b->cur, vis->cursor_col, &scan_start_col,
-                &target_line, &target_col) == 0) {
-                vi_delete_range(b, vis, b->cur, scan_start_col, target_line,
-                    target_col + 1, 1);
-            } else if (vi_match_operator_target(b, vis, &target_line, &target_col) != 0 ||
+            if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0 ||
                 !target_line || vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
                 vis->pending_op = saved_op;
                 (void)!write(STDOUT_FILENO, "\a", 1);

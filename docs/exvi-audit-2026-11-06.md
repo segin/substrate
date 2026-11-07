@@ -964,16 +964,17 @@ The number is not reused.
 
 ### EXVI-64 — `%` from a non-bracket, across lines — *Low*
 
-- [ ] **EXVI-64.1** (Event-driven) When `%` starts on a character that is not a
+- [x] **EXVI-64.1** (Event-driven) When `%` starts on a character that is not a
   bracket, the editor shall move to the match of the first bracket after the
   cursor on the line.
-- [ ] **EXVI-64.2** (Ubiquitous) The editor's `d%` shall delete from the cursor
+- [x] **EXVI-64.2** (Ubiquitous) The editor's `d%` shall delete from the cursor
   to the matching bracket, inclusive.
 
 - **Where**: `exvi_visual.c:3655-3691`, `3705-3728`.
 - **Evidence**: `%x` on `x (a` / `b) y` deletes the `(`; `d%` on `f(a,` /
-  ` b) x` leaves `f x`.
-- **Basis**: reproduced.
+  ` b) x` leaves `f x`.  `%` on `((a)` went to the `)`, past the unmatched
+  `(`.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_percent.py`.
 
 ### EXVI-65 — a `dw` that deletes nothing still changes state — *Low*
 
@@ -1287,3 +1288,16 @@ The number is not reused.
 - **Evidence**: `wDx` on `aa bb` leaves `aa ` (Vim: `aa`); `wd$.` too.
   Found fixing EXVI-62.
 - **Basis**: reproduced; `tests/bin/vi/test_vi_dot_ops.py`.
+
+### EXVI-89 — `d/pattern` from column 0 takes the match's whole line — *Low*
+
+- [x] **EXVI-89.1** (Event-driven) When a search motion after an operator
+  ends at a column other than 0, the editor shall treat the region as
+  characterwise.
+
+- **Where**: `exvi_visual.c`, `vi_apply_search_linewise_motion` took any
+  search from column 0 to a later line linewise, though its comment
+  limited that to a match at column 0.
+- **Evidence**: `d/three` on `one` / `two three` / `four` leaves `four`
+  (Vim: `three` / `four`).  Found fixing EXVI-64.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_percent.py`.

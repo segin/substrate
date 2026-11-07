@@ -188,6 +188,13 @@ moves over after an operator ends at the end of its line;
 .Cm cw
 on a non-blank changes to the end of the word, and on a blank changes
 that blank alone.
+.Cm %
+on a bracket moves to its match; elsewhere, to the match of the first
+bracket after the cursor on the line.
+A
+.Cm d
+over more than one line that starts in its first line's indent and leaves
+only blanks after it deletes the whole lines.
 The current implementation still has documented parity gaps in a few motion,
 undo, and repeat corner cases; see
 .Pa docs/specs/exvi.md
