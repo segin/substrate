@@ -1080,9 +1080,9 @@ The number is not reused.
 
 ### EXVI-72 — loading is quadratic, and `:g` worse — *Medium*
 
-- [ ] **EXVI-72.1** (Ubiquitous) The editor shall load a file in time linear in
+- [x] **EXVI-72.1** (Ubiquitous) The editor shall load a file in time linear in
   its size.
-- [ ] **EXVI-72.2** (Ubiquitous) The editor's `global` shall run in time linear
+- [x] **EXVI-72.2** (Ubiquitous) The editor's `global` shall run in time linear
   in the number of lines times the cost of its commands.
 
 - **Where**: `buf_line_index` scans per insert/delete
@@ -1090,7 +1090,8 @@ The number is not reused.
   each sub-command (`exvi.c:247`, `251`) with a full snapshot each time.
 - **Evidence**: load 25k lines 0.15 s, 100k 1.9 s; `g/./s/$/x/` on 1,000 lines
   0.39 s, 4,000 14.4 s; a 25,000-line `g/./d` still running after 3 minutes.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/ex/test_ex_scaling.py`.  Now: load
+  100k 0.02 s; `g/./s/$/x/` on 25,000 lines 0.09 s, `g/./d` 0.16 s.
 
 ### EXVI-73 — large counts hang vi, and ^C cannot stop them — *Medium*
 
@@ -1330,3 +1331,14 @@ The number is not reused.
   column 2, not 4.  Found fixing EXVI-70 (a combining mark made the first
   common).  Not done: `$` making `j` and `k` keep to the line's end.
 - **Basis**: reproduced; `tests/bin/vi/test_vi_columns.py`.
+
+### EXVI-91 — a line past the last is taken for an address — *Medium*
+
+- [x] **EXVI-91.1** (Unwanted behaviour) If an address names a line past the
+  last line of the buffer, then the editor shall report an error.
+
+- **Where**: `exvi_parse.c`, `parse_address` checked offsets (`+1`) against
+  the buffer but not a line number.
+- **Evidence**: `4d` on three lines did nothing and said nothing; `3,4d`
+  deleted line 3 (POSIX ex and Vim: an error).  Found fixing EXVI-72.
+- **Basis**: reproduced; `tests/bin/ex/test_ex_addresses.sh`.

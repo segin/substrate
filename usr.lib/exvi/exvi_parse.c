@@ -523,6 +523,11 @@ parse_address(buffer_t *b, char **cmd_ptr)
         break;
     }
 
+    /* a line the buffer does not have is an error (POSIX ex): 4d on three
+     * lines did nothing and said nothing, and 3,4d deleted line 3 */
+    if (buf_clamp_line(b, addr) == -1) {
+        return -1;
+    }
     *cmd_ptr = p;
     return addr;
 }

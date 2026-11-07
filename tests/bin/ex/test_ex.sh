@@ -1120,7 +1120,7 @@ run_write_side_effect_test "Invalid file write range leaves target absent" \
     "alpha\n" \
     ":2,3w __OUT_FILE__\n:q!\n" \
     1 \
-    "Invalid write range" \
+    "Bad address" \
     "alpha" \
     "__ABSENT__"
 
@@ -1128,7 +1128,7 @@ run_write_side_effect_test "Invalid shell write range runs nothing" \
     "alpha\n" \
     ":2,3w !cat > __OUT_FILE__\n:q!\n" \
     1 \
-    "Invalid write range" \
+    "Bad address" \
     "alpha" \
     "__ABSENT__"
 

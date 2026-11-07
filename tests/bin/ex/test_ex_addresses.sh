@@ -10,7 +10,9 @@
 #    after (1,3d 2 deleted 1-3, 2p# was "Unknown command");
 #  - d names a buffer, and A-Z append (2d x and 2y A went to the unnamed one);
 #  - each command leaves the current line POSIX says, and ex starts on the
-#    last line of the file (2,4d left line 1, ex started on line 1).
+#    last line of the file (2,4d left line 1, ex started on line 1);
+#  - a line past the last is an error (7d on six lines did nothing, and
+#    6,7d deleted line 6).
 #
 # Usage: test_ex_addresses.sh path/to/ex
 set -u
@@ -54,6 +56,11 @@ error() {
 error "3,1d" "3,1d"
 error "0d" "0d"
 error "1,0d" "1,0d"
+# a line past the last is an error (7d did nothing, silently; 6,7d
+# deleted line 6)
+error "7d" "7d"
+error "6,7d" "6,7d"
+error "7p" "7p"
 
 check ",4p from line 2" "2|,4p" "2 2 3 4"
 check "1,p from line 3" "3|1,p" "3 1 2 3"
