@@ -272,7 +272,7 @@ test_join_and_undo(void)
     fill_buffer(&b, lines, 3);
     b.cur = buf_get_line(&b, 1);
 
-    assert(handle_join_command(&b, 0, -1, -1) == 1);
+    assert(handle_join_command(&b, 0, -1, -1, 0) == 1);
     assert(b.line_count == 2);
     assert(strcmp(buf_get_line(&b, 1)->text, "one two") == 0);
     assert(strcmp(buf_get_line(&b, 2)->text, "three") == 0);
@@ -475,15 +475,20 @@ test_recover_roundtrip_preserves_missing_newline(void)
     b.empty_origin = 0;
     b.started_empty = 0;
 
+    /* the recover file goes in <directory>/exvi-<uid>: keep it in tmpdir */
+    replace_saved_string(&option_directory, tmpdir);
     recover_path = recover_path_for(path);
     assert(recover_path != NULL);
-    assert(exvi_write_recover_snapshot(&b, recover_path) == 0);
+    assert(exvi_write_recover_snapshot(&b) == 0);
+    assert(access(recover_path, F_OK) == 0);
     assert(load_recover_into_buffer(&restored, path) == 0);
     assert(restored.line_count == 1);
     assert(strcmp(restored.head->text, "alpha") == 0);
     assert(restored.trailing_newline == 0);
 
     remove(recover_path);
+    snprintf(path, sizeof(path), "%s/exvi-%u", tmpdir, (unsigned)getuid());
+    rmdir(path);
     remove(tmpdir);
     free(recover_path);
     free_buffer(&restored);

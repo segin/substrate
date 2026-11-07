@@ -1539,11 +1539,11 @@ run_stderr_status_test "Set abbreviation rejects unknown option" \
     1 \
     "Unknown option: frobnicate"
 
-run_stderr_status_test "Set magic query remains unsupported by policy" \
+run_stdout_test "Set magic query reports magic" \
     "one\ntwo\n" \
-    ":set magic?\n:q!\n" \
-    1 \
-    "Unknown option: magic?"
+    ":set magic?\n:set nomagic\n:set magic?\n:q!\n" \
+    "magic
+nomagic"
 
 run_stderr_status_test "Print rejects empty buffer" \
     "" \
@@ -1875,6 +1875,7 @@ ignorecase
 readonly
 showmode
 wrapscan
+magic
 scroll=12
 tabstop=8
 tags=tags

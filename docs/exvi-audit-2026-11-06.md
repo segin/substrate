@@ -1205,3 +1205,19 @@ The number is not reused.
   a trailing `\>` against the whole line (`vi_match_respects_word_boundaries`),
   so only one written elsewhere in the pattern is wrong there.
 - **Basis**: reproduced.
+
+### EXVI-85 — `tests/usr.lib/exvi` does not link — *Medium*
+
+- [ ] **EXVI-85.1** (Ubiquitous) The libexvi unit tests shall build and run
+  with `make -C tests/usr.lib/exvi run`.
+
+- **Where**: `tests/usr.lib/exvi/test_main.c:12-14` includes
+  `exvi_visual.c` with `exvi_visual_main` renamed to a mock and links
+  `libexvi.a`, whose `exvi.o` still calls the real one; the archive's
+  `exvi_visual.o` comes in for it and defines everything else again
+  (`multiple definition of 'vi_utf8_prev_offset'`).
+- **Evidence**: fails at `origin/main`; nothing runs the suite (EXVI-76.3),
+  so two calls left behind by EXVI-37 (`handle_join_command`) and EXVI-03
+  (`exvi_write_recover_snapshot`) went unseen too.  Linked by hand with a
+  stub for `exvi_visual_main`, the core tests pass.
+- **Basis**: reproduced.
