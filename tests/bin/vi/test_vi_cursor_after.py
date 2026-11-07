@@ -6,8 +6,8 @@ end, where r found nothing, and j kept that column.  yy, Y and a line
 yank toward the end (yj, yG, yL) moved the cursor to column 1; they leave
 it where it was.  A yank toward the start (yk) goes to the region's first
 line at its first character, where POSIX and Vim (which keeps the column)
-part: the expected result is POSIX's.  ^F kept the column; it goes to
-the first non-blank.
+part: the expected result is POSIX's.  ^F and ^B kept the column; they
+go to the first non-blank.
 
 Usage: test_vi_cursor_after.py path/to/vi
 """
@@ -45,9 +45,11 @@ CASES = [
     ("yk", "abc\nabc\n", [b"jllykrZ"], "Zbc\nabc\n"),
     ("y'a backward", "abc\nabc\nabc\n", [b"llmajjly'arZ"],
      "Zbc\nabc\nabc\n"),
-    # ^F: the first non-blank
+    # ^F and ^B: the first non-blank
     ("^F", INDENTED, [b"\x06rZ"], None),
     ("^F from a later column", INDENTED, [b"$\x06rZ"], None),
+    ("^B", INDENTED, [b"G\x02rZ"], None),
+    ("^B from a later column", INDENTED, [b"G$\x02rZ"], None),
 ]
 
 
@@ -56,7 +58,7 @@ def main():
     for name, text, keys, want in CASES:
         status, _, saved = run_vi_session(VI, text, keys)
         if want is None:
-            # which line ^F lands on is not what this checks
+            # which line ^F or ^B lands on is not what this checks
             ok = len(changed(saved)) == 1 and changed(saved)[0].startswith("  Z")
         else:
             ok = saved == want
