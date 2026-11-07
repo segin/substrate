@@ -54,7 +54,8 @@
   - **Requirement (Ubiquitous):**
     - The **VM Map Manager** **shall** either perform non-splaying tree walks when holding a shared read lock (`vm_map_lock_read`) or acquire an exclusive write lock before splaying `map->root` and updating `map->hint`.
 
-- [ ] **[REQ-SYS-VM-003]** *(Critical — Multi-Page `UMA_ZONE_OFFPAGE` Slab Hash Lookup Failure in `uma_find_slab()`)*
+- [x] **[REQ-SYS-VM-003]** *(Critical — Multi-Page `UMA_ZONE_OFFPAGE` Slab Hash Lookup Failure in `uma_find_slab()`)*
+  - **Resolution (2026-11-06):** (1) not reproduced: a slab spans pages only when one item is larger than a page (`uz_ipers` is then 1, `uma_zcreate()`); that item starts at `us_data`, the page hashed, so no item lies on a later page (`test_uma_single_item_slab.c` covers the 64 KiB zone).  (2) fixed: the counters change in `uma_count_alloc()`/`uma_count_free()` under the slab lock -- `uz_allocs`/`uz_frees` are 64-bit, which an i486 cannot add atomically -- and `uma_zones` is linked and unlinked under it.
   - **Location:** `sys/vm/uma_core.c:968-1060` (`uma_find_slab`, `uma_item_size`), `sys/vm/uma_core.c:600-960` (`uma_zalloc`, `uma_zfree`)
   - **Finding:**
     1. For `UMA_ZONE_OFFPAGE` multi-page slabs, `uma_hash_insert()` hashes only the base virtual address `slab->us_data`. When freeing or querying an item that lies on page `+1..+(N-1)` of the contiguous allocation, `uma_find_slab()` and `uma_item_size()` hash `(uintptr_t)item & ~0xFFF`, missing the hash bucket and leaking the allocation or miscomputing the item offset relative to `page_base` instead of `slab->us_data`.

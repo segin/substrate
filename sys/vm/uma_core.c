@@ -95,6 +95,41 @@ static void uma_slab_lock_release(unsigned long f) {
 }
 #endif
 
+/*
+ * The zone counters -- uz_allocs, uz_frees, uz_count, uz_max -- are changed
+ * by read-modify-writes that an interrupt (kfree() from the network RX path)
+ * or another CPU could interleave, and uz_allocs and uz_frees are 64-bit,
+ * which an i486 cannot add atomically; so they change under the slab lock.
+ */
+static void uma_count_alloc(uma_zone_t *zone) {
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
+    zone->uz_allocs++;
+    zone->uz_count++;
+    if (zone->uz_count > zone->uz_max) {
+        zone->uz_max = zone->uz_count;
+    }
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
+}
+
+static void uma_count_free(uma_zone_t *zone) {
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
+    zone->uz_frees++;
+    /* Guard against underflow: a stray/duplicate free must not wrap
+     * uz_count to ~4 billion. */
+    if (zone->uz_count > 0) {
+        zone->uz_count--;
+    }
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
+}
+
 /* Global Slab Hash Table */
 #define UMA_HASH_SHIFT  12
 #define UMA_HASH_SIZE   4096
@@ -564,9 +599,15 @@ uma_zone_t *uma_zcreate(
     zone->uz_part_slabs = NULL;
     zone->uz_free_slabs = NULL;
     
-    /* Link to global zone list */
+    /* Link to global zone list, under the slab lock its walkers hold */
+#ifndef HOST_TEST
+    unsigned long zl = uma_slab_lock_acquire();
+#endif
     zone->uz_next = uma_zones;
     uma_zones = zone;
+#ifndef HOST_TEST
+    uma_slab_lock_release(zl);
+#endif
     
     // Debug print
     kprint("UMA: Zone created: ");
@@ -633,7 +674,10 @@ void uma_zdestroy(uma_zone_t *zone) {
     uma_slab_lock_release(dzf);
 #endif
 
-    /* Remove from global list */
+    /* Remove from global list, under the slab lock its walkers hold */
+#ifndef HOST_TEST
+    unsigned long zl = uma_slab_lock_acquire();
+#endif
     if (uma_zones == zone) {
         uma_zones = zone->uz_next;
     } else {
@@ -644,6 +688,9 @@ void uma_zdestroy(uma_zone_t *zone) {
             }
         }
     }
+#ifndef HOST_TEST
+    uma_slab_lock_release(zl);
+#endif
 
     /* Free zone structure if it was dynamically allocated */
     uintptr_t zaddr = (uintptr_t)zone;
@@ -1311,11 +1358,7 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
                 uint8_t *am = uma_item_marker(zone, item);
                 if (am) *am = UMA_ITEM_ALLOCED;
                 cache->uc_allocs++;
-                zone->uz_allocs++;
-                zone->uz_count++;
-                if (zone->uz_count > zone->uz_max) {
-                    zone->uz_max = zone->uz_count;
-                }
+                uma_count_alloc(zone);
                 intr_restore(_uflags);
                 goto out;
             }
@@ -1336,12 +1379,8 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
         kprint("\n");
         return NULL;
     }
-    
-    zone->uz_allocs++;
-    zone->uz_count++;
-    if (zone->uz_count > zone->uz_max) {
-        zone->uz_max = zone->uz_count;
-    }
+
+    uma_count_alloc(zone);
     
 out:
     if (item) {
@@ -1452,10 +1491,7 @@ void uma_zfree(uma_zone_t *zone, void *item) {
         if (cache->uc_freebucket && cache->uc_freebucket->ub_cnt < UMA_CACHE_BUCKET_SIZE) {
             cache->uc_freebucket->ub_bucket[cache->uc_freebucket->ub_cnt++] = item;
             cache->uc_frees++;
-            zone->uz_frees++;
-            if (zone->uz_count > 0) {
-                zone->uz_count--;
-            }
+            uma_count_free(zone);
             intr_restore(_uflags);
             return;
         }
@@ -1464,12 +1500,7 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
     /* Slow path: free to slab */
     uma_zfree_slab(zone, item);
-    zone->uz_frees++;
-    /* Guard against underflow: a stray/duplicate free must not wrap
-     * uz_count to ~4 billion.  Matches the >0 guard on the fast path above. */
-    if (zone->uz_count > 0) {
-        zone->uz_count--;
-    }
+    uma_count_free(zone);
 }
 
 /*
