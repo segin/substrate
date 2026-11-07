@@ -48,7 +48,7 @@ static void
 exvi_history_free(exvi_history_t *history)
 {
     for (int i = 0; i < history->len; i++) {
-        buf_free(&history->items[i]);
+        buf_free(&history->items[i].lines);
     }
     free(history->items);
     history->items = NULL;
@@ -56,53 +56,164 @@ exvi_history_free(exvi_history_t *history)
     history->cap = 0;
 }
 
+/* item onto history; its lines are moved, not copied */
 static int
-exvi_history_grow(exvi_history_t *history)
+exvi_history_push(exvi_history_t *history, exvi_undo_item_t *item)
 {
-    int new_cap = history->cap > 0 ? history->cap * 2 : 8;
-    buffer_t *items = realloc(history->items, sizeof(*items) * (size_t)new_cap);
+    if (history->len >= history->cap) {
+        int new_cap = history->cap > 0 ? history->cap * 2 : 8;
+        exvi_undo_item_t *items = realloc(history->items, sizeof(*items) * (size_t)new_cap);
 
-    if (!items) {
-        return -1;
+        if (!items) {
+            return -1;
+        }
+        history->items = items;
+        history->cap = new_cap;
     }
-    history->items = items;
-    history->cap = new_cap;
+    history->items[history->len++] = *item;
+    buf_init(&item->lines);
     return 0;
 }
 
-int
-exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src)
+static int
+exvi_lines_same(const line_t *a, const line_t *b)
 {
-    if (history->len >= history->cap && exvi_history_grow(history) != 0) {
-        return -1;
+    return a->id == b->id && a->len == b->len && memcmp(a->text, b->text, a->len) == 0;
+}
+
+/*
+ * The newest undo record, if it still holds the whole buffer as it was:
+ * only the lines the change replaced, now that @p b holds what the change
+ * made -- the lines both have, the same line with the same text, at the
+ * start and at the end are left out.
+ */
+static void
+exvi_compact_undo(buffer_t *b)
+{
+    exvi_undo_item_t *item;
+    buffer_t *before;
+    buffer_t old;
+    line_t *lb;
+    line_t *la;
+    line_t *pos = NULL;
+    int prefix = 0;
+    int suffix = 0;
+    int i;
+
+    if (undo_history.len <= 0 || !undo_history.items[undo_history.len - 1].full) {
+        return;
     }
-    buf_init(&history->items[history->len]);
+    item = &undo_history.items[undo_history.len - 1];
+    before = &item->lines;
+    for (lb = before->head, la = b->head; lb && la && exvi_lines_same(lb, la);
+        lb = lb->next, la = la->next) {
+        prefix++;
+    }
+    for (lb = before->tail, la = b->tail;
+        lb && la && suffix < before->line_count - prefix && suffix < b->line_count - prefix &&
+        exvi_lines_same(lb, la); lb = lb->prev, la = la->prev) {
+        suffix++;
+    }
     exvi_history_suspended++;
-    buf_copy(&history->items[history->len], src);
+    buf_init(&old);
+    lb = before->head;
+    for (i = 0; i < prefix && lb; i++) {
+        lb = lb->next;
+    }
+    for (i = prefix; i < before->line_count - suffix && lb; i++, lb = lb->next) {
+        pos = buf_insert_after_n(&old, pos, lb->text, lb->len);
+        if (pos) {
+            pos->id = lb->id;
+        }
+    }
     exvi_history_suspended--;
-    history->len++;
-    return 0;
+    item->start = prefix;
+    item->new_count = b->line_count - prefix - suffix;
+    item->trailing_newline = before->trailing_newline;
+    buf_free(before);
+    item->lines = old;
+    item->full = 0;
 }
 
-static int
-exvi_history_push_move(exvi_history_t *history, buffer_t *src)
+/*
+ * Apply @p item to @p b: the new_count lines from line start give way to
+ * the item's lines.  What gives way goes into @p inverse, which applied
+ * after puts @p b back.  The cursor goes to the first line put back, as
+ * Vim's u does; it went to line 1.
+ */
+static void
+exvi_apply_undo_item(buffer_t *b, exvi_undo_item_t *item, exvi_undo_item_t *inverse)
 {
-    if (history->len >= history->cap && exvi_history_grow(history) != 0) {
-        return -1;
+    line_t *pos = item->start > 0 ? buf_get_line(b, item->start) : NULL;
+    line_t *ipos = NULL;
+    line_t *first = NULL;
+
+    exvi_history_suspended++;
+    buf_init(&inverse->lines);
+    inverse->full = 0;
+    inverse->start = item->start;
+    inverse->new_count = item->lines.line_count;
+    inverse->trailing_newline = b->trailing_newline;
+    for (int k = 0; k < item->new_count; k++) {
+        line_t *l = pos ? pos->next : b->head;
+
+        if (!l) {
+            break;
+        }
+        ipos = buf_insert_after_n(&inverse->lines, ipos, l->text, l->len);
+        if (ipos) {
+            ipos->id = l->id;
+        }
+        b->cur = l;
+        buf_delete(b, l);
     }
-    history->items[history->len++] = *src;
-    buf_init(src);
-    return 0;
+    ipos = pos;
+    for (line_t *o = item->lines.head; o; o = o->next) {
+        ipos = buf_insert_after_n(b, ipos, o->text, o->len);
+        if (ipos) {
+            ipos->id = o->id;
+            if (!first) {
+                first = ipos;
+            }
+        }
+    }
+    b->trailing_newline = item->trailing_newline;
+    b->modified = 1;
+    if (first) {
+        b->cur = first;
+    } else if (pos && pos->next) {
+        b->cur = pos->next;
+    } else if (pos) {
+        b->cur = pos;
+    } else {
+        b->cur = b->head;
+    }
+    buf_free(&item->lines);
+    exvi_history_suspended--;
+    exvi_buffer_generation++;
 }
 
+/*
+ * u (from undo_history to redo_history) or redo (the other way): the
+ * newest record applied to @p b, and its inverse kept for the other.  -1
+ * when there is none.
+ */
 int
-exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out)
+exvi_history_step(buffer_t *b, exvi_history_t *from, exvi_history_t *to)
 {
-    if (history->len <= 0) {
+    exvi_undo_item_t item;
+    exvi_undo_item_t inverse;
+
+    exvi_compact_undo(b);
+    if (from->len <= 0) {
         return -1;
     }
-    *out = history->items[--history->len];
-    buf_init(&history->items[history->len]);
+    item = from->items[--from->len];
+    exvi_apply_undo_item(b, &item, &inverse);
+    if (exvi_history_push(to, &inverse) != 0) {
+        buf_free(&inverse.lines);
+        exvi_report_error("out of memory");
+    }
     return 0;
 }
 
@@ -140,9 +251,17 @@ exvi_note_buffer_change(void)
     if (exvi_history_suspended || !pending_undo_valid) {
         return;
     }
-    if (exvi_history_push_move(&undo_history, &pending_undo_buf) != 0) {
-        exvi_report_error("out of memory");
-        return;
+    {
+        exvi_undo_item_t item = { .lines = pending_undo_buf, .full = 1 };
+
+        /* the whole buffer as it was, until exvi_compact_undo() */
+        buf_init(&pending_undo_buf);
+        if (exvi_history_push(&undo_history, &item) != 0) {
+            buf_free(&item.lines);
+            exvi_report_error("out of memory");
+            pending_undo_valid = 0;
+            return;
+        }
     }
     exvi_history_free(&redo_history);
     pending_undo_valid = 0;
@@ -366,54 +485,13 @@ buf_copy(buffer_t *dst, buffer_t *src)
     while (curr) {
         pos = buf_insert_after_n(dst, pos, curr->text, curr->len);
         if (pos) {
-            /* the copy is the same line, for exvi_restore_snapshot() */
+            /* the copy is the same line, for exvi_compact_undo() */
             pos->id = curr->id;
         }
         curr = curr->next;
     }
     dst->modified = src->modified;
     dst->trailing_newline = src->trailing_newline;
-    exvi_history_suspended--;
-}
-
-/**
- * Make @p b the buffer @p snapshot holds, as undo and redo do: its lines
- * and final newline -- but the file is still the one being
- * edited, so its name, recover file and read state stay; the buffer is
- * modified, as it is no longer what was last written; and each mark stays
- * on its line where the snapshot has that line.  @p snapshot is used up.
- */
-void
-exvi_restore_snapshot(buffer_t *b, buffer_t *snapshot)
-{
-    exvi_history_suspended++;
-    for (int i = 0; i < 26; i++) {
-        snapshot->marks[i] = NULL;
-        snapshot->mark_cols[i] = 0;
-        if (!b->marks[i]) {
-            continue;
-        }
-        for (line_t *l = snapshot->head; l; l = l->next) {
-            if (l->id == b->marks[i]->id) {
-                snapshot->marks[i] = l;
-                snapshot->mark_cols[i] = b->mark_cols[i];
-                break;
-            }
-        }
-    }
-    free(snapshot->filename);
-    free(snapshot->recover_filename);
-    snapshot->filename = b->filename;
-    snapshot->recover_filename = b->recover_filename;
-    snapshot->read_failed = b->read_failed;
-    snapshot->empty_origin = b->empty_origin;
-    snapshot->started_empty = b->started_empty;
-    b->filename = NULL;
-    b->recover_filename = NULL;
-    snapshot->modified = 1;
-    buf_free(b);
-    *b = *snapshot;
-    buf_init(snapshot);
     exvi_history_suspended--;
 }
 
@@ -448,6 +526,7 @@ save_undo(buffer_t *current)
         return;
     }
     exvi_discard_pending_undo();
+    exvi_compact_undo(current);         /* the change before is done */
     buf_copy(&pending_undo_buf, current);
     pending_undo_valid = 1;
 }

@@ -50,8 +50,24 @@ typedef struct {
     int line_array_cap;
 } buffer_t;
 
+/*
+ * One change for undo or redo.  The newest, just recorded, may hold the
+ * whole buffer as it was (full); exvi_compact_undo() makes it what every
+ * other one is: the lines the change replaced, from line `start` (0-based),
+ * and how many lines the change left in their place -- space for the
+ * change, not for the buffer.  Every change kept a copy of the whole
+ * buffer: 200 edits of a 1 MB file held 460 MB.
+ */
 typedef struct {
-    buffer_t *items;
+    buffer_t lines;
+    int full;
+    int start;
+    int new_count;
+    int trailing_newline;
+} exvi_undo_item_t;
+
+typedef struct {
+    exvi_undo_item_t *items;
     int len;
     int cap;
 } exvi_history_t;
@@ -136,7 +152,6 @@ void buf_delete(buffer_t *b, line_t *l);
 void buf_free(buffer_t *b);
 void buf_copy(buffer_t *dst, buffer_t *src);
 void save_undo(buffer_t *current);
-void exvi_restore_snapshot(buffer_t *b, buffer_t *snapshot);
 void exvi_begin_undo_group(buffer_t *current);
 void exvi_end_undo_group(void);
 /** counts changes to any buffer's lines (a line's text, a line added or
@@ -146,8 +161,7 @@ extern unsigned long exvi_buffer_generation;
 void exvi_note_buffer_change(void);
 void exvi_discard_pending_undo(void);
 void exvi_reset_undo_state(void);
-int exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src);
-int exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out);
+int exvi_history_step(buffer_t *b, exvi_history_t *from, exvi_history_t *to);
 void buf_read_file(buffer_t *b, const char *filename);
 /* After loading a file: ex makes its last line current (POSIX); vi keeps
  * the first. */

@@ -814,36 +814,16 @@ handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2)
 int
 handle_undo_command(buffer_t *b)
 {
-    buffer_t snapshot;
-
     exvi_discard_pending_undo();
-    if (undo_history.len > 0) {
-        if (exvi_history_push_snapshot(&redo_history, b) != 0) {
-            exvi_report_error("out of memory");
-            return 1;
-        }
-        if (exvi_history_pop_snapshot(&undo_history, &snapshot) == 0) {
-            exvi_restore_snapshot(b, &snapshot);
-        }
-    }
+    (void)exvi_history_step(b, &undo_history, &redo_history);
     return 1;
 }
 
 int
 handle_redo_command(buffer_t *b)
 {
-    buffer_t snapshot;
-
     exvi_discard_pending_undo();
-    if (redo_history.len > 0) {
-        if (exvi_history_push_snapshot(&undo_history, b) != 0) {
-            exvi_report_error("out of memory");
-            return 1;
-        }
-        if (exvi_history_pop_snapshot(&redo_history, &snapshot) == 0) {
-            exvi_restore_snapshot(b, &snapshot);
-        }
-    }
+    (void)exvi_history_step(b, &redo_history, &undo_history);
     return 1;
 }
 

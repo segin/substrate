@@ -14,7 +14,7 @@ EX_SHELL_TESTS = \
 	test_ex_pattern_escape.sh test_ex_bre.sh test_ex_replacement.sh \
 	test_ex_sub_bol.sh test_ex_shell.sh test_ex_global_undo.sh \
 	test_ex_undo_state.sh test_ex_nul.sh test_ex_global.sh
-EX_PY_TESTS = test_ex_frontend.py test_ex_visual.py
+EX_PY_TESTS = test_ex_frontend.py test_ex_visual.py test_ex_undo_memory.py
 
 .PHONY: all clean test
 

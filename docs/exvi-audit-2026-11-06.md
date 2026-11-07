@@ -1066,15 +1066,17 @@ The number is not reused.
 
 ### EXVI-71 — undo keeps a full copy of the buffer per change, forever — *Medium*
 
-- [ ] **EXVI-71.1** (Ubiquitous) The editor shall store each undo record in
+- [x] **EXVI-71.1** (Ubiquitous) The editor shall store each undo record in
   space proportional to the change it reverses.
-- [ ] **EXVI-71.2** (Event-driven) When a command does not change the buffer,
+- [x] **EXVI-71.2** (Event-driven) When a command does not change the buffer,
   the editor shall store no undo record.
 
 - **Where**: `exvi_buffer.c:72-83`, `128-140`, `348`.
 - **Evidence**: a 1 MB, 20,000-line file: 11 MB at start, 462 MB after 200
   one-character edits.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/ex/test_ex_undo_memory.py` (15 MB
+  either way now).  Each command still copies the buffer while it runs,
+  and drops the copy for the change's lines when the next one starts.
 
 ### EXVI-72 — loading is quadratic, and `:g` worse — *Medium*
 
