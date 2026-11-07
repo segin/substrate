@@ -1140,6 +1140,28 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
     return 0;
 }
 
+/*
+ * vm_map_lookup() for a caller holding the map only for reading: a plain
+ * walk down the tree, which neither splays it nor moves the hint.  Readers
+ * run together -- page faults on other threads among them -- and a splay
+ * is a rewrite of the tree; two at once corrupted it.
+ */
+static vm_map_entry_t *vm_map_lookup_shared(vm_map_t *map, uintptr_t va) {
+    vm_map_entry_t *hint = map->hint;
+
+    if (hint && hint != map->header && va >= hint->start && va < hint->end)
+        return hint;
+    for (vm_map_entry_t *e = map->root; e; ) {
+        if (va < e->start)
+            e = e->left;
+        else if (va >= e->end)
+            e = e->right;
+        else
+            return e;
+    }
+    return NULL;
+}
+
 // Lookup entry containing the given virtual address
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
     vm_map_entry_t *entry;
@@ -1162,7 +1184,7 @@ vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
 void vm_map_cow_adopt(vm_map_t *map, uintptr_t va, vm_page_t *page) {
     if (!map || !page || page->object) return;
     vm_map_lock_read(map);
-    vm_map_entry_t *entry = vm_map_lookup(map, va);
+    vm_map_entry_t *entry = vm_map_lookup_shared(map, va);
     vm_object_t *obj = entry ? entry->object : NULL;
     if (obj && obj->type == VM_OBJ_TYPE_DEFAULT && obj->ref_count == 1) {
         uint64_t pindex = (entry->offset + (va - entry->start)) >> 12;
@@ -1182,7 +1204,7 @@ int vm_map_shared_key(vm_map_t *map, uintptr_t va, struct vm_shared_key *key) {
     key->obj = NULL;
 
     vm_map_lock_read(map);
-    vm_map_entry_t *entry = vm_map_lookup(map, va);
+    vm_map_entry_t *entry = vm_map_lookup_shared(map, va);
     if (!entry || !entry->object) {
         vm_map_unlock_read(map);
         return -1;

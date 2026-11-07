@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
+#include <vm/vm_page.h>
 #include <arch/i386/pmap.h>
 #include <kern/console.h>
 #include <stdio.h>
@@ -315,6 +316,46 @@ void test_vm_map_merge_adjacent(void) {
     kprint("  PASS\n");
 }
 
+/*
+ * vm_map_shared_key() and vm_map_cow_adopt() look an entry up holding the
+ * map only for reading -- concurrently with each other and with faults on
+ * other threads -- so the lookup must not change the tree.  It splayed it
+ * (rotations, map->root and map->hint rewritten), and two readers at once
+ * corrupted it.
+ */
+void test_vm_map_read_lookup_no_splay(void) {
+    kprint("Test: vm_map lookups under the read lock leave the tree alone\n");
+
+    pmap_t pmap = pmap_create();
+    vm_map_t *map = vm_map_create(pmap, 0x1000, 0x200000);
+    TEST_ASSERT(map != NULL, "map created");
+    for (uintptr_t a = 0x10000; a < 0x10000 + 8 * 0x4000; a += 0x4000) {
+        vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x1000);
+        TEST_ASSERT(obj != NULL, "object created");
+        TEST_ASSERT(vm_map_insert(map, obj, 0, a, a + 0x1000,
+                                  VM_PROT_READ | VM_PROT_WRITE, VM_PROT_ALL,
+                                  VM_INHERIT_COPY) == 0, "insert");
+    }
+    /* make the last entry the root, then ask about the first */
+    TEST_ASSERT(vm_map_lookup(map, 0x10000 + 7 * 0x4000) != NULL, "lookup last");
+    vm_map_entry_t *root = map->root;
+    vm_map_entry_t *hint = map->hint;
+
+    struct vm_shared_key key;
+    TEST_ASSERT(vm_map_shared_key(map, 0x10000, &key) == 0, "shared key found");
+    vm_shared_key_release(&key);
+    TEST_ASSERT(map->root == root && map->hint == hint,
+                "vm_map_shared_key() left root and hint as they were");
+    vm_page_t *pg = vm_page_alloc(NULL, 0, 0);    /* no object: adoptable */
+    TEST_ASSERT(pg != NULL, "page allocated");
+    vm_map_cow_adopt(map, 0x10000 + 0x4000, pg);
+    TEST_ASSERT(map->root == root && map->hint == hint,
+                "vm_map_cow_adopt() left them too");
+
+    vm_map_destroy(map);
+    kprint("  PASS\n");
+}
+
 void test_sys_brk(void) {
     kprint("Test: sys_brk\n");
 
@@ -365,6 +406,7 @@ void run_vm_map_tests(void) {
     test_vm_map_protect_inherit();
     test_vm_map_property_sorted_non_overlapping();
     test_vm_map_merge_adjacent();
+    test_vm_map_read_lookup_no_splay();
     test_vm_map_benchmark();
     test_sys_brk();
     

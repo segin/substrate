@@ -48,7 +48,8 @@
     - **When** replacing or collapsing a COW page in `vm_fault()` or `vm_object_collapse()`, the **VM Subsystem** **shall** update hardware mappings (`pmap_enter` / `pmap_page_protect`) before evaluating `cow_src->pv_list` and `cow_src->ref_count` for page reclamation.
     - The **VM Subsystem** **shall** synchronize all `vm_object` page-list and shadow-chain mutations across `vm_fault`, `vm_map_fork`, `vm_object_collapse`, and `vm_object_deallocate` using a shared or per-object lock.
 
-- [ ] **[REQ-SYS-VM-002]** *(Critical — Splay-Tree Corruption Under Read Lock in `vm_map_lookup()`)*
+- [x] **[REQ-SYS-VM-002]** *(Critical — Splay-Tree Corruption Under Read Lock in `vm_map_lookup()`)*
+  - **Resolution (2026-11-07):** `vm_map_cow_adopt()` and `vm_map_shared_key()` -- the only lookups made under the read lock; `vm_fault()` already walked without splaying -- use `vm_map_lookup_shared()`, a plain walk that leaves the tree and the hint alone. `test_vm_map_read_lookup_no_splay` (`test=vm`) fails on the old code and passes.
   - **Location:** `sys/vm/vm_map.c:841-900` (`vm_map_lookup_entry`), `sys/vm/vm_map.c:1144-1195` (`vm_map_lookup`, `vm_map_cow_adopt`, `vm_map_shared_key`)
   - **Finding:** `vm_map_lookup()` calls `vm_map_lookup_entry()`, which splays (rotates and mutates) `map->root` and writes `map->hint = entry`. However, `vm_map_cow_adopt()` and `vm_map_shared_key()` call `vm_map_lookup()` while holding only `vm_map_lock_read(map)`. Concurrent page faults across threads of the same process corrupt the `vm_map` splay tree.
   - **Requirement (Ubiquitous):**
