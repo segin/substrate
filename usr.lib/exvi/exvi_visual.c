@@ -940,6 +940,9 @@ vi_clamp_left_col(vi_visual_t *vis)
     }
 }
 
+/* a byte in no valid UTF-8 sequence, as a character value: apart from every code point */
+#define VI_RAW_BYTE(c) (0x110000 + (int)(unsigned char)(c))
+
 static int
 vi_is_utf8_continuation_byte(unsigned char c)
 {
@@ -1080,6 +1083,55 @@ vi_next_char_index(line_t *cur, int idx)
         idx = (int)cur->len;
     }
     return idx;
+}
+
+/**
+ * The byte offset @p count characters after @p idx in @p cur, or its end
+ * when it has fewer: where an operator's `l` motion ends.
+ */
+static int
+vi_char_offset_forward(line_t *cur, int idx, int count)
+{
+    if (!cur) {
+        return idx + count;
+    }
+    while (count-- > 0 && (size_t)idx < cur->len) {
+        idx = vi_next_char_index(cur, idx);
+    }
+    return idx;
+}
+
+/**
+ * The byte offset @p count characters before @p idx in @p cur, or -1 when
+ * it has fewer: where an operator's `h` motion starts.
+ */
+static int
+vi_char_offset_backward(line_t *cur, int idx, int count)
+{
+    if (!cur) {
+        return idx - count;
+    }
+    while (count-- > 0) {
+        if (idx <= 0) {
+            return -1;
+        }
+        idx = vi_prev_char_index(cur, idx);
+    }
+    return idx;
+}
+
+/**
+ * The end of an inclusive region whose last character starts at @p idx:
+ * past that whole character; at or past the line's end, one past @p idx,
+ * as it was before characters were counted.
+ */
+static int
+vi_inclusive_end(line_t *cur, int idx)
+{
+    if (!cur || idx < 0 || (size_t)idx >= cur->len) {
+        return idx + 1;
+    }
+    return vi_next_char_index(cur, idx);
 }
 
 static int
@@ -1864,6 +1916,41 @@ vi_read_visual_key(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char
         vi_resize_pending = 0;
         vi_render(b, vis, prompt_prefix, prompt);
     }
+}
+
+/**
+ * Read the character argument of f, F, t or T: a key, and when it is the
+ * lead byte of a UTF-8 sequence the rest of the sequence's bytes, for the
+ * whole character.  Its value is vi_char_value_at()'s: the code point, a
+ * byte in no valid sequence VI_RAW_BYTE() of it (the bytes read after it
+ * go with it), and a key that is no byte -- end of input, a special key --
+ * as read.
+ */
+static int
+vi_read_char_arg(buffer_t *b, vi_visual_t *vis)
+{
+    char bytes[4];
+    int key = vi_read_visual_key(b, vis, ':', NULL);
+    int need;
+    unsigned int cp;
+
+    if (key < 0x80 || key > 0xff) {
+        return key;
+    }
+    need = key >= 0xf0 ? 4 : key >= 0xe0 ? 3 : key >= 0xc2 ? 2 : 1;
+    bytes[0] = (char)key;
+    for (int i = 1; i < need; i++) {
+        int next = vi_read_visual_key(b, vis, ':', NULL);
+
+        if (next < 0x80 || next > 0xbf) {
+            return VI_RAW_BYTE(key);
+        }
+        bytes[i] = (char)next;
+    }
+    if (need > 1 && vi_utf8_decode_text_at(bytes, (size_t)need, 0, &cp) == need) {
+        return (int)cp;
+    }
+    return VI_RAW_BYTE(key);
 }
 
 static void
@@ -3531,6 +3618,25 @@ vi_find_bigword_end_exclusive_count(line_t *cur, int start, int count, int *end_
     return 0;
 }
 
+/**
+ * The character at byte @p idx of @p cur, as f, F, t and T compare them:
+ * its code point, or VI_RAW_BYTE() of a byte in no valid sequence.
+ */
+static int
+vi_char_value_at(line_t *cur, int idx)
+{
+    unsigned int cp;
+    unsigned char c = (unsigned char)cur->text[idx];
+
+    if (c < 0x80) {
+        return c;
+    }
+    if (vi_utf8_decode_text_at(cur->text, cur->len, idx, &cp) > 1) {
+        return (int)cp;
+    }
+    return VI_RAW_BYTE(c);
+}
+
 static int
 vi_find_char_in_line(line_t *cur, int start, int ch, int forward, int count, int *col_out)
 {
@@ -3539,16 +3645,18 @@ vi_find_char_in_line(line_t *cur, int start, int ch, int forward, int count, int
     if (!cur || count < 1) {
         return -1;
     }
+    /* character by character: a byte inside a character is no match */
     if (forward) {
-        for (i = start + 1; (size_t)i < cur->len; i++) {
-            if ((unsigned char)cur->text[i] == (unsigned char)ch && --count == 0) {
+        for (i = vi_next_char_index(cur, start); (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
+            if (vi_char_value_at(cur, i) == ch && --count == 0) {
                 *col_out = i;
                 return 0;
             }
         }
     } else {
-        for (i = start - 1; i >= 0; i--) {
-            if ((unsigned char)cur->text[i] == (unsigned char)ch && --count == 0) {
+        for (i = start; i > 0; ) {
+            i = vi_prev_char_index(cur, i);
+            if (vi_char_value_at(cur, i) == ch && --count == 0) {
                 *col_out = i;
                 return 0;
             }
@@ -3826,11 +3934,12 @@ vi_find_motion_span(line_t *cur, int cursor_col, int ch, int forward, int till,
     if (!cur || vi_find_char_in_line(cur, cursor_col, ch, forward, count, &col) != 0) {
         return -1;
     }
+    /* f takes the whole character found, T stops after it */
     if (forward) {
         *start_out = cursor_col;
-        *end_out = till ? col : col + 1;
+        *end_out = till ? col : vi_next_char_index(cur, col);
     } else {
-        *start_out = till ? col + 1 : col;
+        *start_out = till ? vi_next_char_index(cur, col) : col;
         *end_out = cursor_col;
     }
     if (*end_out <= *start_out) {
@@ -3855,11 +3964,11 @@ vi_find_change_motion_span(line_t *cur, int cursor_col, int ch, int forward, int
     if (vi_find_char_in_line(cur, cursor_col, ch, 0, 1, &col) != 0) {
         return -1;
     }
-    if (col + 1 != cursor_col) {
+    if (vi_next_char_index(cur, col) != cursor_col) {
         return -1;
     }
     *start_out = cursor_col;
-    *end_out = cursor_col + 1;
+    *end_out = vi_next_char_index(cur, cursor_col);
     return 0;
 }
 
@@ -3875,7 +3984,7 @@ vi_change_find_is_zero_width_insert(line_t *cur, int cursor_col, int ch, int for
     if (vi_find_char_in_line(cur, cursor_col, ch, 0, 1, &col) != 0) {
         return 0;
     }
-    return (col + 1 == cursor_col);
+    return (vi_next_char_index(cur, col) == cursor_col);
 }
 
 static int
@@ -4185,7 +4294,8 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
                 return;
             }
             if (!before && (size_t)vis->cursor_col < cur->len) {
-                pos = vis->cursor_col + 1;
+                /* after the whole character under the cursor */
+                pos = vi_next_char_index(cur, vis->cursor_col);
             } else {
                 pos = vis->cursor_col;
             }
@@ -4490,16 +4600,17 @@ vi_apply_charwise_motion(buffer_t *b, vi_visual_t *vis, line_t *target_line,
     if (cmp == 0) {
         return -1;
     }
+    /* an inclusive motion takes the whole character at its end, not its first byte */
     if (cmp < 0) {
         start_line = b->cur;
         start_col = vis->cursor_col;
         end_line = target_line;
-        end_col = target_col + (inclusive_end ? 1 : 0);
+        end_col = inclusive_end ? vi_inclusive_end(end_line, target_col) : target_col;
     } else {
         start_line = target_line;
         start_col = target_col;
         end_line = b->cur;
-        end_col = vis->cursor_col + (inclusive_end ? 1 : 0);
+        end_col = inclusive_end ? vi_inclusive_end(end_line, vis->cursor_col) : vis->cursor_col;
     }
 
     if (!inclusive_end && start_line != end_line && end_col == 0) {
@@ -5102,7 +5213,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == 'l') {
         line_t *cur = b->cur;
-        int end = vis->cursor_col + count;
+        int end = vi_char_offset_forward(cur, vis->cursor_col, count);
 
         if (!cur || (size_t)vis->cursor_col >= cur->len) {
             (void)!write(STDOUT_FILENO, "\a", 1);
@@ -5118,7 +5229,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == 'h') {
-        int start = vis->cursor_col - count;
+        int start = vi_char_offset_backward(b->cur, vis->cursor_col, count);
 
         if (start < 0 || vis->cursor_col <= 0) {
             (void)!write(STDOUT_FILENO, "\a", 1);
@@ -5208,7 +5319,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int ch;
         int start;
 
-        ch = vi_read_visual_key(b, vis, ':', NULL);
+        ch = vi_read_char_arg(b, vis);
         if (ch == -1 || ch == '\x1b' || ch == '\r' || ch == '\n') {
             (void)!write(STDOUT_FILENO, "\a", 1);
         } else if (vi_find_motion_span(b->cur, vis->cursor_col, ch,
@@ -5497,7 +5608,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int ch;
         int start;
 
-        ch = vi_read_visual_key(b, vis, ':', NULL);
+        ch = vi_read_char_arg(b, vis);
         if (ch == -1 || ch == '\x1b' || ch == '\r' || ch == '\n') {
             (void)!write(STDOUT_FILENO, "\a", 1);
         } else if (vis->pending_op == 'c' && vi_change_find_is_zero_width_insert(b->cur,
@@ -6446,18 +6557,21 @@ vi_delete_char(buffer_t *b, vi_visual_t *vis)
     line_t *cur = b->cur;
     char *text;
 
+    int end;
+
     if (!cur || (size_t)vis->cursor_col >= cur->len) {
         return;
     }
-    vi_store_charwise_span(vis, cur, vis->cursor_col, vis->cursor_col + 1);
+    /* the whole character under the cursor, every byte of it */
+    end = vi_next_char_index(cur, vis->cursor_col);
+    vi_store_charwise_span(vis, cur, vis->cursor_col, end);
     save_undo(b);
-    text = malloc(cur->len);
+    text = malloc(cur->len + 1);
     if (!text) {
         return;
     }
     memcpy(text, cur->text, (size_t)vis->cursor_col);
-    memcpy(text + vis->cursor_col, cur->text + vis->cursor_col + 1,
-        cur->len - (size_t)vis->cursor_col);
+    memcpy(text + vis->cursor_col, cur->text + end, cur->len - (size_t)end + 1);
     if (vi_replace_current_text(b, text) == 0) {
         vi_mark_body_dirty_current_line(b, vis);
     }
@@ -6471,20 +6585,24 @@ vi_delete_prev_char(buffer_t *b, vi_visual_t *vis)
     line_t *cur = b->cur;
     char *text;
 
+    int start;
+
     if (!cur || vis->cursor_col <= 0) {
         return;
     }
-    vi_store_charwise_span(vis, cur, vis->cursor_col - 1, vis->cursor_col);
+    /* the whole character before the cursor */
+    start = vi_prev_char_index(cur, vis->cursor_col);
+    vi_store_charwise_span(vis, cur, start, vis->cursor_col);
     save_undo(b);
-    text = malloc(cur->len);
+    text = malloc(cur->len + 1);
     if (!text) {
         return;
     }
-    memcpy(text, cur->text, (size_t)vis->cursor_col - 1);
-    memcpy(text + vis->cursor_col - 1, cur->text + vis->cursor_col,
+    memcpy(text, cur->text, (size_t)start);
+    memcpy(text + start, cur->text + vis->cursor_col,
         cur->len - (size_t)vis->cursor_col + 1);
     if (vi_replace_current_text(b, text) == 0) {
-        vis->cursor_col--;
+        vis->cursor_col = start;
         vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
@@ -6800,7 +6918,8 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         if (count == 1) {
             vi_delete_char(b, vis);
         } else {
-            vi_delete_span(b, vis, vis->cursor_col, vis->cursor_col + count, 0);
+            vi_delete_span(b, vis, vis->cursor_col,
+                vi_char_offset_forward(cur, vis->cursor_col, count), 0);
         }
         break;
     case VI_REPEAT_X_BACK:
@@ -6943,8 +7062,10 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         break;
     case VI_REPEAT_C_CHARS:
         if (vis->last_change_char < 0) {
-            if (vis->cursor_col >= count) {
-                vi_delete_span(b, vis, vis->cursor_col - count, vis->cursor_col, 1);
+            int start = vi_char_offset_backward(cur, vis->cursor_col, count);
+
+            if (start >= 0) {
+                vi_delete_span(b, vis, start, vis->cursor_col, 1);
             } else {
                 save_undo(b);
                 vis->insert_mode = 1;
@@ -6954,10 +7075,7 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
                 vi_set_insert_anchor(b, vis);
             }
         } else if (cur && (size_t)vis->cursor_col < cur->len) {
-            end = vis->cursor_col + count;
-            if (end > (int)cur->len) {
-                end = (int)cur->len;
-            }
+            end = vi_char_offset_forward(cur, vis->cursor_col, count);
             vi_delete_span(b, vis, vis->cursor_col, end, 1);
         } else {
             save_undo(b);
@@ -7974,7 +8092,7 @@ process_normal_key:
         case 'f':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            key = vi_read_visual_key(b, &vis, ':', NULL);
+            key = vi_read_char_arg(b, &vis);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 vis.screen_dirty = 1;
                 (void)!write(STDOUT_FILENO, "\a", 1);
@@ -7985,7 +8103,7 @@ process_normal_key:
         case 'F':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            key = vi_read_visual_key(b, &vis, ':', NULL);
+            key = vi_read_char_arg(b, &vis);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 vis.screen_dirty = 1;
                 (void)!write(STDOUT_FILENO, "\a", 1);
@@ -7996,7 +8114,7 @@ process_normal_key:
         case 't':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            key = vi_read_visual_key(b, &vis, ':', NULL);
+            key = vi_read_char_arg(b, &vis);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 vis.screen_dirty = 1;
                 (void)!write(STDOUT_FILENO, "\a", 1);
@@ -8007,7 +8125,7 @@ process_normal_key:
         case 'T':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            key = vi_read_visual_key(b, &vis, ':', NULL);
+            key = vi_read_char_arg(b, &vis);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 vis.screen_dirty = 1;
                 (void)!write(STDOUT_FILENO, "\a", 1);
@@ -8209,7 +8327,7 @@ process_normal_key:
                 if (count == 1) {
                     vi_delete_char(b, &vis);
                 } else if (cur && (size_t)vis.cursor_col < cur->len) {
-                    int end = vis.cursor_col + count;
+                    int end = vi_char_offset_forward(cur, vis.cursor_col, count);
 
                     vi_delete_span(b, &vis, vis.cursor_col, end, 0);
                 }

@@ -839,9 +839,9 @@ The number is not reused.
 
 ### EXVI-56 — operators count bytes, and write broken UTF-8 into the file — *High*
 
-- [ ] **EXVI-56.1** (Ubiquitous) The editor shall measure vi motions and operator
+- [x] **EXVI-56.1** (Ubiquitous) The editor shall measure vi motions and operator
   regions in characters.
-- [ ] **EXVI-56.2** (Ubiquitous) The editor's `f`, `F`, `t` and `T` shall take a
+- [x] **EXVI-56.2** (Ubiquitous) The editor's `f`, `F`, `t` and `T` shall take a
   whole character as their argument.
 
 - **Where**: `dl` `exvi_visual.c:5058`, `dh` `:5074`, the inclusive `+1` in
