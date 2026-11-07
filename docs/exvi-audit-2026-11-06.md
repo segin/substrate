@@ -882,18 +882,20 @@ The number is not reused.
 
 ### EXVI-59 — counts on `i a I A R o O r s S` are ignored, and carry over — *Medium*
 
-- [ ] **EXVI-59.1** (Event-driven) When `i`, `a`, `I`, `A`, `o`, `O` or `R` is
+- [x] **EXVI-59.1** (Event-driven) When `i`, `a`, `I`, `A`, `o`, `O` or `R` is
   given a count, the editor shall enter the input text count times.
-- [ ] **EXVI-59.2** (Event-driven) When `r`, `s` or `S` is given a count, the
+- [x] **EXVI-59.2** (Event-driven) When `r`, `s` or `S` is given a count, the
   editor shall apply the command to count characters or lines.
-- [ ] **EXVI-59.3** (Event-driven) When a command has used its count, the editor
+- [x] **EXVI-59.3** (Event-driven) When a command has used its count, the editor
   shall clear the count.
 
 - **Where**: `exvi_visual.c:8067-8164`, `8204-8215`, `8225-8245` never call
   `vi_take_count`.
 - **Evidence**: `3ix<ESC>` inserts one `x`; `3rx` replaces one;
-  `3ix<ESC>0x` becomes `30x` and deletes the line.
-- **Basis**: reproduced.
+  `3ix<ESC>0x` becomes `30x` and deletes the line.  Fixing it showed that
+  `.` after a multi-line insert replayed only its last line, and that `"q2S`
+  dropped the buffer name at the count.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_counts.py`.
 
 ### EXVI-60 — `^W`, `^U` and backspace erase text that was there before the insert — *Medium*
 

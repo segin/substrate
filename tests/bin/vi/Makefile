@@ -12,7 +12,8 @@ VI_TESTS = \
 	test_vi_tag.py test_vi_zz_fail.py test_vi_utf8_stray.py \
 	test_vi_search_bol.py test_vi_utf8_ops.py test_vi_nul.py \
 	test_vi_signals.py test_vi_limits.py test_vi_registers.py \
-	test_vi_exclusive.py test_vi_utf8_input.py test_vi_esc_burst.py
+	test_vi_exclusive.py test_vi_utf8_input.py test_vi_esc_burst.py \
+	test_vi_counts.py
 
 .PHONY: all clean test oracle
 

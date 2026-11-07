@@ -89,9 +89,14 @@ typedef struct {
     int replace_mode;
     line_t *insert_anchor_line;
     int insert_anchor_col;
+    /* where the text input began: the anchor is where it began on the
+     * current line, which <CR> moves, and . and a count replay from here */
+    line_t *insert_text_line;
+    int insert_text_col;
     int last_insert_line_no;
     int last_insert_col;
     int insert_entry_key;
+    int insert_count;           /* the count i, a, o, R... were given: the text goes in this many times */
     char *last_insert_text;
     vi_replace_edit_t *replace_edits;
     int replace_edit_count;
@@ -207,9 +212,9 @@ vi_clear_replace_edits(vi_visual_t *vis)
 static char *
 vi_capture_insert_span(buffer_t *b, vi_visual_t *vis)
 {
-    line_t *start_line = vis->insert_anchor_line;
+    line_t *start_line = vis->insert_text_line;
     line_t *end_line = b->cur ? b->cur : b->head;
-    int start_col = vis->insert_anchor_col;
+    int start_col = vis->insert_text_col;
     int end_col = vis->cursor_col;
     line_t *line;
     size_t total = 0;
@@ -640,6 +645,10 @@ vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
             vis->insert_anchor_line = edit.line;
             vis->insert_anchor_col = edit.col;
         }
+        if (vis->insert_text_line == edit.aux_line) {
+            vis->insert_text_line = edit.line;
+            vis->insert_text_col = edit.col;
+        }
         b->cur = edit.aux_line;
         buf_delete(b, edit.aux_line);
         b->cur = edit.line;
@@ -784,6 +793,8 @@ vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis)
 {
     vis->insert_anchor_line = b->cur ? b->cur : b->head;
     vis->insert_anchor_col = vis->cursor_col;
+    vis->insert_text_line = vis->insert_anchor_line;
+    vis->insert_text_col = vis->insert_anchor_col;
 }
 
 static void
@@ -1332,6 +1343,15 @@ vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
             }
             if (vis->insert_anchor_col < 0) {
                 vis->insert_anchor_col = 0;
+            }
+        }
+        if (vis->insert_text_line == cur) {
+            if (!(vis->insert_text_col == 0 && old_prefix_len == 0) &&
+                vis->insert_text_col >= old_prefix_len) {
+                vis->insert_text_col += delta;
+            }
+            if (vis->insert_text_col < 0) {
+                vis->insert_text_col = 0;
             }
         }
         vi_clamp_cursor(b, vis);
@@ -4779,6 +4799,71 @@ vi_substitute_line(buffer_t *b, vi_visual_t *vis, int capture_register)
     free(indent);
 }
 
+/*
+ * s: count characters from the cursor, as many as the line has, give way
+ * to text input (POSIX vi; Vim takes the rest of a shorter line).  3s
+ * changed one character.
+ */
+static void
+vi_substitute_chars(buffer_t *b, vi_visual_t *vis, int count)
+{
+    line_t *cur = b->cur;
+
+    if (count < 1) {
+        count = 1;
+    }
+    if (cur && (size_t)vis->cursor_col < cur->len) {
+        vi_delete_span(b, vis, vis->cursor_col,
+            vi_char_offset_forward(cur, vis->cursor_col, count), 1);
+        return;
+    }
+    save_undo(b);
+    vis->insert_mode = 1;
+    vis->replace_mode = 0;
+    vis->insert_entry_key = 0;
+    vi_record_last_insert_site(b, vis);
+    vi_set_insert_anchor(b, vis);
+}
+
+/*
+ * S: count lines from the current one, as many as there are, become one
+ * line of text input, with the first one's indent where autoindent is set
+ * (POSIX vi, as cc).  The lines go to the buffer named, the unnamed one
+ * otherwise; u restores them all.  3S changed one line.
+ */
+static void
+vi_substitute_lines(buffer_t *b, vi_visual_t *vis, int count, int capture_register)
+{
+    int line_no = buf_current_line(b);
+    int last;
+    char regarg[2];
+
+    if (count <= 1 || line_no < 1) {
+        vi_substitute_line(b, vis, capture_register);
+        return;
+    }
+    last = vi_clamp_line_target(b, line_no + count - 1);
+    if (capture_register) {
+        vi_take_register_arg(vis, regarg);
+    } else {
+        regarg[0] = '\0';
+    }
+    handle_yank_command(b, regarg, 1, line_no, last);
+    /* one change for u: the group's snapshot is from before the lines go */
+    exvi_begin_undo_group(b);
+    for (int i = line_no + 1; i <= last; i++) {
+        line_t *gone = buf_get_line(b, line_no + 1);
+
+        if (gone) {
+            buf_delete(b, gone);
+        }
+    }
+    b->cur = buf_get_line(b, line_no);
+    vi_substitute_line(b, vis, 0);
+    exvi_end_undo_group();
+    vi_mark_body_dirty_through_eof(vis, line_no);
+}
+
 static int
 vi_line_number_for_line(buffer_t *b, line_t *line)
 {
@@ -6729,6 +6814,10 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
             vis->insert_anchor_line = prev;
             vis->insert_anchor_col += (int)prev_len;
         }
+        if (vis->insert_text_line == cur) {
+            vis->insert_text_line = prev;
+            vis->insert_text_col += (int)prev_len;
+        }
         return;
     }
     text = malloc(cur->len + 1);
@@ -6882,31 +6971,40 @@ vi_char_value_bytes(int value, char *out)
  * r with é on abc cut é in two, and r on é left half of it.
  */
 static void
-vi_replace_char(buffer_t *b, vi_visual_t *vis, int value)
+vi_replace_char(buffer_t *b, vi_visual_t *vis, int value, int count)
 {
     line_t *cur = b->cur;
     char bytes[4];
     int n = vi_char_value_bytes(value, bytes);
     int col = vis->cursor_col;
-    int end;
+    int end = col;
     size_t new_len;
     char *text;
 
-    if (!cur || (size_t)col >= cur->len) {
-        (void)!write(STDOUT_FILENO, "\a", 1);
-        return;
+    if (count < 1) {
+        count = 1;
     }
-    end = vi_next_char_index(cur, col);
-    new_len = cur->len - (size_t)(end - col) + (size_t)n;
+    /* count characters, or none and an error when the line has fewer */
+    for (int i = 0; i < count; i++) {
+        if (!cur || (size_t)end >= cur->len) {
+            (void)!write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        end = vi_next_char_index(cur, end);
+    }
+    new_len = cur->len - (size_t)(end - col) + (size_t)n * (size_t)count;
     save_undo(b);
     text = malloc(new_len + 1);
     if (!text) {
         return;
     }
     memcpy(text, cur->text, (size_t)col);
-    memcpy(text + col, bytes, (size_t)n);
-    memcpy(text + col + n, cur->text + end, cur->len - (size_t)end + 1);
+    for (int i = 0; i < count; i++) {
+        memcpy(text + col + i * n, bytes, (size_t)n);
+    }
+    memcpy(text + col + count * n, cur->text + end, cur->len - (size_t)end + 1);
     if (vi_replace_current_text(b, text, new_len) == 0) {
+        vis->cursor_col = col + (count - 1) * n;    /* on the last one */
         vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
@@ -7070,7 +7168,17 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
     }
     vis->cursor_col = (int)indent_len;
     vi_mark_body_dirty_through_eof(vis, start_line_no);
-    vi_set_insert_anchor(b, vis);
+    {
+        /* a new line for ^U; the input still began where it began */
+        line_t *text_line = vis->insert_text_line;
+        int text_col = vis->insert_text_col;
+
+        vi_set_insert_anchor(b, vis);
+        if (text_line) {
+            vis->insert_text_line = text_line;
+            vis->insert_text_col = text_col;
+        }
+    }
     free(indent);
     free(left);
     free(right);
@@ -7240,6 +7348,31 @@ vi_start_change_insert(buffer_t *b, vi_visual_t *vis)
     vi_set_insert_anchor(b, vis);
 }
 
+/*
+ * The text of the insert just ended, `times` more times where it ends: on
+ * new lines of their own after o or O, over the text after it in R, at
+ * the cursor otherwise (POSIX vi: a count on i, a, I, A, o, O and R).
+ * 3ix<ESC> put one x, and its count carried over to the next command.
+ */
+static void
+vi_repeat_insert_text(buffer_t *b, vi_visual_t *vis, int entry_key, int times)
+{
+    if (!vis->last_insert_text || vis->last_insert_text[0] == '\0') {
+        return;
+    }
+    while (times-- > 0) {
+        if (entry_key == 'o' || entry_key == 'O') {
+            /* a line below the copy before it, as <CR> at its end makes:
+             * one change for u, with the autoindent o gives */
+            if (b->cur) {
+                vis->cursor_col = (int)b->cur->len;
+            }
+            vi_split_line(b, vis);
+        }
+        vi_replay_insert_text(b, vis, vis->last_insert_text);
+    }
+}
+
 static void
 vi_finish_repeat_insert(buffer_t *b, vi_visual_t *vis)
 {
@@ -7300,7 +7433,7 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             (void)!write(STDOUT_FILENO, "\a", 1);
             return;
         }
-        vi_replace_char(b, vis, vis->last_change_char);
+        vi_replace_char(b, vis, vis->last_change_char, count);
         break;
     case VI_REPEAT_TILDE:
         vi_toggle_case(b, vis, count);
@@ -7370,13 +7503,22 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             (void)!write(STDOUT_FILENO, "\a", 1);
             return;
         }
-        while (count-- > 0) {
-            if (vi_begin_repeat_insert(b, vis, vis->last_change_char) != 0) {
+        {
+            /* entered once, the text count times (3. after ixy<ESC> puts
+             * xyxyxy where it is, as Vim), left once; the text stays one
+             * copy for the next . */
+            char *text = strdup(vis->last_insert_text);
+
+            if (!text || vi_begin_repeat_insert(b, vis, vis->last_change_char) != 0) {
+                free(text);
                 (void)!write(STDOUT_FILENO, "\a", 1);
                 return;
             }
-            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            vi_replay_insert_text(b, vis, text);
+            vi_repeat_insert_text(b, vis, vis->last_change_char, count - 1);
             vi_finish_repeat_insert(b, vis);
+            free(vis->last_insert_text);
+            vis->last_insert_text = text;
         }
         break;
     case VI_REPEAT_C_WORD:
@@ -7394,16 +7536,7 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         vi_finish_repeat_insert(b, vis);
         break;
     case VI_REPEAT_S:
-        if (cur && (size_t)vis->cursor_col < cur->len) {
-            vi_delete_span(b, vis, vis->cursor_col, vis->cursor_col + 1, 1);
-        } else {
-            save_undo(b);
-            vis->insert_mode = 1;
-            vis->replace_mode = 0;
-            vis->insert_entry_key = 0;
-            vi_record_last_insert_site(b, vis);
-            vi_set_insert_anchor(b, vis);
-        }
+        vi_substitute_chars(b, vis, count);
         vi_replay_insert_text(b, vis, vis->last_insert_text);
         vi_finish_repeat_insert(b, vis);
         break;
@@ -7414,7 +7547,7 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         vi_finish_repeat_insert(b, vis);
         break;
     case VI_REPEAT_S_LINE:
-        vi_substitute_line(b, vis, 1);
+        vi_substitute_lines(b, vis, count, 1);
         vi_replay_insert_text(b, vis, vis->last_insert_text);
         vi_finish_repeat_insert(b, vis);
         break;
@@ -7981,12 +8114,16 @@ exvi_visual_main(buffer_t *b)
             case '\x1b':
                 if (vi_current_insert_span_nonempty(b, &vis) ||
                     vis.replace_edit_count > 0) {
+                    int times = vis.insert_count > 1 ? vis.insert_count : 1;
+
                     vi_update_last_insert_text(b, &vis);
+                    vi_repeat_insert_text(b, &vis, 'R', times - 1);
                     if (vis.insert_entry_key != 0) {
-                        vi_set_last_change(&vis, VI_REPEAT_INSERT, 1,
+                        vi_set_last_change(&vis, VI_REPEAT_INSERT, times,
                             vis.insert_entry_key);
                     }
                 }
+                vis.insert_count = 0;
                 vi_record_last_insert_site(b, &vis);
                 vis.insert_entry_key = 0;
                 vi_reset_replace_mode(&vis);
@@ -8074,12 +8211,16 @@ exvi_visual_main(buffer_t *b)
             switch (key) {
             case '\x1b':
                 if (vi_current_insert_span_nonempty(b, &vis)) {
+                    int times = vis.insert_count > 1 ? vis.insert_count : 1;
+
                     vi_update_last_insert_text(b, &vis);
+                    vi_repeat_insert_text(b, &vis, vis.insert_entry_key, times - 1);
                     if (vis.insert_entry_key != 0) {
-                        vi_set_last_change(&vis, VI_REPEAT_INSERT, 1,
+                        vi_set_last_change(&vis, VI_REPEAT_INSERT, times,
                             vis.insert_entry_key);
                     }
                 }
+                vis.insert_count = 0;
                 vi_record_last_insert_site(b, &vis);
                 vis.insert_entry_key = 0;
                 vis.insert_mode = 0;
@@ -8627,6 +8768,7 @@ process_normal_key:
                 break;
             }
             vis.pending_g = 0;
+            vis.insert_count = vi_take_count(&vis);
             save_undo(b);
             vis.screen_dirty = 0;
             vis.insert_mode = 1;
@@ -8649,6 +8791,7 @@ process_normal_key:
                 break;
             }
             vis.pending_g = 0;
+            vis.insert_count = vi_take_count(&vis);
             vis.cursor_col = vi_first_nonblank_col(cur);
             save_undo(b);
             vis.screen_dirty = 0;
@@ -8659,6 +8802,7 @@ process_normal_key:
             break;
         case 'a':
             vis.pending_g = 0;
+            vis.insert_count = vi_take_count(&vis);
             if (cur && vis.cursor_col < (int)cur->len) {
                 vis.cursor_col = vi_next_char_col(cur, vis.cursor_col);
             }
@@ -8671,6 +8815,7 @@ process_normal_key:
             break;
         case 'A':
             vis.pending_g = 0;
+            vis.insert_count = vi_take_count(&vis);
             if (cur) {
                 vis.cursor_col = (int)cur->len;
             } else {
@@ -8685,6 +8830,7 @@ process_normal_key:
             break;
         case 'R':
             vis.pending_g = 0;
+            vis.insert_count = vi_take_count(&vis);
             save_undo(b);
             vis.screen_dirty = 0;
             vis.insert_mode = 0;
@@ -8696,11 +8842,13 @@ process_normal_key:
             break;
         case 'o':
             vis.pending_g = 0;
+            vis.insert_count = vi_take_count(&vis);
             vis.screen_dirty = 0;
             vi_open_line(b, &vis, 0);
             break;
         case 'O':
             vis.pending_g = 0;
+            vis.insert_count = vi_take_count(&vis);
             vis.screen_dirty = 0;
             vi_open_line(b, &vis, 1);
             break;
@@ -8737,6 +8885,7 @@ process_normal_key:
             vis.pending_g = 0;
             key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
+                vis.pending_count = 0;
                 (void)!write(STDOUT_FILENO, "\a", 1);
                 break;
             }
@@ -8753,8 +8902,10 @@ process_normal_key:
                 } else if (vi_utf8_decode_text_at(bytes, (size_t)n, 0, &cp) == n && n > 1) {
                     value = (int)cp;
                 }
-                vi_replace_char(b, &vis, value);
-                vi_set_last_change(&vis, VI_REPEAT_R, 1, value);
+                int count = vi_take_count(&vis);
+
+                vi_replace_char(b, &vis, value, count);
+                vi_set_last_change(&vis, VI_REPEAT_R, count, value);
             }
             break;
         case '~':
@@ -8769,23 +8920,22 @@ process_normal_key:
         case 's':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            if (cur && (size_t)vis.cursor_col < cur->len) {
-                vi_delete_span(b, &vis, vis.cursor_col, vis.cursor_col + 1, 1);
-            } else {
-                save_undo(b);
-                vis.insert_mode = 1;
-                vis.replace_mode = 0;
-                vis.insert_entry_key = 0;
-                vi_record_last_insert_site(b, &vis);
-                vi_set_insert_anchor(b, &vis);
+            {
+                int count = vi_take_count(&vis);
+
+                vi_substitute_chars(b, &vis, count);
+                vi_set_last_change(&vis, VI_REPEAT_S, count, 0);
             }
-            vi_set_last_change(&vis, VI_REPEAT_S, 1, 0);
             break;
         case 'S':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            vi_substitute_line(b, &vis, 1);
-            vi_set_last_change(&vis, VI_REPEAT_S_LINE, 1, 0);
+            {
+                int count = vi_take_count(&vis);
+
+                vi_substitute_lines(b, &vis, count, 1);
+                vi_set_last_change(&vis, VI_REPEAT_S_LINE, count, 0);
+            }
             break;
         case 'u':
             vis.pending_g = 0;
@@ -9159,7 +9309,9 @@ maybe_restore_insert_mode:
             vi_set_insert_anchor(b, &vis);
             resume_replace_mode = 0;
         }
-        if (vis.pending_reg && key != '"' && key != 'd' && key != 'y' && key != 'c') {
+        /* the name lasts through the operator, and the count: "q2S */
+        if (vis.pending_reg && key != '"' && key != 'd' && key != 'y' && key != 'c' &&
+            !(key >= '0' && key <= '9' && vis.pending_count > 0)) {
             vis.pending_reg = 0;
         }
     }

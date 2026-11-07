@@ -135,6 +135,25 @@ for one-shot normal commands from insert or replace mode
 .Pp
 Counts are supported across a large subset of motions and operator-pending
 commands.
+A count on
+.Cm i ,
+.Cm a ,
+.Cm I ,
+.Cm A ,
+.Cm o ,
+.Cm O
+or
+.Cm R
+enters the text that many times;
+.Cm r
+replaces that many characters, or none when the line has fewer;
+.Cm s
+and
+.Cm S
+change that many characters or lines, as many as there are.
+A count on
+.Cm \&.
+repeats the change's text that many times.
 The current implementation still has documented parity gaps in a few motion,
 undo, and repeat corner cases; see
 .Pa docs/specs/exvi.md
