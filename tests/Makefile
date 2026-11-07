@@ -121,6 +121,8 @@ all: test_bc_num test_runner test_getuid test_minix test_ext2_perf test_ext2_rea
 	./test_getpagesize
 	./test_getuid
 	./test_getrusage
+	# the kernel's host tests (tests/sys), every one built and run
+	$(MAKE) -C sys check
 	# ex and vi, each plain and under ASan, and libexvi's unit tests
 	# (tests/bin/ex runs tests/usr.lib/exvi); nothing ran them before
 	$(MAKE) -C bin/ex test

@@ -690,10 +690,24 @@ setuid_helper: setuid_helper.c
 setuid_preload.so: setuid_preload.c
 	$(TORTURE_CC) $(TORTURE_CFLAGS) -fPIC -shared $< -o $@
 
+# Build every host test and run it; a failure's output is shown and the
+# target fails.  make -C tests runs this, and so does CI: nothing did, and
+# four of these stopped linking unnoticed.
+check: $(HOST_TESTS)
+	@fail=0; n=0; \
+	for t in $(HOST_TESTS); do \
+		n=$$((n + 1)); \
+		if ! out=$$(timeout 300 ./$$t 2>&1 </dev/null); then \
+			echo "FAIL: tests/sys/$$t"; echo "$$out" | tail -20; fail=$$((fail + 1)); \
+		fi; \
+	done; \
+	echo "tests/sys: $$n host tests, $$fail failed"; \
+	test $$fail -eq 0
+
 clean:
 	rm -f *.o $(HOST_TESTS) $(TORTURE)
 
-.PHONY: torture
+.PHONY: torture check
 
 host_test_udf_read_file: host_test_udf_read_file.c
 	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_read_file.c -o $@

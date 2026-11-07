@@ -109,7 +109,9 @@ jobs:
       # tests/Makefile's `all` both builds and runs every host test, so a
       # failure here is either a build break or a red test -- the log says
       # which.  Note it stops at the first failing command in the recipe
-      # rather than reporting every failure in one pass.
+      # rather than reporting every failure in one pass.  It includes the
+      # kernel's host tests (`make -C tests/sys check`, every one built and
+      # run, each failure's output shown) and the ex and vi suites.
       - name: Build and run host tests
         run: make -C tests
 
