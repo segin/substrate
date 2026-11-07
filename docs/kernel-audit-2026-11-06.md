@@ -123,7 +123,8 @@
   - **Requirement (Unwanted Behavior):**
     - **If** a `ptrace` memory request specifies an address range outside `[VM_MIN_ADDRESS, USER_VA_END)` or targets a tracee that is not stopped, **then** `sys_ptrace()` **shall** reject the request with `-EIO`, `-EFAULT`, or `-ESRCH`.
 
-- [ ] **[REQ-SYS-KERN-003]** *(High — Signed Length Bypass & Dangling Waiters in `kern_mq_send()` and `futex_lock_pi()`)*
+- [x] **[REQ-SYS-KERN-003]** *(High — Signed Length Bypass & Dangling Waiters in `kern_mq_send()` and `futex_lock_pi()`)*
+  - **Resolution (2026-11-06):** (1) fixed: both message-length checks are unsigned (the send's let a length past 2 GiB through to an allocation that wrapped).  (2) not reproduced: a thread killed while blocked is woken with `-EINTR` and leaves through the paths that unlink it -- `pi_remove_waiter()` on every way out of `futex_lock_pi()`'s sleep, the `recv_waiters` decrement after `mq_block()`.
   - **Location:** `sys/kern/posix_mqueue.c:500-680` (`kern_mq_send`, `kern_mq_receive`), `sys/kern/futex.c:1089-1220` (`futex_lock_pi`), `sys/kern/posix_sem.c:199-370` (`ksem_drop_open`, `kern_ksem_open`)
   - **Finding:**
     1. `kern_mq_send()` validates message size with `if ((long)len > q->attr.mq_msgsize)`, allowing `len >= 0x80000000UL` on 32-bit to pass as negative if called from a personality entry point.

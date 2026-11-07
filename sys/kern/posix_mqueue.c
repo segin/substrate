@@ -517,7 +517,9 @@ int kern_mq_send(int mqd, const char *msg, size_t len, unsigned prio,
     }
     struct mqueue *q = mq_from_desc(d);
     if (!q) { mutex_unlock(&mq_lock); return -EBADF; }
-    if ((long)len > q->msgsize) {
+    /* unsigned: a length of 2 GiB or more is no negative long, which every
+     * mq_msgsize exceeds -- passed so, it overran the message's buffer */
+    if (len > (size_t)q->msgsize) {
         mutex_unlock(&mq_lock);
         return -EMSGSIZE;
     }
@@ -629,7 +631,7 @@ ssize_t kern_mq_receive(int mqd, char *msg, size_t len, unsigned *prio,
     struct mqueue *q = mq_from_desc(d);
     if (!q) { mutex_unlock(&mq_lock); return -EBADF; }
     /* POSIX: the receive buffer must be at least mq_msgsize. */
-    if ((long)len < q->msgsize) {
+    if (len < (size_t)q->msgsize) {
         mutex_unlock(&mq_lock);
         return -EMSGSIZE;
     }
