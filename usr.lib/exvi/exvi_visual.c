@@ -7580,6 +7580,20 @@ vi_delete_char(buffer_t *b, vi_visual_t *vis)
     vi_clamp_cursor(b, vis);
 }
 
+/*
+ * x: the character under the cursor, and the cursor onto the line's new
+ * last character when it was the last (POSIX vi).  The cursor stayed past
+ * the end, where r and x found nothing and j kept that column.
+ */
+static void
+vi_delete_char_x(buffer_t *b, vi_visual_t *vis)
+{
+    vi_delete_char(b, vis);
+    if (b->cur && b->cur->len > 0 && (size_t)vis->cursor_col >= b->cur->len) {
+        vis->cursor_col = vi_last_char_col(b->cur);
+    }
+}
+
 static void
 vi_delete_prev_char(buffer_t *b, vi_visual_t *vis)
 {
@@ -7963,7 +7977,7 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             return;
         }
         if (count == 1) {
-            vi_delete_char(b, vis);
+            vi_delete_char_x(b, vis);
         } else {
             vi_delete_span(b, vis, vis->cursor_col,
                 vi_char_offset_forward(cur, vis->cursor_col, count), 0);
@@ -9519,7 +9533,7 @@ process_normal_key:
                 int count = vi_take_count(&vis);
 
                 if (count == 1) {
-                    vi_delete_char(b, &vis);
+                    vi_delete_char_x(b, &vis);
                 } else if (cur && (size_t)vis.cursor_col < cur->len) {
                     int end = vi_char_offset_forward(cur, vis.cursor_col, count);
 
