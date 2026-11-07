@@ -27,6 +27,14 @@ CASES = [
     ("U after :s", "ab\ncd\n", [b"x:s/b/Z/\rU"], "ab\ncd\n"),
     (". after U repeats x", "abc\n", [b"xU."], "bc\n"),
     ("U after dd", "a\nb\n", [b"ddU"], "b\n"),
+    # u and redo leave the cursor on the line they put back (Vim); u put
+    # it on line 1
+    ("cursor after u", "a\nb\nc\nd\n", [b"jjxurZ"], "a\nb\nZ\nd\n"),
+    ("cursor after u of dd", "a\nb\nc\nd\n", [b"jjddurZ"], "a\nb\nZ\nd\n"),
+    ("cursor after redo", "a\nb\nc\nd\n", [b"jjxu\x12rZ"], "a\nb\n\nd\n"),
+    ("cursor after u from elsewhere", "a\nb\nc\nd\n", [b"Gddggu", b"rZ"],
+     "a\nb\nc\nZ\n"),
+    ("u, u, redo, redo", "a\nb\nc\nd\n", [b"jdduu\x12\x12rZ"], "a\nZ\nd\n"),
     # POSIX: the current line, as it was when it became current
     ("U on another line", "abc\nd\n", [b"xxjU"], "c\nd\n"),
     ("U after coming back", "abc\nd\n", [b"xxjkU"], "c\nd\n"),
