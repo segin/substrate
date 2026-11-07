@@ -209,6 +209,16 @@ and
 replace the whole character under the cursor, and in
 .Ql R
 backspace restores it.
+.Ql Ctrl-H ,
+.Ql Ctrl-W
+and
+.Ql Ctrl-U
+erase only what the text input entered on the current line \(em one
+character; blanks and then a word, a run of letters, digits and
+underscores or of other characters; all of it \(em and leave the buffers
+alone;
+.Ql u
+undoes the input, erasures and all, as one change.
 An
 .Aq ESC
 followed within 50 milliseconds by keys that make no terminal key sequence

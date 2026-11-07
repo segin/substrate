@@ -1242,7 +1242,9 @@ def main():
     )
     require(exit_code == 0, f"insert-backspace-join vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing insert-backspace-join insert status")
-    require(saved == "onetwo\n",
+    # backspace erases only what the input entered on the line: no join
+    # (POSIX vi; Vim with backspace=)
+    require(saved == "one\ntwo\n",
             f"unexpected insert-backspace-join buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -1262,7 +1264,9 @@ def main():
     )
     require(exit_code == 0, f"insert-ctrl-backspace vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing insert-ctrl-backspace insert status")
-    require(saved == "one Xthree\n",
+    # the arrow starts the input again where it leaves the cursor, and the
+    # word erase stops there (POSIX vi; Vim with backspace=)
+    require(saved == "one two Xthree\n",
             f"unexpected insert-ctrl-backspace buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -1282,7 +1286,8 @@ def main():
     )
     require(exit_code == 0, f"insert-ctrl-w vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing insert-ctrl-w insert status")
-    require(saved == "one two X\n",
+    # ^W erases only what this input entered: nothing here
+    require(saved == "one two threeX\n",
             f"unexpected insert-ctrl-w buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(

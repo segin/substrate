@@ -32,6 +32,11 @@ def run_vim_session(helpers, vim_path, initial_text, key_steps, rows=24, cols=80
         "-Nu", "NONE",
         "-i", "NONE",
         "-n",
+        # ^H, ^W and ^U erase only what this input entered on the line, as
+        # POSIX vi; Vim 9's default lets them erase past it and join lines.
+        # --cmd, not -c: with any -c Vim starts at column 0 rather than on
+        # the first non-blank
+        "--cmd", "set backspace=",
     ]
     return helpers.run_vi_session(
         env_path,

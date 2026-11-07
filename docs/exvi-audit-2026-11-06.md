@@ -899,22 +899,23 @@ The number is not reused.
 
 ### EXVI-60 — `^W`, `^U` and backspace erase text that was there before the insert — *Medium*
 
-- [ ] **EXVI-60.1** (Ubiquitous) In text input, the editor's `^H`, `^W` and `^U`
+- [x] **EXVI-60.1** (Ubiquitous) In text input, the editor's `^H`, `^W` and `^U`
   shall erase only characters entered on the current line in the current
   insert.
-- [ ] **EXVI-60.2** (Ubiquitous) In text input, the editor's `^H`, `^W` and `^U`
+- [x] **EXVI-60.2** (Ubiquitous) In text input, the editor's `^H`, `^W` and `^U`
   shall leave the named and unnamed buffers unchanged.
-- [ ] **EXVI-60.3** (Ubiquitous) The editor shall undo one text input, erasures
+- [x] **EXVI-60.3** (Ubiquitous) The editor shall undo one text input, erasures
   included, as one change.
-- [ ] **EXVI-60.4** (Ubiquitous) The editor's `^H` shall erase one character.
+- [x] **EXVI-60.4** (Ubiquitous) The editor's `^H` shall erase one character.
 
 - **Where**: `exvi_visual.c:7590-7598` with `6280-6372` (normal-mode word
   motion and `vi_delete_range`); backspace `6225-6277` (by byte, and joins
   lines at column 0).
 - **Evidence**: `A^W<ESC>jp` on `foo bar` erases `bar` and `p` puts it back;
   `A baz^Wqq<ESC>u` undoes only part of the insert; `A<BS>` on `ab` erases
-  `b`.
-- **Basis**: reproduced.
+  `b`.  `^W` also took `a.b` as one word.  Judged against Vim with
+  `backspace=` (traditional vi); the oracle now runs Vim so.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_input_erase.py`.
 
 ### EXVI-61 — word motions — *Medium*
 

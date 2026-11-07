@@ -6775,94 +6775,126 @@ vi_insert_adjacent_char(buffer_t *b, vi_visual_t *vis, int below)
     }
 }
 
+/*
+ * The column text input may erase back to on the current line: where the
+ * input began on it (POSIX vi: ^H, ^W and ^U erase only what was entered
+ * on the line in this input).  On a line the input did not begin on,
+ * nothing.
+ */
+static int
+vi_input_floor(buffer_t *b, vi_visual_t *vis)
+{
+    if (!b->cur || vis->insert_anchor_line != b->cur) {
+        return vis->cursor_col;
+    }
+    if (vis->insert_anchor_col < 0) {
+        return 0;
+    }
+    return vis->insert_anchor_col < vis->cursor_col ?
+        vis->insert_anchor_col : vis->cursor_col;
+}
+
+/*
+ * Erase [start, cursor) on the current line, text this input entered: no
+ * buffer gets it and it is no change of its own -- u undoes the input
+ * whole.  The erasers went through vi_delete_range(), so A^W<ESC>jp put
+ * the erased word back, and u after A baz^Wqq<ESC> undid only part.
+ */
 static void
-vi_backspace_char(buffer_t *b, vi_visual_t *vis)
+vi_erase_input(buffer_t *b, vi_visual_t *vis, int start)
 {
     line_t *cur = b->cur;
-    line_t *prev;
+    int end = vis->cursor_col;
     char *text;
-    char *merged;
-    size_t prev_len;
-    int start_line_no;
 
-    if (!cur) {
+    if (!cur || start >= end) {
         return;
     }
-    if (vis->cursor_col <= 0) {
-        if (!cur->prev) {
-            return;
-        }
-        prev = cur->prev;
-        start_line_no = vi_line_number_for_line(b, prev);
-        prev_len = prev->len;
-        merged = malloc(prev->len + cur->len + 1);
-        if (!merged) {
-            return;
-        }
-        exvi_note_buffer_change();
-        memcpy(merged, prev->text, prev->len);
-        memcpy(merged + prev->len, cur->text, cur->len + 1);
-        free(prev->text);
-        prev->text = merged;
-        prev->len += cur->len;
-        b->cur = cur;
-        buf_delete(b, cur);
-        b->cur = prev;
-        vis->cursor_col = (int)prev_len;
-        vi_mark_body_dirty_through_eof(vis, start_line_no);
-        if (vis->insert_anchor_line == cur) {
-            vis->insert_anchor_line = prev;
-            vis->insert_anchor_col += (int)prev_len;
-        }
-        if (vis->insert_text_line == cur) {
-            vis->insert_text_line = prev;
-            vis->insert_text_col += (int)prev_len;
-        }
-        return;
-    }
-    text = malloc(cur->len + 1);
+    text = malloc(cur->len - (size_t)(end - start) + 1);
     if (!text) {
         return;
     }
-    memcpy(text, cur->text, (size_t)vis->cursor_col - 1);
-    memcpy(text + vis->cursor_col - 1, cur->text + vis->cursor_col,
-        cur->len - (size_t)vis->cursor_col + 1);
-    if (vi_replace_current_text(b, text, cur->len - 1) == 0) {
-        vis->cursor_col--;
+    memcpy(text, cur->text, (size_t)start);
+    memcpy(text + start, cur->text + end, cur->len - (size_t)end + 1);
+    if (vi_replace_current_text(b, text, cur->len - (size_t)(end - start)) == 0) {
+        vis->cursor_col = start;
         vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
 }
 
+/* ^H: the character before the cursor, all its bytes; it no longer erases
+ * text from before the input, or joins the line to the one before */
+static void
+vi_backspace_char(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    int floor = vi_input_floor(b, vis);
+    int start;
+
+    if (!cur || vis->cursor_col <= floor) {
+        (void)!write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    start = vi_prev_char_index(cur, vis->cursor_col);
+    if (start < floor) {
+        start = floor;
+    }
+    vi_erase_input(b, vis, start);
+}
+
+/* ^W's classes: blanks, word characters (letters, digits, _, and any
+ * non-ASCII character), and the rest */
+static int
+vi_input_char_class(line_t *cur, int idx)
+{
+    unsigned char c = (unsigned char)cur->text[idx];
+
+    if (c == ' ' || c == '\t') {
+        return 0;
+    }
+    if (isalnum(c) || c == '_' || c >= 0x80) {
+        return 1;
+    }
+    return 2;
+}
+
+/*
+ * ^W: back over blanks, then over one word -- a run of word characters,
+ * or of other non-blanks -- no further than where the input began on the
+ * line.  It used normal mode's b, which took a.b as one word.
+ */
 static void
 vi_erase_word_backward_insert(buffer_t *b, vi_visual_t *vis)
 {
-    line_t *end_line = b->cur ? b->cur : b->head;
-    int end_col = vis->cursor_col;
-    line_t *start_line;
-    int start_col;
-    vi_visual_t tmp;
+    line_t *cur = b->cur;
+    int floor = vi_input_floor(b, vis);
+    int start;
+    int cls;
 
-    if (!end_line) {
+    if (!cur || vis->cursor_col <= floor) {
+        (void)!write(STDOUT_FILENO, "\a", 1);
         return;
     }
-    tmp = *vis;
-    vi_move_word_backward_count(b, &tmp, 1);
-    start_line = b->cur ? b->cur : b->head;
-    start_col = tmp.cursor_col;
-    b->cur = end_line;
-    vis->cursor_col = end_col;
-    if (!start_line) {
-        return;
+    start = vis->cursor_col;
+    while (start > floor && vi_input_char_class(cur, vi_prev_char_index(cur, start)) == 0) {
+        start = vi_prev_char_index(cur, start);
     }
-    if (start_line == end_line && start_col == end_col) {
-        return;
+    if (start > floor) {
+        cls = vi_input_char_class(cur, vi_prev_char_index(cur, start));
+        while (start > floor &&
+            vi_input_char_class(cur, vi_prev_char_index(cur, start)) == cls) {
+            start = vi_prev_char_index(cur, start);
+        }
+    }
+    if (start < floor) {
+        start = floor;
     }
     if (vis->replace_mode) {
-        vi_rewind_replace_to(b, vis, start_line, start_col);
+        vi_rewind_replace_to(b, vis, cur, start);
         return;
     }
-    vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
+    vi_erase_input(b, vis, start);
 }
 
 static void
@@ -6892,41 +6924,20 @@ vi_erase_word_forward_insert(buffer_t *b, vi_visual_t *vis)
     vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
 }
 
+/* ^U: back to where the input began on the line */
 static void
 vi_erase_to_insert_anchor(buffer_t *b, vi_visual_t *vis)
 {
-    line_t *end_line = b->cur ? b->cur : b->head;
-    int end_col = vis->cursor_col;
-    line_t *start_line = vis->insert_anchor_line;
-    int start_col = vis->insert_anchor_col;
+    int floor = vi_input_floor(b, vis);
 
-    if (!end_line) {
-        return;
-    }
-    if (!start_line) {
-        start_line = end_line;
-        start_col = 0;
-    }
-    if (start_line != end_line) {
-        start_line = end_line;
-        start_col = 0;
-        vis->insert_anchor_line = end_line;
-        vis->insert_anchor_col = 0;
-    }
-    if (start_col < 0) {
-        start_col = 0;
-    }
-    if (start_col > end_col) {
-        start_col = end_col;
-    }
-    if (start_col == end_col) {
+    if (!b->cur || vis->cursor_col <= floor) {
         return;
     }
     if (vis->replace_mode) {
-        vi_rewind_replace_to(b, vis, start_line, start_col);
+        vi_rewind_replace_to(b, vis, b->cur, floor);
         return;
     }
-    vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
+    vi_erase_input(b, vis, floor);
 }
 
 /*
