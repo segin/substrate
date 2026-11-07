@@ -111,6 +111,12 @@ void set_kernel_stack(uint32_t stack) {
     THIS_CPU()->tss.esp0 = stack;
 }
 
+/* The kernel stack the current CPU's TSS has: where a trap from user or
+ * VM86 mode switches to.  vm86_enter() keeps it, to put back. */
+uint32_t get_kernel_stack(void) {
+    return THIS_CPU()->tss.esp0;
+}
+
 /*
  * tss_iomap_init - Initialize I/O permission bitmap
  */

@@ -17,7 +17,8 @@
 
 ## 1. Architecture & Low-Level (`sys/arch/` & `sys/boot/`)
 
-- [ ] **[REQ-SYS-ARCH-001]** *(Critical — Unprivileged Ring-3 Interrupt Disable & Broken Kernel Helper in `sys/arch/i386/vm86.c`)*
+- [x] **[REQ-SYS-ARCH-001]** *(Critical — Unprivileged Ring-3 Interrupt Disable & Broken Kernel Helper in `sys/arch/i386/vm86.c`)*
+  - **Resolution (2026-11-06):** the guest's IF is VIF, the CPU's stays set; `vm86_bios_call()` enters by `kern_vm86()`.  Running the BIOS then showed what the dead path hid, fixed with it: `vm86_enter` now points the TSS's `esp0` at its own frame (and the return puts it back), the call runs with preemption off, kernel BIOS calls do real word and dword port I/O, and any fault in one ends the call -- as any VM86 trap but #GP ends a user guest by a signal, where it panicked the kernel.  With `vga=ask` the BIOS video menu now draws; reading a key through `int 16h` still gets none (the PS/2 driver owns the keyboard).
   - **Location:** `sys/arch/i386/vm86.c:159-203` (`sys_vm86`), `sys/arch/i386/vm86.c:205-469` (`vm86_gpf_handler`), `sys/arch/i386/vm86.c:471-520` (`vm86_bios_call`)
   - **Finding:**
     1. In `vm86_gpf_handler()`, the `CLI` (`0xFA`), `STI` (`0xFB`), `PUSHF`/`POPF`, `INT n`, and `IRET` opcode emulation paths directly clear/restore the hardware `EFLAGS_IF` bit (`0x00000200`) in `regs->eflags` instead of virtualizing via `EFLAGS_VIF` (`0x00080000`), allowing an unprivileged VM86 task to disable hardware interrupts on the CPU.

@@ -51,12 +51,25 @@ vm86_enter:
     push %esi
     push %edi
 
+    /* Disable interrupts while building the IRET frame */
+    cli
+
+    /*
+     * A trap out of VM86 mode switches to the TSS's esp0 and pushes the
+     * VM86 frame there; vm86_bios_ret_point finds this function's own
+     * registers above that frame, so esp0 must be where the frame is built:
+     * here.  The esp0 it had is kept below the saved registers, and put back
+     * by vm86_bios_ret_point.
+     */
+    call get_kernel_stack
+    push %eax
+    push %esp
+    call set_kernel_stack
+    add $4, %esp
+
     /* Get info pointer into EAX */
     /* We use EAX as base because we can load final EAX value last */
     mov 8(%ebp), %eax
-
-    /* Disable interrupts while building the IRET frame */
-    cli
 
     /* Build VM86 IRET Frame on Kernel Stack */
     /* Pushed Order: GS, FS, DS, ES, SS, ESP, EFLAGS, CS, EIP */
@@ -146,7 +159,11 @@ vm86_bios_ret_point:
     add $24, %esp
 
     /* Now Stack is back to state before 'iret' in vm86_enter */
-    /* [Saved EDI] [Saved ESI] [Saved EBX] [Saved EBP] [RetAddr] ... */
+    /* [Old esp0] [Saved EDI] [Saved ESI] [Saved EBX] [Saved EBP] [RetAddr] ... */
+
+    /* Put back the esp0 vm86_enter replaced: it is on top, the argument */
+    call set_kernel_stack
+    add $4, %esp
 
     /* Restore callee-saved registers */
     pop %edi

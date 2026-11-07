@@ -231,6 +231,15 @@ void isr_handler(registers_t *regs) {
     } else if (regs->int_no < 32) {
         // Exception handling
 
+#ifndef SUBSTRATE_ARCH_X86_64
+        /* The kernel's own BIOS call: any fault but the monitor's #GP ends
+         * it, before the page-fault path takes it for a kernel fault. */
+        if ((regs->eflags & CPU_EFLAGS_VM) && regs->int_no != 13 && vm86_kernel_bios_active()) {
+            (void)vm86_trap(regs);
+            return;
+        }
+#endif
+
         // Page fault (14): try demand-paging BEFORE on_fault recovery so that
         // copyout/copyin on mmap'd anonymous pages (not yet faulted in) can
         // succeed via vm_fault instead of being short-circuited to EFAULT.
@@ -352,9 +361,10 @@ void isr_handler(registers_t *regs) {
         }
 
 #ifndef SUBSTRATE_ARCH_X86_64
-        // VM86 Mode Check for GPF (13).  Long mode has no virtual-8086 mode.
-        if (regs->int_no == 13 && (regs->eflags & CPU_EFLAGS_VM)) {
-            if (vm86_gpf_handler(regs)) {
+        // VM86 Mode: #GP is the monitor's; any other fault ends the guest,
+        // which is no kernel-mode fault.  Long mode has no virtual-8086 mode.
+        if (regs->eflags & CPU_EFLAGS_VM) {
+            if (regs->int_no == 13 ? vm86_gpf_handler(regs) : vm86_trap(regs)) {
                 signal_handle_pending(regs);    /* the guest is ended */
             }
             return;
