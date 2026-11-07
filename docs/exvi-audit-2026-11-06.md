@@ -147,7 +147,7 @@ regex, and every finding that touches a regex was re-run on them.
 
 ### EXVI-05 — file contents can send escape sequences to the terminal — *Medium*
 
-- [ ] **EXVI-05.1** (Ubiquitous) The editor shall display each byte that is not
+- [x] **EXVI-05.1** (Ubiquitous) The editor shall display each byte that is not
   a printable character as a sequence of printable characters.
 
 - **Where**: `exvi_visual.c:1443-1449` (`vi_draw_line`) draws an undecodable

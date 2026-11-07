@@ -170,6 +170,14 @@ to
 .Ql \e9 ,
 .Ql ~
 and the case escapes.
+.Pp
+A control character is drawn as
+.Ql ^ Ns Ar X ,
+and a byte that is no printable character \(em a byte in no valid UTF-8
+sequence, or one of a C1 control's \(em as
+.Ql \e Ns Ar ooo ,
+its octal value: no byte of a file reaches the terminal as one it would
+act on.
 .Sh OPTIONS
 .Bl -tag -width indent
 .It Fl R

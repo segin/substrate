@@ -151,6 +151,7 @@ int write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);
 int buf_current_line(buffer_t *b);
 int exvi_regcomp(regex_t *re, const char *pattern);
+int exvi_drawn_char_bytes(const char *text, size_t len, size_t idx);
 int exvi_join_continued(char **line, size_t *cap, FILE *f);
 char *parse_delimited_text(char **cmd_ptr, char delim);
 int exvi_search(buffer_t *b, const char *pattern, int forward);

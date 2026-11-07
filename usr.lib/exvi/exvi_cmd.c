@@ -15,43 +15,66 @@
 #define EXVI_SUB_PRINT_NUMBER 0x02
 #define EXVI_SUB_PRINT_LIST   0x04
 
+/**
+ * Write the character at byte @p j of @p l as p and l show it -- not a tab
+ * -- and return how many bytes it was: a printable character as itself, a
+ * control byte as ^X, and a byte of no printable character (a high byte in
+ * no valid UTF-8 sequence, or of a C1 control's) as \ooo, so that no line
+ * can send the terminal a byte it would obey; @p col counts the columns.
+ */
+static size_t
+print_visible_char(const line_t *l, size_t j, size_t *col)
+{
+    unsigned char c = (unsigned char)l->text[j];
+    int bytes;
+
+    if (c < 32 || c == 127) {
+        printf("^%c", (c == 127) ? '?' : c + 64);
+        *col += 2;
+        return 1;
+    }
+    if (c < 0x80) {
+        putchar(c);
+        *col += 1;
+        return 1;
+    }
+    bytes = exvi_drawn_char_bytes(l->text, l->len, j);
+    if (bytes > 1) {
+        fwrite(l->text + j, 1, (size_t)bytes, stdout);
+        *col += 1;
+        return (size_t)bytes;
+    }
+    printf("\\%03o", c);
+    *col += 4;
+    return 1;
+}
+
 static void
 print_line_text(line_t *l, int listed)
 {
-    if (listed) {
-        for (size_t j = 0; j < l->len; j++) {
-            unsigned char c = l->text[j];
+    size_t col = 0;
 
-            if (c == '\t') {
-                printf("^I");
-            } else if (c < 32 || c == 127) {
-                printf("^%c", (c == 127) ? '?' : c + 64);
-            } else {
-                putchar(c);
-            }
-        }
-        printf("$\n");
-    } else {
-        size_t col = 0;
+    for (size_t j = 0; j < l->len; ) {
+        unsigned char c = l->text[j];
 
-        for (size_t j = 0; j < l->len; j++) {
-            unsigned char c = l->text[j];
+        if (c == '\t' && listed) {
+            printf("^I");
+            col += 2;
+            j++;
+        } else if (c == '\t') {
+            int tabstop = option_tabstop > 0 ? option_tabstop : 8;
+            int spaces = tabstop - (int)(col % (size_t)tabstop);
 
-            if (c == '\t') {
-                int tabstop = option_tabstop > 0 ? option_tabstop : 8;
-                int spaces = tabstop - (int)(col % (size_t)tabstop);
-
-                while (spaces-- > 0) {
-                    putchar(' ');
-                    col++;
-                }
-            } else {
-                putchar(c);
+            while (spaces-- > 0) {
+                putchar(' ');
                 col++;
             }
+            j++;
+        } else {
+            j += print_visible_char(l, j, &col);
         }
-        putchar('\n');
     }
+    printf(listed ? "$\n" : "\n");
 }
 
 static void

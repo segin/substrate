@@ -182,6 +182,17 @@ are the special forms.
 A command line that ends in a backslash continues on the next line, the
 backslash and the newline part of the command.
 .Pp
+.Ic print
+and
+.Ic list
+show a control character as
+.Ql ^ Ns Ar X
+and a byte that is no printable character \(em a byte in no valid UTF-8
+sequence, or one of a C1 control's \(em as
+.Ql \e Ns Ar ooo ,
+its octal value, so that no line can send the terminal a byte it would
+act on.
+.Pp
 .Ic \&! Ns Ar command
 runs
 .Ar command

@@ -1143,16 +1143,46 @@ vi_char_display_width(unsigned char c, int col)
         }
         return option_tabstop - (col % option_tabstop);
     }
+    /* a byte of no character (vi_draw_line()): \ooo */
+    if (c >= 0x80) {
+        return 4;
+    }
     if (isprint(c)) {
         return 1;
     }
     return 2;
 }
 
+/**
+ * How many bytes at @p idx of @p text vi draws as one character: a UTF-8
+ * sequence's when it encodes a printable character; 1 otherwise, for a
+ * byte drawn as \ooo -- also each byte of a sequence encoding a C1 control
+ * (U+0080-U+009F), which a terminal may obey as it does ESC.
+ */
+static int
+vi_drawn_char_bytes(const char *text, size_t len, int idx)
+{
+    unsigned int cp;
+    int bytes = vi_utf8_decode_text_at(text, len, idx, &cp);
+
+    if (bytes > 1 && cp < 0xa0) {
+        return 1;
+    }
+    return bytes;
+}
+
+/** vi_drawn_char_bytes(), for ex's p and l to show a line as vi does. */
+int
+exvi_drawn_char_bytes(const char *text, size_t len, size_t idx)
+{
+    return vi_drawn_char_bytes(text, len, (int)idx);
+}
+
 static int
 vi_char_display_width_at(line_t *cur, int idx, int col)
 {
     unsigned char c;
+    int bytes;
 
     if (!cur || idx < 0 || (size_t)idx >= cur->len) {
         return 1;
@@ -1161,8 +1191,10 @@ vi_char_display_width_at(line_t *cur, int idx, int col)
     if (c < 0x80) {
         return vi_char_display_width(c, col);
     }
-    if (vi_utf8_decode_text_at(cur->text, cur->len, idx, NULL) > 1) {
-        return 1;
+    bytes = vi_utf8_decode_text_at(cur->text, cur->len, idx, NULL);
+    if (bytes > 1) {
+        /* a C1 control's bytes, as vi_drawn_char_bytes() draws them, 4 columns each */
+        return vi_drawn_char_bytes(cur->text, cur->len, idx) > 1 ? 1 : 4 * bytes;
     }
     return vi_char_display_width(c, col);
 }
@@ -1470,7 +1502,7 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
         if (c < 0x80) {
             width = vi_char_display_width(c, display_col);
         } else {
-            bytes = vi_utf8_decode_text_at(text, len, (int)idx, NULL);
+            bytes = vi_drawn_char_bytes(text, len, (int)idx);
             if (bytes > 1) {
                 width = 1;
             } else {
@@ -1488,7 +1520,7 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
         if (c < 0x80) {
             width = vi_char_display_width(c, display_col);
         } else {
-            bytes = vi_utf8_decode_text_at(text, len, (int)idx, NULL);
+            bytes = vi_drawn_char_bytes(text, len, (int)idx);
             if (bytes > 1) {
                 width = 1;
             } else {
@@ -1518,6 +1550,17 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
                     used++;
                 }
             }
+        } else if (c >= 0x80) {
+            /*
+             * A byte of no character: its octal value, never the byte, nor
+             * '^' and c + 64, which for 0xc0-0xdf is a control byte -- 0xdb
+             * an ESC that a file could drive the terminal with.
+             */
+            if (used + 3 >= cols) {
+                break;
+            }
+            printf("\\%03o", c);
+            used += 4;
         } else if (isprint(c)) {
             putchar((int)c);
             used++;
