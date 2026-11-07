@@ -816,7 +816,7 @@ The number is not reused.
   `insert!` shall toggle `autoindent` for that command.
 - [ ] **EXVI-54.3** (Optional feature) Where `scroll` is set, the editor shall
   use it for ex's `^D` and `z`.
-- [ ] **EXVI-54.4** (Ubiquitous) The editor shall default `showmode` to off.
+- [x] **EXVI-54.4** (Ubiquitous) The editor shall default `showmode` to off.
 
 - **Evidence**: `autoindent` does nothing in ex (`ex.1` says it applies only
   to vi); `a!` does not toggle it; `scroll` has no effect in ex (no `^D`, no

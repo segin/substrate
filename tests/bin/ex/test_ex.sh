@@ -1662,10 +1662,11 @@ run_stdout_test "Set autoindent query reports state" \
     ":set autoindent?\n:q!\n" \
     "noautoindent"
 
+# POSIX: noshowmode by default
 run_stdout_test "Set showmode query reports state" \
     "one\ntwo\n" \
     ":set showmode?\n:q!\n" \
-    "showmode"
+    "noshowmode"
 
 run_stdout_with_cliargs_test "Readonly startup option reports state" \
     "one\ntwo\n" \

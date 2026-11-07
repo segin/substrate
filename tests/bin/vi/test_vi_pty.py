@@ -133,6 +133,8 @@ def main():
         return 2
 
     vi_path = sys.argv[1]
+    # showmode is off by default (POSIX); these sessions check the banner
+    os.environ["EXINIT"] = "set showmode"
     exit_code, decoded, saved = run_vi_session(vi_path, "one\ntwo\nthree\ntwo again\nfive\n", [
         b"G", b"g", b"g", b"/", b"two\r", b"n", b"N", b"?", b"one\r", b"g", b"g",
         # u leaves the cursor on the line it put back (as Vim); gg takes it

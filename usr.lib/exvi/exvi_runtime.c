@@ -23,7 +23,7 @@ int option_ignorecase = 0;
 int option_readonly = 0;
 int option_tabstop = EXVI_DEFAULT_TABSTOP;
 int option_autoindent = 0;
-int option_showmode = 1;
+int option_showmode = 0;             /* POSIX: noshowmode */
 int option_scroll = EXVI_DEFAULT_SCROLL;
 int option_scroll_explicit = 0;
 int option_wrapscan = 1;
@@ -1337,7 +1337,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     option_readonly = 0;
     option_tabstop = EXVI_DEFAULT_TABSTOP;
     option_autoindent = 0;
-    option_showmode = 1;
+    option_showmode = 0;
     option_scroll = EXVI_DEFAULT_SCROLL;
     option_scroll_explicit = 0;
     option_wrapscan = 1;
@@ -1387,7 +1387,7 @@ exvi_cleanup_runtime(void)
     option_readonly = 0;
     option_tabstop = EXVI_DEFAULT_TABSTOP;
     option_autoindent = 0;
-    option_showmode = 1;
+    option_showmode = 0;
     option_scroll = EXVI_DEFAULT_SCROLL;
     option_scroll_explicit = 0;
     option_wrapscan = 1;

@@ -96,7 +96,7 @@ static const exvi_option_t options[] = {
     { "shell", "sh", NULL, OPT_STR, NULL, &option_shell, 0, NULL, 0, 0 },
     { "shiftwidth", "sw", NULL, OPT_NUM, &option_shiftwidth, NULL, 8, NULL, 1, 999 },
     { "showmatch", "sm", NULL, OPT_BOOL, &option_showmatch, NULL, 0, NULL, 0, 0 },
-    { "showmode", "smd", NULL, OPT_BOOL, &option_showmode, NULL, 1, NULL, 0, 0 },
+    { "showmode", "smd", NULL, OPT_BOOL, &option_showmode, NULL, 0, NULL, 0, 0 },
     { "slowopen", "slow", NULL, OPT_BOOL, &option_slowopen, NULL, 0, NULL, 0, 0 },
     { "tabstop", "ts", NULL, OPT_NUM, &option_tabstop, NULL, EXVI_DEFAULT_TABSTOP, NULL,
       EXVI_MIN_TABSTOP, EXVI_MAX_TABSTOP },
