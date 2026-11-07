@@ -136,6 +136,7 @@ HOST_TESTS += host_test_panic_diag
 HOST_TESTS += host_test_vm86
 HOST_TESTS += host_test_ptrace
 HOST_TESTS += host_test_mqueue
+HOST_TESTS += host_test_netdev_recv
 HOST_TESTS += host_test_x86_64_asm
 HOST_TESTS += host_test_x86_64_gdt
 HOST_TESTS += host_test_x86_64_idt
@@ -298,6 +299,10 @@ host_test_vm86: host_test_vm86.c
 
 host_test_mqueue: host_test_mqueue.c ../../sys/kern/posix_mqueue.c
 	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_mqueue.c -o $@
+
+host_test_netdev_recv: host_test_netdev_recv.c host_test_netdev_recv_fault.c ../../sys/net/netdev.c
+	$(CC) -m32 -g -Wall -Wextra -c host_test_netdev_recv_fault.c -o host_test_netdev_recv_fault.o
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_netdev_recv.c host_test_netdev_recv_fault.o -o $@
 
 host_test_ptrace: host_test_ptrace.c ../../sys/kern/ptrace.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_ptrace.c -o $@
