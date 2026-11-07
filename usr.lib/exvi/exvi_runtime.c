@@ -257,6 +257,91 @@ nomem:
  * pattern used to do nothing at all -- s/[/x/ and g/[/d silently, /[/ with
  * only "Bad address".
  */
+/*
+ * regexec() for a match starting at or after offset @p from of @p line,
+ * with \< and \> at that point judged by the character before it.  The
+ * rest of the line alone, searched as a string of its own, has no
+ * character before it, so \< matched there inside a word: s/\<a/X/g on
+ * aa a gave XX X.  The search runs on the rest of the line behind one
+ * stand-in character of the same class -- word or not -- as the real one
+ * (REG_STARTEND, which would search the line itself, is not POSIX and
+ * not in Substrate's regex); a match starting on the stand-in itself says
+ * nothing about one after it, so another stand-in is tried.  A pattern
+ * that can start with each of them (\<. say) falls back to the rest of the
+ * line alone, where a match at its start that @p pattern begins with \<
+ * and that has word characters on both sides is passed over.  @p pm comes
+ * back relative to line + from, as that search's.
+ */
+int
+exvi_regexec_from(const regex_t *re, const char *pattern, const char *line, size_t from,
+    size_t nmatch, regmatch_t *pm)
+{
+    static const char word_stand_ins[] = "Z_q0";
+    static const char other_stand_ins[] = "\x01\x1f~ ";
+    const char *rest = line + from;
+    const char *stand_ins;
+    size_t rest_len;
+    char *tmp;
+    unsigned char before;
+
+    if (from == 0) {
+        return regexec(re, line, nmatch, pm, 0);
+    }
+    before = (unsigned char)line[from - 1];
+    stand_ins = (isalnum(before) || before == '_' || before >= 0x80) ?
+        word_stand_ins : other_stand_ins;
+    rest_len = strlen(rest);
+    tmp = malloc(rest_len + 2);
+    if (!tmp) {
+        return regexec(re, rest, nmatch, pm, REG_NOTBOL);
+    }
+    memcpy(tmp + 1, rest, rest_len + 1);
+    for (const char *c = stand_ins; *c; c++) {
+        int rc;
+
+        tmp[0] = *c;
+        rc = regexec(re, tmp, nmatch, pm, REG_NOTBOL);
+        if (rc != 0) {
+            free(tmp);
+            return rc;          /* nothing at or after from */
+        }
+        if (pm[0].rm_so >= 1) {
+            for (size_t i = 0; i < nmatch; i++) {
+                if (pm[i].rm_so >= 1) {
+                    pm[i].rm_so--;
+                    pm[i].rm_eo--;
+                }
+            }
+            free(tmp);
+            return 0;
+        }
+    }
+    free(tmp);
+    for (;;) {
+        int rc = regexec(re, rest, nmatch, pm, REG_NOTBOL);
+
+        if (rc != 0 || pm[0].rm_so != 0 || !pattern || pattern[0] != '\\' ||
+            pattern[1] != '<' || rest == line || !rest[0] ||
+            !(isalnum((unsigned char)rest[-1]) || rest[-1] == '_' ||
+              (unsigned char)rest[-1] >= 0x80) ||
+            !(isalnum((unsigned char)rest[0]) || rest[0] == '_' ||
+              (unsigned char)rest[0] >= 0x80)) {
+            if (rc == 0 && rest != line + from) {
+                int shift = (int)(rest - (line + from));
+
+                for (size_t i = 0; i < nmatch; i++) {
+                    if (pm[i].rm_so >= 0) {
+                        pm[i].rm_so += shift;
+                        pm[i].rm_eo += shift;
+                    }
+                }
+            }
+            return rc;
+        }
+        rest++;                 /* \< inside a word: none here */
+    }
+}
+
 int
 exvi_regcomp(regex_t *re, const char *pattern)
 {

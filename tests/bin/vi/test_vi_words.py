@@ -50,6 +50,9 @@ CASES = [
     ("e over an empty line", "ab\n\ncd\n", [b"2erZ"], "ab\n\ncZ\n"),
     ("b onto an empty line", "ab\n\n\ncd\n", [b"GbrZ"], "ab\n\n\ncd\n"),
     ("2b across lines", "a\n b\n", [b"$2bD"], "\n b\n"),
+    # \< inside a pattern sees the character before the search's start
+    ("/ with \\< after an alternation", "aa a ba\n", [b"/x\\|\\<a\r", b"rZ"],
+     "aa Z ba\n"),
 ]
 
 

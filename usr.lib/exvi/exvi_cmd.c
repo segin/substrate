@@ -243,9 +243,12 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
                 return 0;
             }
 
-            /* after the first match the text searched starts inside the line: no `^` there */
-            while (regexec(&re, search_start, 10, pm, search_start != l->text ? REG_NOTBOL : 0) == 0) {
+            /* after the first match the search starts inside the line: no `^`
+             * there, and \< and \> see the character before it */
+            while (exvi_regexec_from(&re, pattern, l->text,
+                (size_t)(search_start - l->text), 10, pm) == 0) {
                 int take = 1;
+
 
                 if (confirm) {
                     /* the c option: this match only if the user says so */

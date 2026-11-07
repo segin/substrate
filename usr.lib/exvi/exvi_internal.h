@@ -174,6 +174,8 @@ int write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);
 int buf_current_line(buffer_t *b);
 int exvi_regcomp(regex_t *re, const char *pattern);
+int exvi_regexec_from(const regex_t *re, const char *pattern, const char *line,
+    size_t from, size_t nmatch, regmatch_t *pm);
 /* pat, or the last pattern when pat is empty; made the last pattern */
 char *exvi_resolve_pattern(const char *pat);
 int exvi_drawn_char_bytes(const char *text, size_t len, size_t idx);

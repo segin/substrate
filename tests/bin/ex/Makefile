@@ -13,7 +13,7 @@ EX_SHELL_TESTS = \
 	test_ex_batch_error.sh test_ex_copy.sh test_ex_force_variants.sh \
 	test_ex_pattern_escape.sh test_ex_bre.sh test_ex_replacement.sh \
 	test_ex_sub_bol.sh test_ex_shell.sh test_ex_global_undo.sh \
-	test_ex_undo_state.sh test_ex_nul.sh test_ex_global.sh
+	test_ex_undo_state.sh test_ex_nul.sh test_ex_global.sh test_ex_word_bound.sh
 EX_PY_TESTS = test_ex_frontend.py test_ex_visual.py test_ex_undo_memory.py \
 	test_ex_scaling.py
 

@@ -5361,8 +5361,9 @@ vi_search_forward_in_line(line_t *line, regex_t *re, int start_col, int max_col,
         int start;
         int end;
 
-        /* from inside the line, its start is not the line's: no `^` there */
-        if (regexec(re, line->text + offset, 1, &match, offset > 0 ? REG_NOTBOL : 0) != 0) {
+        /* from inside the line, its start is not the line's: no `^` there,
+         * and \< and \> see the character before */
+        if (exvi_regexec_from(re, NULL, line->text, offset, 1, &match) != 0) {
             return -1;
         }
         if (match.rm_so < 0) {
@@ -5415,7 +5416,7 @@ vi_search_backward_in_line(line_t *line, regex_t *re, int min_col, int max_col,
         size_t pos;
         size_t end;
 
-        if (regexec(re, line->text + offset, 1, &match, offset > 0 ? REG_NOTBOL : 0) != 0) {
+        if (exvi_regexec_from(re, NULL, line->text, offset, 1, &match) != 0) {
             break;
         }
         if (match.rm_so < 0) {

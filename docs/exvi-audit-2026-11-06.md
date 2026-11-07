@@ -1226,7 +1226,7 @@ The number is not reused.
 
 ### EXVI-83 — `\<` matches inside a word after a match in `s///g` — *Medium*
 
-- [ ] **EXVI-83.1** (Event-driven) When the editor matches a pattern from a
+- [x] **EXVI-83.1** (Event-driven) When the editor matches a pattern from a
   position after the start of a line, it shall match `\<` and `\>` at that
   position only as the characters on both sides of it allow.
 
@@ -1238,7 +1238,10 @@ The number is not reused.
   regex and with libregex alike.  vi's searches recheck a leading `\<` and
   a trailing `\>` against the whole line (`vi_match_respects_word_boundaries`),
   so only one written elsewhere in the pattern is wrong there.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/ex/test_ex_word_bound.sh`,
+  `tests/bin/vi/test_vi_words.py`.  Done without `REG_STARTEND` (not POSIX,
+  not in libregex): the rest of the line is searched behind a stand-in for
+  the character before it.
 
 ### EXVI-84 — ex starts on the first line of the file, not the last — *Medium*
 
