@@ -154,6 +154,27 @@ change that many characters or lines, as many as there are.
 A count on
 .Cm \&.
 repeats the change's text that many times.
+.Pp
+For
+.Cm w ,
+.Cm b
+and
+.Cm e
+a word is a run of letters, digits and underscores, or a run of other
+non-blank characters; for
+.Cm W ,
+.Cm B
+and
+.Cm E ,
+a run of non-blanks.
+An empty line is a word.
+The word motions cross lines, also after an operator, except that the
+last word a
+.Cm w
+moves over after an operator ends at the end of its line;
+.Cm cw
+on a non-blank changes to the end of the word, and on a blank changes
+that blank alone.
 The current implementation still has documented parity gaps in a few motion,
 undo, and repeat corner cases; see
 .Pa docs/specs/exvi.md

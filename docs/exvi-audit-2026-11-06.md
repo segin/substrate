@@ -919,14 +919,14 @@ The number is not reused.
 
 ### EXVI-61 — word motions — *Medium*
 
-- [ ] **EXVI-61.1** (Ubiquitous) The editor shall treat a maximal run of
+- [x] **EXVI-61.1** (Ubiquitous) The editor shall treat a maximal run of
   characters other than letters, digits, underscores and blanks as a word.
-- [ ] **EXVI-61.2** (Event-driven) When a counted word motion reaches the end of
+- [x] **EXVI-61.2** (Event-driven) When a counted word motion reaches the end of
   a line, the editor shall continue on the next line.
-- [ ] **EXVI-61.3** (Event-driven) When `e` is used with an operator on the last
+- [x] **EXVI-61.3** (Event-driven) When `e` is used with an operator on the last
   character of a word, the editor shall extend the region to the end of the
   next word.
-- [ ] **EXVI-61.4** (Event-driven) When `cw` with count 1 starts on a blank, the
+- [x] **EXVI-61.4** (Event-driven) When `cw` with count 1 starts on a blank, the
   editor shall change only that character.
 
 - **Where**: `vi_is_word_char` `exvi_visual.c:2893-2896`; `:2905-2943`,
@@ -935,8 +935,11 @@ The number is not reused.
 - **Evidence**: `dw` on `foo.bar baz` → `bar baz` (expected `.bar baz`);
   `3dw` on `a b` / `c d` → an empty first line (expected `d`); `c3wX` fails;
   `lde` on `ab cd` → `a cd` (expected `a`); `lcwX` on `a   b` → `aXb`
-  (POSIX: `aX  b`).
-- **Basis**: reproduced.
+  (POSIX: `aX  b`).  Also `y3w`, `3ye` and `$cw`.  The fix met a GCC 16
+  miscompile (IPA bit-CP took `MAX (count, 1)` passed on to a function
+  whose other caller passes 1 for the constant 1; the i386 cross compiler
+  too); the code avoids the pattern.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_words.py`.
 
 ### EXVI-62 — `.` cannot repeat most deletes and shifts — *Medium*
 
