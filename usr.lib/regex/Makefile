@@ -44,6 +44,7 @@ $(O)$(SHLIB): $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,$(SHLIB) \
 	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
+	$(call BRAND_SUBSTRATE,$@)
 	# libregex is a shared dependency: provide the -lregex link-time name in the
 	# source tree so in-tree consumers (sed, ex, vi, find, diff, exvi, ...) link
 	# DT_NEEDED libregex.so.0 rather than baking in libregex.a.  (grep already

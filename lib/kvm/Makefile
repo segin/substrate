@@ -29,6 +29,7 @@ $(O)$(SHLIB): $(PIC_OBJS)
 	      -L$(TOP)/lib/sys/$(O) -l:libsys.so.0 \
 	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
+	$(call BRAND_SUBSTRATE,$@)
 
 $(OBJS) $(PIC_OBJS): $(MODE_STAMP)
 

@@ -28,6 +28,7 @@ $(O)libusb.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libusb.so.0 \
 	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
+	$(call BRAND_SUBSTRATE,$@)
 
 $(OBJS) $(PIC_OBJS): $(MODE_STAMP)
 

@@ -18,6 +18,7 @@ $(O)$(SHLIB): $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,$(SHLIB) \
 	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
+	$(call BRAND_SUBSTRATE,$@)
 
 $(O)%.o: %.c
 	@mkdir -p $(dir $@)

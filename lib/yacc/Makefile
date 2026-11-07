@@ -16,6 +16,7 @@ $(O)liby.a: $(OBJS)
 # liby has no DT_NEEDED — pure self-contained yacc runtime stubs.
 $(O)liby.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,liby.so.0 -o $@ $(PIC_OBJS)
+	$(call BRAND_SUBSTRATE,$@)
 
 $(O)%.o: %.c
 	@mkdir -p $(dir $@)
