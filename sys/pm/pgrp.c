@@ -162,9 +162,29 @@ static void __pgrp_add_proc(struct pgrp *pgrp, struct process *proc) {
 }
 
 void pgrp_add_proc(struct pgrp *pgrp, struct process *proc) {
+    struct pgrp *old;
+    struct session *free_sess = NULL;
+    int do_free = 0;
+
     mutex_lock(&proctree_lock);
+    old = proc ? proc->p_pgrp : NULL;
     __pgrp_add_proc(pgrp, proc);
+    /* The group this process left -- by setpgid() or setsid() -- goes
+     * if it was the last member, as pgrp_remove_proc() does it at exit.
+     * It stayed, empty and still hashed: leaked with its session, and
+     * found by pgrp_find(), so a later setpgid() could join a group with
+     * no members. */
+    if (old && old != pgrp && old->pg_members == NULL) {
+        free_sess = __pgrp_unlink_locked(old);
+        do_free = 1;
+    }
     mutex_unlock(&proctree_lock);
+    if (do_free) {
+        kfree(old, sizeof(struct pgrp));
+        if (free_sess) {
+            session_free(free_sess);
+        }
+    }
 }
 
 /*
@@ -382,6 +402,12 @@ int sys_setpgid(int pid, int pgid) {
         caller_sess = current_process->p_pgrp->pg_session;
     }
     
+    /* A session leader stays the leader of its own group (POSIX: EPERM
+     * when "the process indicated by pid is a session leader"). */
+    if (target_sess && target_sess->s_sid == target->pid) {
+        return -EPERM;
+    }
+
     /* If changing another process, check it's a child and in same session */
     if (target != current_process) {
         /* Must be a child of caller */

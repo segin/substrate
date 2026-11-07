@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -238,6 +239,10 @@ static void test_wait_search_and_reap(void) {
 
     setup_mocks();
     assert(kern_wait4(999, &status, WNOHANG, NULL) == -ECHILD);
+
+    /* INT_MIN names no group (-INT_MIN overflows): ESRCH, as Linux */
+    setup_mocks();
+    assert(kern_wait4(INT_MIN, &status, WNOHANG, NULL) == -ESRCH);
 }
 
 static void test_wait_wnohang_and_blocking(void) {

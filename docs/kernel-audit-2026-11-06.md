@@ -102,7 +102,8 @@
   - **Requirement (State-Driven):**
     - **While** an exiting thread is still executing on its kernel stack prior to the final `arch_switch_to()` handoff, the **Scheduler and Process Manager** **shall** keep the thread marked on-CPU (and defer `THREAD_ZOMBIE` / `autoreap_pending` publication until after all sleeping locks complete) so no remote CPU can reap its stack.
 
-- [ ] **[REQ-SYS-PM-002]** *(High — Process Group / Session Leaks & Missing Locking in `sys/pm/pgrp.c` and `sys/pm/wait.c`)*
+- [x] **[REQ-SYS-PM-002]** *(High — Process Group / Session Leaks & Missing Locking in `sys/pm/pgrp.c` and `sys/pm/wait.c`)*
+  - **Resolution (2026-11-07):** `pgrp_add_proc()` unlinks and frees the group its process leaves when that was the last member (and the session with its last group), as `pgrp_remove_proc()` does at exit; `sys_setpgid()` refuses a session leader (session ID == PID, as Linux) with `EPERM`; `kern_wait4()` answers `INT_MIN` with `ESRCH`, and the group match negates the group ID, not `pid`. `host_test_pgrp` and `host_test_wait_logic` fail on the old code and pass. `setpgid.2` and `waitpid.2` (which gains its ERRORS section) say so.
   - **Location:** `sys/pm/pgrp.c:67-265` (`session_free`, `__pgrp_remove_proc`), `sys/pm/pgrp.c:359-430` (`sys_setpgid`), `sys/pm/wait.c:66-150` (`find_waitable_child`)
   - **Finding:**
     1. `__pgrp_remove_proc()` never unlinks or frees an empty `struct pgrp` when its last member moves to another process group via `sys_setpgid()`, permanently leaking both the `pgrp` and its `session`.

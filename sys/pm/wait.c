@@ -2,6 +2,7 @@
 #include <sys/wait.h>
 #include <sys/session.h>
 #include <errno.h>
+#include <limits.h>
 #include <stddef.h>
 #include <kern/sched.h> // for sched_sleep
 #include <kern/time.h>  // for get_ticks
@@ -98,9 +99,10 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
             int parent_pg = parent->p_pgrp ? parent->p_pgrp->pg_id : 0;
             if (child_pg == parent_pg && child_pg != 0) match = 1;
         } else if (pid < -1) {
-            /* Match if child in process group = |pid| */
+            /* Match if child in process group = |pid|.  Negate the group
+             * id, which is positive, not pid: -INT_MIN overflows. */
             int child_pg = child->p_pgrp ? child->p_pgrp->pg_id : 0;
-            if (child_pg == -pid) match = 1;
+            if (child_pg > 0 && -child_pg == pid) match = 1;
         }
 
         if (match) {
@@ -202,6 +204,10 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
     process_t *target = NULL;
     int any_exists = 0;
     int reason = 0;
+
+    /* -pid names no process group when pid is INT_MIN (it has no
+     * negation); Linux answers ESRCH. */
+    if (pid == INT_MIN) return -ESRCH;
 
     while (1) {
         // 1. Search + atomic claim - handles zombies, stopped, and continued

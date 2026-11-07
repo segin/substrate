@@ -24,7 +24,30 @@ by a signal.
 on success, returns the process ID of the child whose state has changed;
 if WNOHANG was specified and one or more child(ren) specified by pid
 exist, but have not yet changed state, then 0 is returned.
-On error, -1 is returned.
+On error, -1 is returned, and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B ECHILD
+No child of the caller matches
+.IR pid .
+.TP
+.B EFAULT
+.I status
+or the
+.I rusage
+buffer points outside the caller's address space.
+.TP
+.B EINTR
+.B WNOHANG
+was not given and a signal arrived while waiting.
+.TP
+.B ESRCH
+.I pid
+is
+.BR INT_MIN ,
+which names no process group (as on Linux).
 .SH EXAMPLES
 .B Program source
 .nf

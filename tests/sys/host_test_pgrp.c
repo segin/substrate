@@ -168,9 +168,37 @@ static void test_remove_member_checks_orphan_before_unlock(void) {
     assert(last_signal_mask & sigmask(SIGCONT));
 }
 
+/*
+ * A group its last member leaves by setpgid() goes: it stayed hashed and
+ * empty, leaked, and a later setpgid() could join it.  And a session leader
+ * cannot leave its group (EPERM).
+ */
+static void test_setpgid_frees_emptied_group(void) {
+    reset_env();
+
+    process_t *leader = alloc_proc(0, 40, 0);
+    current_process = leader;
+    assert(sys_setsid() == 40);
+    assert(sys_setpgid(0, 0) == -EPERM);          /* a session leader */
+    assert(sys_setpgid(40, 40) == -EPERM);
+
+    process_t *a = alloc_proc(1, 41, 40);
+    process_t *b = alloc_proc(2, 42, 40);
+    proc_join_pgrp(a, leader->p_pgrp);
+    proc_join_pgrp(b, leader->p_pgrp);
+    assert(sys_setpgid(41, 0) == 0);              /* a leads group 41 */
+    assert(pgrp_find(41) != NULL);
+    assert(sys_setpgid(41, 40) == 0);             /* and leaves it empty */
+    assert(a->p_pgrp == leader->p_pgrp);
+    assert(pgrp_find(41) == NULL);                /* gone */
+    assert(sys_setpgid(42, 41) == -EPERM);        /* nothing to join */
+    assert(b->p_pgrp == leader->p_pgrp);
+}
+
 int main(void) {
     test_setsid_and_ids();
     test_setpgid_paths();
+    test_setpgid_frees_emptied_group();
     test_orphaned_group_signals();
     test_remove_member_checks_orphan_before_unlock();
     puts("host_test_pgrp: PASS");

@@ -57,7 +57,14 @@ The value of
 is less than 0.
 .TP
 .B EPERM
-The process is not allowed to change its PGID in the requested manner.
+The process is not allowed to change its PGID in the requested manner:
+it is a session leader, or the caller's child in another session, or
+.I pgid
+names no process group in the caller's session and is not the process's
+own ID.
+.PP
+A process group is removed when its last member leaves it, so its ID can
+no longer be joined.
 .SH CONFORMING TO
 POSIX.1-2001, POSIX.1-2008.
 .SH SEE ALSO
