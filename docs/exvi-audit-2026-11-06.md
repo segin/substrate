@@ -1036,11 +1036,12 @@ The number is not reused.
 
 ### EXVI-69 — `^@` does not replay the last input — *Low*
 
-- [ ] **EXVI-69.1** (Event-driven) When `^@` is the first character of text
+- [x] **EXVI-69.1** (Event-driven) When `^@` is the first character of text
   input, the editor shall insert the last text input and end text input.
 
 - **Where**: `exvi_visual.c:7565-7566`, `7606` (`^A` does it instead).
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_ctrl_at.py`.  Anywhere in
+  the input, as Vim.
 
 ### EXVI-70 — screen: wide and combining characters, `^Y` at the bottom row — *Low*
 

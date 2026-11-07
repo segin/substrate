@@ -8251,6 +8251,18 @@ exvi_visual_main(buffer_t *b)
         }
         if (vis.insert_mode) {
             switch (key) {
+            case 0x00:
+                /*
+                 * ^@: the text last entered, as if typed, and the end of
+                 * text input (POSIX vi, as its first character; Vim, as
+                 * here, anywhere).  It was ignored, ^A alone did the first.
+                 */
+                if (vis.last_insert_text && vis.last_insert_text[0] != '\0') {
+                    vi_replay_insert_text(b, &vis, vis.last_insert_text);
+                } else {
+                    (void)!write(STDOUT_FILENO, "\a", 1);
+                }
+                /* FALLTHROUGH */
             case '\x1b':
                 if (vi_current_insert_span_nonempty(b, &vis)) {
                     int times = vis.insert_count > 1 ? vis.insert_count : 1;
