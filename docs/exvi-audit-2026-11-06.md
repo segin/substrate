@@ -327,7 +327,7 @@ The number is not reused.
 
 ### EXVI-19 — `:w ./f` while editing `f` leaves the buffer modified — *Low*
 
-- [ ] **EXVI-19.1** (Event-driven) When a write names the current file by any
+- [x] **EXVI-19.1** (Event-driven) When a write names the current file by any
   path, the editor shall mark the buffer unmodified.
 
 - **Where**: `exvi_buffer.c:471-473` compares names with `strcmp`.

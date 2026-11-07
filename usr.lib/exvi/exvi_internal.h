@@ -214,6 +214,9 @@ int handle_prev_command(buffer_t *b, int force);
 int handle_rewind_command(buffer_t *b, int force);
 int handle_preserve_command(buffer_t *b);
 int handle_recover_command(buffer_t *b, const char *args, int force);
+/* Whether path names b's current file: the same name, or the same file
+ * under another (./f for f, a link). */
+int exvi_is_current_file(buffer_t *b, const char *path);
 int exvi_write_allowed(buffer_t *b, const char *filename, int force);
 int handle_write_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2, int force);

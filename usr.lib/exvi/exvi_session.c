@@ -1241,8 +1241,8 @@ handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr
  * Whether path names b's current file: the same name, or the same file
  * under another name (./f for f, a link).
  */
-static int
-is_current_file(buffer_t *b, const char *path)
+int
+exvi_is_current_file(buffer_t *b, const char *path)
 {
     struct stat a;
     struct stat c;
@@ -1300,7 +1300,7 @@ exvi_write_args(buffer_t *b, const char *args, int explicit_range, int addr1,
             free(target);
             return -1;
         }
-        if (!force && !append && !option_writeany && !is_current_file(b, target)
+        if (!force && !append && !option_writeany && !exvi_is_current_file(b, target)
                 && access(target, F_OK) == 0) {
             /* POSIX write: an existing file other than the current one needs ! */
             exvi_report_errorf("%s: File exists (add ! to override)", target);

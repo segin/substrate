@@ -996,7 +996,9 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
         return 0;
     }
 
-    if (b->filename && strcmp(filename, b->filename) == 0) {
+    /* By the file, not the name: `w ./f` while editing f writes the
+     * current file too, and must leave the buffer unmodified. */
+    if (exvi_is_current_file(b, filename)) {
         wrote_current_file = 1;
     }
     if (addr1 == 1 && addr2 == b->line_count) {
