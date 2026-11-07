@@ -120,7 +120,7 @@ static int vi_first_nonblank_col(line_t *cur);
 static int vi_normalize_char_index(line_t *cur, int idx);
 static int vi_display_col_for_index(line_t *cur, int idx);
 static line_t *vi_ensure_current_line(buffer_t *b);
-static int vi_replace_current_text(buffer_t *b, const char *text);
+static int vi_replace_current_text(buffer_t *b, const char *text, size_t len);
 static void vi_open_line(buffer_t *b, vi_visual_t *vis, int above);
 static int vi_clamp_line_target(buffer_t *b, int line_no);
 static int vi_clamp_top_line(buffer_t *b, vi_visual_t *vis, int top_line);
@@ -589,14 +589,15 @@ vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
         if (!line || edit.col < 0 || (size_t)edit.col >= line->len) {
             return -1;
         }
-        text = strdup(line->text);
+        text = malloc(line->len + 1);
         if (!text) {
             vis->replace_edit_count++;
             return -1;
         }
+        memcpy(text, line->text, line->len + 1);
         text[edit.col] = edit.ch;
         b->cur = line;
-        if (vi_replace_current_text(b, text) != 0) {
+        if (vi_replace_current_text(b, text, line->len) != 0) {
             free(text);
             vis->replace_edit_count++;
             return -1;
@@ -618,7 +619,7 @@ vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
         memcpy(text + edit.col, line->text + edit.col + 1,
             line->len - (size_t)edit.col);
         b->cur = line;
-        if (vi_replace_current_text(b, text) != 0) {
+        if (vi_replace_current_text(b, text, line->len - 1) != 0) {
             free(text);
             vis->replace_edit_count++;
             return -1;
@@ -639,7 +640,7 @@ vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
         memcpy(text, edit.line->text, edit.line->len);
         memcpy(text + edit.line->len, edit.aux_line->text, right_len + 1);
         b->cur = edit.line;
-        if (vi_replace_current_text(b, text) != 0) {
+        if (vi_replace_current_text(b, text, edit.line->len + right_len) != 0) {
             free(text);
             vis->replace_edit_count++;
             return -1;
@@ -1262,7 +1263,8 @@ vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
     memset(text + new_tabs, ' ', (size_t)new_spaces);
     memcpy(text + new_prefix_len, cur->text + old_prefix_len,
         cur->len - (size_t)old_prefix_len + 1);
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text,
+        (size_t)new_prefix_len + (cur->len - (size_t)old_prefix_len)) == 0) {
         delta = new_prefix_len - old_prefix_len;
         if (vis->cursor_col >= old_prefix_len) {
             vis->cursor_col += delta;
@@ -1484,12 +1486,14 @@ vi_scroll_into_view(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
-vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
+vi_draw_line(const line_t *line, int cols, int number, int line_no, int left_col)
 {
     int used = 0;
     int display_col = 0;
     size_t idx = 0;
-    size_t len = text ? strlen(text) : 0;
+    /* the line's length: a NUL in it is drawn, ^@, not its end */
+    const char *text = line->text;
+    size_t len = line->len;
 
     if (number) {
         used += printf("%7d ", line_no);
@@ -1638,7 +1642,7 @@ vi_render_body(buffer_t *b, vi_visual_t *vis)
 
         printf("\x1b[K");
         if (line) {
-            vi_draw_line(line->text, vis->cols, option_number, line_no,
+            vi_draw_line(line, vis->cols, option_number, line_no,
                 vi_normalize_left_col(line, vis->left_col));
         } else {
             putchar('~');
@@ -1671,7 +1675,7 @@ vi_render_body_range(buffer_t *b, vi_visual_t *vis, int start_row, int end_row)
 
         printf("\x1b[%d;1H\x1b[K", row + 1);
         if (line) {
-            vi_draw_line(line->text, vis->cols, option_number, line_no,
+            vi_draw_line(line, vis->cols, option_number, line_no,
                 vi_normalize_left_col(line, vis->left_col));
         } else {
             putchar('~');
@@ -2096,7 +2100,7 @@ vi_store_charwise_range_idx(int reg_idx, line_t *start_line, int start_col,
         }
         memcpy(text, start_line->text + start_col, (size_t)(end_col - start_col));
         text[end_col - start_col] = '\0';
-        buf_insert_after(&regs[reg_idx], NULL, text);
+        buf_insert_after_n(&regs[reg_idx], NULL, text, (size_t)(end_col - start_col));
         free(text);
         return;
     }
@@ -2108,11 +2112,11 @@ vi_store_charwise_range_idx(int reg_idx, line_t *start_line, int start_col,
     }
     memcpy(text, start_line->text + start_col, len);
     text[len] = '\0';
-    pos = buf_insert_after(&regs[reg_idx], pos, text);
+    pos = buf_insert_after_n(&regs[reg_idx], pos, text, len);
     free(text);
 
     for (line = start_line->next; line && line != end_line; line = line->next) {
-        pos = buf_insert_after(&regs[reg_idx], pos, line->text);
+        pos = buf_insert_after_n(&regs[reg_idx], pos, line->text, line->len);
     }
 
     text = malloc((size_t)end_col + 1);
@@ -2121,7 +2125,7 @@ vi_store_charwise_range_idx(int reg_idx, line_t *start_line, int start_col,
     }
     memcpy(text, end_line->text, (size_t)end_col);
     text[end_col] = '\0';
-    buf_insert_after(&regs[reg_idx], pos, text);
+    buf_insert_after_n(&regs[reg_idx], pos, text, (size_t)end_col);
     free(text);
 }
 
@@ -4174,7 +4178,7 @@ vi_move_to_percent(buffer_t *b, vi_visual_t *vis, int percent)
 }
 
 static int
-vi_replace_current_text(buffer_t *b, const char *text)
+vi_replace_current_text(buffer_t *b, const char *text, size_t len)
 {
     line_t *cur = b->cur;
     char *copy;
@@ -4189,14 +4193,17 @@ vi_replace_current_text(buffer_t *b, const char *text)
         && b->tail == cur
         && cur->len == 0
         && !b->trailing_newline;
-    copy = strdup(text);
+    /* @p len bytes, a NUL among them too: a line is its length */
+    copy = malloc(len + 1);
     if (!copy) {
         return -1;
     }
+    memcpy(copy, text, len);
+    copy[len] = '\0';
     exvi_note_buffer_change();
     free(cur->text);
     cur->text = copy;
-    cur->len = strlen(copy);
+    cur->len = len;
     if (replacing_empty_placeholder && cur->len > 0) {
         b->trailing_newline = 1;
     }
@@ -4224,7 +4231,7 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
     }
     memcpy(text, cur->text, (size_t)start);
     memcpy(text + start, cur->text + end, cur->len - (size_t)end + 1);
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, cur->len - (size_t)(end - start)) == 0) {
         vis->cursor_col = start;
         vis->insert_mode = enter_insert;
         vis->replace_mode = 0;
@@ -4286,7 +4293,7 @@ vi_delete_range(buffer_t *b, vi_visual_t *vis, line_t *start_line, int start_col
     text[prefix_len + suffix_len] = '\0';
 
     b->cur = start_line;
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, prefix_len + suffix_len) == 0) {
         line_t *line = start_line->next;
 
         while (line) {
@@ -4359,7 +4366,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
                 memcpy(text + pos, src->text, src->len);
                 memcpy(text + pos + src->len, cur->text + pos,
                     cur->len - (size_t)pos + 1);
-                if (vi_replace_current_text(b, text) == 0) {
+                if (vi_replace_current_text(b, text, cur->len + src->len) == 0) {
                     if (src->len > 0) {
                         vis->cursor_col = pos + (int)src->len - 1;
                     } else {
@@ -4369,13 +4376,16 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
                 }
                 free(text);
             } else {
-                char *suffix = strdup(cur->text + pos);
+                /* every part by its length, so a NUL in one is kept */
+                size_t suffix_len = cur->len - (size_t)pos;
+                char *suffix = malloc(suffix_len + 1);
                 char *text;
                 line_t *dst;
 
                 if (!suffix) {
                     return;
                 }
+                memcpy(suffix, cur->text + pos, suffix_len + 1);
                 text = malloc((size_t)pos + src->len + 1);
                 if (!text) {
                     free(suffix);
@@ -4384,7 +4394,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
                 memcpy(text, cur->text, (size_t)pos);
                 memcpy(text + pos, src->text, src->len);
                 text[pos + (int)src->len] = '\0';
-                if (vi_replace_current_text(b, text) != 0) {
+                if (vi_replace_current_text(b, text, (size_t)pos + src->len) != 0) {
                     free(text);
                     free(suffix);
                     return;
@@ -4393,21 +4403,21 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
 
                 dst = cur;
                 for (src = src->next; src && src->next; src = src->next) {
-                    dst = buf_insert_after(b, dst, src->text);
+                    dst = buf_insert_after_n(b, dst, src->text, src->len);
                     if (!dst) {
                         free(suffix);
                         return;
                     }
                 }
 
-                text = malloc(src->len + strlen(suffix) + 1);
+                text = malloc(src->len + suffix_len + 1);
                 if (!text) {
                     free(suffix);
                     return;
                 }
                 memcpy(text, src->text, src->len);
-                memcpy(text + src->len, suffix, strlen(suffix) + 1);
-                dst = buf_insert_after(b, dst, text);
+                memcpy(text + src->len, suffix, suffix_len + 1);
+                dst = buf_insert_after_n(b, dst, text, src->len + suffix_len);
                 free(text);
                 free(suffix);
                 if (!dst) {
@@ -4545,7 +4555,7 @@ vi_substitute_line(buffer_t *b, vi_visual_t *vis, int capture_register)
             return;
         }
         save_undo(b);
-        if (vi_replace_current_text(b, indent) != 0) {
+        if (vi_replace_current_text(b, indent, indent_len) != 0) {
             free(indent);
             return;
         }
@@ -6347,7 +6357,7 @@ vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
     text[vis->cursor_col] = (char)ch;
     memcpy(text + vis->cursor_col + 1, cur->text + vis->cursor_col,
         cur->len - (size_t)vis->cursor_col + 1);
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, cur->len + 1) == 0) {
         if (b->empty_origin && b->line_count == 1 && b->head == cur
                 && b->tail == cur && cur->len > 0) {
             b->trailing_newline = 1;
@@ -6378,12 +6388,13 @@ vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
         return;
     }
     replaced = cur->text[vis->cursor_col];
-    text = strdup(cur->text);
+    text = malloc(cur->len + 1);
     if (!text) {
         return;
     }
+    memcpy(text, cur->text, cur->len + 1);
     text[vis->cursor_col] = (char)ch;
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, cur->len) == 0) {
         vi_record_replace_char(vis, cur, vis->cursor_col, replaced);
         vis->cursor_col++;
         vi_mark_body_dirty_current_line(b, vis);
@@ -6470,7 +6481,7 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
     memcpy(text, cur->text, (size_t)vis->cursor_col - 1);
     memcpy(text + vis->cursor_col - 1, cur->text + vis->cursor_col,
         cur->len - (size_t)vis->cursor_col + 1);
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, cur->len - 1) == 0) {
         vis->cursor_col--;
         vi_mark_body_dirty_current_line(b, vis);
     }
@@ -6583,12 +6594,13 @@ vi_replace_char(buffer_t *b, vi_visual_t *vis, int ch)
         return;
     }
     save_undo(b);
-    text = strdup(cur->text);
+    text = malloc(cur->len + 1);
     if (!text) {
         return;
     }
+    memcpy(text, cur->text, cur->len + 1);
     text[vis->cursor_col] = (char)ch;
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, cur->len) == 0) {
         vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
@@ -6615,7 +6627,7 @@ vi_delete_char(buffer_t *b, vi_visual_t *vis)
     }
     memcpy(text, cur->text, (size_t)vis->cursor_col);
     memcpy(text + vis->cursor_col, cur->text + end, cur->len - (size_t)end + 1);
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, cur->len - (size_t)(end - vis->cursor_col)) == 0) {
         vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
@@ -6644,7 +6656,7 @@ vi_delete_prev_char(buffer_t *b, vi_visual_t *vis)
     memcpy(text, cur->text, (size_t)start);
     memcpy(text + start, cur->text + vis->cursor_col,
         cur->len - (size_t)vis->cursor_col + 1);
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, cur->len - (size_t)(vis->cursor_col - start)) == 0) {
         vis->cursor_col = start;
         vi_mark_body_dirty_current_line(b, vis);
     }
@@ -6665,10 +6677,11 @@ vi_toggle_case(buffer_t *b, vi_visual_t *vis, int count)
         return;
     }
     save_undo(b);
-    text = strdup(cur->text);
+    text = malloc(cur->len + 1);
     if (!text) {
         return;
     }
+    memcpy(text, cur->text, cur->len + 1);
     for (i = (size_t)start_col; i < cur->len && count > 0; i++, count--) {
         unsigned char ch = (unsigned char)text[i];
 
@@ -6678,7 +6691,7 @@ vi_toggle_case(buffer_t *b, vi_visual_t *vis, int count)
             text[i] = (char)tolower(ch);
         }
     }
-    if (vi_replace_current_text(b, text) == 0) {
+    if (vi_replace_current_text(b, text, cur->len) == 0) {
         if (i < cur->len) {
             vis->cursor_col = (int)i;
         } else if (cur->len > 0) {
@@ -6710,8 +6723,10 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
     if (!indent) {
         return;
     }
+    /* both halves by length: a NUL in either is kept */
+    right_len = cur->len - (size_t)vis->cursor_col;
     left = malloc((size_t)vis->cursor_col + 1);
-    right = strdup(cur->text + vis->cursor_col);
+    right = malloc(right_len + 1);
     if (!left || !right) {
         free(indent);
         free(left);
@@ -6720,7 +6735,7 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
     }
     memcpy(left, cur->text, (size_t)vis->cursor_col);
     left[vis->cursor_col] = '\0';
-    right_len = strlen(right);
+    memcpy(right, cur->text + vis->cursor_col, right_len + 1);
     newline_text = malloc(indent_len + right_len + 1);
     if (!newline_text) {
         free(indent);
@@ -6732,14 +6747,14 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
         memcpy(newline_text, indent, indent_len);
     }
     memcpy(newline_text + indent_len, right, right_len + 1);
-    if (vi_replace_current_text(b, left) != 0) {
+    if (vi_replace_current_text(b, left, (size_t)vis->cursor_col) != 0) {
         free(indent);
         free(left);
         free(right);
         free(newline_text);
         return;
     }
-    b->cur = buf_insert_after(b, cur, newline_text);
+    b->cur = buf_insert_after_n(b, cur, newline_text, indent_len + right_len);
     if (vis->replace_mode) {
         vi_record_replace_split(vis, cur, b->cur, vis->cursor_col);
     }

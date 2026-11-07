@@ -1454,14 +1454,18 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
 
         while ((ret = getline(&line, &cap, f)) != -1) {
             if (ret > 0 && line[ret - 1] == '\n') {
-                line[ret - 1] = '\0';
+                line[--ret] = '\0';
                 last_had_newline = 1;
             } else {
                 last_had_newline = 0;
             }
             if (replace_empty_line) {
-                char *text = strdup(line);
+                /* every byte read, a NUL too */
+                char *text = malloc((size_t)ret + 1);
 
+                if (text) {
+                    memcpy(text, line, (size_t)ret + 1);
+                }
                 if (!text) {
                     free(line);
                     if (is_pipe) {
@@ -1476,7 +1480,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
                 exvi_note_buffer_change();
                 free(b->head->text);
                 b->head->text = text;
-                b->head->len = strlen(text);
+                b->head->len = (size_t)ret;
                 b->cur = b->head;
                 b->modified = 1;
                 b->empty_origin = 0;
@@ -1485,7 +1489,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
                 pos = b->head;
                 replace_empty_line = 0;
             } else {
-                pos = buf_insert_after(b, pos, line);
+                pos = buf_insert_after_n(b, pos, line, (size_t)ret);
             }
             lines_read++;
         }

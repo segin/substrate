@@ -127,6 +127,7 @@ extern int exvi_exit_requested;
 
 void buf_init(buffer_t *b);
 line_t *buf_insert_after(buffer_t *b, line_t *pos, const char *text);
+line_t *buf_insert_after_n(buffer_t *b, line_t *pos, const char *text, size_t len);
 void buf_delete(buffer_t *b, line_t *l);
 void buf_free(buffer_t *b);
 void buf_copy(buffer_t *dst, buffer_t *src);

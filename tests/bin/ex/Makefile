@@ -38,6 +38,7 @@ test:
 	bash ./test_ex_shell.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_global_undo.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_undo_state.sh $(abspath $(TOP)/bin/ex/ex); \
+	bash ./test_ex_nul.sh $(abspath $(TOP)/bin/ex/ex); \
 	python3 ./test_ex_frontend.py $(abspath $(TOP)/bin/ex/ex)
 
 clean:

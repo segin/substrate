@@ -149,7 +149,9 @@ struct sub_text {
 static line_t *
 sub_split_line(buffer_t *b, line_t *l)
 {
-    char *nl = strchr(l->text, '\n');
+    /* by the line's length: a NUL in it is part of a piece, not its end */
+    char *text_end = l->text + l->len;
+    char *nl = memchr(l->text, '\n', l->len);
     line_t *last = l;
 
     if (!nl) {
@@ -158,12 +160,10 @@ sub_split_line(buffer_t *b, line_t *l)
     *nl = '\0';
     l->len = (size_t)(nl - l->text);
     for (char *piece = nl + 1;; ) {
-        char *end = strchr(piece, '\n');
+        char *end = memchr(piece, '\n', (size_t)(text_end - piece));
+        size_t piece_len = (size_t)((end ? end : text_end) - piece);
 
-        if (end) {
-            *end = '\0';
-        }
-        last = buf_insert_after(b, last, piece);
+        last = buf_insert_after_n(b, last, piece, piece_len);
         if (!last || !end) {
             break;
         }
@@ -227,7 +227,8 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
             }
 
             if (matches > 0) {
-                if (sub_text_add(&t, search_start, strlen(search_start)) != 0) {
+                /* the rest of the line by its length: past a NUL in it too */
+                if (sub_text_add(&t, search_start, l->len - (size_t)(search_start - l->text)) != 0) {
                     free(t.s);
                     regfree(&re);
                     return 0;
@@ -547,7 +548,7 @@ handle_put_command(buffer_t *b, const char *args, int addr2)
     line_t *src = regs[reg_idx].head;
 
     while (src) {
-        pos = buf_insert_after(b, pos, src->text);
+        pos = buf_insert_after_n(b, pos, src->text, src->len);
         src = src->next;
     }
     return 1;
@@ -724,7 +725,7 @@ handle_copy_command(buffer_t *b, const char *args, int explicit_range, int addr1
             l = l->next;
         }
         for (int i = 0; i < got; i++) {
-            pos = buf_insert_after(b, pos, src[i]->text);
+            pos = buf_insert_after_n(b, pos, src[i]->text, src[i]->len);
         }
         free(src);
     }
@@ -762,7 +763,7 @@ handle_move_command(buffer_t *b, const char *args, int explicit_range, int addr1
         int del_start = addr1;
 
         for (int i = 0; i < (addr2 - addr1 + 1) && src; i++) {
-            pos = buf_insert_after(b, pos, src->text);
+            pos = buf_insert_after_n(b, pos, src->text, src->len);
             src = src->next;
         }
         if (dest < addr1) {
@@ -866,7 +867,7 @@ handle_yank_command(buffer_t *b, const char *args, int explicit_range, int addr1
         line_t *pos = NULL;
 
         for (int i = 0; i < (addr2 - addr1 + 1) && src; i++) {
-            pos = buf_insert_after(&regs[reg_idx], pos, src->text);
+            pos = buf_insert_after_n(&regs[reg_idx], pos, src->text, src->len);
             src = src->next;
         }
     }

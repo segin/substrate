@@ -295,9 +295,9 @@ The number is not reused.
 
 ### EXVI-16 — a NUL byte cuts the line short, and `:w` writes it short — *Medium*
 
-- [ ] **EXVI-16.1** (Ubiquitous) The editor shall keep every byte of a line
+- [x] **EXVI-16.1** (Ubiquitous) The editor shall keep every byte of a line
   read from a file, NUL included.
-- [ ] **EXVI-16.2** (Event-driven) When a NUL is entered with `^V^@` in vi, the
+- [x] **EXVI-16.2** (Event-driven) When a NUL is entered with `^V^@` in vi, the
   editor shall keep the text after the insertion point.
 
 - **Where**: `exvi_buffer.c:171,176` (from `buf_read_file`);

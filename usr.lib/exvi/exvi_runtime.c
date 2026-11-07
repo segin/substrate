@@ -711,7 +711,7 @@ write_recover_stream(buffer_t *b, FILE *f)
     omit_final_newline = !b->trailing_newline && !synthetic_empty_with_content;
     curr = b->head;
     while (curr) {
-        if (fputs(curr->text, f) == EOF) {
+        if (curr->len > 0 && fwrite(curr->text, 1, curr->len, f) != curr->len) {
             return -1;
         }
         if (!(omit_final_newline && curr == b->tail)) {

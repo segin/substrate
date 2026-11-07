@@ -171,6 +171,18 @@ buf_init(buffer_t *b)
 line_t *
 buf_insert_after(buffer_t *b, line_t *pos, const char *text)
 {
+    return buf_insert_after_n(b, pos, text, strlen(text));
+}
+
+/**
+ * Insert a line of the @p len bytes at @p text after @p pos (NULL: first).
+ * The bytes may hold a NUL, as a line read from a file may: a line is its
+ * length, its text NUL-terminated only for the code that reads it as a
+ * string.
+ */
+line_t *
+buf_insert_after_n(buffer_t *b, line_t *pos, const char *text, size_t len)
+{
     static unsigned long next_line_id = 0;
     line_t *l = calloc(1, sizeof(line_t));
     int inserted_at_end = (b->head == NULL || pos == b->tail);
@@ -179,12 +191,14 @@ buf_insert_after(buffer_t *b, line_t *pos, const char *text)
     if (!l) {
         return NULL;
     }
-    l->text = strdup(text);
+    l->text = malloc(len + 1);
     if (!l->text) {
         free(l);
         return NULL;
     }
-    l->len = strlen(text);
+    memcpy(l->text, text, len);
+    l->text[len] = '\0';
+    l->len = len;
     l->id = ++next_line_id;
     exvi_note_buffer_change();
 
@@ -350,7 +364,7 @@ buf_copy(buffer_t *dst, buffer_t *src)
     dst->started_empty = src->started_empty;
     dst->trailing_newline = src->trailing_newline;
     while (curr) {
-        pos = buf_insert_after(dst, pos, curr->text);
+        pos = buf_insert_after_n(dst, pos, curr->text, curr->len);
         if (pos) {
             /* the copy is the same line, for exvi_restore_snapshot() */
             pos->id = curr->id;
@@ -482,12 +496,13 @@ buf_read_stream(buffer_t *b, FILE *f)
     errno = 0;
     while ((ret = getline(&line, &cap, f)) != -1) {
         if (ret > 0 && line[ret - 1] == '\n') {
-            line[ret - 1] = '\0';
+            line[--ret] = '\0';
             last_had_newline = 1;
         } else {
             last_had_newline = 0;
         }
-        pos = buf_insert_after(b, pos, line);
+        /* every byte getline() read, a NUL too */
+        pos = buf_insert_after_n(b, pos, line, (size_t)ret);
     }
     failed = ferror(f);
     {
@@ -569,7 +584,8 @@ write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
         && !synthetic_empty_with_content);
     curr = buf_get_line(b, addr1);
     for (int line = addr1; line <= addr2 && curr; line++) {
-        if (fputs(curr->text, f) == EOF) {
+        /* the line's length, not its text up to a NUL in it */
+        if (curr->len > 0 && fwrite(curr->text, 1, curr->len, f) != curr->len) {
             return -2;
         }
         if (!(omit_final_newline && line == addr2) && fputc('\n', f) == EOF) {
