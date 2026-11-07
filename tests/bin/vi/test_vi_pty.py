@@ -5782,7 +5782,8 @@ def main():
             "utf8-combining-narrow-edit missing row redraw")
     require("\x1b[6;1H\x1b[K" in decoded,
             "utf8-combining-narrow-edit missing status redraw")
-    require(saved == "pre aX\u0301b post\n",
+    # 6| is the b: the accent takes no column, and X goes after it (Vim)
+    require(saved == "pre a\u0301Xb post\n",
             f"unexpected utf8-combining-narrow-edit buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
