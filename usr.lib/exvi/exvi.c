@@ -444,6 +444,14 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_shell_interactive();
     } else if (match_command(cmd, "source", "so", &args, NULL)) {
         return handle_source_command(b, args, do_command);
+    } else if (match_command(cmd, "map", NULL, &args, &force)) {
+        return handle_map_command(args, force ? EXVI_MAP_INPUT : EXVI_MAP_COMMAND, 0);
+    } else if (match_command(cmd, "unmap", "unm", &args, &force)) {
+        return handle_map_command(args, force ? EXVI_MAP_INPUT : EXVI_MAP_COMMAND, 1);
+    } else if (match_command(cmd, "abbreviate", "ab", &args, NULL)) {
+        return handle_map_command(args, EXVI_MAP_ABBREV, 0);
+    } else if (match_command(cmd, "unabbreviate", "una", &args, NULL)) {
+        return handle_map_command(args, EXVI_MAP_ABBREV, 1);
     } else if (match_command(cmd, "suspend", "su", &args, &force)
         || match_command(cmd, "stop", "st", &args, &force)) {
         return handle_suspend_command();

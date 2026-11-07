@@ -47,6 +47,8 @@ check "@ of an empty buffer" '@b\n' "Buffer is empty" 'x\n'
 # p shows the tab of the second line as spaces
 check "< and >" 'set sw=4\n1>\n2>>\n1<\n%%p\n' "1         2 3" '1\n2\n3\n'
 
+check "map lists" 'map K dd\nmap! jj X\nmap\nab teh the\nab\nunmap K\nmap\n' "K	dd teh	the" 'x\n'
+check "unmap of nothing" 'unmap K\n' "K is not mapped" 'x\n'
 printf '2d\n$p\n' >src.ex
 check "source" 'so src.ex\n%%p\n' "3 1 3" '1\n2\n3\n'
 printf 'one\n' >other

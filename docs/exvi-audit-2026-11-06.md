@@ -742,7 +742,7 @@ The number is not reused.
 
 ### EXVI-49 — missing POSIX commands — *Medium*
 
-- [ ] **EXVI-49.1** (Ubiquitous) The editor shall implement `abbreviate`,
+- [x] **EXVI-49.1** (Ubiquitous) The editor shall implement `abbreviate`,
   `unabbreviate`, `map` and `unmap`.
 - [x] **EXVI-49.2** (Ubiquitous) The editor shall implement `chdir`, `shell`,
   `source` and `suspend`/`stop`.

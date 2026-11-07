@@ -1377,6 +1377,7 @@ void
 exvi_cleanup_runtime(void)
 {
     exvi_input_indent_free();
+    exvi_maps_free();
     secure_mode = 0;
     restricted_mode = 0;
     batch_mode = 0;

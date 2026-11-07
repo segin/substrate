@@ -132,6 +132,15 @@ The current supported command contract includes:
 .Ic suspend ,
 .Ic stop ,
 .Ic ex
+.It maps and abbreviations
+.Ic map ,
+.Ic map! ,
+.Ic unmap ,
+.Ic unm ,
+.Ic abbreviate ,
+.Ic ab ,
+.Ic unabbreviate ,
+.Ic una
 .El
 .Pp
 .Ic z Ns Oo Cm \&! Oc Ns Oo Ar type Oc Ns Oo Ar count Oc Ns Op Ar flags
@@ -181,6 +190,31 @@ and
 search on and back for the last pattern, and
 .Ql \e&
 on for the last substitute's.
+.Pp
+.Ic map Ar lhs rhs
+makes the keys
+.Ar lhs ,
+typed in vi's command mode, act as
+.Ar rhs ;
+.Ic map!
+does so in vi's text input.
+The right-hand side is mapped again when the
+.Ic remap
+option is set.
+.Ic abbreviate Ar lhs rhs
+makes the word
+.Ar lhs ,
+typed in text input and ended by a non-word character, become
+.Ar rhs .
+With no argument,
+.Ic map
+and
+.Ic abbreviate
+list their entries;
+.Ic unmap
+and
+.Ic unabbreviate
+remove one.
 .Pp
 A command that would replace or abandon a modified buffer \(em
 .Ic edit ,

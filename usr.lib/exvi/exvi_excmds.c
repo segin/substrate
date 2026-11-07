@@ -508,3 +508,149 @@ handle_execute_command(buffer_t *b, const char *args, int explicit_range, int ad
     free(cmds);
     return 1;
 }
+
+/*
+ * map, map!, unmap, abbreviate, unabbreviate (POSIX ex): three tables of
+ * lhs -> rhs -- vi command mode, vi text input, abbreviations -- that vi
+ * applies to the keys typed (exvi_visual.c).  All four were "Unknown
+ * command".  With no argument, map and ab list their table.
+ */
+typedef struct {
+    char *lhs;
+    char *rhs;
+} exvi_map_t;
+
+static exvi_map_t *map_tables[3];
+static int map_counts[3];
+
+static int
+map_find(int which, const char *lhs)
+{
+    for (int i = 0; i < map_counts[which]; i++) {
+        if (strcmp(map_tables[which][i].lhs, lhs) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int
+handle_map_command(const char *args, int which, int remove)
+{
+    const char *p = skip_blanks(args ? args : "");
+    const char *lhs_end;
+    char *lhs;
+    char *rhs;
+    int i;
+
+    if (*p == '\0') {
+        if (remove) {
+            exvi_report_error("Missing left-hand side");
+            return 1;
+        }
+        for (i = 0; i < map_counts[which]; i++) {
+            printf("%s\t%s\n", map_tables[which][i].lhs, map_tables[which][i].rhs);
+        }
+        return 1;
+    }
+    lhs_end = p;
+    while (*lhs_end && *lhs_end != ' ' && *lhs_end != '\t') {
+        lhs_end++;
+    }
+    lhs = strndup(p, (size_t)(lhs_end - p));
+    if (!lhs) {
+        exvi_report_error("out of memory");
+        return 1;
+    }
+    i = map_find(which, lhs);
+    if (remove) {
+        if (i < 0) {
+            exvi_report_errorf("%s is not %s", lhs, which == 2 ? "an abbreviation" : "mapped");
+        } else {
+            free(map_tables[which][i].lhs);
+            free(map_tables[which][i].rhs);
+            map_tables[which][i] = map_tables[which][--map_counts[which]];
+        }
+        free(lhs);
+        return 1;
+    }
+    p = skip_blanks(lhs_end);
+    if (*p == '\0') {
+        exvi_report_error("Missing right-hand side");
+        free(lhs);
+        return 1;
+    }
+    rhs = strdup(p);
+    if (!rhs) {
+        free(lhs);
+        exvi_report_error("out of memory");
+        return 1;
+    }
+    if (i >= 0) {
+        free(map_tables[which][i].lhs);
+        free(map_tables[which][i].rhs);
+    } else {
+        exvi_map_t *grown = realloc(map_tables[which],
+            sizeof(*grown) * (size_t)(map_counts[which] + 1));
+
+        if (!grown) {
+            free(lhs);
+            free(rhs);
+            exvi_report_error("out of memory");
+            return 1;
+        }
+        map_tables[which] = grown;
+        i = map_counts[which]++;
+    }
+    map_tables[which][i].lhs = lhs;
+    map_tables[which][i].rhs = rhs;
+    return 1;
+}
+
+/*
+ * The table's rhs for the keys keys[0..n) when they are a whole lhs, or
+ * NULL; *longer is set when some lhs is longer than n and starts with them.
+ */
+const char *
+exvi_map_lookup(int which, const int *keys, int n, int *longer)
+{
+    const char *found = NULL;
+
+    *longer = 0;
+    for (int i = 0; i < map_counts[which]; i++) {
+        const char *lhs = map_tables[which][i].lhs;
+        int k;
+
+        for (k = 0; k < n && lhs[k] && (unsigned char)lhs[k] == keys[k]; k++) {
+        }
+        if (k < n) {
+            continue;
+        }
+        if (lhs[n] == '\0') {
+            found = map_tables[which][i].rhs;
+        } else {
+            *longer = 1;
+        }
+    }
+    return found;
+}
+
+int
+exvi_map_count(int which)
+{
+    return map_counts[which];
+}
+
+void
+exvi_maps_free(void)
+{
+    for (int w = 0; w < 3; w++) {
+        for (int i = 0; i < map_counts[w]; i++) {
+            free(map_tables[w][i].lhs);
+            free(map_tables[w][i].rhs);
+        }
+        free(map_tables[w]);
+        map_tables[w] = NULL;
+        map_counts[w] = 0;
+    }
+}

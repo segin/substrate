@@ -2186,9 +2186,34 @@ static int vi_unread_key_value = -2;
 static int vi_op_keys[64];
 static int vi_op_nkeys;
 static int vi_op_recording;
-static int vi_replay_keys[64];
+static int vi_replay_keys[4096];         /* . and the maps' right-hand sides */
 static int vi_replay_len;
 static int vi_replay_pos;
+static int vi_key_from_replay;           /* the key just read came from them */
+
+/* keys to read before any already waiting: a map's rhs, keys read ahead */
+static int
+vi_replay_prepend(const int *keys, int n)
+{
+    int waiting = vi_replay_len - vi_replay_pos;
+
+    if (n <= 0) {
+        return 0;
+    }
+    if (waiting + n > (int)(sizeof(vi_replay_keys) / sizeof(vi_replay_keys[0]))) {
+        return -1;
+    }
+    if (vi_replay_pos >= n) {
+        vi_replay_pos -= n;
+    } else {
+        memmove(vi_replay_keys + n, vi_replay_keys + vi_replay_pos,
+            sizeof(vi_replay_keys[0]) * (size_t)waiting);
+        vi_replay_pos = 0;
+        vi_replay_len = waiting + n;
+    }
+    memcpy(vi_replay_keys + vi_replay_pos, keys, sizeof(keys[0]) * (size_t)n);
+    return 0;
+}
 
 static void
 vi_unread_key(int key)
@@ -2333,11 +2358,13 @@ vi_read_key(void)
 {
     int key;
 
+    vi_key_from_replay = 0;
     if (vi_unread_key_value != -2) {
         key = vi_unread_key_value;
         vi_unread_key_value = -2;
     } else if (vi_replay_pos < vi_replay_len) {
         key = vi_replay_keys[vi_replay_pos++];
+        vi_key_from_replay = 1;
     } else {
         key = vi_read_key_raw();
     }
@@ -2366,6 +2393,90 @@ vi_read_visual_key(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char
             vis->screen_dirty = 1;
         }
         vi_render(b, vis, prompt_prefix, prompt);
+    }
+}
+
+/* the next key, or -3 when none comes within @p ms (keys waiting count) */
+static int
+vi_read_key_within(int ms)
+{
+    if (vi_unread_key_value == -2 && vi_replay_pos >= vi_replay_len && vi_unread_len == 0) {
+        fd_set rfds;
+        struct timeval tv;
+
+        FD_ZERO(&rfds);
+        FD_SET(STDIN_FILENO, &rfds);
+        tv.tv_sec = ms / 1000;
+        tv.tv_usec = (ms % 1000) * 1000;
+        if (select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv) <= 0) {
+            return -3;
+        }
+    }
+    return vi_read_key();
+}
+
+/*
+ * map and map! (POSIX vi): keys that make a map's left-hand side give way
+ * to its right-hand side.  While the keys read could still become a longer
+ * lhs, vi waits up to a second for the next; the longest whole lhs among
+ * them is taken, and the keys after it are read again.  The rhs goes in
+ * front of the keys waiting, and is mapped again only with remap set.  A
+ * map that keeps making itself (map x x with remap) stops after 100.
+ */
+static int
+vi_map_key(vi_visual_t *vis, int key)
+{
+    int which = (vis->insert_mode || vis->replace_mode) ? EXVI_MAP_INPUT : EXVI_MAP_COMMAND;
+    int depth = 0;
+
+    for (;;) {
+        int keys[64];
+        int n = 1;
+        int longer;
+        int best_len = 0;
+        const char *best = NULL;
+        const char *rhs;
+        int rhs_keys[256];
+        int nrhs = 0;
+
+        if (key < 0 || key > 0xff || exvi_map_count(which) == 0 ||
+            (vi_key_from_replay && !option_remap)) {
+            return key;
+        }
+        keys[0] = key;
+        rhs = exvi_map_lookup(which, keys, 1, &longer);
+        if (rhs) {
+            best = rhs;
+            best_len = 1;
+        }
+        while (longer && n < (int)(sizeof(keys) / sizeof(keys[0]))) {
+            int next = vi_read_key_within(1000);
+
+            if (next < 0) {
+                break;
+            }
+            keys[n++] = next;
+            rhs = exvi_map_lookup(which, keys, n, &longer);
+            if (rhs) {
+                best = rhs;
+                best_len = n;
+            }
+        }
+        if (!best) {
+            (void)vi_replay_prepend(keys + 1, n - 1);
+            return key;
+        }
+        if (++depth > 100) {
+            vi_replay_len = vi_replay_pos = 0;
+            (void)!write(STDOUT_FILENO, "\a", 1);
+            return VI_KEY_UNKNOWN;
+        }
+        for (const char *c = best; *c && nrhs < (int)(sizeof(rhs_keys) / sizeof(rhs_keys[0])); c++) {
+            rhs_keys[nrhs++] = (unsigned char)*c;
+        }
+        (void)vi_replay_prepend(keys + best_len, n - best_len);
+        (void)vi_replay_prepend(rhs_keys, nrhs);
+        key = vi_read_key();
     }
 }
 
@@ -6982,6 +7093,48 @@ vi_erase_input(buffer_t *b, vi_visual_t *vis, int start)
     free(text);
 }
 
+/*
+ * abbreviate (POSIX vi): when a character that ends a word is typed in
+ * text input -- a non-word character, <CR> or ESC -- and the word this
+ * input entered before the cursor is an abbreviation's left-hand side, the
+ * word gives way to its right-hand side.  The word must follow a non-word
+ * character or start where the input started.
+ */
+static void
+vi_expand_abbrev(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    int floor = vi_input_floor(b, vis);
+    int start = vis->cursor_col;
+    int keys[256];
+    int n = 0;
+    int longer;
+    const char *rhs;
+
+    if (!cur || exvi_map_count(EXVI_MAP_ABBREV) == 0) {
+        return;
+    }
+    while (start > floor && vi_is_word_char((unsigned char)cur->text[start - 1])) {
+        start--;
+    }
+    /* the loop stops after a non-word character or where the input
+     * began, which counts as a word's start too (as Vim) */
+    if (start == vis->cursor_col) {
+        return;
+    }
+    for (int i = start; i < vis->cursor_col && n < (int)(sizeof(keys) / sizeof(keys[0])); i++) {
+        keys[n++] = (unsigned char)cur->text[i];
+    }
+    rhs = exvi_map_lookup(EXVI_MAP_ABBREV, keys, n, &longer);
+    if (!rhs) {
+        return;
+    }
+    vi_erase_input(b, vis, start);
+    for (const char *c = rhs; *c; c++) {
+        vi_insert_char(b, vis, (unsigned char)*c);
+    }
+}
+
 /* ^H: the character before the cursor, all its bytes; it no longer erases
  * text from before the input, or joins the line to the one before */
 static void
@@ -8327,6 +8480,7 @@ exvi_visual_main(buffer_t *b)
         }
         vi_render(b, &vis, ':', NULL);
         key = vi_read_visual_key(b, &vis, ':', NULL);
+        key = vi_map_key(&vis, key);
         if (clear_status) {
             vi_set_status(&vis, NULL);
         }
@@ -8443,6 +8597,10 @@ exvi_visual_main(buffer_t *b)
             continue;
         }
         if (vis.insert_mode) {
+            if (key == '\x1b' || key == '\r' || key == '\n' ||
+                (vi_key_is_text(key) && !vi_is_word_char(key))) {
+                vi_expand_abbrev(b, &vis);
+            }
             switch (key) {
             case 0x00:
                 /*
