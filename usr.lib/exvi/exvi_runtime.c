@@ -361,6 +361,8 @@ exvi_tty_getline(char **line, size_t *cap, int *by_eof)
 
     *by_eof = 0;
     for (;;) {
+        /* SIGTERM, SIGHUP: preserve and exit, not read on */
+        exvi_check_terminate();
         n = read(STDIN_FILENO, buf, sizeof(buf));
         if (n < 0 && errno == EINTR && !exvi_interrupted) {
             continue;
