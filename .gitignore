@@ -158,6 +158,8 @@ dist/
 /tests/test_getuid
 /tests/lib/sys/test_getuid
 /tests/elks/build/
+/tests/bin/ex/build/
+/tests/bin/vi/build/
 /tests/elks/*_elks
 /tests/elks/gen_hello
 /tests/usr.bin/cc/*.list

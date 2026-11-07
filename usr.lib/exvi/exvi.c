@@ -1,6 +1,7 @@
 #include <exvi.h>
 #include "exvi_internal.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -167,6 +168,65 @@ replace_saved_string(char **dst, const char *src)
     *dst = copy;
 }
 
+/* a global command is running its command list: global, v and undo may
+ * not appear in it (POSIX ex) */
+static int exvi_in_global = 0;
+
+/*
+ * Run a global's command list on the current line.  Its lines are separated
+ * by escaped newlines (backslash-newline, as exvi_join_continued() leaves
+ * them); each is a command, except that after a, i or c the lines are text,
+ * up to a `.` line or the end of the list (POSIX ex, global).  It was given
+ * to do_command() whole, so `g/2/s/2/X/\` + `s/X/Y/` was one bad substitute
+ * and `g/3/a\` + `NEW` read its text from the rest of the input.
+ */
+static void
+run_global_list(buffer_t *b, const char *list)
+{
+    char *copy = strdup(list);
+    char *line = copy;
+
+    if (!copy) {
+        return;
+    }
+    while (line) {
+        char *next = NULL;
+        char *p;
+
+        /* the line ends at the first newline after an odd run of backslashes */
+        for (p = line; *p; p++) {
+            if (*p == '\n') {
+                size_t slashes = 0;
+
+                while (p - slashes > line && p[-1 - (ptrdiff_t)slashes] == '\\') {
+                    slashes++;
+                }
+                if (slashes % 2 == 1) {
+                    p[-1] = '\0';       /* the escaping backslash goes */
+                    next = p + 1;
+                    break;
+                }
+            }
+        }
+        if (input_mode) {
+            if (strcmp(line, ".") == 0) {
+                input_mode = 0;
+            } else {
+                input_insert_pos = buf_insert_after(b, input_insert_pos, line);
+                b->cur = input_insert_pos;
+            }
+        } else {
+            do_command(b, line);
+            if (exvi_exit_requested || exvi_visual_requested || exvi_interrupted) {
+                break;
+            }
+        }
+        line = next;
+    }
+    input_mode = 0;     /* text input ends with the list, `.` or not */
+    free(copy);
+}
+
 static int
 handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
     int explicit_range, int addr1, int addr2)
@@ -180,6 +240,10 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
     regex_t re;
     line_t *curr;
 
+    if (exvi_in_global) {
+        exvi_report_error("global cannot be used within global");
+        return 1;
+    }
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
     }
@@ -198,6 +262,18 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
     if (!re_str) {
         free(work);
         return 1;
+    }
+    {
+        /* g// is the last pattern, and g's pattern becomes the last: it
+         * matched every line, and set nothing */
+        char *resolved = exvi_resolve_pattern(re_str);
+
+        free(re_str);
+        if (!resolved) {
+            free(work);
+            return 1;
+        }
+        re_str = resolved;
     }
     while (*exec_cmd && isspace((unsigned char)*exec_cmd)) {
         exec_cmd++;
@@ -230,19 +306,13 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
 
     /* the command and every command it runs are one change for undo */
     exvi_begin_undo_group(b);
+    exvi_in_global = 1;
     curr = b->head;
     while (curr) {
         if (curr->global_mark) {
-            char *cmd_cpy;
-
             curr->global_mark = 0;
             b->cur = curr;
-            cmd_cpy = strdup(exec_cmd);
-            if (!cmd_cpy) {
-                break;
-            }
-            do_command(b, cmd_cpy);
-            free(cmd_cpy);
+            run_global_list(b, exec_cmd);
             if (exvi_exit_requested || exvi_visual_requested || exvi_interrupted) {
                 break;
             }
@@ -256,6 +326,7 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
         }
         curr = curr->next;
     }
+    exvi_in_global = 0;
     exvi_end_undo_group();
     /* stopped early (an interrupt, out of memory): no mark outlives the command */
     for (curr = b->head; curr; curr = curr->next) {
@@ -285,13 +356,7 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
             fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
             return 1;
         }
-        if (exvi_frontend == EXVI_FRONTEND_EX && b->modified) {
-            exvi_report_error("No write since last change (add ! to override)");
-            return 1;
-        }
-        if (exvi_frontend == EXVI_FRONTEND_EX) {
-            set_visual_handoff_file(b->filename);
-        }
+        /* the same buffer goes on in visual mode, modified or not */
         exvi_visual_requested = 1;
         return 1;
     } else if (match_command(cmd, "version", "ver", &args, NULL)) {
@@ -369,15 +434,23 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     int force = 0;
 
     if (match_command(cmd, "delete", "d", &args, NULL)) {
-        return handle_delete_command(b, explicit_range, addr1, addr2);
+        return handle_ex_delete_command(b, args, explicit_range, addr1, addr2);
     } else if (match_command(cmd, "undo", "u", &args, NULL)) {
+        if (exvi_in_global) {
+            exvi_report_error("undo cannot be used within global");
+            return 1;
+        }
         return handle_undo_command(b);
     } else if (match_command(cmd, "put", "pu", &args, NULL)) {
         return handle_put_command(b, args, addr2);
+    } else if (cmd[0] == 'p' && cmd[1] == 'l' && !isalpha((unsigned char)cmd[2])) {
+        /* `pl` is print with the l flag, as in historic ex */
+        return handle_ex_print_command(b, "p", cmd + 1, explicit_range, addr1, addr2);
     } else if (match_command(cmd, "print", "p", &args, NULL)
+        || match_command(cmd, "number", "nu", &args, NULL)
         || match_command(cmd, "number", "#", &args, NULL)
         || match_command(cmd, "list", "l", &args, NULL)) {
-        return handle_print_command(b, cmd, explicit_range, addr1, addr2);
+        return handle_ex_print_command(b, cmd, args, explicit_range, addr1, addr2);
     } else if (cmd[0] == '=') {
         return handle_equal_command(b, explicit_range, addr2);
     } else if (cmd[0] == 'k' || match_command(cmd, "mark", "ma", &args, NULL)) {
@@ -396,9 +469,9 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     } else if (match_command(cmd, "move", "m", &args, NULL)) {
         return handle_move_command(b, args, explicit_range, addr1, addr2);
     } else if (match_command(cmd, "join", "j", &args, &force)) {
-        return handle_join_command(b, explicit_range, addr1, addr2, force);
+        return handle_ex_join_command(b, args, explicit_range, addr1, addr2, force);
     } else if (match_command(cmd, "yank", "y", &args, NULL)) {
-        return handle_yank_command(b, args, explicit_range, addr1, addr2);
+        return handle_ex_yank_command(b, args, explicit_range, addr1, addr2);
     } else if (match_command(cmd, "substitute", "s", &args, NULL)) {
         return handle_substitute_command(b, args, addr1, addr2);
     } else if (cmd[0] == '&') {
@@ -446,6 +519,36 @@ static void do_command(buffer_t *b, char *cmd) {
     }
 }
 
+/*
+ * Whether cmd's name is word, abbreviated to no fewer than min letters:
+ * "pu" is put, "p" is not.
+ */
+static int
+command_name_is(const char *cmd, const char *word, size_t min)
+{
+    size_t n = 0;
+
+    while (isalpha((unsigned char)cmd[n])) {
+        n++;
+    }
+    return n >= min && n <= strlen(word) && strncmp(cmd, word, n) == 0;
+}
+
+/*
+ * The commands line 0 is an address for (POSIX ex): those that put text
+ * after a line -- append, insert, read, put -- and `=`.  (copy's and
+ * move's destination is parsed by those commands.)
+ */
+static int
+command_takes_line0(const char *cmd)
+{
+    return cmd[0] == '='
+        || command_name_is(cmd, "append", 1)
+        || command_name_is(cmd, "insert", 1)
+        || command_name_is(cmd, "read", 1)
+        || command_name_is(cmd, "put", 2);
+}
+
 /* One command of a command line, its `|` and what follows cut off. */
 static void do_single_command(buffer_t *b, char *cmd) {
     int parse_error = 0;
@@ -457,11 +560,21 @@ static void do_single_command(buffer_t *b, char *cmd) {
         &parse_error);
 
     if (parse_error) {
-        exvi_report_error("Bad address");
+        if (parse_error == 1) {         /* (2: reported, a backwards range) */
+            exvi_report_error("Bad address");
+        }
         return;
     }
-    
+
     while (*cmd && isspace((unsigned char)*cmd)) cmd++;
+
+    /* Line 0 is an address only for the commands that put text after
+     * it; 0d and 1,0d did nothing and said nothing. */
+    if (explicit_range && (addr1 == 0 || addr2 == 0) && *cmd
+        && !command_takes_line0(cmd)) {
+        exvi_report_error("Line 0 is not an address for this command");
+        return;
+    }
 
     if (!*cmd) {
         if (!explicit_range) {
@@ -516,7 +629,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     if (invoked_as(argv[0], "view")) {
         option_readonly = 1;
     }
-    while ((opt = getopt(argc, argv, "+c:t:sSvrR")) != -1) {
+    while ((opt = getopt(argc, argv, "+c:t:sSvrRw:")) != -1) {
         switch (opt) {
         case 'c':
             if (exvi_add_startup_command(optarg) != 0) {
@@ -545,8 +658,20 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         case 'R':
             option_readonly = 1;
             break;
+        case 'w': {
+            /* -w size: the window option (POSIX ex) */
+            char *end = NULL;
+            long n = strtol(optarg, &end, 10);
+
+            if (!end || *end != '\0' || n < 1 || n > 999) {
+                fprintf(stderr, "%s: bad -w size: %s\n", exvi_progname, optarg);
+                exit(1);
+            }
+            option_window = (int)n;
+            break;
+        }
         default:
-            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [-r] [-R] [-c cmd] [-t tag] [+cmd] [file ...]\n",
+            fprintf(stderr, "Usage: %s [-s|-] [-S] [-v] [-r] [-R] [-c cmd] [-t tag] [-w size] [+cmd] [file ...]\n",
                 argv[0]);
             exit(1);
         }
@@ -554,6 +679,10 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 
     scan_plus_args = 1;
     for (int i = optind; i < argc; i++) {
+        if (scan_plus_args && strcmp(argv[i], "-") == 0) {
+            batch_mode = 1;             /* `-`: POSIX's obsolescent -s */
+            continue;
+        }
         if (scan_plus_args && argv[i][0] == '+') {
             if (queue_plus_command(argv[i]) != 0) {
                 fprintf(stderr, "%s: out of memory\n", exvi_progname);
@@ -597,19 +726,21 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     exvi_reset_undo_state();
     exvi_init_registers();
 
-    /* startup files before the file: what they set applies to loading it */
-    if (!(frontend == EXVI_FRONTEND_EX && visual_mode)) {
-        load_startup_files(&buf, do_command);
-    }
+    /* startup files before the file: what they set applies to loading it
+     * (ex -v too: no other program reads them for it any more) */
+    load_startup_files(&buf, do_command);
 
     if (recover_mode && file_argc == 0) {
-        fprintf(stderr, "%s: -r requires a file operand\n", exvi_progname);
+        /* -r alone lists what can be recovered (POSIX ex) */
+        if (exvi_list_recover_files() == 0) {
+            printf("No files to recover\n");
+        }
         free(file_args);
         buf_free(&buf);
         exvi_reset_undo_state();
         exvi_free_registers();
         exvi_cleanup_runtime();
-        return 1;
+        return 0;
     }
 
     if (file_argc > 0) {
@@ -640,12 +771,11 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         } else {
             buf.filename = strdup(exvi_current_arg());
             buf_read_file(&buf, buf.filename);
+            exvi_set_loaded_line(&buf);
         }
     }
     
-    if (!(frontend == EXVI_FRONTEND_EX && visual_mode)) {
-        run_startup_commands(&buf, do_command);
-    }
+    run_startup_commands(&buf, do_command);
     if (exvi_visual_requested) {
         /* `-c vi` and the like */
         exvi_visual_requested = 0;
@@ -661,11 +791,9 @@ enter_visual:
     if (visual_mode) {
         int vret;
 
-        if (frontend == EXVI_FRONTEND_EX) {
-            set_visual_handoff_file(buf.filename);
-            status = EXVI_EXIT_VISUAL_HANDOFF;
-            goto out;
-        }
+        /* ex's visual mode is this library's, in this process, on this
+         * buffer -- its undo, marks and named buffers with it.  It handed a
+         * file name to whatever `vi` it found, which on a host was Vim. */
         if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
             fprintf(stderr, "%s: visual mode requires a terminal.\n", exvi_progname);
             status = 1;
@@ -744,14 +872,10 @@ enter_visual:
             free(line);
             line = NULL;
             cap = 0;
-            if (frontend == EXVI_FRONTEND_VI) {
-                visual_mode = 1;
-                input_mode = 0;
-                input_insert_pos = NULL;
-                goto enter_visual;
-            }
-            status = EXVI_EXIT_VISUAL_HANDOFF;
-            goto out;
+            visual_mode = 1;
+            input_mode = 0;
+            input_insert_pos = NULL;
+            goto enter_visual;
         }
         if (exvi_take_interrupt()) {
             printf("\nInterrupt\n");

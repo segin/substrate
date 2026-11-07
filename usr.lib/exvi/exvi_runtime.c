@@ -9,6 +9,7 @@
 #include <regex.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <sys/stat.h>
 
 int secure_mode = 0;
@@ -41,6 +42,7 @@ static char *visual_handoff_file = NULL;
 static char **startup_commands = NULL;
 static int startup_command_count = 0;
 int last_sub_global = 0;
+int last_sub_confirm = 0;
 const char *exvi_progname = "ex";
 exvi_frontend_t exvi_frontend = EXVI_FRONTEND_EX;
 buffer_t regs[27];
@@ -197,8 +199,10 @@ re_copy_bracket(re_text_t *t, const char *p)
  * @return         0, or regcomp()'s error; REG_ESPACE when out of memory,
  *                 REG_BADPAT for `~` with no substitute before it
  */
-int
-exvi_regcomp(regex_t *re, const char *pattern)
+static int re_no_tilde;        /* exvi_regcomp_text() failed on a bare `~` */
+
+static int
+exvi_regcomp_text(regex_t *re, const char *pattern)
 {
     re_text_t t = { NULL, 0, 0 };
     const char *p = pattern;
@@ -218,6 +222,7 @@ exvi_regcomp(regex_t *re, const char *pattern)
             /* the last substitute's replacement, as written */
             if (!last_sub_replacement) {
                 free(t.s);
+                re_no_tilde = 1;
                 return REG_BADPAT;
             }
             rc = re_text_add_literal(&t, last_sub_replacement);
@@ -245,6 +250,57 @@ exvi_regcomp(regex_t *re, const char *pattern)
 nomem:
     free(t.s);
     return REG_ESPACE;
+}
+
+/*
+ * Compile a command's pattern, and say why when it will not compile: a bad
+ * pattern used to do nothing at all -- s/[/x/ and g/[/d silently, /[/ with
+ * only "Bad address".
+ */
+int
+exvi_regcomp(regex_t *re, const char *pattern)
+{
+    int rc;
+
+    re_no_tilde = 0;
+    rc = exvi_regcomp_text(re, pattern);
+    if (rc != 0) {
+        char msg[128];
+
+        if (re_no_tilde) {
+            exvi_report_error("No previous substitute replacement for ~");
+        } else {
+            regerror(rc, re, msg, sizeof(msg));
+            exvi_report_errorf("Bad pattern: %s", msg);
+        }
+    }
+    return rc;
+}
+
+/**
+ * The pattern a command means by pat: pat itself, or when it is empty the
+ * last pattern any command used (POSIX ex: a search, substitute, global or
+ * v).  Whichever it is becomes the last pattern.
+ * @return a copy to free, or NULL -- reported -- when pat is empty and no
+ *         command has used a pattern yet
+ */
+char *
+exvi_resolve_pattern(const char *pat)
+{
+    char *re;
+
+    if (pat && *pat) {
+        re = strdup(pat);
+    } else if (last_search_pattern) {
+        re = strdup(last_search_pattern);
+    } else {
+        exvi_report_error("No previous regular expression");
+        return NULL;
+    }
+    if (re) {
+        replace_saved_string(&last_search_pattern, re);
+    }
+    return re;
 }
 
 static int
@@ -601,6 +657,52 @@ recover_dir_open(int create)
         return -1;
     }
     return fd;
+}
+
+/**
+ * `-r` with no file: list the files the user can recover -- the name each
+ * was saved under, from the user's recover directory.
+ * @return the number listed
+ */
+int
+exvi_list_recover_files(void)
+{
+    int dirfd = recover_dir_open(0);
+    DIR *d;
+    struct dirent *de;
+    int n = 0;
+
+    if (dirfd < 0) {
+        return 0;
+    }
+    d = fdopendir(dirfd);
+    if (!d) {
+        close(dirfd);
+        return 0;
+    }
+    while ((de = readdir(d)) != NULL) {
+        struct stat st;
+        const char *dot = strchr(de->d_name, '.');
+        int fd;
+        int ok;
+
+        /* <16 hex digits>.<base name>, the user's own regular file */
+        if (!dot || dot - de->d_name != 16 || dot[1] == '\0') {
+            continue;
+        }
+        fd = openat(dirfd, de->d_name, O_RDONLY | O_NOFOLLOW);
+        if (fd < 0) {
+            continue;
+        }
+        ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == getuid();
+        close(fd);
+        if (ok) {
+            printf("%s\n", dot + 1);
+            n++;
+        }
+    }
+    closedir(d);
+    return n;
 }
 
 char *
@@ -1165,6 +1267,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
 
         replace_saved_string(&option_shell, sh && *sh ? sh : EXVI_DEFAULT_SHELL);
     }
+    exvi_options_reset();               /* every option, from the table */
     free(last_shell_command);
     last_shell_command = NULL;
     exvi_note_recover_cwd();
@@ -1175,6 +1278,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     free(last_sub_replacement);
     last_sub_replacement = NULL;
     last_sub_global = 0;
+    last_sub_confirm = 0;
     set_visual_handoff_file(NULL);
     free_startup_commands();
     exvi_progname = (frontend == EXVI_FRONTEND_VI) ? "vi" : "ex";
@@ -1211,6 +1315,7 @@ exvi_cleanup_runtime(void)
     option_directory = NULL;
     free(option_shell);
     option_shell = NULL;
+    exvi_options_free();
     free(last_shell_command);
     last_shell_command = NULL;
     free(last_search_pattern);
@@ -1220,6 +1325,7 @@ exvi_cleanup_runtime(void)
     free(last_sub_replacement);
     last_sub_replacement = NULL;
     last_sub_global = 0;
+    last_sub_confirm = 0;
     free(alternate_filename);
     alternate_filename = NULL;
     set_visual_handoff_file(NULL);

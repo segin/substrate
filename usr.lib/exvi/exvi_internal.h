@@ -112,6 +112,10 @@ extern char *last_sub_pattern;
 extern char *last_sub_replacement;
 extern char *alternate_filename;
 extern int last_sub_global;
+extern int last_sub_confirm;
+/* substitute's c option (exvi_cmd.c): 1 replace, 0 keep, -1 stop */
+int exvi_sub_confirm(buffer_t *b, line_t *l, size_t so, size_t eo);
+extern int (*exvi_sub_confirm_hook)(buffer_t *b, line_t *l, size_t so, size_t eo);
 extern const char *exvi_progname;
 extern exvi_frontend_t exvi_frontend;
 extern buffer_t regs[27];
@@ -145,6 +149,9 @@ void exvi_reset_undo_state(void);
 int exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src);
 int exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out);
 void buf_read_file(buffer_t *b, const char *filename);
+/* After loading a file: ex makes its last line current (POSIX); vi keeps
+ * the first. */
+void exvi_set_loaded_line(buffer_t *b);
 int buf_read_stream(buffer_t *b, FILE *f);
 int buf_write_file(buffer_t *b, const char *filename, int append);
 int buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
@@ -152,6 +159,8 @@ int write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);
 int buf_current_line(buffer_t *b);
 int exvi_regcomp(regex_t *re, const char *pattern);
+/* pat, or the last pattern when pat is empty; made the last pattern */
+char *exvi_resolve_pattern(const char *pat);
 int exvi_drawn_char_bytes(const char *text, size_t len, size_t idx);
 int exvi_join_continued(char **line, size_t *cap, FILE *f);
 char *parse_delimited_text(char **cmd_ptr, char delim);
@@ -211,6 +220,18 @@ int handle_pop_command(buffer_t *b, int force);
 int handle_tag_command(buffer_t *b, const char *args);
 int handle_tags_command(buffer_t *b);
 int handle_set_command(const char *args);
+/* exvi_options.c: the option table's defaults, and freeing its strings */
+void exvi_options_reset(void);
+/* -r with no file: list the recoverable files; how many */
+int exvi_list_recover_files(void);
+void exvi_options_free(void);
+extern int option_autoprint, option_autowrite, option_beautify;
+extern int option_edcompatible, option_errorbells, option_lisp, option_mesg;
+extern int option_prompt, option_redraw, option_remap, option_report;
+extern int option_shiftwidth, option_showmatch, option_slowopen;
+extern int option_taglength, option_terse, option_warn, option_window;
+extern int option_wrapmargin;
+extern char *option_paragraphs, *option_sections, *option_term;
 int handle_args_command(const char *args);
 int handle_next_command(buffer_t *b, const char *args, int force);
 int handle_prev_command(buffer_t *b, int force);
@@ -228,6 +249,15 @@ int exvi_write_args(buffer_t *b, const char *args, int explicit_range,
 int handle_edit_command(buffer_t *b, const char *args, int force);
 int handle_read_command(buffer_t *b, const char *args, int addr2);
 int handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2);
+/* ex's forms of these, which take POSIX's [buffer] [count] [flags] tail */
+int handle_ex_delete_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2);
+int handle_ex_yank_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2);
+int handle_ex_print_command(buffer_t *b, const char *cmd, const char *args,
+    int explicit_range, int addr1, int addr2);
+int handle_ex_join_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2, int force);
 int default_read_destination(buffer_t *b, int addr2);
 int handle_undo_command(buffer_t *b);
 int handle_redo_command(buffer_t *b);

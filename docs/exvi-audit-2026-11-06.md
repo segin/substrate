@@ -536,9 +536,9 @@ The number is not reused.
 
 ### EXVI-33 — an empty pattern does not mean the last pattern — *Medium*
 
-- [ ] **EXVI-33.1** (Event-driven) When a pattern is empty, the editor shall use
+- [x] **EXVI-33.1** (Event-driven) When a pattern is empty, the editor shall use
   the last pattern used by any command.
-- [ ] **EXVI-33.2** (Ubiquitous) The editor shall record the pattern of every
+- [x] **EXVI-33.2** (Ubiquitous) The editor shall record the pattern of every
   command that uses one, `global` and `v` included, as the last pattern.
 
 - **Where**: `exvi_cmd.c:704-710` (`s//` uses only the last substitute
@@ -550,11 +550,11 @@ The number is not reused.
 
 ### EXVI-34 — substitute's `c` flag, count and `&&` missing — *Medium*
 
-- [ ] **EXVI-34.1** (Ubiquitous) The editor shall accept substitute's `c` flag
+- [x] **EXVI-34.1** (Ubiquitous) The editor shall accept substitute's `c` flag
   and ask for confirmation of each replacement.
-- [ ] **EXVI-34.2** (Ubiquitous) The editor shall accept a count after
+- [x] **EXVI-34.2** (Ubiquitous) The editor shall accept a count after
   substitute's flags.
-- [ ] **EXVI-34.3** (Ubiquitous) The editor shall accept the `&` command with
+- [x] **EXVI-34.3** (Ubiquitous) The editor shall accept the `&` command with
   the `&` option.
 
 - **Evidence**: `s/x/y/c`, `s/x/y/ 3`, `&&` → "Bad substitute flags".
@@ -562,7 +562,7 @@ The number is not reused.
 
 ### EXVI-35 — a bad pattern gives no diagnostic — *Low*
 
-- [ ] **EXVI-35.1** (Unwanted behaviour) If a pattern fails to compile, then the
+- [x] **EXVI-35.1** (Unwanted behaviour) If a pattern fails to compile, then the
   editor shall report the error.
 
 - **Where**: `exvi_cmd.c:117`, `exvi.c:209`, `exvi_parse.c:300`.
@@ -645,9 +645,9 @@ The number is not reused.
 
 ### EXVI-41 — counts and print flags after a command are ignored — *Medium*
 
-- [ ] **EXVI-41.1** (Event-driven) When a command is given a count, the editor
+- [x] **EXVI-41.1** (Event-driven) When a command is given a count, the editor
   shall apply it as POSIX "Command Line Parsing in ex" describes.
-- [ ] **EXVI-41.2** (Event-driven) When a command is given the flags `#`, `p`
+- [x] **EXVI-41.2** (Event-driven) When a command is given the flags `#`, `p`
   or `l`, the editor shall print the resulting current line in that form.
 
 - **Evidence**: `1,3d 2` deletes 1–3 (expected 3–4); `3j 3` joins two lines;
@@ -656,9 +656,9 @@ The number is not reused.
 
 ### EXVI-42 — named buffers: `d x` ignores `x`, `A`–`Z` do not append — *Medium*
 
-- [ ] **EXVI-42.1** (Event-driven) When `delete` names a buffer, the editor
+- [x] **EXVI-42.1** (Event-driven) When `delete` names a buffer, the editor
   shall store the deleted lines in it.
-- [ ] **EXVI-42.2** (Event-driven) When a buffer is named by an uppercase
+- [x] **EXVI-42.2** (Event-driven) When a buffer is named by an uppercase
   letter, the editor shall append to the buffer of the lowercase letter.
 
 - **Where**: `exvi_cmd.c:273` passes `""`; `:638` maps `A` to the unnamed
@@ -669,9 +669,9 @@ The number is not reused.
 
 ### EXVI-43 — join's white-space rules — *Medium*
 
-- [ ] **EXVI-43.1** (Ubiquitous) The editor's `join` shall discard the leading
+- [x] **EXVI-43.1** (Ubiquitous) The editor's `join` shall discard the leading
   blanks of each line it appends.
-- [ ] **EXVI-43.2** (Event-driven) When the line before the join point ends in
+- [x] **EXVI-43.2** (Event-driven) When the line before the join point ends in
   `.`, the editor shall insert two spaces.
 
 - **Where**: `exvi_cmd.c:607-611`.
@@ -680,9 +680,9 @@ The number is not reused.
 
 ### EXVI-44 — the current line after commands is wrong — *Medium*
 
-- [ ] **EXVI-44.1** (Event-driven) When a command completes, the editor shall
+- [x] **EXVI-44.1** (Event-driven) When a command completes, the editor shall
   set the current line as POSIX specifies for that command.
-- [ ] **EXVI-44.2** (Event-driven) When a file is loaded at startup or by
+- [x] **EXVI-44.2** (Event-driven) When a file is loaded at startup or by
   `edit`, the editor shall set the current line to the last line.
 
 - **Where**: `exvi_cmd.c:267-285`, `482-561`; startup; `edit`; `read`.
@@ -693,9 +693,9 @@ The number is not reused.
 
 ### EXVI-45 — backward ranges and address 0 are silently ignored — *Medium*
 
-- [ ] **EXVI-45.1** (Unwanted behaviour) If the first address of a range is
+- [x] **EXVI-45.1** (Unwanted behaviour) If the first address of a range is
   greater than the second, then the editor shall report an error.
-- [ ] **EXVI-45.2** (Unwanted behaviour) If address 0 is given to a command that
+- [x] **EXVI-45.2** (Unwanted behaviour) If address 0 is given to a command that
   does not accept it, then the editor shall report an error.
 
 - **Where**: `exvi_parse.c:504-578`.
@@ -704,11 +704,11 @@ The number is not reused.
 
 ### EXVI-46 — omitted and extra addresses — *Medium*
 
-- [ ] **EXVI-46.1** (Event-driven) When an address beside `,` or `;` is omitted,
+- [x] **EXVI-46.1** (Event-driven) When an address beside `,` or `;` is omitted,
   the editor shall use the current line.
-- [ ] **EXVI-46.2** (Event-driven) When more addresses are given than the
+- [x] **EXVI-46.2** (Event-driven) When more addresses are given than the
   command takes, the editor shall use the last ones.
-- [ ] **EXVI-46.3** (Event-driven) When addresses are separated by `;`, the
+- [x] **EXVI-46.3** (Event-driven) When addresses are separated by `;`, the
   editor shall set the current line to the first address before evaluating
   the second.
 
@@ -719,11 +719,11 @@ The number is not reused.
 
 ### EXVI-47 — `:g` command lists and nesting — *Medium*
 
-- [ ] **EXVI-47.1** (Ubiquitous) The editor shall continue a `global` command
+- [x] **EXVI-47.1** (Ubiquitous) The editor shall continue a `global` command
   list over each escaped newline.
-- [ ] **EXVI-47.2** (Event-driven) When text input in a `global` command list
+- [x] **EXVI-47.2** (Event-driven) When text input in a `global` command list
   has no terminating `.`, the editor shall end it at the end of the list.
-- [ ] **EXVI-47.3** (Unwanted behaviour) If a `global` command list contains
+- [x] **EXVI-47.3** (Unwanted behaviour) If a `global` command list contains
   `global`, `v` or `undo`, then the editor shall report an error.
 
 - **Evidence**: `g/2/s/2/X/\` + `s/X/Y/` → "Bad substitute flags";
@@ -733,7 +733,7 @@ The number is not reused.
 
 ### EXVI-48 — `edit +command` is taken as part of the file name — *Medium*
 
-- [ ] **EXVI-48.1** (Event-driven) When `edit` is given `+command`, the editor
+- [x] **EXVI-48.1** (Event-driven) When `edit` is given `+command`, the editor
   shall run the command after loading the file.
 
 - **Where**: `exvi_session.c:1138`.
@@ -759,9 +759,9 @@ The number is not reused.
 
 ### EXVI-50 — ex command-line options — *Low*
 
-- [ ] **EXVI-50.1** (Ubiquitous) The editor shall accept the `-` and
+- [x] **EXVI-50.1** (Ubiquitous) The editor shall accept the `-` and
   `-w size` options.
-- [ ] **EXVI-50.2** (Event-driven) When `-r` is given with no file, the editor
+- [x] **EXVI-50.2** (Event-driven) When `-r` is given with no file, the editor
   shall list the files it can recover.
 
 - **Evidence**: `-w` → "invalid option"; `-r` → "-r requires a file operand"
@@ -770,9 +770,9 @@ The number is not reused.
 
 ### EXVI-51 — `:vi` from ex — *Low*
 
-- [ ] **EXVI-51.1** (Event-driven) When ex enters visual mode, the editor shall
+- [x] **EXVI-51.1** (Event-driven) When ex enters visual mode, the editor shall
   keep the same buffer, undo history, marks and named buffers.
-- [ ] **EXVI-51.2** (Ubiquitous) The installed ex shall enter Substrate's own
+- [x] **EXVI-51.2** (Ubiquitous) The installed ex shall enter Substrate's own
   visual mode.
 
 - **Where**: `exvi.c:278-285` refuses on a modified buffer and otherwise
@@ -782,7 +782,7 @@ The number is not reused.
 
 ### EXVI-52 — some commands fail silently — *Low*
 
-- [ ] **EXVI-52.1** (Unwanted behaviour) If a command cannot be carried out,
+- [x] **EXVI-52.1** (Unwanted behaviour) If a command cannot be carried out,
   then the editor shall report an error.
 
 - **Evidence**: `$j`, and `s` with no previous substitute, do nothing and say
@@ -824,11 +824,11 @@ The number is not reused.
 
 ### EXVI-55 — `:set` reports — *Low*
 
-- [ ] **EXVI-55.1** (Event-driven) When `set` is given no argument, the editor
+- [x] **EXVI-55.1** (Event-driven) When `set` is given no argument, the editor
   shall list the options whose values differ from their defaults.
-- [ ] **EXVI-55.2** (Event-driven) When `set all` is given, the editor shall
+- [x] **EXVI-55.2** (Event-driven) When `set all` is given, the editor shall
   list every option and its value.
-- [ ] **EXVI-55.3** (Event-driven) When `set noX?` is given, the editor shall
+- [x] **EXVI-55.3** (Event-driven) When `set noX?` is given, the editor shall
   report option X's current value.
 
 - **Where**: `exvi_session.c:437-470`, `542`, `552`.
@@ -1006,14 +1006,17 @@ The number is not reused.
 
 ### EXVI-68 — an exclusive region ending at column 0 leaves an empty line — *Low*
 
-- [ ] **EXVI-68.1** (Event-driven) When a characterwise region ends at column 0
+- [x] **EXVI-68.1** (Event-driven) When a characterwise region ends at column 0
   of a later line, the editor shall exclude that line's first character and
   include the newline before it.
 
 - **Where**: `exvi_visual.c:4459-4465`.
 - **Evidence**: ``jjmakkd`a`` on `a b c d` (one per line) → `\nc\nd`
-  (expected `c\nd`).
-- **Basis**: reproduced.
+  (expected `c\nd`).  Also `2d)` and `2y)` over text, blank line, text
+  (a back-off for a single `)` moved the end onto the blank line), and a
+  mark set after `j` onto a shorter line, which kept the remembered column
+  past the line's end.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_exclusive.py`.
 
 ### EXVI-69 — `^@` does not replay the last input — *Low*
 
@@ -1089,7 +1092,7 @@ The number is not reused.
 
 ### EXVI-74 — `bin/ex` and `bin/vi` cannot be built for the host — *Medium*
 
-- [ ] **EXVI-74.1** (Optional feature) Where `NATIVE_BUILD` is set, the ex and
+- [x] **EXVI-74.1** (Optional feature) Where `NATIVE_BUILD` is set, the ex and
   vi Makefiles shall link the host-built libexvi and libregex archives.
 
 - **Where**: `bin/ex/Makefile:6`, `bin/vi/Makefile:6` link
@@ -1098,7 +1101,7 @@ The number is not reused.
 
 ### EXVI-75 — `tests/usr.lib/exvi` does not link — *Medium*
 
-- [ ] **EXVI-75.1** (Ubiquitous) The libexvi tests shall build and pass.
+- [x] **EXVI-75.1** (Ubiquitous) The libexvi tests shall build and pass.
 
 - **Where**: `test_main.c` includes `exvi_visual.c` and also links
   `libexvi.a`: every symbol twice.
@@ -1106,14 +1109,14 @@ The number is not reused.
 
 ### EXVI-76 — the ex and vi test Makefiles hide failures and clobber the tree — *Medium*
 
-- [ ] **EXVI-76.1** (Unwanted behaviour) If a step of the ex or vi test target
+- [x] **EXVI-76.1** (Unwanted behaviour) If a step of the ex or vi test target
   fails, then the target shall fail.
-- [ ] **EXVI-76.2** (Ubiquitous) The ex and vi test targets shall build nothing
+- [x] **EXVI-76.2** (Ubiquitous) The ex and vi test targets shall build nothing
   outside their own directories except through the libraries' own host
   builds.
-- [ ] **EXVI-76.3** (Ubiquitous) The tree's test suite shall run
+- [x] **EXVI-76.3** (Ubiquitous) The tree's test suite shall run
   `tests/bin/ex`, `tests/bin/vi` and `tests/usr.lib/exvi`.
-- [ ] **EXVI-76.4** (Ubiquitous) The ex and vi test targets shall also run
+- [x] **EXVI-76.4** (Ubiquitous) The ex and vi test targets shall also run
   their tests on an AddressSanitizer build of ex and vi.  (Added while
   fixing: `test_vi_exit_paths.py` (EXVI-21) fails on the old code only under
   ASan, and `test_vi_replace_ctrl_o.py` (EXVI-20) on a plain build only
@@ -1128,7 +1131,7 @@ The number is not reused.
 
 ### EXVI-77 — a host libexvi has no regex of its own to agree with — *Medium*
 
-- [ ] **EXVI-77.1** (Optional feature) Where `NATIVE_BUILD` is set, libexvi
+- [x] **EXVI-77.1** (Optional feature) Where `NATIVE_BUILD` is set, libexvi
   shall be compiled and linked against the same regex implementation.
 
 - **Where**: libexvi compiles against the host's `<regex.h>` (the
@@ -1139,9 +1142,9 @@ The number is not reused.
 
 ### EXVI-78 — libexvi exports its internals — *Low*
 
-- [ ] **EXVI-78.1** (Ubiquitous) libexvi shall export only the interface
+- [x] **EXVI-78.1** (Ubiquitous) libexvi shall export only the interface
   declared in `include/exvi.h`.
-- [ ] **EXVI-78.2** (Ubiquitous) `include/exvi.h` shall declare its interface
+- [x] **EXVI-78.2** (Ubiquitous) `include/exvi.h` shall declare its interface
   with C linkage for C++ callers.
 
 - **Evidence**: 135 defined dynamic symbols, 3 of them in `exvi.h`, among
@@ -1151,7 +1154,7 @@ The number is not reused.
 
 ### EXVI-79 — libexvi is not branded for Substrate — *Low*
 
-- [ ] **EXVI-79.1** (Ubiquitous) Each shared object the tree builds for
+- [x] **EXVI-79.1** (Ubiquitous) Each shared object the tree builds for
   Substrate shall carry ELFOSABI_SUBSTRATE.
 
 - **Where**: `usr.lib/exvi/Makefile` never applies `BRAND_SUBSTRATE`;
@@ -1161,7 +1164,7 @@ The number is not reused.
 
 ### EXVI-80 — `view`, `rex` and `rvi` are recognised but not installed — *Low*
 
-- [ ] **EXVI-80.1** (Ubiquitous) The build shall install each name the editor
+- [x] **EXVI-80.1** (Ubiquitous) The build shall install each name the editor
   answers to that its manual pages document.
 
 - **Where**: `exvi.c:484-488`; no Makefile or `build-rootfs.sh` creates the
@@ -1170,7 +1173,7 @@ The number is not reused.
 
 ### EXVI-81 — the documentation claims more than the code does — *Low*
 
-- [ ] **EXVI-81.1** (Ubiquitous) `ex.1`, `vi.1` and
+- [x] **EXVI-81.1** (Ubiquitous) `ex.1`, `vi.1` and
   `docs/specs/exvi_conformance.md` shall describe only behaviour the editor
   has.
 
@@ -1214,7 +1217,7 @@ The number is not reused.
 
 ### EXVI-84 — ex starts on the first line of the file, not the last — *Medium*
 
-- [ ] **EXVI-84.1** (Event-driven) When ex starts editing a file, the editor
+- [x] **EXVI-84.1** (Event-driven) When ex starts editing a file, the editor
   shall make the last line of the buffer the current line.
 
 - **Where**: the startup in `exvi.c` leaves `b->cur` where `buf_read_file`
@@ -1225,7 +1228,7 @@ The number is not reused.
 
 ### EXVI-85 — `tests/usr.lib/exvi` does not link — *Medium*
 
-- [ ] **EXVI-85.1** (Ubiquitous) The libexvi unit tests shall build and run
+- [x] **EXVI-85.1** (Ubiquitous) The libexvi unit tests shall build and run
   with `make -C tests/usr.lib/exvi run`.
 
 - **Where**: `tests/usr.lib/exvi/test_main.c:12-14` includes
@@ -1238,3 +1241,30 @@ The number is not reused.
   (`exvi_write_recover_snapshot`) went unseen too.  Linked by hand with a
   stub for `exvi_visual_main`, the core tests pass.
 - **Basis**: reproduced.
+
+### EXVI-86 — vi forgets the buffer `"x` names — *Medium*
+
+- [x] **EXVI-86.1** (Event-driven) When `"x` precedes a vi command, the
+  editor shall use buffer x for that command.
+
+- **Where**: `exvi_visual.c`, the `"` case read the name into the command
+  loop's `key`, and the loop's end clears the pending name for any key but
+  `"`, `d`, `y` and `c` -- so at once.
+- **Evidence**: `"ayy`, `j`, `"byy`, `G`, `"ap` puts `two`: every `"x`
+  command used the unnamed buffer (`"ayy` then `"ap` only looked right).
+  Found fixing EXVI-51.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_registers.py`.
+
+### EXVI-87 — `z<CR>` and `z.` keep the last page full — *Low*
+
+- [x] **EXVI-87.1** (Event-driven) When `z<CR>` or `z.` places a line near the
+  end of the file, the editor shall put it at the top or the middle of the
+  screen, with `~` rows after the last line.
+
+- **Where**: `exvi_visual.c`, `vi_reposition_target` clamped every new top
+  line with `vi_clamp_top_line`, which keeps the screen's last row on a
+  line of the file.
+- **Evidence**: on a 40-line file in 24 rows, `20Gz<CR>H` goes to line 18
+  (Vim: 20); `38Gz.H` to 18 (Vim: 27).  `test_vi_pty.py`'s z-position case
+  had failed on it, unseen while nothing ran that test (EXVI-76).
+- **Basis**: reproduced; `tests/bin/vi/test_vi_pty.py`.

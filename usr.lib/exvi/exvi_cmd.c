@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
 
 #define EXVI_SUB_PRINT_PLAIN  0x01
@@ -75,6 +76,48 @@ print_line_text(line_t *l, int listed)
         }
     }
     printf(listed ? "$\n" : "\n");
+}
+
+/* vi's way of asking about one replacement (its status line); NULL: ex's */
+int (*exvi_sub_confirm_hook)(buffer_t *b, line_t *l, size_t so, size_t eo) = NULL;
+
+/**
+ * Substitute's c option: ask whether to replace the match l[so, eo).  ex
+ * writes the line with `^` under the match and reads an answer; a frontend
+ * may ask its own way (exvi_sub_confirm_hook).
+ * @return 1 to replace, 0 not to, -1 to stop substituting (q, an
+ *         interrupt, the end of input)
+ */
+int
+exvi_sub_confirm(buffer_t *b, line_t *l, size_t so, size_t eo)
+{
+    char *answer = NULL;
+    size_t cap = 0;
+    ssize_t n;
+    int rc;
+
+    if (exvi_sub_confirm_hook) {
+        return exvi_sub_confirm_hook(b, l, so, eo);
+    }
+    print_line_text(l, 0);
+    for (size_t i = 0; i < so && i < l->len; i++) {
+        putchar(l->text[i] == '\t' ? '\t' : ' ');
+    }
+    putchar('^');                       /* an empty match is marked too */
+    for (size_t i = so + 1; i < eo; i++) {
+        putchar('^');
+    }
+    fputs("\n[y/n/q] ", stdout);
+    fflush(stdout);
+    n = getline(&answer, &cap, stdin);
+    if (exvi_take_interrupt() || n < 0) {
+        clearerr(stdin);
+        free(answer);
+        return -1;
+    }
+    rc = answer[0] == 'y' ? 1 : answer[0] == 'q' ? -1 : 0;
+    free(answer);
+    return rc;
 }
 
 static void
@@ -174,9 +217,10 @@ sub_split_line(buffer_t *b, line_t *l)
 
 static int
 apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
-    const char *replacement, int global, int print_flags)
+    const char *replacement, int global, int confirm, int print_flags)
 {
     regex_t re;
+    int quit = 0;
 
     if (!pattern || !replacement) {
         return 0;
@@ -188,7 +232,7 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
     if (addr1 > 0 && addr2 >= addr1) {
         line_t *l = buf_get_line(b, addr1);
 
-        for (int i = 0; i < (addr2 - addr1 + 1) && l; i++) {
+        for (int i = 0; i < (addr2 - addr1 + 1) && l && !quit; i++) {
             regmatch_t pm[10];
             char *search_start = l->text;
             int matches = 0;
@@ -201,12 +245,35 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
 
             /* after the first match the text searched starts inside the line: no `^` there */
             while (regexec(&re, search_start, 10, pm, search_start != l->text ? REG_NOTBOL : 0) == 0) {
-                matches++;
-                if (sub_text_add(&t, search_start, (size_t)pm[0].rm_so) != 0 ||
-                    sub_expand(&t, replacement, search_start, pm) != 0) {
-                    free(t.s);
-                    regfree(&re);
-                    return 0;
+                int take = 1;
+
+                if (confirm) {
+                    /* the c option: this match only if the user says so */
+                    size_t base = (size_t)(search_start - l->text);
+                    int r = exvi_sub_confirm(b, l, base + (size_t)pm[0].rm_so,
+                        base + (size_t)pm[0].rm_eo);
+
+                    if (r < 0) {
+                        quit = 1;       /* q, interrupt or end of input */
+                        break;
+                    }
+                    take = r;
+                }
+                if (!take) {
+                    /* kept: the text up to the match's end, as it was */
+                    if (sub_text_add(&t, search_start, (size_t)pm[0].rm_eo) != 0) {
+                        free(t.s);
+                        regfree(&re);
+                        return 0;
+                    }
+                } else {
+                    matches++;
+                    if (sub_text_add(&t, search_start, (size_t)pm[0].rm_so) != 0 ||
+                        sub_expand(&t, replacement, search_start, pm) != 0) {
+                        free(t.s);
+                        regfree(&re);
+                        return 0;
+                    }
                 }
 
                 search_start += pm[0].rm_eo;
@@ -266,25 +333,73 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
     return 1;
 }
 
+/*
+ * What follows a substitute's replacement, or `&`: POSIX's
+ * [options][count][flags] -- options `&` (the previous substitute's
+ * options), `c` (confirm each), `g` (every match), `r` (the last pattern
+ * rather than the last substitute's, for a repeat); a count of lines from
+ * the range's last; flags `#`, `p`, `l`.
+ */
+typedef struct sub_opts {
+    int global;
+    int confirm;
+    int keep;           /* `&` */
+    int last_re;        /* `r` */
+    int count;          /* 0: none */
+    int print_mode;
+} sub_opts_t;
+
 static int
-parse_substitute_flags(const char *spec, int *global, int *print_mode)
+parse_substitute_flags(const char *spec, sub_opts_t *o)
 {
+    memset(o, 0, sizeof(*o));
     while (*spec) {
-        if (*spec == 'g') {
-            *global = 1;
+        if (*spec == '&') {
+            o->keep = 1;
+        } else if (*spec == 'c') {
+            o->confirm = 1;
+        } else if (*spec == 'g') {
+            o->global = 1;
+        } else if (*spec == 'r') {
+            o->last_re = 1;
+        } else if (isdigit((unsigned char)*spec) && !o->count) {
+            long n = strtol(spec, (char **)&spec, 10);
+
+            if (n < 1 || n > INT_MAX) {
+                exvi_report_error("Bad count");
+                return 0;
+            }
+            o->count = (int)n;
+            continue;
         } else if (*spec == 'p') {
-            *print_mode |= EXVI_SUB_PRINT_PLAIN;
+            o->print_mode |= EXVI_SUB_PRINT_PLAIN;
         } else if (*spec == '#') {
-            *print_mode |= EXVI_SUB_PRINT_NUMBER;
+            o->print_mode |= EXVI_SUB_PRINT_NUMBER;
         } else if (*spec == 'l') {
-            *print_mode |= EXVI_SUB_PRINT_LIST;
+            o->print_mode |= EXVI_SUB_PRINT_LIST;
         } else if (!isspace((unsigned char)*spec)) {
             exvi_report_error("Bad substitute flags");
             return 0;
         }
         spec++;
     }
+    if (o->keep) {
+        /* the previous substitute's options, these added to them */
+        o->global |= last_sub_global;
+        o->confirm |= last_sub_confirm;
+    }
     return 1;
+}
+
+/* A count makes the range count lines from its last (POSIX ex). */
+static void
+apply_substitute_count(buffer_t *b, const sub_opts_t *o, int *addr1, int *addr2)
+{
+    if (o->count > 0 && *addr2 > 0) {
+        *addr1 = *addr2;
+        *addr2 = (o->count - 1 > b->line_count - *addr1)
+            ? b->line_count : *addr1 + o->count - 1;
+    }
 }
 
 static char *
@@ -473,6 +588,204 @@ sub_expand(sub_text_t *t, const char *repl, const char *line, const regmatch_t *
     return 0;
 }
 
+/*
+ * A buffer name: a-z, or A-Z for the same buffer appended to (POSIX ex).
+ * @return its index, -1 if c names none
+ */
+static int
+register_index(int c, int *append)
+{
+    if (append) {
+        *append = 0;
+    }
+    if (c >= 'a' && c <= 'z') {
+        return c - 'a';
+    }
+    if (c >= 'A' && c <= 'Z') {
+        if (append) {
+            *append = 1;
+        }
+        return c - 'A';
+    }
+    return -1;
+}
+
+/*
+ * What may follow an ex command (POSIX "Command Line Parsing in ex"):
+ * [buffer] [count] [flags], each where the command takes it.
+ */
+typedef struct cmd_tail {
+    char buffer[2];     /* the buffer named, as given ("" if none) */
+    int count;          /* 0: none */
+    int flags;          /* EXVI_SUB_PRINT_*: print the current line after */
+} cmd_tail_t;
+
+static int
+parse_command_tail(const char *args, int take_buffer, int take_count,
+    cmd_tail_t *t)
+{
+    const char *p = args ? args : "";
+
+    memset(t, 0, sizeof(*t));
+    while (isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (take_buffer && register_index((unsigned char)*p, NULL) >= 0) {
+        t->buffer[0] = *p++;
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+    }
+    if (take_count && isdigit((unsigned char)*p)) {
+        long n = strtol(p, (char **)&p, 10);
+
+        if (n < 1 || n > INT_MAX) {
+            exvi_report_error("Bad count");
+            return 0;
+        }
+        t->count = (int)n;
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+    }
+    for (; *p; p++) {
+        if (*p == 'p') {
+            t->flags |= EXVI_SUB_PRINT_PLAIN;
+        } else if (*p == '#') {
+            t->flags |= EXVI_SUB_PRINT_NUMBER;
+        } else if (*p == 'l') {
+            t->flags |= EXVI_SUB_PRINT_LIST;
+        } else if (!isspace((unsigned char)*p)) {
+            exvi_report_error("Extra characters at end of command");
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/*
+ * A count makes the range count lines from its last line (POSIX ex):
+ * `1,3d 2` deletes lines 3 and 4.
+ */
+static void
+apply_command_count(buffer_t *b, int count, int explicit_range, int *addr1,
+    int *addr2)
+{
+    if (!explicit_range) {
+        set_default_current_range(b, addr1, addr2);
+    }
+    if (count > 0 && *addr2 > 0) {
+        *addr1 = *addr2;
+        *addr2 = (count - 1 > b->line_count - *addr1)
+            ? b->line_count : *addr1 + count - 1;
+    }
+}
+
+/* The flags p, # and l: print the current line so, after the command. */
+static void
+print_after_command(buffer_t *b, int flags)
+{
+    int line;
+
+    if (!flags || !b->cur) {
+        return;
+    }
+    line = buf_current_line(b);
+    print_range(b, line, line, (flags & EXVI_SUB_PRINT_NUMBER) || option_number,
+        (flags & EXVI_SUB_PRINT_LIST) || option_list);
+}
+
+/* ex's delete: [buffer] [count] [flags] */
+int
+handle_ex_delete_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2)
+{
+    cmd_tail_t t;
+
+    if (!parse_command_tail(args, 1, 1, &t)) {
+        return 1;
+    }
+    apply_command_count(b, t.count, explicit_range, &addr1, &addr2);
+    if (t.buffer[0]) {
+        /* the named buffer as well as the unnamed one */
+        handle_yank_command(b, t.buffer, 1, addr1, addr2);
+    }
+    handle_delete_command(b, 1, addr1, addr2);
+    print_after_command(b, t.flags);
+    return 1;
+}
+
+/* ex's yank: [buffer] [count] */
+int
+handle_ex_yank_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2)
+{
+    cmd_tail_t t;
+
+    if (!parse_command_tail(args, 1, 1, &t)) {
+        return 1;
+    }
+    apply_command_count(b, t.count, explicit_range, &addr1, &addr2);
+    return handle_yank_command(b, t.buffer, 1, addr1, addr2);
+}
+
+/* ex's print, number (#) and list: [count] [flags] */
+int
+handle_ex_print_command(buffer_t *b, const char *cmd, const char *args,
+    int explicit_range, int addr1, int addr2)
+{
+    cmd_tail_t t;
+    int numbered;
+    int listed;
+
+    if (!parse_command_tail(args, 0, 1, &t)) {
+        return 1;
+    }
+    apply_command_count(b, t.count, explicit_range, &addr1, &addr2);
+    if (addr1 < 1 || addr2 < 1) {
+        exvi_report_error("No current line");
+        return 1;
+    }
+    numbered = cmd[0] == '#' || strncmp(cmd, "nu", 2) == 0 || option_number
+        || (t.flags & EXVI_SUB_PRINT_NUMBER);
+    listed = cmd[0] == 'l' || option_list || (t.flags & EXVI_SUB_PRINT_LIST);
+    print_range(b, addr1, addr2, numbered, listed);
+    return 1;
+}
+
+/* ex's join: [!] [count] [flags] */
+int
+handle_ex_join_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2, int force)
+{
+    cmd_tail_t t;
+
+    if (!parse_command_tail(args, 0, 1, &t)) {
+        return 1;
+    }
+    if (t.count > 0) {
+        /* count lines from the last addressed one: `3j 3` joins 3-5 */
+        apply_command_count(b, t.count, explicit_range, &addr1, &addr2);
+        explicit_range = 1;
+        if (addr1 == addr2 && addr2 < b->line_count) {
+            addr2 = addr1 + 1;  /* a count of 1 still joins two */
+        }
+    }
+    {
+        /* one line and none after it to join to: `$j` said nothing */
+        int first = explicit_range ? addr1 : buf_current_line(b);
+        int last = explicit_range ? addr2 : first;
+
+        if (first >= 1 && last <= first && first >= b->line_count) {
+            exvi_report_error("No line to join with");
+            return 1;
+        }
+    }
+    handle_join_command(b, explicit_range, addr1, addr2, force);
+    print_after_command(b, t.flags);
+    return 1;
+}
+
 int
 handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2)
 {
@@ -488,6 +801,11 @@ handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2)
             if (l) {
                 buf_delete(b, l);
             }
+        }
+        /* POSIX: the line after those deleted, or the last line if they
+         * were at the end (`2,4d` from line 1 left it on line 1) */
+        if (b->line_count > 0) {
+            b->cur = buf_get_line(b, addr1 <= b->line_count ? addr1 : b->line_count);
         }
     }
     return 1;
@@ -538,8 +856,8 @@ handle_put_command(buffer_t *b, const char *args, int addr2)
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
     }
-    if (*ptr >= 'a' && *ptr <= 'z') {
-        reg_idx = *ptr - 'a';
+    if (register_index((unsigned char)*ptr, NULL) >= 0) {
+        reg_idx = register_index((unsigned char)*ptr, NULL);     /* A is a */
     }
 
     save_undo(b);
@@ -550,6 +868,9 @@ handle_put_command(buffer_t *b, const char *args, int addr2)
     while (src) {
         pos = buf_insert_after_n(b, pos, src->text, src->len);
         src = src->next;
+    }
+    if (pos && regs[reg_idx].head) {
+        b->cur = pos;               /* POSIX: the last line put */
     }
     return 1;
 }
@@ -728,6 +1049,9 @@ handle_copy_command(buffer_t *b, const char *args, int explicit_range, int addr1
             pos = buf_insert_after_n(b, pos, src[i]->text, src[i]->len);
         }
         free(src);
+        if (pos) {
+            b->cur = pos;           /* POSIX: the last line copied */
+        }
     }
     return 1;
 }
@@ -776,6 +1100,9 @@ handle_move_command(buffer_t *b, const char *args, int explicit_range, int addr1
                 buf_delete(b, l);
             }
         }
+        if (pos) {
+            b->cur = pos;           /* POSIX: the last line moved */
+        }
     }
     return 1;
 }
@@ -812,7 +1139,8 @@ handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2, int f
             total_len += nxt_len->len;
             nxt_len = nxt_len->next;
         }
-        joined = malloc(total_len + (size_t)(addr2 - addr1 + 1));
+        /* up to two spaces per join, and the NUL */
+        joined = malloc(total_len + 2 * (size_t)(addr2 - addr1) + 1);
         if (!joined) {
             return 1;
         }
@@ -822,16 +1150,31 @@ handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2, int f
         nxt = first->next;
         for (int i = 1; i <= (addr2 - addr1) && nxt; i++) {
             line_t *to_delete = nxt;
+            size_t skip = 0;
 
             nxt = nxt->next;
-            /* join! joins the lines as they are */
-            if (!force && cur_len > 0 && joined[cur_len - 1] != ' '
-                && joined[cur_len - 1] != '\t' && to_delete->text[0] != ' '
-                && to_delete->text[0] != '\t' && to_delete->text[0] != ')') {
-                joined[cur_len++] = ' ';
+            /*
+             * POSIX ex: each appended line loses its leading blanks, and is
+             * joined by two spaces after a `.`, none before a `)` or after
+             * a blank (or for an empty line), else one.  `a` + `   b` gave
+             * `a   b`.  join! joins the lines as they are.
+             */
+            if (!force) {
+                while (skip < to_delete->len && (to_delete->text[skip] == ' '
+                    || to_delete->text[skip] == '\t')) {
+                    skip++;
+                }
+                if (cur_len > 0 && skip < to_delete->len
+                    && to_delete->text[skip] != ')'
+                    && joined[cur_len - 1] != ' ' && joined[cur_len - 1] != '\t') {
+                    if (joined[cur_len - 1] == '.') {
+                        joined[cur_len++] = ' ';
+                    }
+                    joined[cur_len++] = ' ';
+                }
             }
-            memcpy(joined + cur_len, to_delete->text, to_delete->len);
-            cur_len += to_delete->len;
+            memcpy(joined + cur_len, to_delete->text + skip, to_delete->len - skip);
+            cur_len += to_delete->len - skip;
             joined[cur_len] = '\0';
             buf_delete(b, to_delete);
         }
@@ -839,6 +1182,7 @@ handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2, int f
         free(first->text);
         first->text = joined;
         first->len = cur_len;
+        b->cur = first;             /* POSIX: the joined line */
     }
     return 1;
 }
@@ -853,18 +1197,24 @@ handle_yank_command(buffer_t *b, const char *args, int explicit_range, int addr1
     if (!explicit_range) {
         set_default_current_range(b, &addr1, &addr2);
     }
+    int append = 0;
+
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
     }
-    if (*ptr >= 'a' && *ptr <= 'z') {
-        reg_idx = *ptr - 'a';
+    if (register_index((unsigned char)*ptr, &append) >= 0) {
+        reg_idx = register_index((unsigned char)*ptr, &append);
     }
 
-    buf_free(&regs[reg_idx]);
+    /* A-Z: appended to a-z, not replacing it -- and not the unnamed
+     * buffer, where A used to go */
+    if (!append) {
+        buf_free(&regs[reg_idx]);
+    }
     reg_linewise[reg_idx] = 1;
     if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
         line_t *src = buf_get_line(b, addr1);
-        line_t *pos = NULL;
+        line_t *pos = append ? regs[reg_idx].tail : NULL;
 
         for (int i = 0; i < (addr2 - addr1 + 1) && src; i++) {
             pos = buf_insert_after_n(&regs[reg_idx], pos, src->text, src->len);
@@ -883,28 +1233,18 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
     char *pat_raw;
     char *repl_str;
     char *re_str;
-    int global = 0;
-    int print_mode = 0;
+    sub_opts_t o;
 
-    save_undo(b);
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
     }
     delim = *ptr;
-    if (!delim || delim == '\n') {
-        if (!last_sub_pattern || !last_sub_replacement) {
-            return 1;
-        }
-        if (addr1 == -1) {
-            set_default_current_range(b, &addr1, &addr2);
-        }
-        if (addr1 > 0 && addr2 >= addr1
-            && apply_substitute_range(b, addr1, addr2, last_sub_pattern,
-                last_sub_replacement, last_sub_global, 0)) {
-            replace_saved_string(&last_search_pattern, last_sub_pattern);
-        }
-        return 1;
+    /* no pattern -- nothing, or options straight after `s` (a delimiter
+     * is never alphanumeric): the previous substitute again, as `&` */
+    if (!delim || delim == '\n' || isalnum((unsigned char)delim) || delim == '&') {
+        return handle_repeat_substitute_command(b, ptr, addr1, addr2);
     }
+    save_undo(b);
 
     spec = ptr + 1;
     pat_raw = parse_delimited_text(&spec, delim);
@@ -927,22 +1267,15 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
             return 1;
         }
     }
-    if (!parse_substitute_flags(spec, &global, &print_mode)) {
+    if (!parse_substitute_flags(spec, &o)) {
         free(pat_raw);
         free(repl_str);
         return 1;
     }
 
-    if (*pat_raw == '\0') {
-        if (!last_sub_pattern) {
-            free(pat_raw);
-            free(repl_str);
-            return 1;
-        }
-        re_str = strdup(last_sub_pattern);
-    } else {
-        re_str = strdup(pat_raw);
-    }
+    /* s//: the last pattern any command used, a search's too, not only
+     * the last substitute's */
+    re_str = exvi_resolve_pattern(pat_raw);
     free(pat_raw);
     if (!re_str) {
         free(repl_str);
@@ -952,43 +1285,54 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
     if (addr1 == -1) {
         set_default_current_range(b, &addr1, &addr2);
     }
+    apply_substitute_count(b, &o, &addr1, &addr2);
     if (addr1 > 0 && addr2 >= addr1
-        && apply_substitute_range(b, addr1, addr2, re_str, repl_str, global,
-            print_mode)) {
-        replace_saved_string(&last_search_pattern, re_str);
+        && apply_substitute_range(b, addr1, addr2, re_str, repl_str, o.global,
+            o.confirm, o.print_mode)) {
         replace_saved_string(&last_sub_pattern, re_str);
         replace_saved_string(&last_sub_replacement, repl_str);
-        last_sub_global = global;
+        last_sub_global = o.global;
+        last_sub_confirm = o.confirm;
     }
     free(re_str);
     free(repl_str);
     return 1;
 }
 
+/*
+ * `&` -- and `s` with no pattern -- repeats the previous substitute: its
+ * pattern (the last pattern of any command with the r option) and
+ * replacement, with the options and count given here, `&` among them
+ * keeping the previous options (`&&`).
+ */
 int
 handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
     int addr2)
 {
     const char *ptr = args;
-    int global = 0;
-    int print_mode = 0;
+    const char *pattern;
+    sub_opts_t o;
 
-    if (!last_sub_pattern || !last_sub_replacement) {
-        return 1;
-    }
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
     }
-    if (!parse_substitute_flags(ptr, &global, &print_mode)) {
+    if (!parse_substitute_flags(ptr, &o)) {
+        return 1;
+    }
+    pattern = o.last_re ? last_search_pattern : last_sub_pattern;
+    if (!pattern || !last_sub_replacement) {
+        exvi_report_error("No previous substitute");
         return 1;
     }
     save_undo(b);
     if (addr1 == -1) {
         set_default_current_range(b, &addr1, &addr2);
     }
-    if (addr1 > 0 && addr2 >= addr1) {
-        apply_substitute_range(b, addr1, addr2, last_sub_pattern,
-            last_sub_replacement, global, print_mode);
+    apply_substitute_count(b, &o, &addr1, &addr2);
+    if (addr1 > 0 && addr2 >= addr1
+        && apply_substitute_range(b, addr1, addr2, pattern,
+            last_sub_replacement, o.global, o.confirm, o.print_mode)) {
+        replace_saved_string(&last_search_pattern, pattern);
     }
     return 1;
 }

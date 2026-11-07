@@ -117,7 +117,8 @@ def main():
         proc = subprocess.run([ex_path, "-v", path], input=b"",
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         require(proc.returncode == 1, f"ex -v non-tty status mismatch: {proc.returncode}")
-        require(proc.stderr.decode("latin1", "replace") == "vi: visual mode requires a terminal.\n",
+        # ex's own visual mode says so, not an exec'd vi
+        require(proc.stderr.decode("latin1", "replace") == "ex: visual mode requires a terminal.\n",
                 f"ex -v non-tty stderr mismatch: {proc.stderr!r}")
     finally:
         os.unlink(path)
@@ -146,12 +147,15 @@ def main():
         require(exit_code == 0, f"ex -v -t status mismatch: {exit_code}")
         require("line 2/2" in decoded, f"ex -v -t missing tag target status: {decoded!r}")
 
-    proc = subprocess.run([ex_path, "-r"], input=b"",
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    require(proc.returncode == 1, f"ex -r missing-file status mismatch: {proc.returncode}")
-    require(proc.stdout == b"", f"ex -r missing-file stdout mismatch: {proc.stdout!r}")
-    require(proc.stderr.decode("latin1", "replace") == "ex: -r requires a file operand\n",
-            f"ex -r missing-file stderr mismatch: {proc.stderr!r}")
+    # -r with no file lists what can be recovered (POSIX ex): none, here
+    with tempfile.TemporaryDirectory() as rdir:
+        proc = subprocess.run([ex_path, "-r"], input=b"",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=dict(os.environ, EXINIT=f"set dir={rdir}"))
+    require(proc.returncode == 0, f"ex -r (no file) status mismatch: {proc.returncode}")
+    require(proc.stdout == b"No files to recover\n",
+            f"ex -r (no file) stdout mismatch: {proc.stdout!r}")
+    require(proc.stderr == b"", f"ex -r (no file) stderr mismatch: {proc.stderr!r}")
 
     # :preserve, then ex -r: the recover image is in <directory>/exvi-<uid>
     # (EXINIT points directory at a scratch directory), and a .recover

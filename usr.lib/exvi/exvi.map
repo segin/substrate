@@ -1,0 +1,12 @@
+/*
+ * libexvi.so.0 exports include/exvi.h and nothing else: the editor's
+ * internals -- buf_init, regs, parse_range and the rest -- stay inside it.
+ */
+{
+    global:
+        exvi_main;
+        exvi_handoff_file;
+        exvi_readonly_mode;
+    local:
+        *;
+};

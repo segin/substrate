@@ -1,40 +1,32 @@
 TOP = ../../..
-USR_LIB_LOCKDIR = $(TOP)/.locks/usr.lib-test.lock
 ORACLE_ARGS ?=
+
+include ../exvi-build.mk
+
+# Every test, on the plain build and on the ASan one; the oracle, which
+# compares with Vim and is slow, on the plain build only.  Each step is its
+# own command, so the first failure fails the target.
+VI_TESTS = \
+	test_vi_pty.py test_vi_stress.py test_vi_frontend.py \
+	test_vi_replace_ctrl_o.py test_vi_exit_paths.py test_vi_interrupt.py \
+	test_vi_tag.py test_vi_zz_fail.py test_vi_utf8_stray.py \
+	test_vi_search_bol.py test_vi_utf8_ops.py test_vi_nul.py \
+	test_vi_signals.py test_vi_limits.py test_vi_registers.py \
+	test_vi_exclusive.py
 
 .PHONY: all clean test oracle
 
 all: test
 
-test:
-	@mkdir -p $(TOP)/.locks
-	@while ! mkdir "$(USR_LIB_LOCKDIR)" 2>/dev/null; do sleep 1; done; \
-	trap 'rmdir "$(USR_LIB_LOCKDIR)"' EXIT INT TERM; \
-	$(MAKE) -C $(TOP)/usr.lib clean all NATIVE_BUILD=1; \
-	$(MAKE) -C $(TOP)/bin/vi clean all NATIVE_BUILD=1; \
-	python3 ./test_vi_pty.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_oracle.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_stress.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_frontend.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_replace_ctrl_o.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_exit_paths.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_interrupt.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_tag.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_zz_fail.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_utf8_stray.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_search_bol.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_utf8_ops.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_hostile_bytes.py $(abspath $(TOP)/bin/vi/vi) $(abspath $(TOP)/bin/ex/ex); \
-	python3 ./test_vi_nul.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_signals.py $(abspath $(TOP)/bin/vi/vi); \
-	python3 ./test_vi_limits.py $(abspath $(TOP)/bin/vi/vi)
+test: $(VI_PLAIN) $(VI_ASAN) $(EX_PLAIN) $(EX_ASAN)
+	set -e; for vi in $(VI_PLAIN) $(VI_ASAN); do \
+		for t in $(VI_TESTS); do python3 ./$$t $$vi; done; \
+	done
+	python3 ./test_vi_hostile_bytes.py $(VI_PLAIN) $(EX_PLAIN)
+	python3 ./test_vi_hostile_bytes.py $(VI_ASAN) $(EX_ASAN)
+	python3 ./test_vi_oracle.py $(VI_PLAIN) $(ORACLE_ARGS)
 
-oracle:
-	@mkdir -p $(TOP)/.locks
-	@while ! mkdir "$(USR_LIB_LOCKDIR)" 2>/dev/null; do sleep 1; done; \
-	trap 'rmdir "$(USR_LIB_LOCKDIR)"' EXIT INT TERM; \
-	$(MAKE) -C $(TOP)/usr.lib clean all NATIVE_BUILD=1; \
-	$(MAKE) -C $(TOP)/bin/vi clean all NATIVE_BUILD=1; \
-	python3 ./test_vi_oracle.py $(abspath $(TOP)/bin/vi/vi) $(ORACLE_ARGS)
+oracle: $(VI_PLAIN)
+	python3 ./test_vi_oracle.py $(VI_PLAIN) $(ORACLE_ARGS)
 
-clean:
+clean: clean-build

@@ -422,7 +422,11 @@ Shared objects are branded with Substrate's ELF OSABI (64).
   account tools.
 - **`usr.lib/elfobj`**: ELF reading for `nm`, `readelf`, `ar` and friends
   (`usr.lib/elfobj/README.md`, `ABI_POLICY.md`).
-- **`usr.lib/exvi`**: the shared implementation of `ex` and `vi`.
+- **`usr.lib/exvi`**: the shared implementation of `ex` and `vi`.  Its
+  shared object exports only `exvi_main` and the two variables the
+  frontends set (`exvi.map`); `bin/ex` and `bin/vi` are each one call to
+  `exvi_main`.  `tests/bin/ex` and `tests/bin/vi` build both, plain and
+  under ASan, into their own `build/` (`tests/bin/exvi-build.mk`).
 
 `lib/c/arch/i386/crt0.S` serves static and dynamic programs alike: it
 finds the GOT with `call`/`pop`, reaches `environ` through the GOT, and

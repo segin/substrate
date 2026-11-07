@@ -9,8 +9,12 @@
 #include "../../../usr.lib/exvi/exvi_internal.h"
 
 #pragma GCC diagnostic ignored "-Wunused-result"
-#define exvi_decode_terminal_key_sequence exvi_decode_terminal_key_sequence_mock
-#define exvi_visual_main exvi_visual_main_mock
+/*
+ * exvi_visual.c, compiled into this test for its static functions.  Under
+ * its own names: it renamed exvi_visual_main, which exvi.o in libexvi.a
+ * still calls, so the archive's exvi_visual.o was linked in for it and
+ * defined everything here a second time -- the suite did not link.
+ */
 #include "../../../usr.lib/exvi/exvi_visual.c"
 
 static void

@@ -453,6 +453,19 @@ save_undo(buffer_t *current)
 }
 
 /**
+ * After a file is loaded, at startup or by edit or next: ex makes its last
+ * line current (POSIX ex), so `a` or `r !cmd` with no address go at the
+ * end; it was the first.  vi starts on the first line.
+ */
+void
+exvi_set_loaded_line(buffer_t *b)
+{
+    if (!visual_mode && b->tail) {
+        b->cur = b->tail;
+    }
+}
+
+/**
  * Read filename into b.  A file that does not exist is a new file, and b
  * stays empty; any other failure to open or read it is reported and marks
  * b read_failed, so that the partial buffer is not written back over the

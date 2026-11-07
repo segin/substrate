@@ -568,33 +568,23 @@ parse_range_checked(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2,
         return 1;
     }
 
-    a1 = parse_address_checked(b, cmd_ptr, &parse_error);
-    if (parse_error) {
-        b->cur = saved_cur;
-        if (errorp) {
-            *errorp = 1;
-        }
-        return 0;
-    }
-    if (a1 != -1) {
-        explicit_range = 1;
-        *addr1 = a1;
-        *addr2 = a1;
+    /*
+     * Addresses separated by `,` or `;`, as many as are given (POSIX ex,
+     * Addressing): an address omitted beside a separator is the current
+     * line (`,5p` is `.,5p`, `5,p` is `5,.p`); a command taking two uses
+     * the last two (`1,3,5p` is `3,5p`); and `;` makes the address before
+     * it the current line, for the rest and after.
+     */
+    {
+        int prev = -1;
+        int last = -1;
+        int count = 0;
+        int semicolon_seen = 0;
 
-        p = *cmd_ptr;
-        while (*p && isspace((unsigned char)*p)) {
-            p++;
-        }
-        if (*p == ',' || *p == ';') {
-            int semicolon = (*p == ';');
-            int a2;
+        (void)a1;
+        for (;;) {
+            int a = parse_address_checked(b, cmd_ptr, &parse_error);
 
-            p++;
-            *cmd_ptr = p;
-            if (semicolon) {
-                b->cur = buf_get_line(b, a1);
-            }
-            a2 = parse_address_checked(b, cmd_ptr, &parse_error);
             if (parse_error) {
                 b->cur = saved_cur;
                 if (errorp) {
@@ -602,14 +592,54 @@ parse_range_checked(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2,
                 }
                 return 0;
             }
-            if (a2 != -1) {
-                *addr2 = a2;
-            } else {
-                *addr2 = b->line_count;
+            p = *cmd_ptr;
+            while (*p && isspace((unsigned char)*p)) {
+                p++;
             }
+            if (*p != ',' && *p != ';') {
+                if (a != -1) {
+                    prev = last;
+                    last = a;
+                    count++;
+                } else if (count > 0) {
+                    /* `5,` : the omitted last address is the current line */
+                    prev = last;
+                    last = buf_current_line(b);
+                    count++;
+                }
+                break;
+            }
+            if (a == -1) {
+                a = buf_current_line(b);
+            }
+            prev = last;
+            last = a;
+            count++;
+            if (*p == ';' && a >= 1 && a <= b->line_count) {
+                /* (0;/x/ searches from the top, but line 0 is no line to
+                 * make current) */
+                semicolon_seen = 1;
+                b->cur = buf_get_line(b, a);
+            }
+            *cmd_ptr = p + 1;
+        }
+        if (count > 0) {
+            explicit_range = 1;
+            *addr1 = (count > 1) ? prev : last;
+            *addr2 = last;
+        }
+        if (!semicolon_seen) {
+            b->cur = saved_cur;
+        }
+        if (count > 1 && *addr1 > *addr2 && *addr2 >= 0) {
+            /* 3,1d said nothing and did nothing */
+            exvi_report_error("Backwards range");
+            if (errorp) {
+                *errorp = 2;
+            }
+            return 0;
         }
     }
-    b->cur = saved_cur;
     if (errorp) {
         *errorp = 0;
     }

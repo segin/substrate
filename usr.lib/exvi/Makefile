@@ -5,7 +5,8 @@ include ../../Makefile.inc
 # themselves are $(O)$(LIB) and $(O)$(SHLIB).
 LIB   = libexvi.a
 SHLIB = libexvi.so.0
-SRCS  = exvi.c exvi_buffer.c exvi_parse.c exvi_runtime.c exvi_cmd.c exvi_session.c exvi_visual.c
+SRCS  = exvi.c exvi_buffer.c exvi_parse.c exvi_runtime.c exvi_cmd.c exvi_session.c exvi_visual.c \
+        exvi_options.c
 OBJS     = $(SRCS:%.c=$(O)%.o)
 PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
@@ -27,11 +28,13 @@ $(O)$(LIB): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 # libexvi calls into libregex; declare DT_NEEDED so ld.so loads it.
-$(O)$(SHLIB): $(PIC_OBJS)
+$(O)$(SHLIB): $(PIC_OBJS) exvi.map
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,$(SHLIB) \
+	      -Wl,--version-script,exvi.map \
 	      -L$(TOP)/usr.lib/regex/$(O) -l:libregex.so.0 \
 	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
+	$(call BRAND_SUBSTRATE,$@)
 	# Provide the -lexvi link-time name in the source tree so in-tree consumers
 	# (ex, vi) link DT_NEEDED libexvi.so.0 instead of baking in libexvi.a.
 	@ln -sf $(SHLIB) $(O)libexvi.so

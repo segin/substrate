@@ -1003,10 +1003,11 @@ run_stdout_test "Long print command" \
     ":1print\n:q!\n" \
     "alpha"
 
-run_stdout_test "Plain print starts at top after file load" \
+# POSIX ex: editing a file makes its last line current
+run_stdout_test "Plain print prints the last line after file load" \
     "alpha\nbeta\ngamma\n" \
     ":p\n:q!\n" \
-    "alpha"
+    "gamma"
 
 run_stdout_test "Set number enables numbered print" \
     "alpha\nbeta\n" \
@@ -1044,13 +1045,13 @@ run_stdout_test "Equals prints last line number and leaves current unchanged" \
     "alpha\nbeta\ngamma\n" \
     ":=\n:p\n:q!\n" \
     "3
-alpha"
+gamma"
 
 run_stdout_test "Addressed equals prints addressed line number and leaves current unchanged" \
     "alpha\nbeta\ngamma\n" \
     ":1,2=\n:p\n:q!\n" \
     "2
-alpha"
+gamma"
 
 run_stdout_test "Equals prints zero for an empty buffer" \
     "" \
@@ -1150,8 +1151,9 @@ run_oracle_test "Move defaults to current line" \
 run_stdout_with_auxfile_test "Read appends after current line by default" \
     "one\ntwo\n" \
     "inserted-a\ninserted-b\n" \
-    ":r __READ_FILE__\n:1,4p\n:q!\n" \
+    ":1\n:r __READ_FILE__\n:1,4p\n:q!\n" \
     "one
+one
 inserted-a
 inserted-b
 two"
@@ -1242,8 +1244,9 @@ one"
 
 run_stdout_test "Read percent expands current filename" \
     "one\ntwo\n" \
-    ":r %\n:1,4p\n:q!\n" \
+    ":1\n:r %\n:1,4p\n:q!\n" \
     "one
+one
 one
 two
 two"
@@ -1352,7 +1355,7 @@ run_tag_test "Tags reports saved and current tag locations" \
     "beta\tsample.txt\t2\n" \
     ":tag beta\n:tags\n:q!\n" \
     "beta
-1 __FILE__:1
+1 __FILE__:3
 > beta sample.txt:2"
 
 run_tag_test "Tags reports nested tag stack names" \
@@ -1361,7 +1364,7 @@ run_tag_test "Tags reports nested tag stack names" \
     ":tag beta\n:tag gamma\n:tags\n:q!\n" \
     "beta
 gamma
-1 __FILE__:1
+1 __FILE__:3
 2 beta sample.txt:2
 > gamma sample.txt:3"
 
@@ -1371,7 +1374,7 @@ run_tag_test "Pop restores active tag name for tags report" \
     ":tag beta\n:tag gamma\n:pop\n:tags\n:q!\n" \
     "beta
 gamma
-1 __FILE__:1
+1 __FILE__:3
 > beta sample.txt:2"
 
 run_tag_searchpath_test "Tag uses tags option search path" \
@@ -1868,21 +1871,15 @@ run_stdout_test "Set tags assignment updates value" \
     ":set tags=first.tags,second.tags\n:set tags?\n:q!\n" \
     "tags=first.tags,second.tags"
 
-run_stdout_test "Set all prints enabled options" \
+# set with no argument: the options changed from their defaults, in the
+# table's order (set all, every option, is test_ex_set.sh's)
+run_stdout_test "Set prints the options changed from their defaults" \
     "one\ntwo\n" \
-    ":set number list ignorecase readonly shell=/bin/sh\n:set all\n:q!\n" \
-    "number
+    ":set number list ignorecase readonly\n:set\n:q!\n" \
+    "ignorecase
 list
-ignorecase
-readonly
-showmode
-wrapscan
-magic
-scroll=12
-tabstop=8
-tags=tags
-directory=/var/tmp
-shell=/bin/sh"
+number
+readonly"
 
 run_stdout_test "Set noreadonly disables readonly option" \
     "one\ntwo\n" \

@@ -92,7 +92,10 @@ assert_buffer_invariants(buffer_t *b)
     while (cur) {
         assert(cur->prev == prev);
         assert(cur->text != NULL);
-        assert(cur->len == strlen(cur->text));
+        /* a line is len bytes, a NUL among them too (EXVI-16), and its
+         * text is terminated there */
+        assert(cur->text[cur->len] == '\0');
+        assert(strlen(cur->text) <= cur->len);
         if (cur == b->cur) {
             found_cur = 1;
         }
@@ -175,7 +178,8 @@ test_parser_properties(void)
         assert(buffer_text_equal(&b, lines, 4));
         assert(buf_current_line(&b) >= 1 && buf_current_line(&b) <= 4);
         assert(ptr >= cmd && ptr <= cmd + strlen(cmd));
-        assert(error == 0 || error == 1);
+        /* 0, a bad address (1), or a backwards range, reported (2) */
+        assert(error == 0 || error == 1 || error == 2);
 
         breakp = find_command_break(&b, cmd_copy, &kind);
         assert_buffer_invariants(&b);
@@ -321,7 +325,8 @@ test_recovery_properties(void)
 
         recover_path = recover_path_for(path);
         assert(recover_path != NULL);
-        assert(exvi_write_recover_snapshot(&b, recover_path) == 0);
+        /* written where recover_path_for() says, b's filename deciding */
+        assert(exvi_write_recover_snapshot(&b) == 0);
         assert(load_recover_into_buffer(&restored, path) == 0);
         assert_buffer_invariants(&restored);
         assert(buffer_text_equal(&restored, line_ptrs, lines));

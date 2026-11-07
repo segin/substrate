@@ -125,7 +125,7 @@ and delete, change, and yank with the supported motion families
 .Cm P ,
 .Cm u ,
 .Cm Ctrl-R
-.It tag and mode handoff
+.It tag and mode switching
 .Ql Ctrl-]
 .Cm Ctrl-T ,
 .Cm Q ,
@@ -228,9 +228,11 @@ as the current buffer.
 If multiple files are given, they become the initial argument list.
 .El
 .Sh SET OPTIONS
-The shared
 .Ic :set
-option table currently supports:
+takes every option POSIX lists (see
+.Xr ex 1 ,
+which lists them); these are the ones with an effect in
+.Nm :
 .Bl -tag -width indent
 .It Ic number , nu
 Display line numbers in the visual gutter.

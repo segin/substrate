@@ -121,6 +121,10 @@ all: test_bc_num test_runner test_getuid test_minix test_ext2_perf test_ext2_rea
 	./test_getpagesize
 	./test_getuid
 	./test_getrusage
+	# ex and vi, each plain and under ASan, and libexvi's unit tests
+	# (tests/bin/ex runs tests/usr.lib/exvi); nothing ran them before
+	$(MAKE) -C bin/ex test
+	$(MAKE) -C bin/vi test
 
 test_getpagesize: lib/sys/test_getpagesize.c ../lib/sys/getpagesize.c
 	$(CC) $(CFLAGS_COMMON) $^ -o $@

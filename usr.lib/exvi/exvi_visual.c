@@ -861,6 +861,35 @@ vi_handle_cont(int sig)
 }
 
 /*
+ * Substitute's c option from vi's `:` line: show the match -- the cursor on
+ * it -- and ask on the status line.  ex's way, a line of `^` and a line
+ * read, would be drawn over at once.
+ */
+static int
+vi_sub_confirm(buffer_t *b, line_t *l, size_t so, size_t eo)
+{
+    vi_visual_t *vis = active_visual;
+    int key;
+
+    (void)eo;
+    if (!vis) {
+        return -1;
+    }
+    b->cur = l;
+    vis->cursor_col = (int)so;
+    vis->screen_dirty = 1;
+    for (;;) {
+        key = vi_read_visual_key(b, vis, ' ', "replace? (y/n/q)");
+        if (key == 'y' || key == 'n') {
+            return key == 'y';
+        }
+        if (key == 'q' || key == '\x1b' || key < 0) {
+            return -1;
+        }
+    }
+}
+
+/*
  * ^Z: give the terminal back as it was and stop, as the shell's job control
  * expects; vi_handle_cont() brings vi back.  With ISIG off the key arrives
  * as a byte, so the stop is vi's to make.
@@ -2665,7 +2694,19 @@ vi_reposition_target(buffer_t *b, vi_visual_t *vis, int target_line, int mode, i
         top_line = target_line - visible_rows + 1;
         break;
     }
-    vis->top_line = vi_clamp_top_line(b, vis, top_line);
+    if (mode == 2) {
+        vis->top_line = vi_clamp_top_line(b, vis, top_line);
+    } else {
+        /*
+         * z<CR> and z. put the line at the top or in the middle even near
+         * the end of the file, with `~` rows after the last line (POSIX vi,
+         * and Vim); a full last page put line 20 of 40 on row 3, not 1.
+         */
+        if (top_line < 1) {
+            top_line = 1;
+        }
+        vis->top_line = top_line;
+    }
     if (keep_col) {
         if ((size_t)vis->cursor_col > target->len) {
             vis->cursor_col = (int)target->len;
@@ -4713,6 +4754,24 @@ vi_apply_charwise_motion(buffer_t *b, vi_visual_t *vis, line_t *target_line,
         end_col = inclusive_end ? vi_inclusive_end(end_line, vis->cursor_col) : vis->cursor_col;
     }
 
+    /*
+     * An exclusive region ending at column 0 of a later line ends instead
+     * at the end of the line before; one that also starts at or before
+     * its line's first non-blank is the whole lines (POSIX vi, Vim).
+     * d`a over lines a b c, from line 1 to a mark at line 3, left an empty
+     * line where it deleted a and b.
+     */
+    if (!inclusive_end && start_line != end_line && end_col == 0 &&
+        (vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        start_col <= vi_first_nonblank_col(start_line)) {
+        int first = vi_line_number_for_mark(b, start_line);
+        int last = vi_line_number_for_mark(b, end_line) - 1;
+
+        if (first < 1 || last < first) {
+            return -1;
+        }
+        return vi_apply_linewise_operator(b, vis, first, last);
+    }
     if (!inclusive_end && start_line != end_line && end_col == 0) {
         end_line = end_line->prev;
         if (!end_line) {
@@ -5860,8 +5919,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             vi_line_is_paragraph_break(target_line->prev)) {
             target_line = target_line->prev;
             target_col = 0;
-        } else if (rc == 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
+        } else if (rc == 0 && count <= 1 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
                 vis->pending_op == 'y') && (key == ')' || key == '}') &&
+            /* a count carries the motion past the blank line (2d) on
+             * text, blank, text deletes both, as Vim) */
             target_line && !(key == '}' ? vi_line_is_paragraph_break(target_line) :
             vi_line_is_blank(target_line)) &&
             target_col == vi_first_nonblank_col(target_line) && target_line->prev &&
@@ -7695,6 +7756,7 @@ exvi_visual_main(buffer_t *b)
     }
     vi_resize_pending = 0;
     vi_cont_pending = 0;
+    exvi_sub_confirm_hook = vi_sub_confirm;
 
     for (;;) {
         line_t *cur;
@@ -8048,15 +8110,21 @@ process_normal_key:
 
         vis.screen_dirty = 1;
         switch (key) {
-        case '"':
-            key = vi_read_visual_key(b, &vis, ':', NULL);
-            if (key >= 'a' && key <= 'z') {
-                vis.pending_reg = key;
+        case '"': {
+            /* the name in a variable of its own: read into key, it made the
+             * end of this loop take the command for something other than
+             * `"` and forget the register at once -- "ap put the unnamed
+             * buffer */
+            int name = vi_read_visual_key(b, &vis, ':', NULL);
+
+            if (name >= 'a' && name <= 'z') {
+                vis.pending_reg = name;
             } else {
                 vis.pending_reg = 0;
                 (void)!write(STDOUT_FILENO, "\a", 1);
             }
             break;
+        }
         case 'h':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
@@ -8611,7 +8679,12 @@ process_normal_key:
             key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key >= 'a' && key <= 'z' && b->cur) {
                 b->marks[key - 'a'] = b->cur;
+                /* the column the cursor is on: after a move to a shorter
+                 * line, cursor_col may still be past its end */
                 b->mark_cols[key - 'a'] = vis.cursor_col;
+                if (b->cur->len > 0 && (size_t)vis.cursor_col >= b->cur->len) {
+                    b->mark_cols[key - 'a'] = vi_last_char_col(b->cur);
+                }
             } else {
                 (void)!write(STDOUT_FILENO, "\a", 1);
             }
@@ -8878,6 +8951,7 @@ maybe_restore_insert_mode:
     }
 
 done:
+    exvi_sub_confirm_hook = NULL;
     if (have_winch) {
         sigaction(SIGWINCH, &old_winch, NULL);
     }
@@ -8892,6 +8966,7 @@ done:
     return 0;
 
 ex_mode:
+    exvi_sub_confirm_hook = NULL;
     if (have_winch) {
         sigaction(SIGWINCH, &old_winch, NULL);
     }

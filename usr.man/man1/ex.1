@@ -3,12 +3,13 @@
 .Os Substrate
 .Sh NAME
 .Nm ex
-.Nd line-oriented text editor with visual handoff support
+.Nd line-oriented text editor with a visual mode
 .Sh SYNOPSIS
 .Nm
 .Op Fl RrsSv
 .Op Fl c Ar command
 .Op Fl t Ar tag
+.Op Fl w Ar size
 .Op Ar +command
 .Op Ar file
 .Op Ar file ...
@@ -32,7 +33,7 @@ prompt before each command.
 .Pp
 The current supported command contract includes:
 .Bl -tag -width indent
-.It visual handoff
+.It visual mode
 .Ic visual ,
 .Ic vi
 .It version
@@ -127,10 +128,96 @@ A command that would replace or abandon a modified buffer \(em
 .Ql \&!
 .Pq for example Ic recover! .
 .Pp
+The commands of a
+.Ic global
+or
+.Ic v
+follow the pattern; a line ending in a backslash continues the list on the
+next line, each line a command.
+After
+.Ic append ,
+.Ic insert
+or
+.Ic change
+in the list, the lines are text, up to a line holding only
+.Ql \&.
+or the end of the list.
+The list may not contain
+.Ic global ,
+.Ic v
+or
+.Ic undo .
+.Pp
 Addresses, ranges, marks, search addresses, relative offsets, and
 delimiter-aware command chaining with
 .Ql |
 are supported.
+An address left out beside
+.Ql \&,
+or
+.Ql \&;
+is the current line; of more addresses than a command takes, the last are
+used;
+.Ql \&;
+makes the address before it the current line.
+A range whose first line is after its second is an error, and so is line 0
+for any command but
+.Ic append ,
+.Ic insert ,
+.Ic read ,
+.Ic put
+and
+.Ic = .
+.Pp
+.Ic delete ,
+.Ic yank ,
+.Ic print ,
+.Ic list ,
+.Ic number
+and
+.Ic join
+take a count, which makes the range that many lines from its last, and
+.Ic delete
+and
+.Ic join
+the flags
+.Ql p ,
+.Ql #
+and
+.Ql l ,
+which print the current line after.
+.Ic delete ,
+.Ic yank
+and
+.Ic put
+take a buffer name,
+.Ql a
+to
+.Ql z ;
+.Ql A
+to
+.Ql Z
+name the same buffers, appended to.
+Each command leaves the current line as POSIX describes \(em
+.Ic delete
+the line after those deleted,
+.Ic copy ,
+.Ic move ,
+.Ic put
+and
+.Ic read
+the last line they placed,
+.Ic join
+the joined line \(em and editing a file makes its last line current.
+.Ic join
+drops the leading blanks of each line it appends and puts two spaces after
+a line ending in
+.Ql \&. ,
+none before a
+.Ql \&)
+or after a blank, and one otherwise;
+.Ic join!
+joins the lines as they are.
 The editor accepts the traditional
 .Ql \&"
 command-tail comment form outside delimiter bodies.
@@ -151,6 +238,8 @@ matching at the start and end of a word, and
 standing for the replacement text of the last
 .Ic substitute .
 A backslash before the delimiter makes the delimiter part of the pattern.
+An empty pattern is the last pattern any of these commands used, and a
+pattern that will not compile is reported as an error.
 With the
 .Ic magic
 option off,
@@ -190,6 +279,34 @@ With
 and
 .Ql \e~
 are the special forms.
+.Pp
+After the replacement
+.Ic substitute
+takes options, a count and flags:
+.Ql g
+replaces every match on a line,
+.Ql c
+asks about each one (answer
+.Ql y
+to replace it,
+.Ql q
+to stop),
+.Ql r
+in a repeat uses the last pattern rather than the last substitute's, and
+.Ql &
+keeps the previous substitute's options; a count makes the range that many
+lines from its last; and
+.Ql p ,
+.Ql #
+and
+.Ql l
+print the last line changed.
+.Ic &
+and
+.Ic s
+without a pattern repeat the previous substitute with the options given
+.Pq so Ic && keeps its options .
+.Pp
 A command line that ends in a backslash continues on the next line, the
 backslash and the newline part of the command.
 .Pp
@@ -238,9 +355,23 @@ Recover the named file from a preserved recovery image.
 If no recovery image exists,
 .Nm
 fails with an error.
+With no file,
+.Nm
+lists the files that can be recovered and exits.
+.It Fl w Ar size
+Set the
+.Ic window
+option to
+.Ar size .
+.It Fl
+The same as
+.Fl s
+(obsolescent).
 .It Fl s
-Batch mode: suppress interactive diagnostics where possible, and read no
-startup commands from
+Batch mode: no prompts, file messages or other interactive output; the
+first command read that fails ends the session with a failing status (see
+.Sx EXIT STATUS ) ;
+and no startup commands are read from
 .Ev EXINIT ,
 .Pa ~/.exrc
 or
@@ -252,8 +383,15 @@ still run.
 Start in secure mode.
 Shell escapes and shell-capable commands are disabled.
 .It Fl v
-Enter visual mode by handing control to
-.Xr vi 1 .
+Start in visual mode, as
+.Xr vi 1
+does.
+.Ic visual
+enters it later, on the same buffer \(em modified or not \(em with its
+undo history, marks and named buffers;
+.Ic Q
+in visual mode returns to
+.Nm .
 .It Fl c Ar command
 Execute
 .Ar command
@@ -278,9 +416,25 @@ as the current buffer.
 If multiple files are given, they become the initial argument list.
 .El
 .Sh SET OPTIONS
-The shared
-.Ic :set
-option table currently supports:
+.Ic set
+with no argument lists the options whose values differ from their
+defaults,
+.Ic set all
+every option and its value, and
+.Ic set Ar opt Ns \&?
+(or
+.Ic set no Ns Ar opt Ns \&? )
+the value of one.
+Every option POSIX lists is accepted under its name and abbreviation, and
+reported:
+autoindent (ai), autoprint (ap), autowrite (aw), beautify (bf), directory
+(dir), edcompatible (ed), errorbells (eb), exrc (ex), ignorecase (ic), lisp,
+list, magic, mesg, number (nu), paragraphs (para), prompt, readonly (ro),
+redraw, remap, report, scroll (scr), sections (sect), shell (sh), shiftwidth
+(sw), showmatch (sm), showmode (smd), slowopen (slow), tabstop (ts),
+taglength (tl), tags, term, terse, warn, window (wi), wrapmargin (wm),
+wrapscan (ws) and writeany (wa).
+Those with an effect are:
 .Bl -tag -width indent
 .It Ic number , nu
 Number printed output in

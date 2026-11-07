@@ -115,6 +115,7 @@ load_current_arg_file(buffer_t *b)
     b->filename = strdup(ex_args[ex_arg_idx]);
     if (b->filename) {
         buf_read_file(b, b->filename);
+        exvi_set_loaded_line(b);
         if (!batch_mode) {
             printf("\"%s\" %d lines\n", b->filename, b->line_count);
         }
@@ -495,545 +496,7 @@ next_file:
     return 1;
 }
 
-static void
-print_enabled_set_options(int include_numeric_defaults)
-{
-    if (option_number) {
-        printf("number\n");
-    }
-    if (option_list) {
-        printf("list\n");
-    }
-    if (option_autoindent) {
-        printf("autoindent\n");
-    }
-    if (option_ignorecase) {
-        printf("ignorecase\n");
-    }
-    if (option_readonly) {
-        printf("readonly\n");
-    }
-    if (option_showmode) {
-        printf("showmode\n");
-    }
-    if (option_wrapscan) {
-        printf("wrapscan\n");
-    }
-    if (option_magic) {
-        printf("magic\n");
-    }
-    if (option_exrc) {
-        printf("exrc\n");
-    }
-    if (option_writeany) {
-        printf("writeany\n");
-    }
-    if (include_numeric_defaults || option_scroll != EXVI_DEFAULT_SCROLL) {
-        printf("scroll=%d\n", option_scroll);
-    }
-    if (include_numeric_defaults || option_tabstop != EXVI_DEFAULT_TABSTOP) {
-        printf("tabstop=%d\n", option_tabstop);
-    }
-    if (include_numeric_defaults
-            || (option_tags && strcmp(option_tags, EXVI_DEFAULT_TAGS) != 0)) {
-        printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
-    }
-    if (include_numeric_defaults
-            || (option_directory && strcmp(option_directory, EXVI_DEFAULT_DIRECTORY) != 0)) {
-        printf("directory=%s\n",
-            option_directory ? option_directory : EXVI_DEFAULT_DIRECTORY);
-    }
-    if (include_numeric_defaults) {
-        printf("shell=%s\n", option_shell ? option_shell : EXVI_DEFAULT_SHELL);
-    }
-}
-
-int
-handle_set_command(const char *args)
-{
-    char *ptr = (char *)args;
-
-    while (*ptr && isspace((unsigned char)*ptr)) {
-        ptr++;
-    }
-
-    if (!*ptr) {
-        print_enabled_set_options(0);
-        return 1;
-    }
-
-    while (*ptr) {
-        char *end = ptr;
-        char *eq;
-        size_t len;
-        size_t value_len = 0;
-        int query = 0;
-        const char *value = NULL;
-
-        while (*end && !isspace((unsigned char)*end)) {
-            end++;
-        }
-        len = (size_t)(end - ptr);
-        if (len > 0 && end[-1] == '?') {
-            query = 1;
-            len--;
-        }
-        eq = memchr(ptr, '=', len);
-        if (eq) {
-            value = eq + 1;
-            value_len = (size_t)(end - value);
-            len = (size_t)(eq - ptr);
-        }
-
-        if (len == 3 && strncmp(ptr, "all", 3) == 0) {
-            if (query || eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            print_enabled_set_options(1);
-        } else if (len == 2 && strncmp(ptr, "ai", 2) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_autoindent ? "autoindent" : "noautoindent");
-            } else {
-                option_autoindent = 1;
-            }
-        } else if (len == 10 && strncmp(ptr, "autoindent", 10) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_autoindent ? "autoindent" : "noautoindent");
-            } else {
-                option_autoindent = 1;
-            }
-        } else if (len == 4 && strncmp(ptr, "noai", 4) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_autoindent ? "noautoindent" : "autoindent");
-            } else {
-                option_autoindent = 0;
-            }
-        } else if (len == 12 && strncmp(ptr, "noautoindent", 12) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_autoindent ? "noautoindent" : "autoindent");
-            } else {
-                option_autoindent = 0;
-            }
-        } else if (len == 2 && strncmp(ptr, "ic", 2) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_ignorecase ? "ignorecase" : "noignorecase");
-            } else {
-                option_ignorecase = 1;
-            }
-        } else if (len == 10 && strncmp(ptr, "ignorecase", 10) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_ignorecase ? "ignorecase" : "noignorecase");
-            } else {
-                option_ignorecase = 1;
-            }
-        } else if (len == 4 && strncmp(ptr, "noic", 4) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_ignorecase ? "noignorecase" : "ignorecase");
-            } else {
-                option_ignorecase = 0;
-            }
-        } else if (len == 12 && strncmp(ptr, "noignorecase", 12) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_ignorecase ? "noignorecase" : "ignorecase");
-            } else {
-                option_ignorecase = 0;
-            }
-        } else if (len == 2 && strncmp(ptr, "ro", 2) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_readonly ? "readonly" : "noreadonly");
-            } else {
-                option_readonly = 1;
-            }
-        } else if (len == 8 && strncmp(ptr, "readonly", 8) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_readonly ? "readonly" : "noreadonly");
-            } else {
-                option_readonly = 1;
-            }
-        } else if (len == 4 && strncmp(ptr, "noro", 4) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_readonly ? "noreadonly" : "readonly");
-            } else {
-                option_readonly = 0;
-            }
-        } else if (len == 10 && strncmp(ptr, "noreadonly", 10) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_readonly ? "noreadonly" : "readonly");
-            } else {
-                option_readonly = 0;
-            }
-        } else if (len == 3 && strncmp(ptr, "smd", 3) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_showmode ? "showmode" : "noshowmode");
-            } else {
-                option_showmode = 1;
-            }
-        } else if (len == 8 && strncmp(ptr, "showmode", 8) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_showmode ? "showmode" : "noshowmode");
-            } else {
-                option_showmode = 1;
-            }
-        } else if (len == 5 && strncmp(ptr, "nosmd", 5) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_showmode ? "noshowmode" : "showmode");
-            } else {
-                option_showmode = 0;
-            }
-        } else if (len == 10 && strncmp(ptr, "noshowmode", 10) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_showmode ? "noshowmode" : "showmode");
-            } else {
-                option_showmode = 0;
-            }
-        } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_number ? "number" : "nonumber");
-            } else {
-                option_number = 1;
-            }
-        } else if (len == 6 && strncmp(ptr, "number", 6) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_number ? "number" : "nonumber");
-            } else {
-                option_number = 1;
-            }
-        } else if (len == 4 && strncmp(ptr, "nonu", 4) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_number ? "nonumber" : "number");
-            } else {
-                option_number = 0;
-            }
-        } else if (len == 8 && strncmp(ptr, "nonumber", 8) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_number ? "nonumber" : "number");
-            } else {
-                option_number = 0;
-            }
-        } else if (len == 2 && strncmp(ptr, "li", 2) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_list ? "list" : "nolist");
-            } else {
-                option_list = 1;
-            }
-        } else if (len == 4 && strncmp(ptr, "list", 4) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_list ? "list" : "nolist");
-            } else {
-                option_list = 1;
-            }
-        } else if (len == 4 && strncmp(ptr, "noli", 4) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_list ? "nolist" : "list");
-            } else {
-                option_list = 0;
-            }
-        } else if (len == 6 && strncmp(ptr, "nolist", 6) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_list ? "nolist" : "list");
-            } else {
-                option_list = 0;
-            }
-        } else if (len == 2 && strncmp(ptr, "ws", 2) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_wrapscan ? "wrapscan" : "nowrapscan");
-            } else {
-                option_wrapscan = 1;
-            }
-        } else if (len == 8 && strncmp(ptr, "wrapscan", 8) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_wrapscan ? "wrapscan" : "nowrapscan");
-            } else {
-                option_wrapscan = 1;
-            }
-        } else if (len == 4 && strncmp(ptr, "nows", 4) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_wrapscan ? "nowrapscan" : "wrapscan");
-            } else {
-                option_wrapscan = 0;
-            }
-        } else if (len == 10 && strncmp(ptr, "nowrapscan", 10) == 0) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_wrapscan ? "nowrapscan" : "wrapscan");
-            } else {
-                option_wrapscan = 0;
-            }
-        } else if ((len == 5 && strncmp(ptr, "magic", 5) == 0)
-                || (len == 7 && strncmp(ptr, "nomagic", 7) == 0)) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_magic ? "magic" : "nomagic");
-            } else {
-                option_magic = (ptr[0] != 'n');
-            }
-        } else if ((len == 2 && strncmp(ptr, "ex", 2) == 0)
-                || (len == 4 && strncmp(ptr, "exrc", 4) == 0)
-                || (len == 4 && strncmp(ptr, "noex", 4) == 0)
-                || (len == 6 && strncmp(ptr, "noexrc", 6) == 0)) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_exrc ? "exrc" : "noexrc");
-            } else {
-                option_exrc = (ptr[0] != 'n');
-            }
-        } else if ((len == 2 && strncmp(ptr, "wa", 2) == 0)
-                || (len == 8 && strncmp(ptr, "writeany", 8) == 0)
-                || (len == 4 && strncmp(ptr, "nowa", 4) == 0)
-                || (len == 10 && strncmp(ptr, "nowriteany", 10) == 0)) {
-            if (eq) {
-                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-                return 1;
-            }
-            if (query) {
-                printf("%s\n", option_writeany ? "writeany" : "nowriteany");
-            } else {
-                option_writeany = (ptr[0] != 'n');
-            }
-        } else if ((len == 2 && strncmp(ptr, "ts", 2) == 0)
-                || (len == 7 && strncmp(ptr, "tabstop", 7) == 0)) {
-            if (query || (!eq && !query)) {
-                printf("tabstop=%d\n", option_tabstop);
-            } else {
-                char *num_end = NULL;
-                char buf[32];
-                long val;
-
-                if (!value || value_len == 0 || value_len >= sizeof(buf)) {
-                    exvi_report_error("Bad tabstop value");
-                    return 1;
-                }
-                memcpy(buf, value, value_len);
-                buf[value_len] = '\0';
-                val = strtol(buf, &num_end, 10);
-                if (!num_end || *num_end != '\0' || val < EXVI_MIN_TABSTOP
-                        || val > EXVI_MAX_TABSTOP) {
-                    exvi_report_error("Bad tabstop value");
-                    return 1;
-                }
-                option_tabstop = (int)val;
-            }
-        } else if ((len == 2 && strncmp(ptr, "sc", 2) == 0)
-                || (len == 6 && strncmp(ptr, "scroll", 6) == 0)) {
-            if (query || (!eq && !query)) {
-                printf("scroll=%d\n", option_scroll);
-            } else {
-                char *num_end = NULL;
-                char buf[32];
-                long val;
-
-                if (!value || value_len == 0 || value_len >= sizeof(buf)) {
-                    exvi_report_error("Bad scroll value");
-                    return 1;
-                }
-                memcpy(buf, value, value_len);
-                buf[value_len] = '\0';
-                val = strtol(buf, &num_end, 10);
-                if (!num_end || *num_end != '\0' || val < EXVI_MIN_SCROLL
-                        || val > EXVI_MAX_SCROLL) {
-                    exvi_report_error("Bad scroll value");
-                    return 1;
-                }
-                option_scroll = (int)val;
-                option_scroll_explicit = 1;
-            }
-        } else if (len == 4 && strncmp(ptr, "tags", 4) == 0) {
-            if (query || (!eq && !query)) {
-                printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
-            } else {
-                char *copy;
-
-                if (!value || value_len == 0) {
-                    exvi_report_error("Bad tags value");
-                    return 1;
-                }
-                copy = malloc(value_len + 1);
-                if (!copy) {
-                    perror("malloc");
-                    return 1;
-                }
-                memcpy(copy, value, value_len);
-                copy[value_len] = '\0';
-                replace_saved_string(&option_tags, copy);
-                free(copy);
-            }
-        } else if ((len == 3 && strncmp(ptr, "dir", 3) == 0)
-                || (len == 9 && strncmp(ptr, "directory", 9) == 0)) {
-            if (query || (!eq && !query)) {
-                printf("directory=%s\n",
-                    option_directory ? option_directory : EXVI_DEFAULT_DIRECTORY);
-            } else {
-                char *copy;
-
-                if (!value || value_len == 0) {
-                    exvi_report_error("Bad directory value");
-                    return 1;
-                }
-                copy = malloc(value_len + 1);
-                if (!copy) {
-                    perror("malloc");
-                    return 1;
-                }
-                memcpy(copy, value, value_len);
-                copy[value_len] = '\0';
-                replace_saved_string(&option_directory, copy);
-                free(copy);
-            }
-        } else if ((len == 2 && strncmp(ptr, "sh", 2) == 0)
-                || (len == 5 && strncmp(ptr, "shell", 5) == 0)) {
-            if (query || (!eq && !query)) {
-                printf("shell=%s\n", option_shell ? option_shell : EXVI_DEFAULT_SHELL);
-            } else {
-                char *copy;
-
-                if (secure_mode || restricted_mode) {
-                    exvi_report_shell_forbidden();
-                    return 1;
-                }
-                if (!value || value_len == 0) {
-                    exvi_report_error("Bad shell value");
-                    return 1;
-                }
-                copy = malloc(value_len + 1);
-                if (!copy) {
-                    perror("malloc");
-                    return 1;
-                }
-                memcpy(copy, value, value_len);
-                copy[value_len] = '\0';
-                replace_saved_string(&option_shell, copy);
-                free(copy);
-            }
-        } else {
-            exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
-            return 1;
-        }
-
-        ptr = end;
-        while (*ptr && isspace((unsigned char)*ptr)) {
-            ptr++;
-        }
-    }
-    return 1;
-}
+/* set: see exvi_options.c */
 
 int
 exvi_write_allowed(buffer_t *b, const char *filename, int force)
@@ -1335,6 +798,7 @@ handle_edit_command(buffer_t *b, const char *args, int force)
     char *ptr = (char *)args;
     char *old_filename = NULL;
     char *new_filename = NULL;
+    char *plus_cmd = NULL;
     int replace_alt = 0;
 
     while (*ptr && isspace((unsigned char)*ptr)) {
@@ -1346,10 +810,37 @@ handle_edit_command(buffer_t *b, const char *args, int force)
         return 1;
     }
 
+    /*
+     * edit +command file: the command runs once the file is loaded (POSIX
+     * ex), and ends at a blank no backslash escapes.  `e +2 three` edited
+     * a file called "+2 three".
+     */
+    if (*ptr == '+') {
+        size_t n = 0;
+
+        ptr++;
+        plus_cmd = malloc(strlen(ptr) + 1);
+        if (!plus_cmd) {
+            perror("malloc");
+            return 1;
+        }
+        while (*ptr && !isspace((unsigned char)*ptr)) {
+            if (*ptr == '\\' && ptr[1] != '\0') {
+                ptr++;
+            }
+            plus_cmd[n++] = *ptr++;
+        }
+        plus_cmd[n] = '\0';
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+    }
+
     if (b->filename) {
         old_filename = strdup(b->filename);
         if (!old_filename) {
             perror("strdup");
+            free(plus_cmd);
             return 1;
         }
     }
@@ -1358,6 +849,7 @@ handle_edit_command(buffer_t *b, const char *args, int force)
         new_filename = strdup(old_filename);
         if (!new_filename) {
             free(old_filename);
+            free(plus_cmd);
             perror("strdup");
             return 1;
         }
@@ -1365,6 +857,7 @@ handle_edit_command(buffer_t *b, const char *args, int force)
         new_filename = expand_filename_refs(b, ptr);
         if (!new_filename) {
             free(old_filename);
+            free(plus_cmd);
             return 1;
         }
     }
@@ -1375,6 +868,7 @@ handle_edit_command(buffer_t *b, const char *args, int force)
     if (exvi_restricted_filename_change(b, new_filename)) {
         free(old_filename);
         free(new_filename);
+        free(plus_cmd);
         return 1;
     }
 
@@ -1386,12 +880,22 @@ handle_edit_command(buffer_t *b, const char *args, int force)
     }
     if (b->filename) {
         buf_read_file(b, b->filename);
+        exvi_set_loaded_line(b);
         if (!batch_mode) {
             printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        }
+        if (plus_cmd) {
+            /* `+` alone is the last line, as for the command line's */
+            if (*plus_cmd) {
+                exvi_execute_command(b, plus_cmd);
+            } else if (b->tail) {
+                b->cur = b->tail;
+            }
         }
     } else {
         exvi_report_error("No current filename");
     }
+    free(plus_cmd);
     free(old_filename);
     return 1;
 }
@@ -1510,6 +1014,9 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
 
         if (lines_read > 0 && inserting_at_eof) {
             b->trailing_newline = last_had_newline;
+        }
+        if (lines_read > 0 && pos) {
+            b->cur = pos;           /* POSIX: the last line read */
         }
 
         if (!batch_mode && display_name) {

@@ -103,12 +103,15 @@ def main():
     finally:
         os.unlink(path)
 
-    proc = subprocess.run([vi_path, "-r"], input=b"",
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    require(proc.returncode == 1, f"vi -r missing-file status mismatch: {proc.returncode}")
-    require(proc.stdout == b"", f"vi -r missing-file stdout mismatch: {proc.stdout!r}")
-    require(proc.stderr.decode("latin1", "replace") == "vi: -r requires a file operand\n",
-            f"vi -r missing-file stderr mismatch: {proc.stderr!r}")
+    # -r with no file lists what can be recovered (POSIX): none, here
+    with tempfile.TemporaryDirectory() as rdir:
+        proc = subprocess.run([vi_path, "-r"], input=b"",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=dict(os.environ, EXINIT=f"set dir={rdir}"))
+    require(proc.returncode == 0, f"vi -r (no file) status mismatch: {proc.returncode}")
+    require(proc.stdout == b"No files to recover\n",
+            f"vi -r (no file) stdout mismatch: {proc.stdout!r}")
+    require(proc.stderr == b"", f"vi -r (no file) stderr mismatch: {proc.stderr!r}")
 
     # a buffer.txt.recover beside the file is anyone's: it is not recovered
     exit_code, decoded, saved = helpers.run_vi_session(

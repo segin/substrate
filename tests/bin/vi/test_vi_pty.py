@@ -592,9 +592,12 @@ def main():
         file_args=["buffer.txt", "two.txt"],
     )
     require(exit_code == 0, f"visual args/next/prev/rewind vi exited with status {exit_code}")
-    require("[/tmp/exvi-" in decoded and "/buffer.txt] /tmp/exvi-" in decoded and "/two.txt " in decoded,
+    # the session's directory is under the temporary directory, which
+    # TMPDIR may move from /tmp
+    tmp = os.path.join(tempfile.gettempdir(), "exvi-")
+    require(f"[{tmp}" in decoded and f"/buffer.txt] {tmp}" in decoded and "/two.txt " in decoded,
             "missing visual :args output")
-    require("\"/tmp/exvi-" in decoded and "/two.txt\" 1 lines" in decoded,
+    require(f"\"{tmp}" in decoded and "/two.txt\" 1 lines" in decoded,
             "missing visual :next file switch report")
     require(decoded.count("/buffer.txt\" 1 lines") >= 1,
             "missing visual rewind/prev return report")
@@ -1046,10 +1049,11 @@ def main():
     require(saved == "Xone\n",
             f"unexpected ZZ buffer: {saved!r}")
 
+    # on a modified buffer ZQ warns, and a second ZQ discards (19f09478b)
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one\n",
-        [b"i", b"X", b"\x1b", b"Z", b"Q"],
+        [b"i", b"X", b"\x1b", b"Z", b"Q", b"Z", b"Q"],
         final_keys=None,
     )
     require(exit_code == 0, f"ZQ vi exited with status {exit_code}")
@@ -1154,7 +1158,8 @@ def main():
     require(exit_code == 0, f"empty-enter vi exited with status {exit_code}")
     require("line 1/1" in decoded, "missing empty-enter initial line status")
     require("-- INSERT --" in decoded, "missing empty-enter insert status")
-    require(saved == "\n",
+    # two empty lines, each written with its newline (EXVI-18; as Vim)
+    require(saved == "\n\n",
             f"unexpected empty-enter buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -2096,7 +2101,7 @@ def main():
         [b"j", b"j", b"y", b"k", b"P"],
     )
     require(exit_code == 0, f"yk vi exited with status {exit_code}")
-    require(saved == "one\ntwo\ntwo\nthree\nthree\nfour\n",
+    require(saved == "one\ntwo\nthree\ntwo\nthree\nfour\n",
             f"unexpected yk buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -2314,7 +2319,7 @@ def main():
         [b"j", b"j", b"y", b"g", b"g", b"P"],
     )
     require(exit_code == 0, f"ygg vi exited with status {exit_code}")
-    require(saved == "one\ntwo\none\ntwo\nthree\nthree\nfour\n",
+    require(saved == "one\ntwo\nthree\none\ntwo\nthree\nfour\n",
             f"unexpected ygg buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -2619,7 +2624,7 @@ def main():
         [b"d", b"/", b"g", b"a", b"m", b"m", b"a", b"\r"],
     )
     require(exit_code == 0, f"d/search vi exited with status {exit_code}")
-    require(saved == "\ngamma\n",
+    require(saved == "gamma\n",
             f"unexpected d/search buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -2638,7 +2643,7 @@ def main():
         [b"y", b"/", b"g", b"a", b"m", b"m", b"a", b"\r", b"P"],
     )
     require(exit_code == 0, f"y/search vi exited with status {exit_code}")
-    require(saved == "alpha\nbetaalpha\nbeta\ngamma\n",
+    require(saved == "alpha\nbeta\nalpha\nbeta\ngamma\n",
             f"unexpected y/search buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -3255,7 +3260,7 @@ def main():
     )
     require(exit_code == 0, f"$cTX vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing $cTX insert status")
-    require(saved == "abcXdefXghiXTAIL\n",
+    require(saved == "abcXdefXghiXTAILj\n",
             f"unexpected $cTX buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -3743,7 +3748,7 @@ def main():
         cols=20,
     )
     require(exit_code == 0, f"line-scroll-down vi exited with status {exit_code}")
-    require(saved == "line 1\nline 2\nZine 3\nline 4\nline 5\nline 6\nline 7\nline 8\n",
+    require(saved == "line 1\nZine 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n",
             f"unexpected line-scroll-down buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -3754,7 +3759,7 @@ def main():
         cols=20,
     )
     require(exit_code == 0, f"counted-line-scroll-down vi exited with status {exit_code}")
-    require(saved == "line 1\nline 2\nline 3\nZine 4\nline 5\nline 6\nline 7\nline 8\n",
+    require(saved == "line 1\nline 2\nZine 3\nline 4\nline 5\nline 6\nline 7\nline 8\n",
             f"unexpected counted line-scroll-down buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -3800,6 +3805,16 @@ def main():
     require(decoded.count("line 20/40") >= 4, "missing z-position status transitions")
     require(saved.startswith("line 1\nline 2\nline 3\n"),
             "unexpected z-position buffer contents")
+
+    # z<CR> and z. near the end of the file leave `~` rows rather than keep
+    # the last page full: H is then the line z put at the top or middle
+    forty = "".join(f"{i}\n" for i in range(1, 41))
+    for keys, want in (([b"20G", b"z\r", b"H", b"rZ"], "Z0"),
+                       ([b"38G", b"z.", b"H", b"rZ"], "Z7")):
+        exit_code, decoded, saved = run_vi_session(vi_path, forty, keys)
+        require(exit_code == 0, f"{keys!r} vi exited with status {exit_code}")
+        require([l for l in saved.split("\n") if "Z" in l] == [want],
+                f"{keys!r}: H is not the line z placed: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
@@ -4102,7 +4117,7 @@ def main():
     )
     require(exit_code == 0, f"operator-find vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing operator-find insert status")
-    require(saved == "abcXdefXghiXTAIL\n",
+    require(saved == "abcXdefXghiXTAILj\n",
             f"unexpected operator-find buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -4225,7 +4240,7 @@ def main():
         [b"2", b"G", b"c", b"M", b"X", b"\x1b", b"j", b"."],
     )
     require(exit_code == 0, f"visual-dot-after-cM vi exited with status {exit_code}")
-    require(saved == "one\nX\nfour\nfive\n",
+    require(saved == "one\nX\nfive\n",
             f"unexpected visual-dot-after-cM buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
