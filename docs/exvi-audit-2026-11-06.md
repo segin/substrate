@@ -978,13 +978,14 @@ The number is not reused.
 
 ### EXVI-65 — a `dw` that deletes nothing still changes state — *Low*
 
-- [ ] **EXVI-65.1** (Event-driven) When an operator's region is empty, the editor
+- [x] **EXVI-65.1** (Event-driven) When an operator's region is empty, the editor
   shall leave the buffer, the named buffers and the modified flag unchanged.
 
 - **Where**: `exvi_visual.c:5321-5325`, `vi_delete_span` `4010-4041`.
 - **Evidence**: `dw` on an empty line marks the buffer modified and empties the
-  unnamed buffer.
-- **Basis**: reproduced.
+  unnamed buffer; so did `d$` and `D`.  (`dw` on an empty line with a line
+  after it deletes the line, as in Vim: its region ends at that line.)
+- **Basis**: reproduced; `tests/bin/vi/test_vi_empty_ops.py`.
 
 ### EXVI-66 — `cc` with a count — *Low*
 

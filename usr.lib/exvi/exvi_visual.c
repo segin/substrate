@@ -4318,6 +4318,24 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
     if ((size_t)end > cur->len) {
         end = (int)cur->len;
     }
+    if (end == start) {
+        /*
+         * Nothing to delete (D on an empty line): the buffer, the buffers
+         * and the modified flag stay as they are (POSIX vi).  It emptied
+         * the unnamed buffer and marked the file modified.  C still
+         * starts text input.
+         */
+        if (enter_insert) {
+            save_undo(b);
+            vis->cursor_col = start;
+            vis->insert_mode = 1;
+            vis->replace_mode = 0;
+            vis->insert_entry_key = 0;
+            vi_record_last_insert_site(b, vis);
+            vi_set_insert_anchor(b, vis);
+        }
+        return;
+    }
     vi_store_charwise_span(vis, cur, start, end);
     save_undo(b);
     text = malloc(cur->len - (size_t)(end - start) + 1);
