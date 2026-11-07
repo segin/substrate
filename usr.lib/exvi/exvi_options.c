@@ -235,6 +235,11 @@ set_value(const exvi_option_t *o, const char *value, size_t vlen)
         exvi_report_errorf("Bad %s value", o->name);
         return -1;
     }
+    /* pairs of characters, nroff macro names (POSIX: odd is an error) */
+    if ((o->str == &option_paragraphs || o->str == &option_sections) && vlen % 2 != 0) {
+        exvi_report_errorf("%s takes pairs of characters", o->name);
+        return -1;
+    }
     replace_saved_string(o->str, buf);
     return 0;
 }
@@ -316,4 +321,44 @@ next:
         }
     }
     return 1;
+}
+
+/*
+ * Is @p text (of @p len bytes) a line that starts an nroff macro named in
+ * @p pairs -- ".IP" for "IP", ".P" for "P " (POSIX ex, paragraphs and
+ * sections)?
+ */
+static int
+line_starts_macro(const char *text, size_t len, const char *pairs)
+{
+    if (!pairs || len < 2 || text[0] != '.') {
+        return 0;
+    }
+    for (size_t i = 0; pairs[i] && pairs[i + 1]; i += 2) {
+        if (text[1] != pairs[i]) {
+            continue;
+        }
+        if (pairs[i + 1] == ' ') {
+            if (len == 2 || text[2] == ' ' || text[2] == '\t') {
+                return 1;
+            }
+        } else if (len >= 3 && text[2] == pairs[i + 1]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int
+exvi_line_is_paragraph_macro(const char *text, size_t len)
+{
+    return line_starts_macro(text, len,
+        option_paragraphs ? option_paragraphs : EXVI_DEFAULT_PARAGRAPHS);
+}
+
+int
+exvi_line_is_section_macro(const char *text, size_t len)
+{
+    return line_starts_macro(text, len,
+        option_sections ? option_sections : EXVI_DEFAULT_SECTIONS);
 }

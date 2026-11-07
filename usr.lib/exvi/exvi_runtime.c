@@ -1250,6 +1250,11 @@ exvi_report_error(const char *msg)
     if (visual_mode) {
         exvi_set_pending_status(msg);
     } else {
+        /* errorbells: ex has no standout mode for an error, so a bell
+         * before it (POSIX ex) */
+        if (option_errorbells) {
+            fputc('\a', stderr);
+        }
         fprintf(stderr, "%s\n", msg);
     }
 }

@@ -571,6 +571,26 @@ exvi_set_loaded_line(buffer_t *b)
  * b read_failed, so that the partial buffer is not written back over the
  * file without `!`.
  */
+/*
+ * beautify (POSIX ex): the non-printable characters in text read from a
+ * file go, but for <tab> and <form-feed>.  The new length.
+ */
+size_t
+exvi_beautify(char *text, size_t len)
+{
+    size_t out = 0;
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)text[i];
+
+        if (c >= 0x20 ? c != 0x7f : (c == '\t' || c == '\f')) {
+            text[out++] = (char)c;
+        }
+    }
+    text[out] = '\0';
+    return out;
+}
+
 void
 buf_read_file(buffer_t *b, const char *filename)
 {
@@ -613,6 +633,9 @@ buf_read_stream(buffer_t *b, FILE *f)
             last_had_newline = 1;
         } else {
             last_had_newline = 0;
+        }
+        if (option_beautify) {
+            ret = (ssize_t)exvi_beautify(line, (size_t)ret);
         }
         /* every byte getline() read, a NUL too */
         pos = buf_insert_after_n(b, pos, line, (size_t)ret);

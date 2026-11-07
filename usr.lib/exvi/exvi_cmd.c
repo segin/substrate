@@ -50,9 +50,13 @@ print_visible_char(const line_t *l, size_t j, size_t *col)
     return 1;
 }
 
+/* lines p, l, # and the print flags have written: autoprint's test */
+unsigned long exvi_lines_printed;
+
 static void
 print_line_text(line_t *l, int listed)
 {
+    exvi_lines_printed++;
     size_t col = 0;
 
     for (size_t j = 0; j < l->len; ) {
@@ -729,7 +733,11 @@ handle_ex_yank_command(buffer_t *b, const char *args, int explicit_range,
         return 1;
     }
     apply_command_count(b, t.count, explicit_range, &addr1, &addr2);
-    return handle_yank_command(b, t.buffer, 1, addr1, addr2);
+    handle_yank_command(b, t.buffer, 1, addr1, addr2);
+    if (addr1 >= 1 && addr2 >= addr1) {
+        exvi_report_lines(addr2 - addr1 + 1, "lines yanked");
+    }
+    return 1;
 }
 
 /* ex's print, number (#) and list: [count] [flags] */
@@ -814,9 +822,13 @@ handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2)
     return 1;
 }
 
+/* set by u and redo, which report leaves out */
+int exvi_last_command_was_undo;
+
 int
 handle_undo_command(buffer_t *b)
 {
+    exvi_last_command_was_undo = 1;
     exvi_discard_pending_undo();
     (void)exvi_history_step(b, &undo_history, &redo_history);
     return 1;
@@ -825,6 +837,7 @@ handle_undo_command(buffer_t *b)
 int
 handle_redo_command(buffer_t *b)
 {
+    exvi_last_command_was_undo = 1;
     exvi_discard_pending_undo();
     (void)exvi_history_step(b, &redo_history, &undo_history);
     return 1;
@@ -1396,6 +1409,19 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
         free(repl_str);
         return 1;
     }
+    if (option_edcompatible) {
+        /*
+         * edcompatible (POSIX ex): s's g and c are remembered, and each
+         * one written turns its remembered state over.
+         */
+        static int ed_global;
+        static int ed_confirm;
+
+        ed_global ^= o.global;
+        ed_confirm ^= o.confirm;
+        o.global = ed_global;
+        o.confirm = ed_confirm;
+    }
 
     /* s//: the last pattern any command used, a search's too, not only
      * the last substitute's */
@@ -1845,6 +1871,11 @@ handle_shell_command(buffer_t *b, const char *cmd, int explicit_range, int addr1
         free(text);
         return 1;
     }
+    if (exvi_autowrite(b, 0) != 0) {
+        free(text);
+        return 1;
+    }
+    exvi_warn_unwritten(b);
     if (visual_mode) {
         exvi_visual_shell_suspend();
     }

@@ -540,7 +540,40 @@ redraw, remap, report, scroll (scr), sections (sect), shell (sh), shiftwidth
 (sw), showmatch (sm), showmode (smd), slowopen (slow), tabstop (ts),
 taglength (tl), tags, term, terse, warn, window (wi), wrapmargin (wm),
 wrapscan (ws) and writeany (wa).
-Those with an effect are:
+Each has the effect POSIX gives it.
+Among them: autoprint writes the current line after a command that
+changed the buffer, autowrite writes the buffer before
+.Ic next ,
+.Ic rewind ,
+.Ic tag ,
+.Ic stop
+and
+.Ic \&! ,
+beautify drops control characters but tab and form feed from text read,
+edcompatible makes
+.Ic s
+remember its
+.Cm g
+and
+.Cm c ,
+errorbells rings before an error message, mesg unset keeps others from
+writing to the terminal in vi, paragraphs and sections name nroff macros
+that are paragraph and section boundaries, prompt writes the
+.Ql \&:
+prompt, report says how many lines a command changed once there are that
+many, showmatch shows the bracket a typed one matches, slowopen keeps vi
+from redrawing more than the line typed during text input, taglength
+limits the characters of a tag name compared, term set to dumb has no
+visual mode, warn warns before
+.Ic \&!
+with unwritten changes, and wrapmargin breaks lines typed in vi that pass
+that many columns from the right edge.
+autoprint, report and warn write nothing in batch use.
+terse has no effect (POSIX: messages
+.Dq may
+be shorter), nor redraw, which applies only to terminals that cannot do
+visual mode.
+Some in more detail:
 .Bl -tag -width indent
 .It Ic number , nu
 Number printed output in

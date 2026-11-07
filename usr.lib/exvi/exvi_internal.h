@@ -235,7 +235,7 @@ void handle_sigterm(int sig);
  * notes it). */
 void exvi_check_terminate(void);
 int handle_pop_command(buffer_t *b, int force);
-int handle_tag_command(buffer_t *b, const char *args);
+int handle_tag_command(buffer_t *b, const char *args, int force);
 int handle_tags_command(buffer_t *b);
 int handle_set_command(const char *args);
 /* exvi_options.c: the option table's defaults, and freeing its strings */
@@ -304,6 +304,15 @@ int handle_scroll_command(buffer_t *b);
 int handle_map_command(const char *args, int which, int remove);
 const char *exvi_map_lookup(int which, const int *keys, int n, int *longer);
 int exvi_map_count(int which);
+size_t exvi_beautify(char *text, size_t len);
+int exvi_autowrite(buffer_t *b, int force);
+void exvi_warn_unwritten(buffer_t *b);
+void exvi_report_lines(int n, const char *what);
+extern int exvi_last_command_was_undo;
+extern unsigned long exvi_lines_printed;
+extern int exvi_autoprint_skip;
+int exvi_line_is_paragraph_macro(const char *text, size_t len);
+int exvi_line_is_section_macro(const char *text, size_t len);
 void exvi_maps_free(void);
 extern int exvi_visual_start_col;
 int handle_open_command(buffer_t *b, const char *args, int explicit_range, int addr2);

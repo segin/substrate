@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 
 typedef enum {
     VI_REPEAT_NONE = 0,
@@ -132,6 +133,7 @@ typedef struct {
     int body_dirty_end;
     int clear_screen;
     int rendered_cur_line;
+    int slowopen_deferred;      /* slowopen: the screen to bring up to date after input */
     int zq_pending;
 } vi_visual_t;
 
@@ -806,11 +808,15 @@ vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis)
     vis->insert_text_col = vis->insert_anchor_col;
 }
 
+static void vi_mesg_leave(void);
+
 static void
 vi_restore_terminal(void)
 {
     static const char restore_seq[] =
         "\x1b[?1l\x1b>\x1b[?25h\x1b[0m\x1b[?1049l";
+
+    vi_mesg_leave();            /* at exit too: it is atexit's */
 
     if (active_visual && active_visual->raw_active) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &active_visual->saved_tio);
@@ -942,6 +948,38 @@ vi_suspend(void)
     sigaction(SIGTSTP, &dfl, &old);
     raise(SIGTSTP);
     sigaction(SIGTSTP, &old, NULL);
+}
+
+/*
+ * mesg (POSIX ex): with it unset, others may not write to the terminal --
+ * write(1), talk(1) -- while vi runs; their permission comes back after.
+ */
+static mode_t vi_mesg_saved_mode;
+static int vi_mesg_changed;
+
+static void
+vi_mesg_enter(void)
+{
+    struct stat st;
+
+    vi_mesg_changed = 0;
+    if (option_mesg || fstat(STDIN_FILENO, &st) != 0) {
+        return;
+    }
+    if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0 &&
+        fchmod(STDIN_FILENO, st.st_mode & ~(mode_t)(S_IWGRP | S_IWOTH) & 07777) == 0) {
+        vi_mesg_saved_mode = st.st_mode & 07777;
+        vi_mesg_changed = 1;
+    }
+}
+
+static void
+vi_mesg_leave(void)
+{
+    if (vi_mesg_changed) {
+        (void)fchmod(STDIN_FILENO, vi_mesg_saved_mode);
+        vi_mesg_changed = 0;
+    }
 }
 
 static int
@@ -2022,6 +2060,35 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
     if (prompt || vis->insert_mode || vis->replace_mode || vis->status_msg[0] != '\0'
         || cur_line != vis->rendered_cur_line) {
         vis->status_dirty = 1;
+    }
+
+    /*
+     * slowopen (POSIX ex): in text input, nothing but the line being typed
+     * is brought up to date -- not the other lines, not the status line --
+     * until the input ends.
+     */
+    if (option_slowopen && (vis->insert_mode || vis->replace_mode) && !prompt &&
+        !vis->screen_dirty) {
+        if (vis->body_dirty_start > 0) {
+            int row = cur_line - vis->top_line;
+
+            if (row >= 0 && row < vis->rows - 1) {
+                vi_render_body_range(b, vis, row, row);
+            }
+            if (vis->body_dirty_start != cur_line || vis->body_dirty_end != cur_line) {
+                vis->slowopen_deferred = 1;
+            }
+            vis->body_dirty_start = 0;
+            vis->body_dirty_end = 0;
+        }
+        vis->status_dirty = 0;
+        vi_position_cursor(b, vis, cur_line);
+        fflush(stdout);
+        return;
+    }
+    if (vis->slowopen_deferred && !vis->insert_mode && !vis->replace_mode) {
+        vis->slowopen_deferred = 0;
+        vis->screen_dirty = 1;
     }
 
     if (vis->screen_dirty) {
@@ -3258,7 +3325,11 @@ vi_line_is_blank(line_t *cur)
 static int
 vi_line_is_paragraph_break(line_t *cur)
 {
-    return cur == NULL || cur->len == 0;
+    /* an empty line, or a paragraph or section macro (the paragraphs and
+     * sections options: .IP, .SH ...), which { and } passed over */
+    return cur == NULL || cur->len == 0 ||
+        exvi_line_is_paragraph_macro(cur->text, cur->len) ||
+        exvi_line_is_section_macro(cur->text, cur->len);
 }
 
 static void
@@ -3377,7 +3448,8 @@ vi_is_section_line(line_t *line, int want_end)
     if (want_end) {
         return ch == '}';
     }
-    return ch == '{';
+    /* { or a section macro (the sections option: .SH, .NH ...) */
+    return ch == '{' || exvi_line_is_section_macro(line->text, line->len);
 }
 
 static void
@@ -4916,6 +4988,8 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
     }
     /* one change for u, and one copy of the buffer for it: each put
      * took its own, so yy8000p ran for 40 s; ^C stops it */
+    int lines_before = b->line_count;
+
     exvi_begin_undo_group(b);
     while (count-- > 0 && !exvi_interrupted) {
         handle_put_command(b, regarg, before ? line_no - 1 : line_no);
@@ -4931,6 +5005,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
         }
     }
     exvi_end_undo_group();
+    exvi_report_lines(b->line_count - lines_before, "more lines");
     vis->cursor_col = 0;
     vi_mark_body_dirty_through_eof(vis, dirty_start_line);
 }
@@ -4954,16 +5029,19 @@ vi_linewise_yank(buffer_t *b, vi_visual_t *vis, int start, int end)
         b->cur = orig;
     }
     vis->cursor_col = 0;
+    exvi_report_lines(end - start + 1, "lines yanked");
 }
 
 static void
 vi_linewise_delete(buffer_t *b, vi_visual_t *vis, int start, int end)
 {
     char regarg[2];
+    int before = b->line_count;
 
     vi_take_register_arg(vis, regarg);
     handle_yank_command(b, regarg, 1, start, end);
     handle_delete_command(b, 1, start, end);
+    exvi_report_lines(before - b->line_count, "fewer lines");
     vi_ensure_visible_line(b);
     vis->cursor_col = 0;
     vi_mark_body_dirty_through_eof(vis, start);
@@ -7094,6 +7172,113 @@ vi_erase_input(buffer_t *b, vi_visual_t *vis, int start)
 }
 
 /*
+ * showmatch (POSIX ex): a ), } or ] typed in text input shows its match --
+ * the cursor on it for a second, or until the next key -- when the match
+ * is on the screen.
+ */
+static void
+vi_show_match(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    line_t *match_line;
+    int match_col;
+    int at = vis->cursor_col - 1;
+    int match_no;
+    fd_set rfds;
+    struct timeval tv;
+
+    if (!cur || at < 0 ||
+        vi_find_match_for_bracket(cur, at, &match_line, &match_col) != 0) {
+        return;
+    }
+    match_no = vi_line_number_for_mark(b, match_line);
+    if (match_no < vis->top_line || match_no > vis->top_line + vis->rows - 2) {
+        return;
+    }
+    {
+        line_t *saved_line = b->cur;
+        int saved_col = vis->cursor_col;
+
+        vi_render(b, vis, ':', NULL);
+        b->cur = match_line;
+        vis->cursor_col = match_col;
+        vi_position_cursor(b, vis, match_no);
+        fflush(stdout);
+        FD_ZERO(&rfds);
+        FD_SET(STDIN_FILENO, &rfds);
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+        (void)select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
+        b->cur = saved_line;
+        vis->cursor_col = saved_col;
+    }
+}
+
+/*
+ * wrapmargin (POSIX ex): in text input, once the cursor goes past
+ * wrapmargin columns from the screen's right edge, the line breaks at a
+ * blank: a blank typed there ends the line itself, its blanks dropped;
+ * otherwise the blanks before the word being typed become the line break
+ * and the word goes on the next line.
+ */
+static void
+vi_wrap_margin(buffer_t *b, vi_visual_t *vis, int key)
+{
+    line_t *cur = b->cur;
+    int margin = vi_text_cols(vis) - option_wrapmargin;
+    int floor = vi_input_floor(b, vis);
+    int word_start;
+    int blanks_start;
+    int moved;
+
+    if (!cur || margin < 1 || vi_display_col_for_index(cur, vis->cursor_col) <= margin) {
+        return;
+    }
+    if (key == ' ' || key == '\t') {
+        blanks_start = vis->cursor_col;
+        while (blanks_start > floor &&
+            (cur->text[blanks_start - 1] == ' ' || cur->text[blanks_start - 1] == '\t')) {
+            blanks_start--;
+        }
+        vi_erase_input(b, vis, blanks_start);
+        vi_split_line(b, vis);
+        return;
+    }
+    word_start = vis->cursor_col;
+    while (word_start > floor &&
+        cur->text[word_start - 1] != ' ' && cur->text[word_start - 1] != '\t') {
+        word_start--;
+    }
+    blanks_start = word_start;
+    while (blanks_start > floor &&
+        (cur->text[blanks_start - 1] == ' ' || cur->text[blanks_start - 1] == '\t')) {
+        blanks_start--;
+    }
+    if (blanks_start == word_start || blanks_start == 0) {
+        return;                 /* no blank to break at */
+    }
+    moved = vis->cursor_col - word_start;
+    {
+        /* the blanks go; the line breaks where they were */
+        char *text = malloc(cur->len - (size_t)(word_start - blanks_start) + 1);
+
+        if (!text) {
+            return;
+        }
+        memcpy(text, cur->text, (size_t)blanks_start);
+        memcpy(text + blanks_start, cur->text + word_start, cur->len - (size_t)word_start + 1);
+        if (vi_replace_current_text(b, text, cur->len - (size_t)(word_start - blanks_start)) != 0) {
+            free(text);
+            return;
+        }
+        free(text);
+    }
+    vis->cursor_col = blanks_start;
+    vi_split_line(b, vis);
+    vis->cursor_col += moved;
+}
+
+/*
  * abbreviate (POSIX vi): when a character that ends a word is typed in
  * text input -- a non-word character, <CR> or ESC -- and the word this
  * input entered before the cursor is an abbreviation's left-hand side, the
@@ -8458,6 +8643,7 @@ exvi_visual_main(buffer_t *b)
     if (vi_enable_raw(&vis) != 0) {
         return 1;
     }
+    vi_mesg_enter();
     if (exvi_take_pending_status(vis.status_msg, sizeof(vis.status_msg))) {
         vis.status_once = 1;
     }
@@ -8709,6 +8895,12 @@ exvi_visual_main(buffer_t *b)
 
                     for (int i = 0; i < n; i++) {
                         vi_insert_char(b, &vis, (unsigned char)bytes[i]);
+                    }
+                    if (option_wrapmargin > 0) {
+                        vi_wrap_margin(b, &vis, key);
+                    }
+                    if (option_showmatch && (key == ')' || key == '}' || key == ']')) {
+                        vi_show_match(b, &vis);
                     }
                 }
                 break;
@@ -9511,7 +9703,7 @@ process_normal_key:
                     (void)!write(STDOUT_FILENO, "\a", 1);
                     break;
                 }
-                handle_tag_command(b, tag);
+                handle_tag_command(b, tag, 0);
                 free(tag);
                 if (b->cur) {
                     vis.cursor_col = vi_first_nonblank_col(b->cur);
@@ -9767,6 +9959,7 @@ done:
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
     vi_leave_terminal();
+    vi_mesg_leave();
     return 0;
 
 ex_mode:
@@ -9784,5 +9977,6 @@ ex_mode:
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
     vi_leave_terminal();
+    vi_mesg_leave();
     return EXVI_EXIT_EX_HANDOFF;
 }

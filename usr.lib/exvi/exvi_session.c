@@ -391,8 +391,22 @@ apply_tag_address(buffer_t *b, char *addr_text)
     return 0;
 }
 
+/*
+ * Tag names compared as taglength has it (POSIX ex): its first taglength
+ * characters, in the name typed and in the tags file, or all of them for
+ * 0.  ta fooxx did not find foo with taglength=3.
+ */
+static int
+tag_names_match(const char *in_file, const char *typed)
+{
+    if (option_taglength > 0) {
+        return strncmp(in_file, typed, (size_t)option_taglength) == 0;
+    }
+    return strcmp(in_file, typed) == 0;
+}
+
 int
-handle_tag_command(buffer_t *b, const char *args)
+handle_tag_command(buffer_t *b, const char *args, int force)
 {
     char *ptr = (char *)args;
     FILE *f;
@@ -434,14 +448,14 @@ next_file:
         char *tfile = strtok(NULL, "\t ");
         char *tcmd = strtok(NULL, "");
 
-        if (tname && tfile && tcmd && strcmp(tname, ptr) == 0) {
+        if (tname && tfile && tcmd && tag_names_match(tname, ptr)) {
             char *old_filename;
 
             if (exvi_restricted_filename_change(b, tfile)) {
                 found = 1;
                 break;
             }
-            if (b->modified) {
+            if (b->modified && !force) {
                 exvi_report_error("No write since last change");
                 free(line);
                 fclose(f);
@@ -969,6 +983,10 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
                 last_had_newline = 1;
             } else {
                 last_had_newline = 0;
+            }
+            /* from a file: beautify's; a command's output is no file */
+            if (option_beautify && !is_pipe) {
+                ret = (ssize_t)exvi_beautify(line, (size_t)ret);
             }
             if (replace_empty_line) {
                 /* every byte read, a NUL too */

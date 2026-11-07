@@ -719,3 +719,61 @@ handle_open_command(buffer_t *b, const char *args, int explicit_range, int addr2
     b->cur = line;
     return 2;                   /* the caller goes to visual mode */
 }
+
+/*
+ * autowrite (POSIX ex): before next, rewind, tag, stop, suspend and !, a
+ * buffer modified since it was last written is written as by w; a ! on
+ * the command (but !'s own) prevents it.  -1, the command not to run, when
+ * the write fails.
+ */
+int
+exvi_autowrite(buffer_t *b, int force)
+{
+    if (!option_autowrite || force || !b->modified || !b->filename) {
+        return 0;
+    }
+    (void)handle_write_command(b, "", 0, -1, -1, 0);
+    return b->modified ? -1 : 0;
+}
+
+/*
+ * warn (POSIX ex): before a ! command, a buffer modified since it was last
+ * written gets a warning -- not in batch use, where informational messages
+ * are not written.
+ */
+void
+exvi_warn_unwritten(buffer_t *b)
+{
+    if (option_warn && b->modified && !batch_mode && isatty(STDIN_FILENO)) {
+        if (visual_mode) {
+            exvi_set_pending_status("[No write since last change]");
+        } else {
+            printf("[No write since last change]\n");
+            fflush(stdout);
+        }
+    }
+}
+
+/*
+ * report (POSIX ex): a command that adds, deletes or yanks at least report
+ * lines says how many.  The message is informational: batch use writes
+ * none.  In vi it is the status line.
+ */
+void
+exvi_report_lines(int n, const char *what)
+{
+    char msg[64];
+
+    if (option_report <= 0 || n < option_report) {
+        return;
+    }
+    if (!visual_mode && (batch_mode || !isatty(STDIN_FILENO))) {
+        return;
+    }
+    snprintf(msg, sizeof(msg), "%d %s", n, what);
+    if (visual_mode) {
+        exvi_set_pending_status(msg);
+    } else {
+        printf("%s\n", msg);
+    }
+}

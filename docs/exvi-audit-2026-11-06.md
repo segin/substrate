@@ -799,7 +799,7 @@ The number is not reused.
 
 ### EXVI-53 — 26 of POSIX's 37 options are missing — *Medium*
 
-- [ ] **EXVI-53.1** (Ubiquitous) The editor shall implement every option POSIX
+- [x] **EXVI-53.1** (Ubiquitous) The editor shall implement every option POSIX
   lists for ex and vi.
 
 - **Missing**: autoprint, autowrite, beautify, directory, edcompatible,
@@ -809,8 +809,14 @@ The number is not reused.
   EXVI-01 (`exrc`), EXVI-03 (`directory`), EXVI-11 (`writeany`), EXVI-29
   (`magic`), EXVI-36 (`shell`), EXVI-67 (`shiftwidth`).  No autoprint after
   `1d`; `ta fooxx` finds no `foo` (no taglength).
-- **Basis**: reproduced.  All 37 are now accepted (EXVI-55); `shiftwidth`
-  has its effect since EXVI-67.
+- **Basis**: reproduced.  All 37 are accepted (EXVI-55) and have their
+  effects: `shiftwidth` (EXVI-67), `remap` (EXVI-49), `scroll`/`window`
+  (EXVI-54.3, 49), `prompt`, and the rest with this item --
+  `tests/bin/ex/test_ex_options.sh`, `test_ex_options_tty.py`,
+  `tests/bin/vi/test_vi_options.py`.  Won't do: `terse` (POSIX: messages
+  "may" be shorter -- no requirement) and `redraw` (only for terminals that
+  cannot do visual mode, which exvi does not drive).  autoprint, report and
+  warn write nothing in batch use, POSIX -s's informational messages.
 
 ### EXVI-54 — options accepted but without effect, and wrong defaults — *Medium*
 

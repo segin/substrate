@@ -26,6 +26,8 @@ int exvi_exit_requested = 0;
 static int exvi_visual_requested = 0;
 /* in text input on a terminal, ^D, 0^D or ^^D read for the line being typed */
 static char input_eof_prefix[64];
+/* the command just run is one autoprint leaves alone */
+int exvi_autoprint_skip;
 
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
@@ -395,10 +397,16 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     } else if (match_command(cmd, "args", "ar", &args, NULL)) {
         return handle_args_command(args);
     } else if (match_command(cmd, "next", "n", &args, &force)) {
+        if (exvi_autowrite(b, force) != 0) {
+            return 1;
+        }
         return handle_next_command(b, args, force);
     } else if (match_command(cmd, "prev", NULL, &args, &force)) {
         return handle_prev_command(b, force);
     } else if (match_command(cmd, "rewind", "rew", &args, &force)) {
+        if (exvi_autowrite(b, force) != 0) {
+            return 1;
+        }
         return handle_rewind_command(b, force);
     } else if (match_command(cmd, "preserve", "pre", &args, NULL)) {
         return handle_preserve_command(b);
@@ -408,8 +416,11 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_pop_command(b, force);
     } else if (match_command(cmd, "tags", NULL, &args, NULL)) {
         return handle_tags_command(b);
-    } else if (match_command(cmd, "tag", "ta", &args, NULL)) {
-        return handle_tag_command(b, args);
+    } else if (match_command(cmd, "tag", "ta", &args, &force)) {
+        if (exvi_autowrite(b, force) != 0) {
+            return 1;
+        }
+        return handle_tag_command(b, args, force);
     } else if (match_command(cmd, "set", "se", &args, NULL)) {
         return handle_set_command(args);
     } else if (match_command(cmd, "quit", "q", &args, &force)) {
@@ -461,8 +472,12 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_map_command(args, EXVI_MAP_ABBREV, 1);
     } else if (match_command(cmd, "suspend", "su", &args, &force)
         || match_command(cmd, "stop", "st", &args, &force)) {
+        if (exvi_autowrite(b, force) != 0) {
+            return 1;
+        }
         return handle_suspend_command();
     } else if (match_command(cmd, "read", "r", &args, NULL)) {
+        exvi_autoprint_skip = 1;
         return handle_read_command(b, args, addr2);
     }
 
@@ -537,6 +552,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     } else if (cmd[0] == '<' || cmd[0] == '>') {
         return handle_shift_command(b, cmd, explicit_range, addr1, addr2);
     } else if (cmd[0] == '@' || cmd[0] == '*') {
+        exvi_autoprint_skip = 1;
         return handle_execute_command(b, cmd + 1, explicit_range, addr1, addr2, do_command);
     } else if (cmd[0] == 0x04 && cmd[1] == '\0') {
         return handle_scroll_command(b);
@@ -545,6 +561,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     } else if (match_command(cmd, "global", "g", &args, &force)
         || match_command(cmd, "global", "v", &args, &force)) {
         /* global! is v */
+        exvi_autoprint_skip = 1;
         return handle_global_command(b, cmd, args, force, explicit_range, addr1, addr2);
     } else if (cmd[0] == '!') {
         return handle_shell_command(b, cmd, explicit_range, addr1, addr2);
@@ -860,7 +877,10 @@ enter_visual:
         /* ex's visual mode is this library's, in this process, on this
          * buffer -- its undo, marks and named buffers with it.  It handed a
          * file name to whatever `vi` it found, which on a host was Vim. */
-        if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
+        /* the term option names the display: a dumb one cannot do visual
+         * mode (POSIX ex: term determines the type of the display) */
+        if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO) ||
+            (option_term && strcmp(option_term, "dumb") == 0)) {
             fprintf(stderr, "%s: visual mode requires a terminal.\n", exvi_progname);
             status = 1;
             goto out;
@@ -962,7 +982,35 @@ enter_visual:
         while (*cmd_line && isspace((unsigned char)*cmd_line)) cmd_line++;
         if (*cmd_line == ':') cmd_line++;
         
-        do_command(&buf, cmd_line);
+        {
+            int lines_before = buf.line_count;
+
+            unsigned long generation = exvi_buffer_generation;
+            unsigned long printed = exvi_lines_printed;
+
+            exvi_last_command_was_undo = 0;
+            exvi_autoprint_skip = 0;
+            do_command(&buf, cmd_line);
+            if (!exvi_last_command_was_undo) {
+                int d = buf.line_count - lines_before;
+
+                exvi_report_lines(d > 0 ? d : -d, d > 0 ? "more lines" : "fewer lines");
+            }
+            /*
+             * autoprint (POSIX ex): after a command that changed the buffer,
+             * the current line -- not after global, v, @ and *, read, text
+             * input, or a command that wrote the line by a flag; and only
+             * interactively, batch use writing no such lines.
+             */
+            if (option_autoprint && interactive && !visual_mode && !input_mode &&
+                !exvi_autoprint_skip && !exvi_exit_requested &&
+                generation != exvi_buffer_generation && printed == exvi_lines_printed &&
+                buf.cur && buf.line_count > 0) {
+                int n = buf_current_line(&buf);
+
+                print_range(&buf, n, n, option_number, option_list);
+            }
+        }
         if (exvi_take_error() && !isatty(STDIN_FILENO)) {
             /*
              * POSIX ex, Consequences of Errors: reading commands from
