@@ -3799,11 +3799,12 @@ def main():
         [b"\x1b[6~", b"r", b"X", b"\x1b[5~", b"r", b"Y"],
     )
     require(exit_code == 0, f"page-key-scroll vi exited with status {exit_code}")
-    require("line 23/40" in decoded, "missing page-down key status")
+    # POSIX: the page stops with line 40 at the bottom of 23 text rows
+    require("line 18/40" in decoded, "missing page-down key status")
     require("line 1/40" in decoded, "missing page-up key status")
     require(saved.startswith("Yine 1\nline 2\nline 3\n"),
             "unexpected page-key-scroll buffer contents")
-    require("Xine 23\n" in saved, "missing page-down key edit target")
+    require("Xine 18\n" in saved, "missing page-down key edit target")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

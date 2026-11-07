@@ -187,6 +187,16 @@ and
 .Cm k
 go to the last character of each line they reach until a command sets the
 column.
+.Cm Ctrl-F
+and
+.Cm Ctrl-B
+move the screen count times
+.Ic window
+less two lines, a screenful when
+.Ic window
+is under 3, and stop with the last line at the bottom or the first at the
+top; the cursor moves with the screen, to the first non-blank.
+Each is an error on the last line or the first.
 A count on
 .Cm \&.
 repeats the change's text that many times.

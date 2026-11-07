@@ -165,7 +165,7 @@ static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count)
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_move_word_end_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_move_bigword_end_count(buffer_t *b, vi_visual_t *vis, int count);
-static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
+static int vi_page_scroll(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_delete_char(buffer_t *b, vi_visual_t *vis);
 static void vi_linewise_yank(buffer_t *b, vi_visual_t *vis, int start, int end);
 static void vi_linewise_delete(buffer_t *b, vi_visual_t *vis, int start, int end);
@@ -3027,15 +3027,70 @@ vi_move_line_first_nonblank(buffer_t *b, vi_visual_t *vis, int delta)
     vis->cursor_col = vi_first_nonblank_col(b->cur);
 }
 
-static void
-vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
+/*
+ * ^F (count > 0) and ^B (count < 0), POSIX vi: the screen moves count x
+ * (window - 2) lines, the next or previous screenful when window is under
+ * 3, and never past the buffer's last line at the bottom or its first at
+ * the top.  The current line moves with the screen, by the lines it newly
+ * shows; when no line of the old screen is left, it is the new screen's
+ * first line (^F) or last (^B).  An error on the buffer's last line (^F)
+ * or first (^B).  The cursor moved rows - 2 lines and the screen followed
+ * it, so a page was a line too far.
+ */
+static int
+vi_page_scroll(buffer_t *b, vi_visual_t *vis, int count)
 {
-    int page = vis->rows - 2;
+    int visible_rows = vis->rows - 1 > 1 ? vis->rows - 1 : 1;
+    int cur_line = buf_current_line(b);
+    int forward = count > 0;
+    int pages = forward ? count : -count;
+    int old_top;
+    int old_last;
+    int new_top;
+    int new_last;
+    int target;
 
-    if (page < 1) {
-        page = 1;
+    if (b->line_count < 1 || cur_line < 1 ||
+        (forward ? cur_line >= b->line_count : cur_line <= 1)) {
+        return -1;
     }
-    vi_move_vertical(b, vis, direction * page);
+    if (pages > b->line_count) {
+        pages = b->line_count;
+    }
+    /* the screen as it stands, though keys ahead skipped the redraw */
+    vi_scroll_into_view(b, vis);
+    old_top = vi_clamp_top_line(b, vis, vis->top_line);
+    old_last = old_top + visible_rows - 1;
+    if (old_last > b->line_count) {
+        old_last = b->line_count;
+    }
+    if (forward) {
+        new_top = option_window < 3 ? old_last + 1 :
+            old_top + pages * (option_window - 2);
+    } else {
+        new_top = option_window < 3 ? old_top - visible_rows :
+            old_top - pages * (option_window - 2);
+    }
+    new_top = vi_clamp_top_line(b, vis, new_top);
+    new_last = new_top + visible_rows - 1;
+    if (new_last > b->line_count) {
+        new_last = b->line_count;
+    }
+    if (forward) {
+        target = new_top > old_last ? new_top : cur_line + (new_last - old_last);
+    } else {
+        target = new_last < old_top ? new_last : cur_line - (old_top - new_top);
+    }
+    if (target < new_top) {
+        target = new_top;
+    }
+    if (target > new_last) {
+        target = new_last;
+    }
+    vis->top_line = new_top;
+    b->cur = buf_get_line(b, target);
+    vi_clamp_cursor(b, vis);
+    return 0;
 }
 
 static void
@@ -9906,7 +9961,10 @@ process_normal_key:
         case 0x02:
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            vi_page_scroll(b, &vis, -vi_take_count(&vis));
+            if (vi_page_scroll(b, &vis, -vi_take_count(&vis)) != 0) {
+                (void)!write(STDOUT_FILENO, "\a", 1);
+                break;
+            }
             /* onto the first non-blank (POSIX vi); it kept the column */
             vis.cursor_col = vi_first_nonblank_col(b->cur);
             break;
@@ -9934,7 +9992,10 @@ process_normal_key:
         case 0x06:
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            vi_page_scroll(b, &vis, vi_take_count(&vis));
+            if (vi_page_scroll(b, &vis, vi_take_count(&vis)) != 0) {
+                (void)!write(STDOUT_FILENO, "\a", 1);
+                break;
+            }
             /* onto the first non-blank (POSIX vi); it kept the column */
             vis.cursor_col = vi_first_nonblank_col(b->cur);
             break;
