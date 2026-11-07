@@ -1,5 +1,5 @@
 /*
- * ex commands POSIX lists that exvi lacked (EXVI-49): chdir/cd, shell,
+ * ex commands POSIX lists that exvi lacked: chdir/cd, shell,
  * source, suspend/stop, z, < and >, ^D, and @ / *.  Each was "Unknown
  * command".
  */

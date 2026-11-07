@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <regex.h>
 #include <signal.h>
 #include <stdint.h>
@@ -68,6 +69,8 @@ typedef struct {
 } vi_replace_edit_t;
 
 #define VI_PROMPT_HISTORY_MAX 32
+/* want_col after $: past any line's end, so the last character */
+#define VI_WANT_EOL (INT_MAX / 2)
 
 typedef struct {
     struct termios saved_tio;
@@ -114,9 +117,10 @@ typedef struct {
     char *ai_restore;           /* after ^^D: the next line's autoindent */
     /* the column j and k aim for, while the cursor stays where the last of
      * them put it: that line (by id) and that column */
-    int want_col;
+    int want_col;               /* VI_WANT_EOL: the line's end, after $ */
     unsigned long want_line_id;
     int want_at_col;
+    int want_kept;              /* this command kept want_col: $, j, k ... */
     char *u_text;
     size_t u_len;
     int last_change_keys[64];           /* ... and the keys it read after the motion key */
@@ -2836,6 +2840,19 @@ vi_yank_span(vi_visual_t *vis, line_t *cur, int start, int end)
     return 0;
 }
 
+/*
+ * True if the line delta lines from the current one is in the buffer.  A
+ * count past the first or last line is an error for j, k, +, -, $, dd,
+ * yy, << and >> (POSIX vi), not a move as far as there are lines.
+ */
+static int
+vi_line_in_reach(buffer_t *b, int delta)
+{
+    int target = buf_current_line(b) + delta;
+
+    return target >= 1 && target <= b->line_count;
+}
+
 static void
 vi_move_vertical(buffer_t *b, vi_visual_t *vis, int delta)
 {
@@ -2876,6 +2893,7 @@ vi_move_vertical(buffer_t *b, vi_visual_t *vis, int delta)
             vis->want_col = display_col;
             vis->want_line_id = b->cur->id;
             vis->want_at_col = vis->cursor_col;
+            vis->want_kept = 1;
         }
     }
 }
@@ -4630,16 +4648,26 @@ vi_move_to_eol_count(buffer_t *b, vi_visual_t *vis, int count)
     if (count < 1) {
         count = 1;
     }
-    target = vi_clamp_line_target(b, buf_current_line(b) + count - 1);
-    if (target < 1) {
+    if (!vi_line_in_reach(b, count - 1)) {
+        (void)!write(STDOUT_FILENO, "\a", 1);
         return;
     }
+    target = buf_current_line(b) + count - 1;
     b->cur = buf_get_line(b, target);
     if (!b->cur) {
         vis->cursor_col = 0;
         return;
     }
     vis->cursor_col = vi_last_char_col(b->cur);
+    /*
+     * The column is the line's end: j, k and the rest that change the line
+     * and not the column keep to the end of each line they go to, until a
+     * command sets the column (POSIX vi).
+     */
+    vis->want_col = VI_WANT_EOL;
+    vis->want_line_id = b->cur->id;
+    vis->want_at_col = vis->cursor_col;
+    vis->want_kept = 1;
 }
 
 static int
@@ -4651,10 +4679,10 @@ vi_eol_motion_target(buffer_t *b, int count, line_t **line_out, int *col_out)
     if (count < 1) {
         count = 1;
     }
-    target = vi_clamp_line_target(b, buf_current_line(b) + count - 1);
-    if (target < 1) {
+    if (!vi_line_in_reach(b, count - 1)) {
         return -1;
     }
+    target = buf_current_line(b) + count - 1;
     line = buf_get_line(b, target);
     if (!line) {
         return -1;
@@ -5926,8 +5954,13 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     int count = vi_multiply_counts(op_count, motion_count);
     int end;
     int last_line = vi_clamp_line_target(b, line_no + count - 1);
+    /* dd, yy, <<, >> and _ with fewer than count - 1 lines after */
+    int short_of_lines = line_no >= 1 && !vi_line_in_reach(b, count - 1) &&
+        (key == vis->pending_op || key == '_');
 
-    if (vis->pending_op == '>' && key == '>') {
+    if (short_of_lines && !(vis->pending_op == 'c' && key == 'c')) {
+        (void)!write(STDOUT_FILENO, "\a", 1);
+    } else if (vis->pending_op == '>' && key == '>') {
         if (vi_shift_range(b, vis, line_no, last_line, 1) != 0) {
             (void)!write(STDOUT_FILENO, "\a", 1);
         }
@@ -6118,7 +6151,8 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int start = line_no;
         int end_line = vi_clamp_line_target(b, line_no + count);
 
-        if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+        if (!vi_line_in_reach(b, count) ||
+            vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
             (void)!write(STDOUT_FILENO, "\a", 1);
         } else if (vis->pending_op == 'c') {
             vi_set_last_change(vis, VI_REPEAT_C_LINE_MOTION, count, key);
@@ -7955,6 +7989,10 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         vi_toggle_case(b, vis, count);
         break;
     case VI_REPEAT_DD:
+        if (!vi_line_in_reach(b, count - 1)) {
+            (void)!write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
         last = vi_clamp_line_target(b, line_no + count - 1);
         handle_delete_command(b, 1, line_no, last);
         if (!b->cur && b->head) {
@@ -8908,6 +8946,7 @@ exvi_visual_main(buffer_t *b)
             continue;
         }
 process_normal_key:
+        vis.want_kept = 0;
         switch (key) {
         case VI_KEY_UP:
             key = 'k';
@@ -9098,14 +9137,18 @@ process_normal_key:
             }
             break;
         case 'j':
-            vis.pending_g = 0;
-            vis.screen_dirty = 0;
-            vi_move_vertical(b, &vis, vi_take_count(&vis));
-            break;
         case 'k':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            vi_move_vertical(b, &vis, -vi_take_count(&vis));
+            {
+                int delta = key == 'j' ? vi_take_count(&vis) : -vi_take_count(&vis);
+
+                if (!vi_line_in_reach(b, delta)) {
+                    (void)!write(STDOUT_FILENO, "\a", 1);
+                } else {
+                    vi_move_vertical(b, &vis, delta);
+                }
+            }
             break;
         case ')':
             vis.pending_g = 0;
@@ -9158,14 +9201,18 @@ process_normal_key:
         case '+':
         case '\r':
         case '\n':
-            vis.pending_g = 0;
-            vis.screen_dirty = 0;
-            vi_move_line_first_nonblank(b, &vis, vi_take_count(&vis));
-            break;
         case '-':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            vi_move_line_first_nonblank(b, &vis, -vi_take_count(&vis));
+            {
+                int delta = key == '-' ? -vi_take_count(&vis) : vi_take_count(&vis);
+
+                if (!vi_line_in_reach(b, delta)) {
+                    (void)!write(STDOUT_FILENO, "\a", 1);
+                } else {
+                    vi_move_line_first_nonblank(b, &vis, delta);
+                }
+            }
             break;
         case 'w':
             vis.pending_g = 0;
@@ -9308,7 +9355,9 @@ process_normal_key:
                 int target = vi_clamp_line_target(b, line_no + count - 1);
 
                 vis.pending_g = 0;
-                if (b->line_count > 0) {
+                if (!vi_line_in_reach(b, count - 1)) {
+                    (void)!write(STDOUT_FILENO, "\a", 1);
+                } else if (b->line_count > 0) {
                     b->cur = buf_get_line(b, target);
                     vis.cursor_col = vi_first_nonblank_col(b->cur);
                 }
@@ -9325,7 +9374,7 @@ process_normal_key:
                 }
                 if (cur) {
                     vis.cursor_col = vi_index_for_display_col(cur, target);
-                    /* past the line's end: its last character (EXVI-90) */
+                    /* past the line's end: its last character */
                     if (cur->len > 0 && (size_t)vis.cursor_col >= cur->len) {
                         vis.cursor_col = vi_last_char_col(cur);
                     }
@@ -9904,7 +9953,11 @@ process_normal_key:
                 int line_no = buf_current_line(b);
                 int last_line = vi_clamp_line_target(b, line_no + count - 1);
 
-                vi_linewise_yank(b, &vis, line_no, last_line);
+                if (!vi_line_in_reach(b, count - 1)) {
+                    (void)!write(STDOUT_FILENO, "\a", 1);
+                } else {
+                    vi_linewise_yank(b, &vis, line_no, last_line);
+                }
             }
             break;
         case '.':
@@ -9918,6 +9971,13 @@ process_normal_key:
             break;
         }
 maybe_restore_insert_mode:
+        /* a command that set the column ends $'s line's-end column, even
+         * one that left the cursor where it was (r on the last character) */
+        if (vis.want_col == VI_WANT_EOL && !vis.want_kept && !vis.pending_op &&
+            !vis.pending_count && !vis.pending_g && !vis.pending_z &&
+            !vis.pending_big_z && key != '"') {
+            vis.want_col = -1;
+        }
         if (resume_insert_mode && !vis.insert_mode && !vis.replace_mode &&
             !vis.pending_op && !vis.pending_z && !vis.pending_big_z && !vis.pending_g) {
             vis.insert_mode = 1;

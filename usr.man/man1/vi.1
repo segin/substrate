@@ -158,6 +158,35 @@ change that many lines, and fail, changing nothing, when fewer than
 count \- 1 lines follow the current one; with
 .Ic autoindent
 set, the new line takes the first changed line's indent.
+A count reaching past the first or last line is an error that moves and
+changes nothing, as POSIX has it, for
+.Cm j ,
+.Cm k ,
+.Cm + ,
+.Cm - ,
+.Aq Enter ,
+.Cm $ ,
+.Cm _ ,
+.Cm dd ,
+.Cm yy ,
+.Cm Y ,
+.Cm <<
+and
+.Cm >> ,
+and for
+.Cm j ,
+.Cm +
+and
+.Cm $
+as an operator's motion: 4dd with three lines left deletes none of them.
+After
+.Cm $
+the column is the line's end:
+.Cm j
+and
+.Cm k
+go to the last character of each line they reach until a command sets the
+column.
 A count on
 .Cm \&.
 repeats the change's text that many times.

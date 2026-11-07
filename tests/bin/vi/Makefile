@@ -17,7 +17,7 @@ VI_TESTS = \
 	test_vi_dot_ops.py test_vi_undo_line.py test_vi_percent.py \
 	test_vi_empty_ops.py test_vi_change_lines.py test_vi_indent_keys.py \
 	test_vi_ctrl_at.py test_vi_columns.py test_vi_large_counts.py \
-	test_vi_maps.py test_vi_options.py
+	test_vi_maps.py test_vi_options.py test_vi_count_ends.py
 
 .PHONY: all clean test oracle
 
