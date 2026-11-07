@@ -304,6 +304,8 @@ int handle_map_command(const char *args, int which, int remove);
 const char *exvi_map_lookup(int which, const int *keys, int n, int *longer);
 int exvi_map_count(int which);
 void exvi_maps_free(void);
+extern int exvi_visual_start_col;
+int handle_open_command(buffer_t *b, const char *args, int explicit_range, int addr2);
 int handle_execute_command(buffer_t *b, const char *args, int explicit_range, int addr1,
     int addr2, void (*command_fn)(buffer_t *, char *));
 int handle_copy_command(buffer_t *b, const char *args, int explicit_range,

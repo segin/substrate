@@ -376,6 +376,11 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         /* the same buffer goes on in visual mode, modified or not */
         exvi_visual_requested = 1;
         return 1;
+    } else if (match_command(cmd, "open", "o", &args, NULL)) {
+        if (handle_open_command(b, args, explicit_range, addr2) == 2) {
+            exvi_visual_requested = 1;
+        }
+        return 1;
     } else if (match_command(cmd, "version", "ve", &args, NULL)) {
         const char *version = "Substrate vi v0.1";
 

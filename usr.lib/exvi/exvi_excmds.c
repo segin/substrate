@@ -8,6 +8,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <regex.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -653,4 +654,68 @@ exvi_maps_free(void)
         map_tables[w] = NULL;
         map_counts[w] = 0;
     }
+}
+
+/* the column vi starts at, set by open /pattern/; -1 for its own choice */
+int exvi_visual_start_col = -1;
+
+/*
+ * [1addr] o[pen] [/pattern/] [flags] (POSIX ex): vi on the line addressed,
+ * the cursor at the pattern's match on it.  POSIX's open mode shows the
+ * one line; this is visual mode, which POSIX lets stand in on terminals
+ * without the means (it "need not be supported").  It was "Unknown
+ * command".  2 when vi is to start, 1 after an error.
+ */
+int
+handle_open_command(buffer_t *b, const char *args, int explicit_range, int addr2)
+{
+    const char *p = skip_blanks(args ? args : "");
+    line_t *line;
+
+    if (visual_mode) {
+        exvi_report_error("Already in visual mode");
+        return 1;
+    }
+    if (b->line_count < 1) {
+        exvi_report_error("No lines in the buffer");
+        return 1;
+    }
+    line = explicit_range && addr2 >= 1 ? buf_get_line(b, addr2) : b->cur;
+    if (!line) {
+        exvi_report_error("Bad address");
+        return 1;
+    }
+    exvi_visual_start_col = -1;
+    if (*p == '/') {
+        const char *q = p + 1;
+        char *pattern;
+        regex_t re;
+        regmatch_t m;
+
+        while (*q && *q != '/') {
+            if (*q == '\\' && q[1]) {
+                q++;
+            }
+            q++;
+        }
+        pattern = strndup(p + 1, (size_t)(q - p - 1));
+        if (!pattern) {
+            exvi_report_error("out of memory");
+            return 1;
+        }
+        if (exvi_regcomp(&re, pattern) != 0) {
+            free(pattern);
+            return 1;
+        }
+        free(pattern);
+        if (regexec(&re, line->text, 1, &m, 0) != 0) {
+            regfree(&re);
+            exvi_report_error("Pattern not found");
+            return 1;
+        }
+        regfree(&re);
+        exvi_visual_start_col = (int)m.rm_so;
+    }
+    b->cur = line;
+    return 2;                   /* the caller goes to visual mode */
 }

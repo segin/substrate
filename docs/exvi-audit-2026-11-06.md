@@ -746,7 +746,7 @@ The number is not reused.
   `unabbreviate`, `map` and `unmap`.
 - [x] **EXVI-49.2** (Ubiquitous) The editor shall implement `chdir`, `shell`,
   `source` and `suspend`/`stop`.
-- [ ] **EXVI-49.3** (Ubiquitous) The editor shall implement `open`, `z`, `<`,
+- [x] **EXVI-49.3** (Ubiquitous) The editor shall implement `open`, `z`, `<`,
   `>`, `^D`, `~`, `@`, `*` and `ex`.
 - [x] **EXVI-49.4** (Ubiquitous) The editor shall accept every command
   abbreviation POSIX lists, `nu` and `ve` included.
@@ -755,7 +755,11 @@ The number is not reused.
 
 - **Evidence** ("Unknown command"): each of the above; bare `su` does
   nothing.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/ex/test_ex_commands.sh`,
+  `test_ex_open.py`, `tests/bin/vi/test_vi_maps.py`.  `open` is visual mode
+  on the line and match, not POSIX's one-line open mode: POSIX says open
+  "need not be supported" on terminals without the means, and exvi has no
+  one-line display.  `\&` is historic, not POSIX.
 
 ### EXVI-50 — ex command-line options — *Low*
 

@@ -8450,6 +8450,11 @@ exvi_visual_main(buffer_t *b)
     vis.clear_screen = 1;
     vis.rendered_cur_line = -1;
     vi_ensure_visible_line(b);
+    if (exvi_visual_start_col >= 0 && b->cur &&
+        (size_t)exvi_visual_start_col < b->cur->len) {
+        vis.cursor_col = exvi_visual_start_col;   /* open /pattern/ */
+    }
+    exvi_visual_start_col = -1;
     if (vi_enable_raw(&vis) != 0) {
         return 1;
     }

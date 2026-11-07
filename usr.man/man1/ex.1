@@ -131,7 +131,9 @@ The current supported command contract includes:
 .Ic so ,
 .Ic suspend ,
 .Ic stop ,
-.Ic ex
+.Ic ex ,
+.Ic open ,
+.Ic o
 .It maps and abbreviations
 .Ic map ,
 .Ic map! ,
@@ -190,6 +192,11 @@ and
 search on and back for the last pattern, and
 .Ql \e&
 on for the last substitute's.
+.Pp
+.Ic open Op Ar /pattern/
+starts vi on the line addressed, the cursor on the pattern's match there:
+visual mode stands in for open mode, which shows one line, as POSIX
+allows where open mode is not supported.
 .Pp
 .Ic map Ar lhs rhs
 makes the keys
