@@ -7,6 +7,7 @@
 #include <arch/x86-common/cpu.h>
 #include <arch/i386/early_boot.h>
 #include <arch/i386/gdt.h>
+#include <arch/i386/pmm.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>
@@ -634,8 +635,12 @@ acpi_failed:
 #define SMP_LOWMEM_TRAMP_BASE      0x8000u
 #define SMP_LOWMEM_TRAMP_LIMIT     0x100000u
 
-// Per-AP stack (static for now, should be dynamically allocated per AP)
-static char ap_stacks[MAX_CPUS][4096] __attribute__((aligned(16)));
+/*
+ * Each AP's idle stack: a kernel stack, the size every thread's has
+ * (THREAD_KSTACK_PAGES), allocated when the AP is first booted, so only the
+ * processors there are take memory.
+ */
+static uint8_t *ap_stacks[MAX_CPUS];
 static volatile int aps_ready = 0;
 static uint32_t smp_lowmem_cursor = SMP_LOWMEM_TRAMP_BASE;
 static uint32_t smp_trampoline_phys = 0;
@@ -726,7 +731,15 @@ int smp_boot_ap(uint8_t apic_id) {
         }
     }
     if (cpu_idx < 0) return -1;
-    
+    if (!ap_stacks[cpu_idx]) {
+        ap_stacks[cpu_idx] = pmm_alloc_contiguous(THREAD_KSTACK_PAGES);
+        if (!ap_stacks[cpu_idx]) {
+            kprint("SMP: no memory for an AP's kernel stack.\n");
+            return -1;
+        }
+    }
+    uint32_t ap_stack_top = (uint32_t)(uintptr_t)(ap_stacks[cpu_idx] + THREAD_KSTACK_SIZE);
+
     // 2a. Initialize Per-CPU structures for the new core
     percpu_init_cpu(cpu_idx);
 
@@ -735,7 +748,7 @@ int smp_boot_ap(uint8_t apic_id) {
 
     // 2c. Set Kernel Stack (ESP0) in TSS
     struct percpu_data *pcpu = percpu_get_cpu(cpu_idx);
-    pcpu->tss.esp0 = (uint32_t)&ap_stacks[cpu_idx][4096];
+    pcpu->tss.esp0 = ap_stack_top;
 
     // 2d. Create Idle Thread for the new core
     thread_t *idle = sched_alloc_thread(kernel_process);
@@ -762,7 +775,7 @@ int smp_boot_ap(uint8_t apic_id) {
     *cr3_ptr = pmap_kernel()->pdir_phys;
     *cr4_ptr = cr4;
     *cr0_ptr = cr0;
-    *stk_ptr = (uint32_t)&ap_stacks[cpu_idx][4096];
+    *stk_ptr = ap_stack_top;
     *ent_ptr = (uint32_t)smp_ap_entry;
 
     int old_ready = aps_ready;

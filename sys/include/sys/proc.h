@@ -326,6 +326,14 @@ typedef enum {
     THREAD_KSTACK_KMALLOC
 } thread_kstack_type_t;
 
+/*
+ * A kernel stack's size: 16 KiB, as deep VFS, ext2 and network call chains
+ * overflow 4 KiB.  Every kernel stack -- a thread's (pmm_alloc_contiguous(4))
+ * and an application processor's idle stack -- has it.
+ */
+#define THREAD_KSTACK_PAGES 4
+#define THREAD_KSTACK_SIZE  (THREAD_KSTACK_PAGES * 4096)
+
 // Scheduling Classes
 typedef enum {
     SCHED_REALTIME,
