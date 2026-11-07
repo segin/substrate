@@ -176,7 +176,8 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
                 return 0;
             }
 
-            while (regexec(&re, search_start, 10, pm, 0) == 0) {
+            /* after the first match the text searched starts inside the line: no `^` there */
+            while (regexec(&re, search_start, 10, pm, search_start != l->text ? REG_NOTBOL : 0) == 0) {
                 matches++;
                 if (sub_text_add(&t, search_start, (size_t)pm[0].rm_so) != 0 ||
                     sub_expand(&t, replacement, search_start, pm) != 0) {

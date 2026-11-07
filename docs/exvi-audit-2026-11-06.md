@@ -520,7 +520,7 @@ The number is not reused.
 
 ### EXVI-32 — `^` matches in the middle of a line — *High*
 
-- [ ] **EXVI-32.1** (Event-driven) When the editor matches a pattern from a
+- [x] **EXVI-32.1** (Event-driven) When the editor matches a pattern from a
   position after the start of a line, it shall not match `^` at that
   position.
 
@@ -1188,4 +1188,20 @@ The number is not reused.
   in `second.tags` → "Tag not found".  test_ex.sh's "Tag uses tags option
   search path" passed only because its `:=` printed the last line number,
   3, whatever `:tag` did; EXVI-15's stop-on-error exposed it.
+- **Basis**: reproduced.
+
+### EXVI-83 — `\<` matches inside a word after a match in `s///g` — *Medium*
+
+- [ ] **EXVI-83.1** (Event-driven) When the editor matches a pattern from a
+  position after the start of a line, it shall match `\<` and `\>` at that
+  position only as the characters on both sides of it allow.
+
+- **Where**: `exvi_cmd.c` (`apply_substitute_range`) and `exvi_visual.c`
+  (`vi_search_forward_in_line`, `vi_search_backward_in_line`) match the
+  rest of the line as a string of its own, so its first character has no
+  character before it; `REG_NOTBOL` (EXVI-32) covers `^` alone.
+- **Evidence**: `s/\<a/X/g` on `aa a` → `XX X` (vim: `Xa X`), with glibc's
+  regex and with libregex alike.  vi's searches recheck a leading `\<` and
+  a trailing `\>` against the whole line (`vi_match_respects_word_boundaries`),
+  so only one written elsewhere in the pattern is wrong there.
 - **Basis**: reproduced.
