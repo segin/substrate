@@ -489,9 +489,9 @@ The number is not reused.
 
 ### EXVI-30 — every backslash is stripped from a pattern — *High*
 
-- [ ] **EXVI-30.1** (Ubiquitous) The editor shall remove a backslash from a
+- [x] **EXVI-30.1** (Ubiquitous) The editor shall remove a backslash from a
   delimited pattern only where it precedes the delimiter.
-- [ ] **EXVI-30.2** (Ubiquitous) The editor shall end a `global` pattern at the
+- [x] **EXVI-30.2** (Ubiquitous) The editor shall end a `global` pattern at the
   first unescaped delimiter.
 
 - **Where**: `exvi_parse.c:275-278` (`parse_delimited_text`),

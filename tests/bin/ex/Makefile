@@ -31,6 +31,7 @@ test:
 	bash ./test_ex_batch_error.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_copy.sh $(abspath $(TOP)/bin/ex/ex); \
 	bash ./test_ex_force_variants.sh $(abspath $(TOP)/bin/ex/ex); \
+	bash ./test_ex_pattern_escape.sh $(abspath $(TOP)/bin/ex/ex); \
 	python3 ./test_ex_frontend.py $(abspath $(TOP)/bin/ex/ex)
 
 clean:

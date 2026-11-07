@@ -260,6 +260,17 @@ buf_clamp_line(buffer_t *b, int line_num)
     return line_num;
 }
 
+/**
+ * Read a pattern up to its closing delimiter, as POSIX ex reads one: a
+ * backslash before the delimiter makes the delimiter part of the pattern and
+ * goes, and every other backslash stays, as the pattern's own.
+ *
+ * @param cmd_ptr  the text after the opening delimiter; on success, set past
+ *                 the closing one
+ * @param delim    the delimiter
+ * @return         the pattern, malloc'd, or NULL when no delimiter closes it
+ *                 or out of memory
+ */
 char *
 parse_delimited_text(char **cmd_ptr, char delim)
 {
@@ -272,9 +283,15 @@ parse_delimited_text(char **cmd_ptr, char delim)
     }
 
     while (*src) {
-        if (*src == '\\' && src[1] != '\0') {
-            text[len++] = src[1];
+        /* `\` before the delimiter makes it part of the pattern; before anything else it is the pattern's own */
+        if (*src == '\\' && src[1] == delim) {
+            text[len++] = delim;
             src += 2;
+            continue;
+        }
+        if (*src == '\\' && src[1] != '\0') {
+            text[len++] = *src++;
+            text[len++] = *src++;
             continue;
         }
         if (*src == delim) {

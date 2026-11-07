@@ -175,7 +175,7 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
     int inverted = (cmd[0] == 'v') || force;
     char delim;
     char *re_str;
-    char *end_re;
+    char *work;
     char *exec_cmd;
     regex_t re;
     line_t *curr;
@@ -188,18 +188,17 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
         return 1;
     }
 
-    re_str = strdup(ptr + 1);
+    /* the pattern ends at the first delimiter no backslash escapes; the commands follow it */
+    work = strdup(ptr + 1);
+    if (!work) {
+        return 1;
+    }
+    exec_cmd = work;
+    re_str = parse_delimited_text(&exec_cmd, delim);
     if (!re_str) {
+        free(work);
         return 1;
     }
-    end_re = strchr(re_str, delim);
-    if (!end_re) {
-        free(re_str);
-        return 1;
-    }
-    *end_re = '\0';
-
-    exec_cmd = end_re + 1;
     while (*exec_cmd && isspace((unsigned char)*exec_cmd)) {
         exec_cmd++;
     }
@@ -209,6 +208,7 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
 
     if (regcomp(&re, re_str, exvi_regex_flags()) != 0) {
         free(re_str);
+        free(work);
         return 1;
     }
     if (!explicit_range) {
@@ -260,6 +260,7 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
     }
 
     free(re_str);
+    free(work);
     return 1;
 }
 
