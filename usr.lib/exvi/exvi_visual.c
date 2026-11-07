@@ -1649,10 +1649,118 @@ vi_apply_linewise_operator(buffer_t *b, vi_visual_t *vis, int start_line, int en
     return -1;
 }
 
+/*
+ * Display columns are found by walking a line from its start, and a redraw
+ * walks to the cursor and to the screen's left edge several times over: on
+ * a line of a million characters each key took a tenth of a second, on one
+ * of 999999999 minutes.  Two things make that cheap.  A run of printable
+ * ASCII is one column a byte, skipped at once (vi_ascii_run()).  And a few
+ * points of the line walked to -- a character's byte index and its display
+ * column -- are kept until the buffer changes (exvi_buffer_generation), so
+ * a walk starts from the nearest one before its end instead of from 0.  A
+ * column depends only on the text before it and tabstop and list, so a
+ * point stays exact while those do.
+ */
+#define VI_COL_MARKS 4
+
+static struct {
+    const line_t *line;
+    const char *text;
+    size_t len;
+    unsigned long generation;
+    int tabstop;
+    int list;
+    int idx;
+    int col;
+} vi_col_marks[VI_COL_MARKS];
+static int vi_col_mark_next;
+
+/* how many bytes from @p i, before @p limit, are printable ASCII */
+static int
+vi_ascii_run(const line_t *cur, int i, int limit)
+{
+    const unsigned char *p = (const unsigned char *)cur->text;
+    int j = i;
+
+    while (j < limit && p[j] >= 0x20 && p[j] < 0x7f) {
+        j++;
+    }
+    return j - i;
+}
+
+static int
+vi_col_mark_valid(int slot, const line_t *cur)
+{
+    return vi_col_marks[slot].line == cur &&
+        vi_col_marks[slot].text == cur->text &&
+        vi_col_marks[slot].len == cur->len &&
+        vi_col_marks[slot].generation == exvi_buffer_generation &&
+        vi_col_marks[slot].tabstop == option_tabstop &&
+        vi_col_marks[slot].list == option_list;
+}
+
+/*
+ * The furthest kept point of @p cur at or before byte @p max_idx (when
+ * @p max_col < 0), or at or before column @p max_col (otherwise): its index
+ * and column in @p idx and @p col, or the line's start.  No point follows a
+ * zero-width character (vi_col_mark_note()), so every character before one
+ * starts at a smaller column -- what a walk by column needs to start there.
+ */
+static void
+vi_col_mark_find(const line_t *cur, int max_idx, int max_col, int *idx, int *col)
+{
+    int slot;
+
+    *idx = 0;
+    *col = 0;
+    for (slot = 0; slot < VI_COL_MARKS; slot++) {
+        if (!vi_col_mark_valid(slot, cur)) {
+            continue;
+        }
+        if (max_col < 0 ? vi_col_marks[slot].idx > max_idx :
+                vi_col_marks[slot].col > max_col) {
+            continue;
+        }
+        if (vi_col_marks[slot].idx > *idx) {
+            *idx = vi_col_marks[slot].idx;
+            *col = vi_col_marks[slot].col;
+        }
+    }
+}
+
+/* keep the point a walk of @p cur reached: byte @p idx, a character's
+ * first, at display column @p col -- unless a zero-width character comes
+ * just before it (vi_col_mark_find()) */
+static void
+vi_col_mark_note(line_t *cur, int idx, int col)
+{
+    int slot;
+
+    if (idx <= 0 || (size_t)idx > cur->len ||
+        vi_char_display_width_at(cur, vi_prev_char_index(cur, idx), 0) == 0) {
+        return;
+    }
+    for (slot = 0; slot < VI_COL_MARKS; slot++) {
+        if (vi_col_mark_valid(slot, cur) && vi_col_marks[slot].idx == idx) {
+            return;
+        }
+    }
+    slot = vi_col_mark_next;
+    vi_col_mark_next = (vi_col_mark_next + 1) % VI_COL_MARKS;
+    vi_col_marks[slot].line = cur;
+    vi_col_marks[slot].text = cur->text;
+    vi_col_marks[slot].len = cur->len;
+    vi_col_marks[slot].generation = exvi_buffer_generation;
+    vi_col_marks[slot].tabstop = option_tabstop;
+    vi_col_marks[slot].list = option_list;
+    vi_col_marks[slot].idx = idx;
+    vi_col_marks[slot].col = col;
+}
+
 static int
 vi_display_col_for_index(line_t *cur, int idx)
 {
-    int col = 0;
+    int col;
     int i;
 
     if (!cur || idx <= 0) {
@@ -1662,23 +1770,48 @@ vi_display_col_for_index(line_t *cur, int idx)
     if ((size_t)idx > cur->len) {
         idx = (int)cur->len;
     }
-    for (i = 0; i < idx; i = vi_next_char_index(cur, i)) {
+    vi_col_mark_find(cur, idx, -1, &i, &col);
+    while (i < idx) {
+        int run = vi_ascii_run(cur, i, idx);
+
+        if (run > 0) {
+            i += run;
+            col += run;
+            continue;
+        }
         col += vi_char_display_width_at(cur, i, col);
+        i = vi_next_char_index(cur, i);
     }
+    vi_col_mark_note(cur, idx, col);
     return col;
 }
 
 static int
 vi_index_for_display_col(line_t *cur, int target_col)
 {
-    int col = 0;
+    int col;
     int i;
 
     if (!cur || target_col <= 0) {
         return 0;
     }
-    for (i = 0; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
-        int width = vi_char_display_width_at(cur, i, col);
+    vi_col_mark_find(cur, 0, target_col, &i, &col);
+    for (; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
+        /* one column each, so none of them is target_col's but the last */
+        int run = vi_ascii_run(cur, i, (int)cur->len);
+        int width;
+
+        if (run > target_col - col) {
+            run = target_col - col;
+        }
+        if (run > 0) {
+            i += run;
+            col += run;
+            if ((size_t)i >= cur->len) {
+                break;
+            }
+        }
+        width = vi_char_display_width_at(cur, i, col);
 
         if (width == 0 && i > 0) {
             /* a combining mark or zero-width character takes no column:
@@ -1686,10 +1819,8 @@ vi_index_for_display_col(line_t *cur, int target_col)
              * between the a and its accent) */
             continue;
         }
-        if (col >= target_col) {
-            return i;
-        }
-        if (col + width > target_col) {
+        if (col >= target_col || col + width > target_col) {
+            vi_col_mark_note(cur, i, col);
             return i;
         }
         col += width;
@@ -1700,34 +1831,63 @@ vi_index_for_display_col(line_t *cur, int target_col)
 static int
 vi_normalize_left_col(line_t *cur, int left_col)
 {
-    int col = 0;
+    int col;
     int i;
 
     if (!cur || left_col <= 0) {
         return 0;
     }
-    for (i = 0; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
-        int width = vi_char_display_width_at(cur, i, col);
+    vi_col_mark_find(cur, 0, left_col, &i, &col);
+    while ((size_t)i < cur->len) {
+        /* one column each: all of them end by left_col but the last */
+        int run = vi_ascii_run(cur, i, (int)cur->len);
+        int width;
 
+        if (run > left_col - col) {
+            run = left_col - col;
+        }
+        if (run > 0) {
+            i += run;
+            col += run;
+            continue;
+        }
+        width = vi_char_display_width_at(cur, i, col);
         if (col + width > left_col) {
             break;
         }
         col += width;
+        i = vi_next_char_index(cur, i);
     }
+    vi_col_mark_note(cur, i, col);
     return col;
 }
 
 static int
 vi_next_left_col(line_t *cur, int left_col)
 {
-    int col = 0;
+    int col;
     int i;
 
     if (!cur || left_col < 0) {
         return 0;
     }
-    for (i = 0; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
-        int width = vi_char_display_width_at(cur, i, col);
+    vi_col_mark_find(cur, 0, left_col, &i, &col);
+    for (; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
+        /* one column each, so none of them is left_col's but the last */
+        int run = vi_ascii_run(cur, i, (int)cur->len);
+        int width;
+
+        if (run > left_col - col) {
+            run = left_col - col;
+        }
+        if (run > 0) {
+            i += run;
+            col += run;
+            if ((size_t)i >= cur->len) {
+                break;
+            }
+        }
+        width = vi_char_display_width_at(cur, i, col);
 
         if (col >= left_col) {
             return col + width;
@@ -1812,11 +1972,30 @@ vi_draw_line(const line_t *line, int cols, int number, int line_no, int left_col
     if (number) {
         used += printf("%7d ", line_no);
     }
+    /* from a kept point at or before the left edge, never one inside a
+     * character this draws a byte at a time (vi_col_mark_note()) */
+    {
+        int mark_idx;
+        int mark_col;
+
+        vi_col_mark_find(line, 0, left_col, &mark_idx, &mark_col);
+        idx = (size_t)mark_idx;
+        display_col = mark_col;
+    }
     while (idx < len && display_col < left_col) {
         unsigned char c = (unsigned char)text[idx];
         int width;
         int bytes = 1;
+        int run = vi_ascii_run(line, (int)idx, (int)len);
 
+        if (run > left_col - display_col) {
+            run = left_col - display_col;
+        }
+        if (run > 0) {
+            idx += (size_t)run;
+            display_col += run;
+            continue;
+        }
         if (c < 0x80) {
             width = vi_char_display_width(c, display_col);
         } else {

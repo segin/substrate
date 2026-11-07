@@ -7,9 +7,11 @@ ISIG off ^C reached vi only as a key after the command, so nothing could
 stop a long one (999999999. after ix<ESC> ran until killed).  And a counted
 text input, or . repeating one, put its text in a character at a time,
 copying the line for each: 1000000. after ix<ESC> took 80 s, 2000000.
-more than 300.  Each session here must finish well within its timeout.
-(999999999. after ix<ESC> now finishes before a ^C reaches it, so the ^C
-case repeats an o, a line at a time.)
+more than 300.  And every redraw walked the cursor's line from its start,
+several times, at about 0.14 s a million characters: a few keys on a line
+of 30 million took minutes.  Each session here must finish well within its
+timeout.  (999999999. after ix<ESC> now finishes before a ^C reaches it, so
+the ^C case repeats an o, a line at a time.)
 
 Usage: test_vi_large_counts.py path/to/vi
 """
@@ -43,6 +45,16 @@ CASES = [
      lambda s: s == "ab" + "z" * 1000000 + "\n"),
     ("u after 2000000. is one change", "a\n", [b"ix\x1b", b"2000000.", b"u"],
      b":wq\r", lambda s: s == "xa\n"),
+    # a redraw costs what is on the screen, not the line's length: each key
+    # sent alone, to be drawn after
+    ("keys on a line of 30000000", "x" * 30000000 + "\n",
+     [b"$"] + [b"h"] * 25 + [b"0", b"$", b"r", b"Z"], b":wq\r",
+     lambda s: s == "x" * 29999999 + "Z\n"),
+    # j's column from far along a line of wide characters
+    ("j under a long line of wide characters",
+     "日" * 1000000 + "x\n" + "a" * 2000010 + "\n", [b"$hjrZ"], b":wq\r",
+     lambda s: s == "日" * 1000000 + "x\n" + "a" * 1999998 + "Z" +
+     "a" * 11 + "\n"),
 ]
 
 
