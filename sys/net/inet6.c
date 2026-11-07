@@ -139,7 +139,8 @@ int nd6_solicit(netdev_t *dev, const uint8_t target_ip6[16]) {
     };
     ih->check = inet_csum_pseudo6(dev->ip6_addr, dst_ip,
                                   IPPROTO_ICMPV6, sizeof(pkt), pkt);
-    return ip6_output(dst_ip, IPPROTO_ICMPV6, pkt, sizeof(pkt));
+    /* 255: RFC 4861 7.1.1 -- a receiver drops an NS with any other */
+    return ip6_output_hl(dst_ip, IPPROTO_ICMPV6, pkt, sizeof(pkt), 255);
 }
 
 /* ------------------------------------------------------------------ */
@@ -235,6 +236,11 @@ int ip6_source_for(const uint8_t daddr[16], uint8_t out[16]) {
 
 int ip6_output(const uint8_t daddr[16], uint8_t next_header,
                const void *payload, size_t payload_len) {
+    return ip6_output_hl(daddr, next_header, payload, payload_len, 64);
+}
+
+int ip6_output_hl(const uint8_t daddr[16], uint8_t next_header,
+                  const void *payload, size_t payload_len, uint8_t hop_limit) {
     int via_gw = 0;
     netdev_t *dev = route_for_v6(daddr, &via_gw);
     if (!dev) return -ENETUNREACH;
@@ -261,7 +267,7 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
     h->vtcfl = __builtin_bswap32(6u << 28);
     h->payload_len = __builtin_bswap16((uint16_t)payload_len);
     h->next_header = next_header;
-    h->hop_limit = 64;
+    h->hop_limit = hop_limit;
     memcpy(h->src, dev->ip6_addr, 16);
     memcpy(h->dst, daddr, 16);
     memcpy(pkt + sizeof(*h), payload, payload_len);
@@ -393,7 +399,7 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     size_t l4_len = end - off;
     switch (nh) {
         case IPPROTO_ICMPV6:
-            icmp6_input(dev, h->src, h->dst, l4, l4_len);
+            icmp6_input(dev, h->src, h->dst, h->hop_limit, l4, l4_len);
             break;
         case IPPROTO_UDP_NUM:
             udp_input(dev, /*AF_INET6=*/10, h->src, h->dst, l4, l4_len,

@@ -409,7 +409,9 @@ static void icmp6_handle_ns(netdev_t *dev, const uint8_t saddr[16],
     memcpy(opt->mac, dev->hwaddr, 6);
     rh->check = inet_csum_pseudo6(dev->ip6_addr, saddr,
                                   IPPROTO_ICMPV6, sizeof(reply), reply);
-    ip6_output(saddr, IPPROTO_ICMPV6, reply, sizeof(reply));
+    /* 255: RFC 4861 7.1.2 -- a receiver drops an NA with any other, so
+     * one sent at 64 was answered to nobody but ourselves */
+    ip6_output_hl(saddr, IPPROTO_ICMPV6, reply, sizeof(reply), 255);
 }
 
 static void icmp6_handle_na(netdev_t *dev, const uint8_t *pkt, size_t len) {
@@ -468,14 +470,23 @@ static void icmp6_handle_echo(const uint8_t saddr[16], const uint8_t daddr[16],
 }
 
 void icmp6_input(netdev_t *dev, const uint8_t saddr[16], const uint8_t daddr[16],
-                 const uint8_t *pkt, size_t len) {
+                 uint8_t hop_limit, const uint8_t *pkt, size_t len) {
     if (len < sizeof(struct icmp6_hdr)) return;
     const struct icmp6_hdr *ih = (const struct icmp6_hdr *)pkt;
+    /* The checksum is mandatory in ICMPv6 (RFC 4443 2.3) and covers the
+     * pseudo-header: a message failing it is dropped, not answered or
+     * learned from. */
+    if (inet_csum_pseudo6(saddr, daddr, IPPROTO_ICMPV6, (uint32_t)len, pkt) != 0)
+        return;
     switch (ih->type) {
         case ND_NEIGHBOR_SOLICIT:
+            /* RFC 4861 7.1.1: hop limit 255 proves the sender is on-link
+             * -- a router would have decremented it -- and code 0. */
+            if (hop_limit != 255 || ih->code != 0) break;
             icmp6_handle_ns(dev, saddr, pkt, len);
             break;
         case ND_NEIGHBOR_ADVERT:
+            if (hop_limit != 255 || ih->code != 0) break;   /* 7.1.2 */
             icmp6_handle_na(dev, pkt, len);
             break;
         case ICMP6_ECHO_REQUEST:

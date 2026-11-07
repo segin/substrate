@@ -393,6 +393,14 @@ pktrebind: pktrebind.c
 	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# netpeer: a hostile peer played through a second NIC on the same QEMU hub
+# (MSS-1 SYN, Neighbor Solicitations at the wrong hop limit or with a bad
+# checksum, connect() across a close()).  Substrate only; run as root with
+# the two hub NICs netpeer.c names.
+netpeer: netpeer.c
+	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # scmfail: a failed sendmsg leaves no SCM_RIGHTS descriptor queued.  Runs
 # on the host too.
 scmfail: scmfail.c
@@ -515,6 +523,6 @@ clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm utimeperm brkover shmgrow \
 	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault \
-	      sigretsel.linux execipc linkfollow.linux walkrecycle ptsrace
+	      sigretsel.linux execipc linkfollow.linux walkrecycle ptsrace netpeer
 
 .PHONY: all clean

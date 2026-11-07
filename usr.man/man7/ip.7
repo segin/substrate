@@ -55,6 +55,17 @@ Reports below 552 octets are held at 552 and the path is marked so that
 sockets send to it without Don't Fragment.
 Other sockets set Don't Fragment only when asked with
 .BR IP_MTU_DISCOVER .
+.SS ICMPv6
+An ICMPv6 message whose checksum is wrong is discarded, and a Neighbor
+Solicitation or Advertisement arriving with a hop limit other than 255 is
+ignored (RFC 4861); the host sends its own at hop limit 255.
+On an
+.B AF_INET6
+.B SOCK_RAW
+socket of protocol
+.BR IPPROTO_ICMPV6 ,
+the kernel computes the checksum of every message sent (RFC 3542), so
+whatever the caller left in the checksum field is replaced.
 .SS ICMP errors
 An ICMP Destination Unreachable, Time Exceeded or Parameter Problem about
 a datagram a socket sent is reported to that socket.

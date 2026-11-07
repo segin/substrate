@@ -154,6 +154,10 @@ int      ip6_source_for(const uint8_t daddr[16], uint8_t out[16]);
 void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len);
 int  ip6_output(const uint8_t daddr[16], uint8_t next_header,
                 const void *payload, size_t payload_len);
+/* ip6_output() with the hop limit given: Neighbor Discovery sends 255
+ * (RFC 4861), which a receiver checks to know the message is on-link. */
+int  ip6_output_hl(const uint8_t daddr[16], uint8_t next_header,
+                   const void *payload, size_t payload_len, uint8_t hop_limit);
 
 /* -- L4 demux helpers ----------------------------------------------- */
 
@@ -165,8 +169,9 @@ int  ip6_output(const uint8_t daddr[16], uint8_t next_header,
 void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
                 const uint8_t *opts, size_t optlen,
                 const uint8_t *pkt, size_t len);
+/* hop_limit: the IPv6 header's, which Neighbor Discovery requires be 255. */
 void icmp6_input(netdev_t *dev, const uint8_t saddr[16], const uint8_t daddr[16],
-                 const uint8_t *pkt, size_t len);
+                 uint8_t hop_limit, const uint8_t *pkt, size_t len);
 /* netpkt/netlen: the whole invoking IP datagram, header included, which an
  * ICMP error must quote.  for_bcast: the destination was a broadcast or
  * multicast address, for which no ICMP error may ever be sent. */

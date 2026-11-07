@@ -24,6 +24,7 @@
 #include <kern/time.h>
 #include <net/if.h>
 #include <net/inet.h>
+#include <netinet/icmp.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
@@ -1214,13 +1215,27 @@ static int afi_install_fd(afi_sock_t *s) {
     return fd;
 }
 
-static afi_sock_t *afi_from_fd(int fd) {
-    if (fd < 0 || fd >= MAX_FD) return NULL;
+/*
+ * The socket behind fd, pinned: the reference is taken under afi_lock
+ * (afi_node_get()), so a close() on another thread -- which clears
+ * node->impl under the same lock -- cannot free the socket under a call
+ * still using it, a connect() or accept() asleep in particular.  NULL if
+ * fd is not an AF_INET socket or is being torn down.  Every entry point
+ * below pins on the way in and drops it with afi_unpin() on the way out.
+ */
+static afi_sock_t *afi_pin_fd(int fd) {
+    if (fd < 0 || fd >= MAX_FD || !current_process) return NULL;
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return NULL;
     fs_node_t *n = (fs_node_t *)f->f_data;
     if (n->read != afinet_node_read) return NULL;
-    return (afi_sock_t *)(uintptr_t)n->impl;
+    return afi_node_get(n);
+}
+
+static void afi_unpin(afi_sock_t *s) {
+    if (!s) return;
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    afi_rele_unlock(s, fl);             /* may free; s must not be touched */
 }
 
 /* ------------------------------------------------------------------ */
@@ -1397,8 +1412,15 @@ static int afinet_port_reserved(uint16_t port) {
            (!current_process || current_process->euid != 0);
 }
 
+static int afinet_bind_s(afi_sock_t *s, const void *addr, socklen_t len);
 int afinet_bind(int fd, const void *addr, socklen_t len) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_bind_s(s, addr, len);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_bind_s(afi_sock_t *s, const void *addr, socklen_t len) {
     if (!s) return -ENOTSOCK;
     if (!addr) return -EINVAL;
     if (s->bound) return -EINVAL;            /* already bound */
@@ -1482,9 +1504,18 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
  * datagrams.  The interface is chosen by index (struct ip_mreqn), by
  * address, or -- for INADDR_ANY -- is the first UP multicast-capable one.
  */
+static int afinet_mc_membership_s(afi_sock_t *s, int add, uint32_t group,
+                                  uint32_t ifaddr, int ifindex);
 int afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
                          int ifindex) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_mc_membership_s(s, add, group, ifaddr, ifindex);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_mc_membership_s(afi_sock_t *s, int add, uint32_t group,
+                                  uint32_t ifaddr, int ifindex) {
     if (!s) return -ENOTSOCK;
     if (s->family != AF_INET || (s->type != SOCK_DGRAM && s->type != SOCK_RAW))
         return -EINVAL;
@@ -1538,8 +1569,15 @@ int afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
  * sender could neither widen its scope nor keep its own group sends from
  * looping back.  A TCP socket's options are pushed into its PCB.
  */
+static int afinet_set_ipopt_s(afi_sock_t *s, int optname, int val, uint32_t addr);
 int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_set_ipopt_s(s, optname, val, addr);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_set_ipopt_s(afi_sock_t *s, int optname, int val, uint32_t addr) {
     if (!s) return -ENOTSOCK;
     if (s->family != AF_INET) return -ENOPROTOOPT;
     if (optname == 8) {         /* IP_PKTINFO */
@@ -1593,8 +1631,15 @@ int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
  * -ENOTSOCK when fd is not an AF_INET socket, -ENOPROTOOPT for anything
  * else, including a non-stream socket.
  */
+static int afinet_set_tcpopt_s(afi_sock_t *s, int optname, int val);
 int afinet_set_tcpopt(int fd, int optname, int val) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_set_tcpopt_s(s, optname, val);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_set_tcpopt_s(afi_sock_t *s, int optname, int val) {
     if (!s) return -ENOTSOCK;
     if (s->type != SOCK_STREAM || !s->tcp) return -ENOPROTOOPT;
     switch (optname) {
@@ -1608,8 +1653,15 @@ int afinet_set_tcpopt(int fd, int optname, int val) {
 
 /* fcntl(F_SETOWN/F_GETOWN) on an AF_INET socket -- the pid (or
  * -pgrp) that receives SIGURG.  -ENOTSOCK for any other descriptor. */
+static int afinet_setown_s(afi_sock_t *s, int owner);
 int afinet_setown(int fd, int owner) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_setown_s(s, owner);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_setown_s(afi_sock_t *s, int owner) {
     if (!s) return -ENOTSOCK;
     s->owner = owner;
     if (s->tcp) tcp_set_owner(s->tcp, owner);
@@ -1618,8 +1670,15 @@ int afinet_setown(int fd, int owner) {
 
 /* SO_LINGER, stored per socket and acted on at close().
  * -ENOTSOCK for a descriptor that is not an AF_INET socket. */
+static int afinet_set_linger_s(afi_sock_t *s, int onoff, int secs);
 int afinet_set_linger(int fd, int onoff, int secs) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_set_linger_s(s, onoff, secs);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_set_linger_s(afi_sock_t *s, int onoff, int secs) {
     if (!s) return -ENOTSOCK;
     if (secs < 0) return -EINVAL;
     s->linger_on = onoff ? 1 : 0;
@@ -1627,23 +1686,44 @@ int afinet_set_linger(int fd, int onoff, int secs) {
     return 0;
 }
 
+static int afinet_get_linger_s(afi_sock_t *s, int *onoff, int *secs);
 int afinet_get_linger(int fd, int *onoff, int *secs) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_get_linger_s(s, onoff, secs);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_get_linger_s(afi_sock_t *s, int *onoff, int *secs) {
     if (!s) return -ENOTSOCK;
     *onoff = s->linger_on;
     *secs = s->linger_secs;
     return 0;
 }
 
+static int afinet_getown_s(afi_sock_t *s, int *owner);
 int afinet_getown(int fd, int *owner) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_getown_s(s, owner);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_getown_s(afi_sock_t *s, int *owner) {
     if (!s) return -ENOTSOCK;
     *owner = s->owner;
     return 0;
 }
 
+static int afinet_get_tcpopt_s(afi_sock_t *s, int optname, int *val);
 int afinet_get_tcpopt(int fd, int optname, int *val) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_get_tcpopt_s(s, optname, val);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_get_tcpopt_s(afi_sock_t *s, int optname, int *val) {
     if (!s) return -ENOTSOCK;
     if (s->type != SOCK_STREAM || !s->tcp) return -ENOPROTOOPT;
     switch (optname) {
@@ -1652,8 +1732,15 @@ int afinet_get_tcpopt(int fd, int optname, int *val) {
     }
 }
 
+static int afinet_get_ipopt_s(afi_sock_t *s, int optname, int *val, uint32_t *addr);
 int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_get_ipopt_s(s, optname, val, addr);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_get_ipopt_s(afi_sock_t *s, int optname, int *val, uint32_t *addr) {
     if (!s) return -ENOTSOCK;
     if (s->family != AF_INET) return -ENOPROTOOPT;
     *addr = 0;
@@ -1673,8 +1760,15 @@ int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
 /* IP_OPTIONS (RFC 791 3.1): the options every datagram from this socket
  * carries.  A raw socket's caller builds its own IP header only under
  * IP_HDRINCL, which is not offered, so options apply to every type. */
+static int afinet_set_ipoptions_s(afi_sock_t *s, const uint8_t *opts, size_t len);
 int afinet_set_ipoptions(int fd, const uint8_t *opts, size_t len) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_set_ipoptions_s(s, opts, len);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_set_ipoptions_s(afi_sock_t *s, const uint8_t *opts, size_t len) {
     if (!s) return -ENOTSOCK;
     if (s->family != AF_INET) return -ENOPROTOOPT;
     struct ip4_txopts o = s->txo;
@@ -1685,8 +1779,15 @@ int afinet_set_ipoptions(int fd, const uint8_t *opts, size_t len) {
     return 0;
 }
 
+static int afinet_get_ipoptions_s(afi_sock_t *s, uint8_t *opts, size_t *len);
 int afinet_get_ipoptions(int fd, uint8_t *opts, size_t *len) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_get_ipoptions_s(s, opts, len);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_get_ipoptions_s(afi_sock_t *s, uint8_t *opts, size_t *len) {
     if (!s) return -ENOTSOCK;
     if (s->family != AF_INET) return -ENOPROTOOPT;
     size_t n = s->txo.optlen < *len ? s->txo.optlen : *len;
@@ -1702,8 +1803,15 @@ int afinet_get_ipoptions(int fd, uint8_t *opts, size_t *len) {
  * bytes of records and it sends one datagram at a time; a stream socket has
  * TCP's 32 KiB ring.  -ENOTSOCK on a non-AF_INET fd.
  */
+static int afinet_bufsize_s(afi_sock_t *s, int rcv);
 int afinet_bufsize(int fd, int rcv) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_bufsize_s(s, rcv);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_bufsize_s(afi_sock_t *s, int rcv) {
     if (!s) return -ENOTSOCK;
     if (s->type == SOCK_STREAM) return 32 * 1024;
     return rcv ? (int)s->rcvbuf : AFI_DATA_MAX;
@@ -1715,8 +1823,15 @@ int afinet_bufsize(int fd, int rcv) {
  * the admission limit and keeps what is already queued.  Clamped to
  * [AFI_RCVBUF_MIN, AFI_RCVBUF_MAX].  (A stream socket's TCP ring is fixed.)
  */
+static int afinet_set_rcvbuf_s(afi_sock_t *s, int val);
 int afinet_set_rcvbuf(int fd, int val) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_set_rcvbuf_s(s, val);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_set_rcvbuf_s(afi_sock_t *s, int val) {
     if (!s) return -ENOTSOCK;
     uint32_t want = val < (int)AFI_RCVBUF_MIN ? AFI_RCVBUF_MIN
                   : (uint32_t)val > AFI_RCVBUF_MAX ? AFI_RCVBUF_MAX : (uint32_t)val;
@@ -1745,8 +1860,15 @@ int afinet_set_rcvbuf(int fd, int val) {
 }
 
 /* SO_RCVTIMEO / SO_SNDTIMEO. */
+static int afinet_set_timeo_s(afi_sock_t *s, int rcv, int64_t sec, int64_t usec);
 int afinet_set_timeo(int fd, int rcv, int64_t sec, int64_t usec) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_set_timeo_s(s, rcv, sec, usec);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_set_timeo_s(afi_sock_t *s, int rcv, int64_t sec, int64_t usec) {
     if (!s) return -ENOTSOCK;
     if (sec < 0 || usec < 0 || usec >= 1000000) return -EDOM;
     uint64_t hz = get_hz();
@@ -1758,8 +1880,15 @@ int afinet_set_timeo(int fd, int rcv, int64_t sec, int64_t usec) {
     return 0;
 }
 
+static int afinet_get_timeo_s(afi_sock_t *s, int rcv, int64_t *sec, int64_t *usec);
 int afinet_get_timeo(int fd, int rcv, int64_t *sec, int64_t *usec) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_get_timeo_s(s, rcv, sec, usec);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_get_timeo_s(afi_sock_t *s, int rcv, int64_t *sec, int64_t *usec) {
     if (!s) return -ENOTSOCK;
     uint64_t hz = get_hz();
     if (!hz) hz = 100;
@@ -1770,32 +1899,67 @@ int afinet_get_timeo(int fd, int rcv, int64_t *sec, int64_t *usec) {
 }
 
 /* SO_BROADCAST. */
+static int afinet_set_broadcast_s(afi_sock_t *s, int on);
 int afinet_set_broadcast(int fd, int on) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_set_broadcast_s(s, on);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_set_broadcast_s(afi_sock_t *s, int on) {
     if (!s) return -ENOTSOCK;
     s->broadcast = on ? 1 : 0;
     return 0;
 }
 
+static int afinet_get_broadcast_s(afi_sock_t *s);
 int afinet_get_broadcast(int fd) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_get_broadcast_s(s);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_get_broadcast_s(afi_sock_t *s) {
     return s ? s->broadcast : -ENOTSOCK;
 }
 
+static int afinet_set_reuseaddr_s(afi_sock_t *s, int on);
 int afinet_set_reuseaddr(int fd, int on) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_set_reuseaddr_s(s, on);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_set_reuseaddr_s(afi_sock_t *s, int on) {
     if (!s) return -ENOTSOCK;
     s->reuseaddr = on ? 1 : 0;
     return 0;
 }
+static int afinet_get_reuseaddr_s(afi_sock_t *s);
 int afinet_get_reuseaddr(int fd) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_get_reuseaddr_s(s);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_get_reuseaddr_s(afi_sock_t *s) {
     if (!s) return -ENOTSOCK;
     return s->reuseaddr;
 }
 
+static int afinet_listen_s(afi_sock_t *s, int backlog);
 int afinet_listen(int fd, int backlog) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_listen_s(s, backlog);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_listen_s(afi_sock_t *s, int backlog) {
     if (!s) return -ENOTSOCK;
     if (!s->tcp) return -EOPNOTSUPP;
     /* listen() on a never-bound socket entered LISTEN with
@@ -1815,8 +1979,15 @@ int afinet_listen(int fd, int backlog) {
 /* shutdown(2) for AF_INET sockets.  SHUT_RD forces recv() to EOF;
  * SHUT_WR sends a FIN (half-close) so the peer sees EOF while this
  * socket can still read.  Routed here from sys_shutdown(). */
+static int afinet_shutdown_s(afi_sock_t *s, int how);
 int afinet_shutdown(int fd, int how) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_shutdown_s(s, how);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_shutdown_s(afi_sock_t *s, int how) {
     if (!s) return -ENOTSOCK;
     if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR)
         return -EINVAL;
@@ -1860,8 +2031,15 @@ static int afinet_pack_sockaddr(int family, uint16_t hport,
                                 const uint8_t addr_bytes[16],
                                 void *out, socklen_t *outlen);
 
+static int afinet_accept_s(afi_sock_t *s, int fd, void *addr, socklen_t *addrlen);
 int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_accept_s(s, fd, addr, addrlen);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_accept_s(afi_sock_t *s, int fd, void *addr, socklen_t *addrlen) {
     if (!s) return -ENOTSOCK;
     if (!s->tcp) return -EOPNOTSUPP;
     /* accept() is only valid on a listening socket. */
@@ -2035,8 +2213,15 @@ static int afinet_pack_sockaddr(int family, uint16_t hport,
  * (set by tcp_kill_pcb when the connection failed).  */
 
 
+static int afinet_so_error_s(afi_sock_t *s);
 int afinet_so_error(int fd) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_so_error_s(s);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_so_error_s(afi_sock_t *s) {
     if (!s) return -ENOTSOCK;
     if (s->tcp) return tcp_take_so_error(s->tcp);
     /* This used to be a hard 0 for every datagram socket, so
@@ -2051,21 +2236,42 @@ int afinet_so_error(int fd) {
 
 /* SO_TYPE for an AF_INET/AF_INET6 fd: SOCK_STREAM / SOCK_DGRAM / SOCK_RAW, or
  * -ENOTSOCK if the fd is not one of ours. */
+static int afinet_so_type_s(afi_sock_t *s);
 int afinet_so_type(int fd) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_so_type_s(s);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_so_type_s(afi_sock_t *s) {
     if (!s) return -ENOTSOCK;
     return s->type;
 }
 
+static int afinet_getsockname_s(afi_sock_t *s, void *addr, socklen_t *addrlen);
 int afinet_getsockname(int fd, void *addr, socklen_t *addrlen) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_getsockname_s(s, addr, addrlen);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_getsockname_s(afi_sock_t *s, void *addr, socklen_t *addrlen) {
     if (!s) return -ENOTSOCK;
     return afinet_pack_sockaddr(s->family, s->local_port, s->local_addr,
                                 addr, addrlen);
 }
 
+static int afinet_getpeername_s(afi_sock_t *s, void *addr, socklen_t *addrlen);
 int afinet_getpeername(int fd, void *addr, socklen_t *addrlen) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_getpeername_s(s, addr, addrlen);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_getpeername_s(afi_sock_t *s, void *addr, socklen_t *addrlen) {
     if (!s) return -ENOTSOCK;
     /* A stream socket has a peer once its connection is
      * synchronized -- not while a non-blocking connect() is still in
@@ -2080,8 +2286,15 @@ int afinet_getpeername(int fd, void *addr, socklen_t *addrlen) {
                                 addr, addrlen);
 }
 
+static int afinet_connect_s(afi_sock_t *s, int fd, const void *addr, socklen_t len);
 int afinet_connect(int fd, const void *addr, socklen_t len) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    int r = afinet_connect_s(s, fd, addr, len);
+    afi_unpin(s);
+    return r;
+}
+
+static int afinet_connect_s(afi_sock_t *s, int fd, const void *addr, socklen_t len) {
     if (!s) return -ENOTSOCK;
     if (!addr) return -EINVAL;
     /* A stream socket's PCB state decides whether an open is
@@ -2198,9 +2411,9 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
  * tcp_send / ip4_output / ip6_output, none of which can take a fault.  The
  * public entry point below is what copies the caller's payload in.
  */
-static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
+static ssize_t afinet_sendto_k(afi_sock_t *s, int fd, const void *buf,
+                               size_t len, int flags,
                                const void *addr, socklen_t addrlen) {
-    afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     /* After shutdown(SHUT_WR) a datagram send fails EPIPE, with
      * SIGPIPE unless the caller passed MSG_NOSIGNAL. */
@@ -2320,6 +2533,25 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);
         return rc < 0 ? rc : (ssize_t)len;
     } else {
+        if (s->type == SOCK_RAW && s->protocol == IPPROTO_ICMPV6) {
+            /* RFC 3542 3.1: the kernel computes an ICMPv6 raw socket's
+             * checksum, which covers the pseudo-header and so the
+             * source address only routing picks.  ICMPv6 input checks
+             * it, so a message sent with it left zero went nowhere. */
+            uint8_t src6[16];
+            if (len < sizeof(struct icmp6_hdr)) return -EINVAL;
+            if (ip6_source_for(daddr_buf, src6) != 0) return -ENETUNREACH;
+            uint8_t *msg = kmalloc(len);
+            if (!msg) return -ENOMEM;
+            memcpy(msg, buf, len);
+            struct icmp6_hdr *mh = (struct icmp6_hdr *)msg;
+            mh->check = 0;
+            mh->check = inet_csum_pseudo6(src6, daddr_buf, IPPROTO_ICMPV6,
+                                          (uint32_t)len, msg);
+            int rc = ip6_output(daddr_buf, IPPROTO_ICMPV6, msg, len);
+            kfree(msg, len);
+            return rc < 0 ? rc : (ssize_t)len;
+        }
         if (s->type == SOCK_RAW) {
             int rc = ip6_output(daddr_buf, (uint8_t)s->protocol, buf, len);
             return rc < 0 ? rc : (ssize_t)len;
@@ -2369,23 +2601,42 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
  */
 #define AFI_SEND_CHUNK (64U * 1024U)
 
-ssize_t afinet_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
-                           const void *addr, socklen_t addrlen) {
-    afi_sock_t *s = afi_from_fd(fd);
+static ssize_t afinet_sendto_kbuf_s(afi_sock_t *s, int fd, const void *kbuf,
+                                    size_t len, int flags,
+                                    const void *addr, socklen_t addrlen) {
     if (!s) return -ENOTSOCK;
     if (!kbuf && len) return -EINVAL;
     if (!(s->type == SOCK_STREAM && s->tcp) && len > afi_max_payload(s->family, s->type))
         return -EMSGSIZE;
-    return afinet_sendto_k(fd, kbuf, len, flags, addr, addrlen);
+    return afinet_sendto_k(s, fd, kbuf, len, flags, addr, addrlen);
 }
 
+ssize_t afinet_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
+                           const void *addr, socklen_t addrlen) {
+    afi_sock_t *s = afi_pin_fd(fd);
+    ssize_t r = afinet_sendto_kbuf_s(s, fd, kbuf, len, flags, addr, addrlen);
+    afi_unpin(s);
+    return r;
+}
+
+static ssize_t afinet_sendto_s(afi_sock_t *s, int fd, const void *ubuf,
+                               size_t len, int flags,
+                               const void *addr, socklen_t addrlen);
 ssize_t afinet_sendto(int fd, const void *ubuf, size_t len, int flags,
                       const void *addr, socklen_t addrlen) {
-    afi_sock_t *s = afi_from_fd(fd);
+    afi_sock_t *s = afi_pin_fd(fd);
+    ssize_t r = afinet_sendto_s(s, fd, ubuf, len, flags, addr, addrlen);
+    afi_unpin(s);
+    return r;
+}
+
+static ssize_t afinet_sendto_s(afi_sock_t *s, int fd, const void *ubuf,
+                               size_t len, int flags,
+                               const void *addr, socklen_t addrlen) {
     if (!s) return -ENOTSOCK;
     if (!ubuf && len) return -EINVAL;   /* len==0 is a valid empty datagram */
     if (len == 0)
-        return afinet_sendto_k(fd, ubuf, 0, flags, addr, addrlen);
+        return afinet_sendto_k(s, fd, ubuf, 0, flags, addr, addrlen);
 
     int stream = (s->type == SOCK_STREAM && s->tcp) ? 1 : 0;
 
@@ -2405,7 +2656,7 @@ ssize_t afinet_sendto(int fd, const void *ubuf, size_t len, int flags,
             kfree(kbuf, cap);
             return total ? total : -EFAULT;
         }
-        ssize_t w = afinet_sendto_k(fd, kbuf, chunk, flags, addr, addrlen);
+        ssize_t w = afinet_sendto_k(s, fd, kbuf, chunk, flags, addr, addrlen);
         if (w < 0) {
             kfree(kbuf, cap);
             return total ? total : w;
@@ -2426,8 +2677,10 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
 }
 
 int afinet_pktinfo_on(int fd) {
-    afi_sock_t *s = afi_from_fd(fd);
-    return s && s->family == AF_INET && s->pktinfo;
+    afi_sock_t *s = afi_pin_fd(fd);
+    int on = s && s->family == AF_INET && s->pktinfo;
+    afi_unpin(s);
+    return on;
 }
 
 static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
@@ -2436,11 +2689,22 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
                                      struct afi_rxinfo *rx, uint8_t *tmp,
                                      size_t cap);
 
+static ssize_t afinet_recvfrom_rx_s(afi_sock_t *s, int fd, void *buf,
+                                    size_t len, int flags, void *addr,
+                                    socklen_t *addrlen, struct afi_rxinfo *rx);
 ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
                            void *addr, socklen_t *addrlen,
                            struct afi_rxinfo *rx) {
+    afi_sock_t *s = afi_pin_fd(fd);
+    ssize_t r = afinet_recvfrom_rx_s(s, fd, buf, len, flags, addr, addrlen, rx);
+    afi_unpin(s);
+    return r;
+}
+
+static ssize_t afinet_recvfrom_rx_s(afi_sock_t *s, int fd, void *buf,
+                                    size_t len, int flags, void *addr,
+                                    socklen_t *addrlen, struct afi_rxinfo *rx) {
     if (rx) rx->valid = 0;
-    afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!buf) return -EINVAL;
     /* No source address unless a datagram is actually taken.

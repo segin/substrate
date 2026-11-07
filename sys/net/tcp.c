@@ -87,6 +87,10 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
 #define TCP_RING_LEN       (32 * 1024)
 #define TCP_MSS            1460
 #define TCP_DEFAULT_PEER_MSS 536         /* RFC 1122 4.2.2.6 */
+/* The least peer MSS believed.  An MSS option is the peer's word alone,
+ * and one of 1 had every byte sent as its own segment -- 40 bytes of
+ * header per byte of data, and a send queue cut into thousands of them. */
+#define TCP_MIN_MSS        64
 /*
  * Every timer constant here was hardcoded for HZ=128 while
  * <sys/param.h> defines HZ 250, so each was HALF its documented value --
@@ -582,7 +586,10 @@ static void tcp_set_mtu_mss(tcp_pcb_t *p) {
 }
 
 static void tcp_take_peer_mss(tcp_pcb_t *p, uint16_t syn_mss) {
-    p->snd_mss = syn_mss ? syn_mss : TCP_DEFAULT_PEER_MSS;
+    if (syn_mss == 0)
+        p->snd_mss = TCP_DEFAULT_PEER_MSS;
+    else
+        p->snd_mss = syn_mss < TCP_MIN_MSS ? TCP_MIN_MSS : syn_mss;
 }
 
 /* Sequence space a segment occupies: its data plus one for SYN and FIN. */

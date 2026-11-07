@@ -24,6 +24,10 @@ sender applies the Nagle algorithm and sender silly-window avoidance.
 While the peer advertises a zero window, one-octet probes are sent for as
 long as the peer keeps answering them.
 .PP
+Segments are no larger than the maximum segment size the peer advertises
+in its SYN (536 octets when it advertises none), but a peer advertising
+fewer than 64 octets is taken to mean 64.
+.PP
 Data left unacknowledged is retransmitted with exponential backoff.
 The connection is aborted with
 .B ETIMEDOUT
