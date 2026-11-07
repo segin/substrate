@@ -9545,6 +9545,8 @@ ex_mode:
         sigaction(SIGCONT, &old_cont, NULL);
     }
     free(vis.last_insert_text);         /* as done: does; Q leaked it */
+    free(vis.u_text);
+    free(vis.ai_restore);
     vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
