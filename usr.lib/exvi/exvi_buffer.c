@@ -171,6 +171,7 @@ buf_init(buffer_t *b)
 line_t *
 buf_insert_after(buffer_t *b, line_t *pos, const char *text)
 {
+    static unsigned long next_line_id = 0;
     line_t *l = calloc(1, sizeof(line_t));
     int inserted_at_end = (b->head == NULL || pos == b->tail);
     int idx;
@@ -184,6 +185,7 @@ buf_insert_after(buffer_t *b, line_t *pos, const char *text)
         return NULL;
     }
     l->len = strlen(text);
+    l->id = ++next_line_id;
     exvi_note_buffer_change();
 
     if (!b->head) {
@@ -349,10 +351,55 @@ buf_copy(buffer_t *dst, buffer_t *src)
     dst->trailing_newline = src->trailing_newline;
     while (curr) {
         pos = buf_insert_after(dst, pos, curr->text);
+        if (pos) {
+            /* the copy is the same line, for exvi_restore_snapshot() */
+            pos->id = curr->id;
+        }
         curr = curr->next;
     }
     dst->modified = src->modified;
     dst->trailing_newline = src->trailing_newline;
+    exvi_history_suspended--;
+}
+
+/**
+ * Make @p b the buffer @p snapshot holds, as undo and redo do: its lines
+ * and final newline -- but the file is still the one being
+ * edited, so its name, recover file and read state stay; the buffer is
+ * modified, as it is no longer what was last written; and each mark stays
+ * on its line where the snapshot has that line.  @p snapshot is used up.
+ */
+void
+exvi_restore_snapshot(buffer_t *b, buffer_t *snapshot)
+{
+    exvi_history_suspended++;
+    for (int i = 0; i < 26; i++) {
+        snapshot->marks[i] = NULL;
+        snapshot->mark_cols[i] = 0;
+        if (!b->marks[i]) {
+            continue;
+        }
+        for (line_t *l = snapshot->head; l; l = l->next) {
+            if (l->id == b->marks[i]->id) {
+                snapshot->marks[i] = l;
+                snapshot->mark_cols[i] = b->mark_cols[i];
+                break;
+            }
+        }
+    }
+    free(snapshot->filename);
+    free(snapshot->recover_filename);
+    snapshot->filename = b->filename;
+    snapshot->recover_filename = b->recover_filename;
+    snapshot->read_failed = b->read_failed;
+    snapshot->empty_origin = b->empty_origin;
+    snapshot->started_empty = b->started_empty;
+    b->filename = NULL;
+    b->recover_filename = NULL;
+    snapshot->modified = 1;
+    buf_free(b);
+    *b = *snapshot;
+    buf_init(snapshot);
     exvi_history_suspended--;
 }
 

@@ -611,11 +611,11 @@ The number is not reused.
 
 ### EXVI-39 — undo restores the file name and modified flag, drops marks, and does not toggle — *High*
 
-- [ ] **EXVI-39.1** (Ubiquitous) The editor's `undo` shall leave the current
+- [x] **EXVI-39.1** (Ubiquitous) The editor's `undo` shall leave the current
   file name unchanged.
-- [ ] **EXVI-39.2** (Event-driven) When `undo` changes the buffer, the editor
+- [x] **EXVI-39.2** (Event-driven) When `undo` changes the buffer, the editor
   shall mark the buffer modified relative to the last write.
-- [ ] **EXVI-39.3** (Ubiquitous) The editor's `undo` shall keep the marks of
+- [x] **EXVI-39.3** (Ubiquitous) The editor's `undo` shall keep the marks of
   lines it does not remove.
 - [ ] **EXVI-39.4** (Event-driven) When `undo` follows `undo`, the editor shall
   reverse the first `undo`.

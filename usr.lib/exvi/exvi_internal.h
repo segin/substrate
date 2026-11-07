@@ -25,6 +25,9 @@ typedef struct line {
     char *text;
     size_t len;
     int global_mark;
+    /** which line this is: a new line's own, kept by buf_copy()'s copy of it,
+     *  so undo can find in a snapshot the lines marks are on */
+    unsigned long id;
 } line_t;
 
 typedef struct {
@@ -128,6 +131,7 @@ void buf_delete(buffer_t *b, line_t *l);
 void buf_free(buffer_t *b);
 void buf_copy(buffer_t *dst, buffer_t *src);
 void save_undo(buffer_t *current);
+void exvi_restore_snapshot(buffer_t *b, buffer_t *snapshot);
 void exvi_begin_undo_group(buffer_t *current);
 void exvi_end_undo_group(void);
 /** counts changes to any buffer's lines (a line's text, a line added or

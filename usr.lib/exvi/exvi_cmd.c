@@ -481,10 +481,7 @@ handle_undo_command(buffer_t *b)
             return 1;
         }
         if (exvi_history_pop_snapshot(&undo_history, &snapshot) == 0) {
-            exvi_history_suspended++;
-            buf_free(b);
-            *b = snapshot;
-            exvi_history_suspended--;
+            exvi_restore_snapshot(b, &snapshot);
         }
     }
     return 1;
@@ -502,10 +499,7 @@ handle_redo_command(buffer_t *b)
             return 1;
         }
         if (exvi_history_pop_snapshot(&redo_history, &snapshot) == 0) {
-            exvi_history_suspended++;
-            buf_free(b);
-            *b = snapshot;
-            exvi_history_suspended--;
+            exvi_restore_snapshot(b, &snapshot);
         }
     }
     return 1;
