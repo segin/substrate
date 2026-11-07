@@ -502,15 +502,15 @@ The number is not reused.
 
 ### EXVI-31 — the replacement is copied literally — *High*
 
-- [ ] **EXVI-31.1** (Ubiquitous) The editor shall replace `&` in a replacement
+- [x] **EXVI-31.1** (Ubiquitous) The editor shall replace `&` in a replacement
   with the matched text.
-- [ ] **EXVI-31.2** (Ubiquitous) The editor shall replace `\1` through `\9` in a
+- [x] **EXVI-31.2** (Ubiquitous) The editor shall replace `\1` through `\9` in a
   replacement with the matched subexpressions.
-- [ ] **EXVI-31.3** (Ubiquitous) The editor shall replace `~` in a replacement
+- [x] **EXVI-31.3** (Ubiquitous) The editor shall replace `~` in a replacement
   with the previous replacement.
-- [ ] **EXVI-31.4** (Ubiquitous) The editor shall apply `\u`, `\l`, `\U`, `\L`
+- [x] **EXVI-31.4** (Ubiquitous) The editor shall apply `\u`, `\l`, `\U`, `\L`
   and `\E` in a replacement.
-- [ ] **EXVI-31.5** (Ubiquitous) The editor shall split the line at each escaped
+- [x] **EXVI-31.5** (Ubiquitous) The editor shall split the line at each escaped
   newline in a replacement.
 
 - **Where**: `exvi_cmd.c:139-152` (`memcpy`).

@@ -149,6 +149,38 @@ option off,
 and
 .Ql ~
 are ordinary characters and their escaped forms are the special ones.
+.Pp
+In the replacement of
+.Ic substitute ,
+.Ql &
+stands for the matched text,
+.Ql \e1
+to
+.Ql \e9
+for its subexpressions and
+.Ql ~
+for the last replacement;
+.Ql \eu
+and
+.Ql \el
+make the next character upper or lower case, and
+.Ql \eU
+and
+.Ql \eL
+the characters up to
+.Ql \eE
+or
+.Ql \ee .
+A backslash before any other character stands for that character, and
+before a newline splits the line there.
+With
+.Ic nomagic ,
+.Ql \e&
+and
+.Ql \e~
+are the special forms.
+A command line that ends in a backslash continues on the next line, the
+backslash and the newline part of the command.
 .Sh OPTIONS
 .Bl -tag -width indent
 .It Fl R

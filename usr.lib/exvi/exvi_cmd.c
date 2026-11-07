@@ -105,6 +105,50 @@ default_read_destination(buffer_t *b, int addr2)
     return b->cur ? buf_current_line(b) : 0;
 }
 
+typedef struct sub_text sub_text_t;
+static int sub_text_add(sub_text_t *t, const char *p, size_t n);
+static int sub_expand(sub_text_t *t, const char *repl, const char *line, const regmatch_t *pm);
+
+/** A growing string a replacement is built in. */
+struct sub_text {
+    char *s;
+    size_t len;
+    size_t cap;
+};
+
+/**
+ * Split line @p l of @p b at each newline in its text: the text up to the
+ * first stays in @p l, and each piece after goes in a line of its own after
+ * it, as a replacement with an escaped newline asks.
+ *
+ * @return the last line of those, or NULL when out of memory
+ */
+static line_t *
+sub_split_line(buffer_t *b, line_t *l)
+{
+    char *nl = strchr(l->text, '\n');
+    line_t *last = l;
+
+    if (!nl) {
+        return l;
+    }
+    *nl = '\0';
+    l->len = (size_t)(nl - l->text);
+    for (char *piece = nl + 1;; ) {
+        char *end = strchr(piece, '\n');
+
+        if (end) {
+            *end = '\0';
+        }
+        last = buf_insert_after(b, last, piece);
+        if (!last || !end) {
+            break;
+        }
+        piece = end + 1;
+    }
+    return last;
+}
+
 static int
 apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
     const char *replacement, int global, int print_flags)
@@ -120,78 +164,62 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
 
     if (addr1 > 0 && addr2 >= addr1) {
         line_t *l = buf_get_line(b, addr1);
-        size_t rep_len = strlen(replacement);
 
         for (int i = 0; i < (addr2 - addr1 + 1) && l; i++) {
-            regmatch_t pm;
+            regmatch_t pm[10];
             char *search_start = l->text;
             int matches = 0;
-            size_t new_len = 0;
-            char *new_text = malloc(1);
+            sub_text_t t = { NULL, 0, 0 };
 
-            if (!new_text) {
+            if (sub_text_add(&t, "", 0) != 0) {
                 regfree(&re);
                 return 0;
             }
-            new_text[0] = '\0';
 
-            while (regexec(&re, search_start, 1, &pm, 0) == 0) {
-                char *grown;
-
+            while (regexec(&re, search_start, 10, pm, 0) == 0) {
                 matches++;
-                grown = realloc(new_text, new_len + pm.rm_so + rep_len + 1);
-                if (!grown) {
-                    free(new_text);
+                if (sub_text_add(&t, search_start, (size_t)pm[0].rm_so) != 0 ||
+                    sub_expand(&t, replacement, search_start, pm) != 0) {
+                    free(t.s);
                     regfree(&re);
                     return 0;
                 }
-                new_text = grown;
-                memcpy(new_text + new_len, search_start, pm.rm_so);
-                new_len += pm.rm_so;
-                memcpy(new_text + new_len, replacement, rep_len);
-                new_len += rep_len;
-                new_text[new_len] = '\0';
 
-                search_start += pm.rm_eo;
+                search_start += pm[0].rm_eo;
                 if (!global) {
                     break;
                 }
-                if (pm.rm_so == pm.rm_eo) {
-                    if (*search_start) {
-                        grown = realloc(new_text, new_len + 2);
-                        if (!grown) {
-                            free(new_text);
-                            regfree(&re);
-                            return 0;
-                        }
-                        new_text = grown;
-                        new_text[new_len++] = *search_start++;
-                        new_text[new_len] = '\0';
-                    } else {
+                if (pm[0].rm_so == pm[0].rm_eo) {
+                    if (!*search_start) {
                         break;
                     }
+                    if (sub_text_add(&t, search_start, 1) != 0) {
+                        free(t.s);
+                        regfree(&re);
+                        return 0;
+                    }
+                    search_start++;
                 }
             }
 
             if (matches > 0) {
-                size_t rem_len = strlen(search_start);
-                char *grown = realloc(new_text, new_len + rem_len + 1);
-
-                if (!grown) {
-                    free(new_text);
+                if (sub_text_add(&t, search_start, strlen(search_start)) != 0) {
+                    free(t.s);
                     regfree(&re);
                     return 0;
                 }
-                new_text = grown;
-                memcpy(new_text + new_len, search_start, rem_len);
-                new_len += rem_len;
-                new_text[new_len] = '\0';
 
                 exvi_note_buffer_change();
                 free(l->text);
-                l->text = new_text;
-                l->len = new_len;
+                l->text = t.s;
+                l->len = t.len;
                 b->modified = 1;
+                /* the lines a newline in the replacement made are this line's, not the range's */
+                l = sub_split_line(b, l);
+                if (!l) {
+                    regfree(&re);
+                    return 0;
+                }
                 b->cur = l;
                 if (print_flags & EXVI_SUB_PRINT_NUMBER) {
                     print_line_number_prefix(addr1 + i);
@@ -203,7 +231,7 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
                     print_line_text(l, 0);
                 }
             } else {
-                free(new_text);
+                free(t.s);
             }
             l = l->next;
         }
@@ -246,9 +274,10 @@ parse_delimited_text_or_eol(char **cmd_ptr, char delim)
     }
 
     while (*src) {
+        /* escapes stay, for sub_expand() to read: `\/` is then a `/` */
         if (*src == '\\' && src[1] != '\0') {
-            text[len++] = src[1];
-            src += 2;
+            text[len++] = *src++;
+            text[len++] = *src++;
             continue;
         }
         if (*src == delim) {
@@ -262,6 +291,161 @@ parse_delimited_text_or_eol(char **cmd_ptr, char delim)
     text[len] = '\0';
     *cmd_ptr = src;
     return text;
+}
+
+/**
+ * Append @p n bytes to @p t.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int
+sub_text_add(sub_text_t *t, const char *p, size_t n)
+{
+    if (t->len + n + 1 > t->cap) {
+        size_t cap = t->cap ? t->cap : 64;
+        char *s;
+
+        while (t->len + n + 1 > cap) {
+            cap *= 2;
+        }
+        s = realloc(t->s, cap);
+        if (!s) {
+            return -1;
+        }
+        t->s = s;
+        t->cap = cap;
+    }
+    if (n > 0) {
+        memcpy(t->s + t->len, p, n);
+    }
+    t->len += n;
+    t->s[t->len] = '\0';
+    return 0;
+}
+
+/**
+ * Put the last substitute's replacement where a replacement as written has
+ * `~` (with the magic option; `\~` without), as POSIX ex reads it; the
+ * other form stays, the character.
+ *
+ * @param repl  the replacement as written, escapes in it
+ * @return      the replacement, malloc'd, or NULL -- reported -- when it
+ *              has `~` and no substitute came before, or out of memory
+ */
+static char *
+sub_expand_tilde(const char *repl)
+{
+    sub_text_t t = { NULL, 0, 0 };
+
+    if (sub_text_add(&t, "", 0) != 0) {
+        exvi_report_error("out of memory");
+        return NULL;
+    }
+    while (*repl) {
+        int esc = repl[0] == '\\' && repl[1] != '\0';
+        size_t n = esc ? 2 : 1;
+        int rc;
+
+        if ((esc ? repl[1] : repl[0]) == '~' && esc == !option_magic) {
+            if (!last_sub_replacement) {
+                exvi_report_error("No previous replacement");
+                free(t.s);
+                return NULL;
+            }
+            rc = sub_text_add(&t, last_sub_replacement, strlen(last_sub_replacement));
+        } else {
+            rc = sub_text_add(&t, repl, n);
+        }
+        if (rc != 0) {
+            exvi_report_error("out of memory");
+            free(t.s);
+            return NULL;
+        }
+        repl += n;
+    }
+    return t.s;
+}
+
+/**
+ * Append @p n bytes of matched text to @p t, in the case that `\u`, `\l`,
+ * `\U` and `\L` ask: @p once, the next character's, then cleared; @p
+ * persist, every character's until `\E`.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int
+sub_add_cased(sub_text_t *t, const char *p, size_t n, char *once, char persist)
+{
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)p[i];
+        char mode = *once ? *once : persist;
+
+        if (mode == 'u' || mode == 'U') {
+            c = (unsigned char)toupper(c);
+        } else if (mode == 'l' || mode == 'L') {
+            c = (unsigned char)tolower(c);
+        }
+        *once = 0;
+        if (sub_text_add(t, (const char *)&c, 1) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Append to @p t the text a match is replaced with: the replacement, `~`
+ * already put in it, read as POSIX ex reads one -- `&` (`\&` with nomagic)
+ * the whole match, `\1` to `\9` the subexpressions, `\u` and `\l` the next
+ * character upper or lower case and `\U` and `\L` the ones up to `\E` or
+ * `\e`, a backslash before a newline the newline (where the line splits),
+ * and before anything else that character.
+ *
+ * @param repl  the replacement
+ * @param line  the text matched in
+ * @param pm    the match and its subexpressions, 10 of them
+ * @return      0, or -1 when out of memory
+ */
+static int
+sub_expand(sub_text_t *t, const char *repl, const char *line, const regmatch_t *pm)
+{
+    char once = 0;
+    char persist = 0;
+
+    while (*repl) {
+        int esc = repl[0] == '\\' && repl[1] != '\0';
+        char c = esc ? repl[1] : repl[0];
+        int group = -1;
+
+        repl += esc ? 2 : 1;
+        if (c == '&' && esc == !option_magic) {
+            group = 0;
+        } else if (esc && c >= '1' && c <= '9') {
+            group = c - '0';
+        } else if (esc && (c == 'u' || c == 'l')) {
+            once = c;
+            continue;
+        } else if (esc && (c == 'U' || c == 'L')) {
+            /* a `\u` or `\l` before still takes the next character */
+            persist = c;
+            continue;
+        } else if (esc && (c == 'E' || c == 'e')) {
+            persist = 0;
+            continue;
+        }
+        if (group >= 0) {
+            if (pm[group].rm_so >= 0 &&
+                sub_add_cased(t, line + pm[group].rm_so,
+                    (size_t)(pm[group].rm_eo - pm[group].rm_so), &once, persist) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (sub_add_cased(t, &c, 1, &once, persist) != 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 int
@@ -712,6 +896,17 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
     if (!repl_str) {
         free(pat_raw);
         return 1;
+    }
+    {
+        /* `~` is the last replacement, as it was, before this one becomes the last */
+        char *expanded = sub_expand_tilde(repl_str);
+
+        free(repl_str);
+        repl_str = expanded;
+        if (!repl_str) {
+            free(pat_raw);
+            return 1;
+        }
     }
     if (!parse_substitute_flags(spec, &global, &print_mode)) {
         free(pat_raw);

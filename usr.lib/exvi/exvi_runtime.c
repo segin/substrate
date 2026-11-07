@@ -294,6 +294,58 @@ exrc_dir_is_safe(const char *path)
     return 1;
 }
 
+/**
+ * Join to a command line the lines after it while it ends in a backslash
+ * that no backslash escapes, as POSIX ex reads a command: the backslash and
+ * a newline stay in it, for the command to read -- a substitute's
+ * replacement splits its line there.
+ *
+ * @param line  the command, its newline gone; grown as getline() grows it
+ * @param cap   its size, as getline() keeps it
+ * @param f     where the command was read
+ * @return      0, or -1 when out of memory (the line as it was)
+ */
+int
+exvi_join_continued(char **line, size_t *cap, FILE *f)
+{
+    char *next = NULL;
+    size_t next_cap = 0;
+
+    for (;;) {
+        size_t len = strlen(*line);
+        size_t slashes = 0;
+        ssize_t got;
+
+        while (slashes < len && (*line)[len - 1 - slashes] == '\\') {
+            slashes++;
+        }
+        if (slashes % 2 == 0) {
+            break;
+        }
+        got = getline(&next, &next_cap, f);
+        if (got == -1) {
+            break;
+        }
+        if (got > 0 && next[got - 1] == '\n') {
+            next[--got] = '\0';
+        }
+        if (len + 1 + (size_t)got + 1 > *cap) {
+            char *grown = realloc(*line, len + 1 + (size_t)got + 1);
+
+            if (!grown) {
+                free(next);
+                return -1;
+            }
+            *line = grown;
+            *cap = len + 1 + (size_t)got + 1;
+        }
+        (*line)[len] = '\n';
+        memcpy(*line + len + 1, next, (size_t)got + 1);
+    }
+    free(next);
+    return 0;
+}
+
 static int
 load_exrc_file(buffer_t *b, void (*command_fn)(buffer_t *, char *), const char *path,
     dev_t *dev_out, ino_t *ino_out)
@@ -329,6 +381,7 @@ load_exrc_file(buffer_t *b, void (*command_fn)(buffer_t *, char *), const char *
         if (rc_ret > 0 && rc_line[rc_ret - 1] == '\n') {
             rc_line[rc_ret - 1] = '\0';
         }
+        (void)exvi_join_continued(&rc_line, &rc_cap, f);
         command_fn(b, rc_line);
     }
     free(rc_line);

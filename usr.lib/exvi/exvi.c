@@ -695,6 +695,10 @@ enter_visual:
             continue;
         }
 
+        if (exvi_join_continued(&line, &cap, stdin) != 0) {
+            exvi_report_error("out of memory");
+            continue;
+        }
         /* strip optional ':' prefix */
         char *cmd_line = line;
         while (*cmd_line && isspace((unsigned char)*cmd_line)) cmd_line++;
