@@ -63,6 +63,7 @@ static spinlock_t vm_fault_lock_init = SPINLOCK_INIT("vm_fault_init");
  * this interesting.
  */
 static thread_t *vm_fault_lock_owner;   /* thread inside the locked region */
+static int       vm_fault_lock_depth;   /* its vm_object_chain_lock() nesting */
 static uintptr_t vm_fault_lock_va;      /* the fault that took the lock */
 static uint32_t  vm_fault_lock_pc;
 static uint8_t   vm_fault_lock_prot;
@@ -97,11 +98,39 @@ static void vm_fault_object_lock_acquire(uintptr_t va, uint8_t prot,
     vm_fault_lock_va    = va;
     vm_fault_lock_prot  = prot;
     vm_fault_lock_pc    = pc;
+    vm_fault_lock_depth = 1;
 }
 
 static void vm_fault_object_lock_release(void) {
+    vm_fault_lock_depth = 0;
     vm_fault_lock_owner = NULL;
     mutex_unlock(&vm_fault_object_lock);
+}
+
+/*
+ * The same lock for changes to objects' page lists and shadow chains made
+ * outside a fault -- vm_object_collapse(), vm_map_fork()'s shadowing,
+ * msync()'s walk -- so a fault on another thread, which walks and fills
+ * those chains under it, never sees one half-changed.  Recursive for its
+ * holder, so a fault's locked region may call what takes it.  Before
+ * there are threads there is nothing to exclude.
+ */
+void vm_object_chain_lock(void) {
+    if (!current_thread) return;
+    if (vm_fault_lock_owner == current_thread) {
+        vm_fault_lock_depth++;
+        return;
+    }
+    vm_fault_object_lock_acquire(0, 0, 0);
+}
+
+void vm_object_chain_unlock(void) {
+    if (!current_thread) return;
+    if (vm_fault_lock_depth > 1) {
+        vm_fault_lock_depth--;
+        return;
+    }
+    vm_fault_object_lock_release();
 }
 
 

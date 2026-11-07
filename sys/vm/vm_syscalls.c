@@ -761,7 +761,10 @@ int sys_msync(void *addr, size_t length, int flags) {
         }
     }
 
-    // Walk the range and flush dirty pages
+    /* Walk the range and flush dirty pages -- under the object lock, as a
+     * fault in another process mapping the same object fills its page
+     * list under it. */
+    vm_object_chain_lock();
     for (uintptr_t va = start; va < end; va += 0x1000) {
         vm_map_entry_t *entry = NULL;
         for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
@@ -794,6 +797,7 @@ int sys_msync(void *addr, size_t length, int flags) {
             pmap_clear_modify(map->pmap, va);
         }
     }
+    vm_object_chain_unlock();
 
     vm_map_unlock_read(map);
     return 0;

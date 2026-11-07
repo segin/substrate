@@ -1595,6 +1595,10 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
         } else if (src_entry->inheritance == VM_INHERIT_COPY) {
             // Copy-on-Write
             if (obj) {
+                /* The shadowing below reshapes chains a fault in another
+                 * process sharing them may be walking: under the object
+                 * lock, as faults are. */
+                vm_object_chain_lock();
                 /*
                  * Before stacking yet another shadow on top, try to
                  * collapse any unreferenced shadow that this object
@@ -1647,6 +1651,7 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
                         vm_object_deallocate(parent_shadow);
                     }
                     if (child_shadow) vm_object_deallocate(child_shadow);
+                    vm_object_chain_unlock();
                     vm_map_unlock(src_map);
                     vm_map_destroy(dst_map);
                     return NULL;
@@ -1667,6 +1672,7 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
                 // Downgrade protection in parent to ensure COW trap happens.
                 pmap_protect(src_map->pmap, src_entry->start, src_entry->end,
                              src_entry->protection & ~VM_PROT_WRITE);
+                vm_object_chain_unlock();
             }
         } else if (src_entry->inheritance == VM_INHERIT_ZERO) {
             /* Child gets a new zero-filled object, allocated lazily.  But

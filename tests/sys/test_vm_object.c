@@ -151,6 +151,50 @@ void test_vm_object_collapse(void) {
     kprint("  PASS\n");
 }
 
+/* The PTE for va in pmap, read through the direct map -- the pmap need not
+ * be current, which pmap_extract() requires. */
+static uint32_t pte_of(pmap_t pmap, uintptr_t va) {
+    const uint32_t *pd = (const uint32_t *)(pmap->pdir_phys + 0xC0000000u);
+    uint32_t pde = pd[va >> 22];
+    if (!(pde & 1u) || (pde & 0x80u)) return 0;
+    const uint32_t *pt = (const uint32_t *)((pde & 0xFFFFF000u) + 0xC0000000u);
+    return pt[(va >> 12) & 0x3FFu];
+}
+
+/*
+ * A backing page that the collapse frees because the top object masks it
+ * must not stay mapped: vm_page_free() drops the pv entries, not the PTEs,
+ * so a still-mapped one left a live PTE on a freed frame.
+ */
+void test_vm_object_collapse_unmaps_masked(void) {
+    kprint("Test: vm_object collapse unmaps a masked page it frees\n");
+
+    pmap_t pmap = pmap_create();
+    vm_object_t *backing = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x1000);
+    vm_object_t *top = vm_object_shadow(backing);
+    TEST_ASSERT(pmap != 0 && backing != NULL && top != NULL, "objects made");
+
+    vm_page_t *old = vm_page_alloc(backing, 0, 0);
+    vm_page_t *new = vm_page_alloc(top, 0, 0);
+    TEST_ASSERT(old != NULL && new != NULL, "pages allocated");
+    vm_page_insert(old, backing, 0);
+    vm_page_insert(new, top, 0);
+    uint32_t old_pa = old->phys_addr;
+    const uintptr_t va = 0x20000000;            /* user space, above the kernel's PDEs */
+    TEST_ASSERT(pmap_enter(pmap, va, old_pa, VM_PROT_READ, 0) >= 0,
+                "backing page mapped");
+    TEST_ASSERT((pte_of(pmap, va) & 0xFFFFF001u) == (old_pa | 1u), "mapping in place");
+
+    vm_object_deallocate(backing);              /* the top holds it alone */
+    TEST_ASSERT(vm_object_collapse(top) == 0, "collapse succeeded");
+    TEST_ASSERT((pte_of(pmap, va) & 0xFFFFF001u) != (old_pa | 1u),
+                "the freed backing page is mapped no more");
+
+    vm_object_deallocate(top);
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
 void test_vm_object_map_reference_contract(void) {
     kprint("Test: vm_object map reference contract\n");
 
@@ -183,6 +227,7 @@ void run_vm_object_tests(void) {
     test_vm_object_pages();
     test_vm_object_dynamic_free();
     test_vm_object_collapse();
+    test_vm_object_collapse_unmaps_masked();
     test_vm_object_map_reference_contract();
     kprint("\nVM Object Tests Complete\n");
 }

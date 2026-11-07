@@ -5,6 +5,8 @@
 #include <vm/vm_kmem.h>
 #include <vm/vm_pager.h>
 #include <sys/lock.h>
+#include <machine/intr.h>
+#include <machine/pmap.h>
 #include <kern/panic.h>
 #include <kern/console.h>
 
@@ -452,7 +454,36 @@ vm_object_t *vm_object_shadow(vm_object_t *source) {
  *     require reading remaining pager-backed pages, out of scope here)
  *   - shadow has no other shadowers (implied by ref_count == 1)
  */
+/*
+ * Free a backing-object page the collapse leaves unreachable.  It may still
+ * be mapped -- read through the chain before the top object got its own
+ * copy -- and vm_page_free() drops only the pv entries, not the PTEs, which
+ * would go on mapping a freed frame: take the mappings down first.
+ */
+static void vm_object_collapse_free(vm_page_t *p) {
+    p->obj_next = NULL;
+    p->obj_prev = NULL;
+    p->object = NULL;
+    if (p->pv_list) {
+        uint32_t f = intr_disable();
+        (void)pmap_page_remove_all(p);
+        intr_restore(f);
+    }
+    vm_page_free(p);
+}
+
+static int vm_object_collapse_locked(vm_object_t *object);
+
+/* Under the object lock: it moves pages between objects a fault on another
+ * thread may be walking. */
 int vm_object_collapse(vm_object_t *object) {
+    vm_object_chain_lock();
+    int rc = vm_object_collapse_locked(object);
+    vm_object_chain_unlock();
+    return rc;
+}
+
+static int vm_object_collapse_locked(vm_object_t *object) {
     vm_object_t *shadow;
     uint64_t shadow_offset_pages;
 
@@ -485,17 +516,11 @@ int vm_object_collapse(vm_object_t *object) {
             /* Out of object's mapping range — stays only in shadow.
              * Since shadow is going away, this page is unreachable;
              * free it. */
-            p->obj_next = NULL;
-            p->obj_prev = NULL;
-            p->object = NULL;
-            vm_page_free(p);
+            vm_object_collapse_free(p);
         } else if (vm_object_lookup_page(object, op)) {
             /* Object already has a page here; shadow's copy is masked.
              * Detach and free. */
-            p->obj_next = NULL;
-            p->obj_prev = NULL;
-            p->object = NULL;
-            vm_page_free(p);
+            vm_object_collapse_free(p);
         } else {
             /* Move page from shadow to object at translated pindex. */
             p->obj_next = NULL;

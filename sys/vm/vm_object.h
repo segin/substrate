@@ -78,6 +78,12 @@ void vm_syscalls_evict_shared_obj(vm_object_t *object);
 vm_object_t *vm_object_shadow(vm_object_t *source);
 int vm_object_collapse(vm_object_t *object);
 
+/* The page-fault path's object lock (vm_fault.c), for page-list and
+ * shadow-chain changes made outside a fault.  Recursive for its holder;
+ * taken after any vm_map lock, never before one.  A mutex: it may sleep. */
+void vm_object_chain_lock(void);
+void vm_object_chain_unlock(void);
+
 // Page management
 void vm_object_add_page(vm_object_t *object, vm_page_t *page);
 void vm_object_remove_page(vm_object_t *object, vm_page_t *page);
