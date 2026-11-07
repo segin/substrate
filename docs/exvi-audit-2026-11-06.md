@@ -1095,11 +1095,11 @@ The number is not reused.
 
 ### EXVI-73 — large counts hang vi, and ^C cannot stop them — *Medium*
 
-- [ ] **EXVI-73.1** (Ubiquitous) The editor shall run a counted `p`, `P` or `.`
+- [x] **EXVI-73.1** (Ubiquitous) The editor shall run a counted `p`, `P` or `.`
   as one change, in time linear in the text it inserts.
-- [ ] **EXVI-73.2** (Ubiquitous) The editor's `^E` and `^Y` shall stop at the
+- [x] **EXVI-73.2** (Ubiquitous) The editor's `^E` and `^Y` shall stop at the
   ends of the buffer, whatever the count.
-- [ ] **EXVI-73.3** (Event-driven) When `^C` is typed during a vi command, the
+- [x] **EXVI-73.3** (Event-driven) When `^C` is typed during a vi command, the
   editor shall stop the command.
 
 - **Where**: `p`/`P` and `.` (`exvi_visual.c:4220-4232`, `8291-8310`,
@@ -1107,7 +1107,9 @@ The number is not reused.
   count; ISIG is off.
 - **Evidence**: `yy8000p` 38.7 s, `yy16000p` over 100 s; `999999999^E` on a
   3-line file 4.5 s.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_large_counts.py`.  A
+  counted text input (`999999999.` after `ix<ESC>`) still takes time
+  growing faster than its text, but ^C stops it.
 
 ---
 

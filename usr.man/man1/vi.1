@@ -494,7 +494,14 @@ from it.
 .Sh ASYNCHRONOUS EVENTS
 In visual mode
 .Ql Ctrl-C
-is an ordinary key.
+sends
+.Dv SIGINT ,
+as the terminal's interrupt character: it stops a command while it runs
+\(em a counted
+.Ql p
+or
+.Ql \&. ,
+say \(em as well as acting on its own.
 A
 .Dv SIGINT
 sent to

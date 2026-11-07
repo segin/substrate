@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <regex.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -829,6 +830,29 @@ exvi_visual_shell_suspend(void)
     }
 }
 
+/*
+ * The terminal's signals in vi's raw mode: the interrupt character only.
+ * ^C sends SIGINT, so it stops a command while it runs (a counted p or .,
+ * a large ^E) as well as ending text input; with ISIG off it reached vi
+ * only after the command, as a key.  ^Z and ^\ stay keys (vi suspends on
+ * ^Z itself, restoring the terminal first), and BSD's delayed suspend
+ * (^Y) and status (^T) characters, which would take ^Y and ^T, are off.
+ */
+static void
+vi_raw_signals(struct termios *raw)
+{
+    raw->c_lflag |= ISIG;
+    raw->c_cc[VINTR] = 0x03;
+    raw->c_cc[VQUIT] = _POSIX_VDISABLE;
+    raw->c_cc[VSUSP] = _POSIX_VDISABLE;
+#ifdef VDSUSP
+    raw->c_cc[VDSUSP] = _POSIX_VDISABLE;
+#endif
+#ifdef VSTATUS
+    raw->c_cc[VSTATUS] = _POSIX_VDISABLE;
+#endif
+}
+
 void
 exvi_visual_shell_resume(void)
 {
@@ -840,7 +864,8 @@ exvi_visual_shell_resume(void)
         raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
         raw.c_oflag &= ~(OPOST);
         raw.c_cflag |= CS8;
-        raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+        raw.c_lflag &= ~(ECHO | ICANON | IEXTEN);
+        vi_raw_signals(&raw);
         raw.c_cc[VMIN] = 1;
         raw.c_cc[VTIME] = 0;
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
@@ -933,7 +958,8 @@ vi_enable_raw(vi_visual_t *vis)
     raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
     raw.c_oflag &= ~(OPOST);
     raw.c_cflag |= CS8;
-    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN);
+    vi_raw_signals(&raw);
     raw.c_cc[VMIN] = 1;
     raw.c_cc[VTIME] = 0;
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) {
@@ -4657,7 +4683,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
     dirty_start_line = before ? line_no : line_no + 1;
     if (!reg_linewise[reg_idx]) {
         save_undo(b);
-        while (count-- > 0) {
+        while (count-- > 0 && !exvi_interrupted) {
             line_t *cur = b->cur;
             line_t *src = regs[reg_idx].head;
             int pos;
@@ -4679,24 +4705,37 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
             }
 
             if (regs[reg_idx].line_count == 1) {
-                char *text = malloc(cur->len + src->len + 1);
+                /* all count copies at once: one at a time rebuilt the line
+                 * count times */
+                size_t copies = (size_t)count + 1;
+                size_t add;
+                char *text;
 
+                if (src->len > 0 && copies > (SIZE_MAX - cur->len - 1) / src->len) {
+                    exvi_report_error("out of memory");
+                    return;
+                }
+                add = src->len * copies;
+                text = malloc(cur->len + add + 1);
                 if (!text) {
+                    exvi_report_error("out of memory");
                     return;
                 }
                 memcpy(text, cur->text, (size_t)pos);
-                memcpy(text + pos, src->text, src->len);
-                memcpy(text + pos + src->len, cur->text + pos,
-                    cur->len - (size_t)pos + 1);
-                if (vi_replace_current_text(b, text, cur->len + src->len) == 0) {
-                    if (src->len > 0) {
-                        vis->cursor_col = pos + (int)src->len - 1;
+                for (size_t k = 0; k < copies; k++) {
+                    memcpy(text + pos + k * src->len, src->text, src->len);
+                }
+                memcpy(text + pos + add, cur->text + pos, cur->len - (size_t)pos + 1);
+                if (vi_replace_current_text(b, text, cur->len + add) == 0) {
+                    if (add > 0) {
+                        vis->cursor_col = pos + (int)add - 1;
                     } else {
                         vis->cursor_col = pos;
                     }
                     vi_mark_body_dirty_current_line(b, vis);
                 }
                 free(text);
+                return;
             } else {
                 /* every part by its length, so a NUL in one is kept */
                 size_t suffix_len = cur->len - (size_t)pos;
@@ -4758,7 +4797,10 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
     } else {
         regarg[0] = '\0';
     }
-    while (count-- > 0) {
+    /* one change for u, and one copy of the buffer for it: each put
+     * took its own, so yy8000p ran for 40 s; ^C stops it */
+    exvi_begin_undo_group(b);
+    while (count-- > 0 && !exvi_interrupted) {
         handle_put_command(b, regarg, before ? line_no - 1 : line_no);
         if (before) {
             if (line_no > 1) {
@@ -4771,6 +4813,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
             line_no++;
         }
     }
+    exvi_end_undo_group();
     vis->cursor_col = 0;
     vi_mark_body_dirty_through_eof(vis, dirty_start_line);
 }
@@ -7479,7 +7522,7 @@ vi_repeat_insert_text(buffer_t *b, vi_visual_t *vis, int entry_key, int times)
     if (!vis->last_insert_text || vis->last_insert_text[0] == '\0') {
         return;
     }
-    while (times-- > 0) {
+    while (times-- > 0 && !exvi_interrupted) {
         if (entry_key == 'o' || entry_key == 'O') {
             /* a line below the copy before it, as <CR> at its end makes:
              * one change for u, with the autoindent o gives */
@@ -9432,7 +9475,12 @@ process_normal_key:
             {
                 int count = vi_take_count(&vis);
 
-                while (count-- > 0) {
+                /* no more than the buffer has lines: 999999999^E ran
+                 * the whole count, for seconds */
+                if (count > b->line_count) {
+                    count = b->line_count;
+                }
+                while (count-- > 0 && !exvi_interrupted) {
                     vi_line_scroll(b, &vis, 1);
                 }
             }
@@ -9453,7 +9501,10 @@ process_normal_key:
             {
                 int count = vi_take_count(&vis);
 
-                while (count-- > 0) {
+                if (count > b->line_count) {
+                    count = b->line_count;
+                }
+                while (count-- > 0 && !exvi_interrupted) {
                     vi_line_scroll(b, &vis, -1);
                 }
             }
