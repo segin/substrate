@@ -474,11 +474,11 @@ The number is not reused.
 
 ### EXVI-29 — patterns are EREs, not BREs — *High*
 
-- [ ] **EXVI-29.1** (Ubiquitous) The editor shall compile ex and vi patterns as
+- [x] **EXVI-29.1** (Ubiquitous) The editor shall compile ex and vi patterns as
   POSIX basic regular expressions.
-- [ ] **EXVI-29.2** (Ubiquitous) The editor shall support `\<`, `\>` and `~` in
+- [x] **EXVI-29.2** (Ubiquitous) The editor shall support `\<`, `\>` and `~` in
   patterns.
-- [ ] **EXVI-29.3** (Ubiquitous) The editor shall provide the boolean option
+- [x] **EXVI-29.3** (Ubiquitous) The editor shall provide the boolean option
   `magic`, on by default.
 
 - **Where**: `exvi_runtime.c:63` (`exvi_regex_flags`) sets `REG_EXTENDED`.

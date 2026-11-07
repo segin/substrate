@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <signal.h>
 #include <stdio.h>
+#include <regex.h>
 
 #include <exvi.h>
 
@@ -90,6 +91,7 @@ extern int option_showmode;
 extern int option_scroll;
 extern int option_scroll_explicit;
 extern int option_wrapscan;
+extern int option_magic;
 extern int option_exrc;
 extern int option_writeany;
 extern char *option_tags;
@@ -138,7 +140,7 @@ int buf_write_file(buffer_t *b, const char *filename, int append);
 int buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);
 int buf_current_line(buffer_t *b);
-int exvi_regex_flags(void);
+int exvi_regcomp(regex_t *re, const char *pattern);
 char *parse_delimited_text(char **cmd_ptr, char delim);
 int exvi_search(buffer_t *b, const char *pattern, int forward);
 int exvi_decode_terminal_key_sequence(char prefix, const char *seq);

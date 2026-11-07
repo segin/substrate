@@ -4914,7 +4914,7 @@ vi_search_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward
         return -1;
     }
     vi_pattern_word_boundaries(search, &word_start, &word_end);
-    if (regcomp(&re, search, exvi_regex_flags()) != 0) {
+    if (exvi_regcomp(&re, search) != 0) {
         free(search);
         return -1;
     }

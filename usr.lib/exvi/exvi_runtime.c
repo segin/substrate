@@ -26,6 +26,7 @@ int option_showmode = 1;
 int option_scroll = EXVI_DEFAULT_SCROLL;
 int option_scroll_explicit = 0;
 int option_wrapscan = 1;
+int option_magic = 1;
 int option_exrc = 0;
 int option_writeany = 0;
 char *option_tags = NULL;
@@ -87,15 +88,161 @@ free_startup_commands(void)
     startup_command_count = 0;
 }
 
-int
-exvi_regex_flags(void)
-{
-    int flags = REG_EXTENDED;
+/** A growing string that exvi_regcomp() builds the regular expression in. */
+typedef struct {
+    char *s;
+    size_t len;
+    size_t cap;
+} re_text_t;
 
-    if (option_ignorecase) {
-        flags |= REG_ICASE;
+/**
+ * Append @p n bytes to @p t.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int
+re_text_add(re_text_t *t, const char *p, size_t n)
+{
+    if (t->len + n + 1 > t->cap) {
+        size_t cap = t->cap ? t->cap : 64;
+        char *s;
+
+        while (t->len + n + 1 > cap) {
+            cap *= 2;
+        }
+        s = realloc(t->s, cap);
+        if (!s) {
+            return -1;
+        }
+        t->s = s;
+        t->cap = cap;
     }
-    return flags;
+    memcpy(t->s + t->len, p, n);
+    t->len += n;
+    t->s[t->len] = '\0';
+    return 0;
+}
+
+/**
+ * Append @p text to @p t as a basic regular expression matching it as
+ * written: each of `.[\*^$` behind a backslash.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int
+re_text_add_literal(re_text_t *t, const char *text)
+{
+    for (; *text; text++) {
+        if (strchr(".[\\*^$", *text) && re_text_add(t, "\\", 1) != 0) {
+            return -1;
+        }
+        if (re_text_add(t, text, 1) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Copy the bracket expression at @p p, which starts with `[`, to @p t as it
+ * is: nothing in it is vi's to change.  `]` first (after any `^`) is a
+ * member, and `[:`, `[.` and `[=` open a class, collating element or
+ * equivalence class whose own `]` does not close it.
+ *
+ * @return the text after its closing `]`, or after the pattern when nothing
+ *         closes it (regcomp() then says so); NULL when out of memory
+ */
+static const char *
+re_copy_bracket(re_text_t *t, const char *p)
+{
+    const char *start = p++;
+
+    if (*p == '^') {
+        p++;
+    }
+    if (*p == ']') {
+        p++;
+    }
+    while (*p && *p != ']') {
+        if (*p == '[' && (p[1] == ':' || p[1] == '.' || p[1] == '=')) {
+            char close = p[1];
+            const char *q = p + 2;
+
+            while (*q && !(q[0] == close && q[1] == ']')) {
+                q++;
+            }
+            p = *q ? q + 2 : q;
+            continue;
+        }
+        p++;
+    }
+    if (*p == ']') {
+        p++;
+    }
+    return re_text_add(t, start, (size_t)(p - start)) == 0 ? p : NULL;
+}
+
+/**
+ * Compile a pattern as ex and vi read one: a POSIX basic regular
+ * expression, with `\<` and `\>`, in which `~` stands for the replacement
+ * text of the last substitute command; with the `magic` option off, `.`, `[`
+ * and `*` are ordinary characters and `\.`, `\[` and `\*` the special ones,
+ * and `\~` stands for that text where `~` is the character.  `ignorecase`
+ * makes it match either case.
+ *
+ * @param re       the compiled expression, for regexec() and regfree()
+ * @param pattern  the pattern, its delimiters gone
+ * @return         0, or regcomp()'s error; REG_ESPACE when out of memory,
+ *                 REG_BADPAT for `~` with no substitute before it
+ */
+int
+exvi_regcomp(regex_t *re, const char *pattern)
+{
+    re_text_t t = { NULL, 0, 0 };
+    const char *p = pattern;
+    int rc;
+
+    if (re_text_add(&t, "", 0) != 0) {
+        return REG_ESPACE;
+    }
+    while (*p) {
+        int esc = p[0] == '\\' && p[1] != '\0';
+        char c = esc ? p[1] : p[0];
+        size_t n = esc ? 2 : 1;
+        /* `.`, `*`, `[` and `~` are vi's special form bare with magic, escaped without */
+        int special = esc == !option_magic;
+
+        if (c == '~' && special) {
+            /* the last substitute's replacement, as written */
+            if (!last_sub_replacement) {
+                free(t.s);
+                return REG_BADPAT;
+            }
+            rc = re_text_add_literal(&t, last_sub_replacement);
+        } else if (c == '[' && special) {
+            p = re_copy_bracket(&t, p + n - 1);
+            if (!p) {
+                goto nomem;
+            }
+            continue;
+        } else if (c == '~' || c == '.' || c == '*' || c == '[') {
+            /* the regular expression's form: `.`, `*` and `[` bare when special, else escaped */
+            rc = special ? re_text_add(&t, &c, 1) : re_text_add_literal(&t, (char[]){ c, '\0' });
+        } else {
+            rc = re_text_add(&t, p, n);
+        }
+        if (rc != 0) {
+            goto nomem;
+        }
+        p += n;
+    }
+    rc = regcomp(re, t.s, option_ignorecase ? REG_ICASE : 0);
+    free(t.s);
+    return rc;
+
+nomem:
+    free(t.s);
+    return REG_ESPACE;
 }
 
 static int
@@ -922,6 +1069,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     option_scroll = EXVI_DEFAULT_SCROLL;
     option_scroll_explicit = 0;
     option_wrapscan = 1;
+    option_magic = 1;
     option_exrc = 0;
     option_writeany = 0;
     replace_saved_string(&option_tags, EXVI_DEFAULT_TAGS);
@@ -961,6 +1109,7 @@ exvi_cleanup_runtime(void)
     option_scroll = EXVI_DEFAULT_SCROLL;
     option_scroll_explicit = 0;
     option_wrapscan = 1;
+    option_magic = 1;
     option_exrc = 0;
     option_writeany = 0;
     free(option_tags);

@@ -123,6 +123,32 @@ are supported.
 The editor accepts the traditional
 .Ql \&"
 command-tail comment form outside delimiter bodies.
+.Pp
+A pattern \(em in a search address,
+.Ic global ,
+.Ic v
+or
+.Ic substitute
+\(em is a POSIX basic regular expression
+.Pq Xr regex 3 ,
+with
+.Ql \e<
+and
+.Ql \e>
+matching at the start and end of a word, and
+.Ql ~
+standing for the replacement text of the last
+.Ic substitute .
+A backslash before the delimiter makes the delimiter part of the pattern.
+With the
+.Ic magic
+option off,
+.Ql \&. ,
+.Ql \&[ ,
+.Ql *
+and
+.Ql ~
+are ordinary characters and their escaped forms are the special ones.
 .Sh OPTIONS
 .Bl -tag -width indent
 .It Fl R
@@ -198,6 +224,15 @@ Mark the session readonly.
 Shared option state used by the visual frontend's mode banner.
 .It Ic wrapscan , ws
 Wrap searches at buffer boundaries.
+.It Ic magic
+Give
+.Ql \&. ,
+.Ql \&[ ,
+.Ql *
+and
+.Ql ~
+their special meaning in patterns.
+It is on by default.
 .It Ic writeany , wa
 Let
 .Ic write
@@ -341,4 +376,5 @@ and restricted entry points such as
 are implemented through the shared frontend parser even though they are not
 separate binaries today.
 .Sh SEE ALSO
-.Xr vi 1
+.Xr vi 1 ,
+.Xr regex 3

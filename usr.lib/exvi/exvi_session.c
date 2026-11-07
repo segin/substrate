@@ -519,6 +519,9 @@ print_enabled_set_options(int include_numeric_defaults)
     if (option_wrapscan) {
         printf("wrapscan\n");
     }
+    if (option_magic) {
+        printf("magic\n");
+    }
     if (option_exrc) {
         printf("exrc\n");
     }
@@ -864,6 +867,17 @@ handle_set_command(const char *args)
                 printf("%s\n", option_wrapscan ? "nowrapscan" : "wrapscan");
             } else {
                 option_wrapscan = 0;
+            }
+        } else if ((len == 5 && strncmp(ptr, "magic", 5) == 0)
+                || (len == 7 && strncmp(ptr, "nomagic", 7) == 0)) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_magic ? "magic" : "nomagic");
+            } else {
+                option_magic = (ptr[0] != 'n');
             }
         } else if ((len == 2 && strncmp(ptr, "ex", 2) == 0)
                 || (len == 4 && strncmp(ptr, "exrc", 4) == 0)

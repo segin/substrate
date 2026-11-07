@@ -139,6 +139,26 @@ The current implementation still has documented parity gaps in a few motion,
 undo, and repeat corner cases; see
 .Pa docs/specs/exvi.md
 for the tracked conformance backlog.
+.Pp
+A search pattern, as an ex command's, is a POSIX basic regular expression
+.Pq Xr regex 3 ,
+with
+.Ql \e<
+and
+.Ql \e>
+matching at the start and end of a word, and
+.Ql ~
+standing for the replacement text of the last
+.Ic :substitute .
+With the
+.Ic magic
+option off,
+.Ql \&. ,
+.Ql \&[ ,
+.Ql *
+and
+.Ql ~
+are ordinary characters and their escaped forms are the special ones.
 .Sh OPTIONS
 .Bl -tag -width indent
 .It Fl R
@@ -210,6 +230,15 @@ Mark the session readonly.
 Show or suppress insert and replace mode banners.
 .It Ic wrapscan , ws
 Wrap searches at buffer boundaries.
+.It Ic magic
+Give
+.Ql \&. ,
+.Ql \&[ ,
+.Ql *
+and
+.Ql ~
+their special meaning in patterns.
+It is on by default.
 .It Ic writeany , wa
 Let
 .Ic :write
@@ -346,4 +375,5 @@ separate binaries today.
 The current renderer still uses a repaint-heavy refresh strategy rather than a
 dirty-region diff engine.
 .Sh SEE ALSO
-.Xr ex 1
+.Xr ex 1 ,
+.Xr regex 3

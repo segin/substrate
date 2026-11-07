@@ -206,7 +206,7 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
         exec_cmd = "p";
     }
 
-    if (regcomp(&re, re_str, exvi_regex_flags()) != 0) {
+    if (exvi_regcomp(&re, re_str) != 0) {
         free(re_str);
         free(work);
         return 1;
