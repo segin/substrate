@@ -1631,6 +1631,12 @@ vi_index_for_display_col(line_t *cur, int target_col)
     for (i = 0; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
         int width = vi_char_display_width_at(cur, i, col);
 
+        if (width == 0 && i > 0) {
+            /* a combining mark or zero-width character takes no column:
+             * the cursor is never put on it for one (2| on a+U+0301 b went
+             * between the a and its accent) */
+            continue;
+        }
         if (col >= target_col) {
             return i;
         }
@@ -8964,6 +8970,10 @@ process_normal_key:
                 }
                 if (cur) {
                     vis.cursor_col = vi_index_for_display_col(cur, target);
+                    /* past the line's end: its last character (EXVI-90) */
+                    if (cur->len > 0 && (size_t)vis.cursor_col >= cur->len) {
+                        vis.cursor_col = vi_last_char_col(cur);
+                    }
                 } else {
                     vis.cursor_col = 0;
                 }

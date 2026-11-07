@@ -5760,7 +5760,9 @@ def main():
     require("\x1b[6;1H\x1b[K" in decoded,
             "utf8-narrow-mixed-line missing status redraw")
     require("line 1/1" in decoded, "utf8-narrow-mixed-line missing status text")
-    require(saved == "aa漢bb\ta\u0301c\u200bddeeffgXghh\n",
+    # 漢 two columns, the accent and U+200B none, as a terminal draws
+    # them (Vim draws U+200B as <200b>, six columns, and lands on an e)
+    require(saved == "aa漢bb\ta\u0301c\u200bddeeffgghXh\n",
             f"unexpected utf8-narrow-mixed-line buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(

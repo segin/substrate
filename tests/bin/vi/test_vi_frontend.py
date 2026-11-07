@@ -301,8 +301,9 @@ def main():
     for name, initial_text, key_steps, expected in (
         ("display-tab-inside", "\tb\n", [b"2|", b"i", b"X", b"\x1b"], "X\tb\n"),
         ("display-tab-after", "\tb\n", [b"9|", b"i", b"X", b"\x1b"], "\tXb\n"),
+        # 漢 takes columns 1 and 2: 2| is on it (Vim)
         ("display-doublewidth-fallback", "漢b\n",
-            [b"2|", b"i", b"X", b"\x1b"], "漢Xb\n"),
+            [b"2|", b"i", b"X", b"\x1b"], "X漢b\n"),
         ("display-combining-fallback", "a\u0301b\n",
             [b"3|", b"i", b"X", b"\x1b"], "a\u0301Xb\n"),
         ("display-zero-width-fallback", "a\u200bb\n",
