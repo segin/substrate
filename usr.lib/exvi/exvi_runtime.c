@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <regex.h>
+#include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -340,6 +341,59 @@ exvi_regexec_from(const regex_t *re, const char *pattern, const char *line, size
         }
         rest++;                 /* \< inside a word: none here */
     }
+}
+
+/*
+ * A line from the terminal, as the terminal's canonical mode gives it,
+ * for interactive ex: *by_eof is set when the eof character ended it --
+ * the read had no newline -- after what was typed before it, possibly
+ * nothing.  -1 on an error, end of input or an interrupt.  A terminal
+ * that has hung up reads nothing again and again: after 100 such reads
+ * it is end of input.
+ */
+ssize_t
+exvi_tty_getline(char **line, size_t *cap, int *by_eof)
+{
+    static int empty_reads;
+    size_t len = 0;
+    char buf[8192];             /* more than a canonical line holds */
+    ssize_t n;
+
+    *by_eof = 0;
+    for (;;) {
+        n = read(STDIN_FILENO, buf, sizeof(buf));
+        if (n < 0 && errno == EINTR && !exvi_interrupted) {
+            continue;
+        }
+        if (n < 0) {
+            return -1;
+        }
+        break;
+    }
+    if (n == 0) {
+        if (++empty_reads > 100) {
+            return -1;
+        }
+        *by_eof = 1;
+    } else {
+        empty_reads = 0;
+        if (buf[n - 1] != '\n') {
+            *by_eof = 1;
+        }
+    }
+    if (*cap < (size_t)n + 1) {
+        char *grown = realloc(*line, (size_t)n + 1);
+
+        if (!grown) {
+            return -1;
+        }
+        *line = grown;
+        *cap = (size_t)n + 1;
+    }
+    memcpy(*line, buf, (size_t)n);
+    len = (size_t)n;
+    (*line)[len] = '\0';
+    return (ssize_t)len;
 }
 
 int

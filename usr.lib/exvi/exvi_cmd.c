@@ -950,7 +950,8 @@ handle_file_command(buffer_t *b, const char *args)
 }
 
 /*
- * Autoindent in ex's text input (POSIX ex, autoindent): each line entered
+ * Autoindent in ex's text input on a terminal (POSIX ex, autoindent; batch
+ * use, -s or input not a terminal, ignores it): each line entered
  * starts with the indent the line before it has -- the line appended
  * after (a), the line inserted before (i), the first line changed (c),
  * then each line entered.  A ^D at the start of a line takes it back one
@@ -984,6 +985,10 @@ static void
 begin_input_indent(const line_t *from, int force)
 {
     input_ai = option_autoindent ? !force : force;
+    /* POSIX ex -s, and input that is not a terminal: no autoindent */
+    if (batch_mode || !isatty(STDIN_FILENO)) {
+        input_ai = 0;
+    }
     free(input_indent);
     input_indent = (input_ai && from) ? leading_blanks(from) : NULL;
 }

@@ -24,6 +24,8 @@ int exvi_history_suspended = 0;
 int exvi_exit_requested = 0;
 /** `visual` asked for visual mode; the caller of do_command enters it */
 static int exvi_visual_requested = 0;
+/* in text input on a terminal, ^D, 0^D or ^^D read for the line being typed */
+static char input_eof_prefix[64];
 
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
@@ -876,12 +878,25 @@ enter_visual:
     (void)exvi_take_error();
     /* (a -c q! has already asked to quit: read nothing) */
     while (!exvi_exit_requested) {
-        if (!batch_mode && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) && !input_mode) {
+        int interactive = !batch_mode && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+        int by_eof = 0;
+
+        if (interactive && !input_mode && option_prompt) {
             fputs(":", stdout);
             fflush(stdout);
         }
 
-        ret = getline(&line, &cap, stdin);
+        /*
+         * On a terminal, the eof character (^D) is ex's to read (POSIX ex):
+         * alone at a line's start it is the ^D command at once, and in text
+         * input ^D, 0^D and ^^D take back the autoindent.  The terminal
+         * ends a read with it, so a read ending without a newline is one.
+         */
+        if (interactive) {
+            ret = exvi_tty_getline(&line, &cap, &by_eof);
+        } else {
+            ret = getline(&line, &cap, stdin);
+        }
         if (exvi_take_interrupt()) {
             /* POSIX ex: an interrupt stops the command, and text input */
             clearerr(stdin);
@@ -898,8 +913,38 @@ enter_visual:
             break;
         }
         if (ret > 0 && line[ret-1] == '\n') line[ret-1] = '\0';
-        
+
+        if (by_eof && input_mode) {
+            /* ^D, 0^D or ^^D begin the line still being typed */
+            size_t have = strlen(input_eof_prefix);
+
+            if (have + strlen(line) + 2 < sizeof(input_eof_prefix)) {
+                memcpy(input_eof_prefix + have, line, strlen(line));
+                input_eof_prefix[have + strlen(line)] = 0x04;
+                input_eof_prefix[have + strlen(line) + 1] = '\0';
+            }
+            continue;
+        }
+        if (by_eof && line[0] == '\0') {
+            line[0] = 0x04;     /* ^D alone: the ^D command */
+            line[1] = '\0';
+        }
+
         if (input_mode) {
+            if (input_eof_prefix[0] != '\0') {
+                size_t pl = strlen(input_eof_prefix);
+                size_t ll = strlen(line);
+                char *joined = malloc(pl + ll + 1);
+
+                if (joined) {
+                    memcpy(joined, input_eof_prefix, pl);
+                    memcpy(joined + pl, line, ll + 1);
+                    (void)exvi_input_line(&buf, joined);
+                    free(joined);
+                }
+                input_eof_prefix[0] = '\0';
+                continue;
+            }
             if (strcmp(line, ".") == 0) {
                 input_mode = 0;
             } else {
