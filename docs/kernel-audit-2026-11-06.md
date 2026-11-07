@@ -153,7 +153,8 @@
     - **When** `fat_mount()` reads the boot sector, the **FAT Filesystem Driver** **shall** read the 512-byte sector into a 512-byte scratch buffer and copy only `sizeof(fat_bpb_t)` / `sizeof(fat32_ext_bpb_t)` into `fs`.
     - **When** `fat_unlink()` removes a directory entry for a file that still has active open/held references, the **FAT Filesystem Driver** **shall** defer cluster chain reclamation until the final reference is released.
 
-- [ ] **[REQ-SYS-VFS-001]** *(High — Unpinned `fs_node_t` Recycling Across `fsnode_vop_lookup()` and `vfs_mount_legacy()`)*
+- [x] **[REQ-SYS-VFS-001]** *(High — Unpinned `fs_node_t` Recycling Across `fsnode_vop_lookup()` and `vfs_mount_legacy()`)*
+  - **Resolution (2026-11-07):** (the bridge is `sys/vfs/vnode_fsnode.c`.) A bridged vnode holds its `fs_node_t` from `fsnode_vget()` until `fsnode_vop_reclaim()`, and a mount holds the directory it covers until `vfs_unmount_covered()` frees it -- both through the node's own hold/rele hooks, since `vfs_hold()` charges the current system call. `tests/kern/mntpin.c` mounts procfs on an ext2 directory and looks up 400 other files: the old kernel's umount then answers `EINVAL`, this one's unmounts. (No test drives the vnode bridge.)
   - **Location:** `sys/vfs/vnode.c:170-235` (`fsnode_vop_lookup`), `sys/vfs/vfs.c:322-420` (`vfs_mount_legacy`), `sys/vfs/vfs.c:2164-2310` (`vfs_unmount_covered`)
   - **Finding:**
     1. `fsnode_vop_lookup()` wraps `child` (`fs_node_t *`) into `vp->v_data` and immediately calls `vfs_rele(child)`, dropping the `fs_node_t` hold while `vp` stays alive and allowing the filesystem node cache (`ext2`, `fat`, `procfs`) to recycle `child` under `vp`.

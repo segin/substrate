@@ -86,10 +86,10 @@ static enum vtype fsnode_to_vtype(const fs_node_t *n)
  * Obtain a vnode for `n` under mount `mp`, reusing the cached one if this
  * file already has a vnode.  Returns with a reference held on *vpp.
  *
- * The caller keeps ownership of `n`: fs_node_t lifetime is still governed by
- * the live VFS, which is why vop_reclaim below does not free it.  That is the
- * same open node-lifetime question tracked for the live layer, and bridging
- * must not invent a different answer for it.
+ * The caller keeps its own reference to `n`; a new vnode takes another, through
+ * the node's hold hook, and vop_reclaim gives it back.  The node is never
+ * freed here -- its lifetime is the live VFS's -- only kept from being
+ * recycled while a vnode names it.
  */
 int fsnode_vget(struct mount *mp, fs_node_t *n, struct vnode **vpp)
 {
@@ -113,6 +113,15 @@ int fsnode_vget(struct mount *mp, fs_node_t *n, struct vnode **vpp)
     if (error)
         return error;
 
+    /* The vnode keeps n, so it holds n -- its own reference, released at
+     * reclaim, not the caller's.  Unheld, a filesystem's node cache
+     * recycled n under the vnode, which then read through freed or reused
+     * memory, and -- n's address being the vnode's identity -- a lookup
+     * of the file that took the slot came back with this vnode.  The
+     * node's own hook, not vfs_hold(): that charges this system call,
+     * which would then look like it leaked the reference. */
+    if (n->hold)
+        n->hold(n);
     vp->v_data = n;
     vp->v_type = fsnode_to_vtype(n);
     vp->v_ino  = (uint64_t)(uintptr_t)n;
@@ -274,7 +283,8 @@ static int fsnode_vop_readlink(struct vnode *vp, struct uio *uio,
  * The fs_node_t in v_data is NOT freed here.  Its lifetime belongs to the
  * live VFS -- some backends hand out pointers into a node cache, others into
  * a per-mount ring -- and that ownership question is the same one open for
- * the live layer.  Dropping the pointer is all this bridge may safely do.
+ * the live layer.  Reclaim drops the pointer and the hold fsnode_vget() took
+ * on it; the filesystem decides what that release means.
  */
 static int fsnode_vop_inactive(struct vnode *vp, struct ucred *cred)
 {
@@ -284,9 +294,15 @@ static int fsnode_vop_inactive(struct vnode *vp, struct ucred *cred)
 
 static int fsnode_vop_reclaim(struct vnode *vp, struct ucred *cred)
 {
+    fs_node_t *n;
+
     (void)cred;
-    if (vp)
-        vp->v_data = NULL;
+    if (!vp)
+        return 0;
+    n = VTOFSNODE(vp);
+    vp->v_data = NULL;
+    if (n && n->rele)
+        n->rele(n);             /* the hold fsnode_vget() took */
     return 0;
 }
 

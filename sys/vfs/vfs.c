@@ -559,13 +559,19 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
 
         mp->mnt_node_root = root;
         mp->mnt_node_covered = mountpoint;
+        /* The mount holds the covered directory until it is unmounted
+         * (vfs_unmount_covered()).  Unheld, a filesystem with a node cache
+         * -- ext2 -- recycled its slot: FS_MOUNTPOINT went with it, so
+         * umount found no mount there (EINVAL), and devfs/sysfs/procfs
+         * resolved ".." through the stale pointer.  The node's own hook,
+         * not vfs_hold(), which would charge this system call. */
+        if (mountpoint && mountpoint->hold)
+            mountpoint->hold(mountpoint);
         mp->mnt_vfs_caps = fs->caps;
         mp->mnt_dev = vfs_mount_dev_alloc();
 
-        /* Snapshot the covered node's identity for mount crossing.
-         * We cannot dereference mnt_node_covered later because
-         * filesystems like ext2 reuse a fixed-size node cache;
-         * the slot may be recycled and overwritten. */
+        /* Snapshot the covered node's identity for mount crossing, which
+         * compares (mp, inode) rather than node addresses. */
         if (mountpoint) {
             mp->mnt_covered_ino = mountpoint->inode;
             mp->mnt_covered_mp  = mountpoint->mp;
@@ -585,8 +591,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
                 path ? path : "(null)", type ? type : "unknown");
     }
 
-    /* The covered directory is known by its (mp, inode) identity from here
-     * on (mnt_covered_*), not by the lookup's reference. */
+    /* The lookup's reference; the mount took its own above. */
     vfs_rele(mountpoint);
     return 0;
 }
@@ -2216,7 +2221,13 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
          * console) may still walk it, and ext2_unmount already keeps the
          * in-core mount alive when it is still referenced. */
         if (rootfs && rootfs->unmount) rootfs->unmount(rootfs);
-        if (root_mp) kfree(root_mp, sizeof(struct mount));
+        if (root_mp) {
+            fs_node_t *covered = root_mp->mnt_node_covered;
+
+            kfree(root_mp, sizeof(struct mount));
+            if (covered && covered->rele)
+                covered->rele(covered);     /* (the root covers nothing) */
+        }
         return 0;
     }
 
@@ -2384,7 +2395,12 @@ static int vfs_unmount_covered(fs_node_t *mountpoint, const char *path,
     /* Unreachable once TAILQ_REMOVE'd under the lock, so freeing outside it
      * is safe -- and keeps a potentially sleeping path out of the section. */
     if (target_mp) {
+        fs_node_t *covered = target_mp->mnt_node_covered;
+
         kfree(target_mp, sizeof(struct mount));
+        /* the hold the mount took on the covered directory */
+        if (covered && covered->rele)
+            covered->rele(covered);
     }
 
     return 0;

@@ -393,6 +393,12 @@ pktrebind: pktrebind.c
 	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# mntpin: a mount point survives ext2's node cache turning over; umount
+# still finds it.  Substrate only; run as root on a writable ext2 root.
+mntpin: mntpin.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ptylinger: a slave's output left behind a full master ring at close
 # survives the slave being opened, written and closed again.  Substrate only.
 ptylinger: ptylinger.c
@@ -536,6 +542,6 @@ clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm utimeperm brkover shmgrow \
 	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault \
-	      sigretsel.linux execipc linkfollow.linux walkrecycle ptsrace netpeer ptylinger ptyclose
+	      sigretsel.linux execipc linkfollow.linux walkrecycle ptsrace netpeer ptylinger ptyclose mntpin
 
 .PHONY: all clean
