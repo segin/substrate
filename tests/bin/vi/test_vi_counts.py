@@ -5,7 +5,8 @@ None of these took its count: 3ix<ESC> put one x, 3rx replaced one
 character, and the count was left for the next command, so 3ix<ESC>0x
 became 30x and deleted the line.  The text of a counted insert goes in
 count times; r, s and S act on count characters or lines; u undoes each
-as one change.  Expected results are Vim's (vim -u NONE -N).
+as one change.  Expected results are Vim's (vim -u NONE -N), but for S
+past the last line, an error in POSIX, which Vim does to the end.
 
 Usage: test_vi_counts.py path/to/vi
 """
@@ -34,7 +35,9 @@ CASES = [
     ("2s", "abcd\n", [b"2sX\x1b"], "Xcd\n"),
     ("9s", "abcd\n", [b"9sX\x1b"], "X\n"),
     ("2S", "a\nb\nc\nd\n", [b"2SX\x1b"], "X\nc\nd\n"),
-    ("5S", "a\nb\n", [b"5SX\x1b"], "X\n"),
+    # fewer than count - 1 lines after: an error, nothing changes, and X
+    # is a command (POSIX vi; Vim changes to the end)
+    ("5S", "a\nb\n", [b"5SX\x1b"], "a\nb\n"),
     ("the count is used up", "ab\n", [b"3ix\x1b0x"], "xxab\n"),
     ("3.", "ab\n", [b"ixy\x1b", b"3."], "xxyxyxyyab\n"),
     (". keeps the count", "ab\n", [b"2ix\x1b", b"."], "xxxxab\n"),

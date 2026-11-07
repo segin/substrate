@@ -989,13 +989,16 @@ The number is not reused.
 
 ### EXVI-66 — `cc` with a count — *Low*
 
-- [ ] **EXVI-66.1** (Optional feature) Where `autoindent` is set, the editor's
+- [x] **EXVI-66.1** (Optional feature) Where `autoindent` is set, the editor's
   `ncc` shall start the new line with the first changed line's indent.
-- [ ] **EXVI-66.2** (Unwanted behaviour) If fewer than n−1 lines follow the
+- [x] **EXVI-66.2** (Unwanted behaviour) If fewer than n−1 lines follow the
   current line, then the editor's `ncc` shall report an error.
 
 - **Where**: `exvi_visual.c:4999-5010`.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_change_lines.py`.  POSIX's
+  error, where Vim changes to the end; `S` (`c_`) the same, so EXVI-59's
+  `5S` case follows.  `dd`, `yy` and `j` have the same rule in POSIX and
+  Vim's clamp here -- not changed.
 
 ### EXVI-67 — `^D`, `0^D`, `^^D` and `^T` — *Medium*
 

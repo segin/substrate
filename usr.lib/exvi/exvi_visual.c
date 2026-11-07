@@ -4715,23 +4715,29 @@ vi_substitute_chars(buffer_t *b, vi_visual_t *vis, int count)
 }
 
 /*
- * S: count lines from the current one, as many as there are, become one
- * line of text input, with the first one's indent where autoindent is set
- * (POSIX vi, as cc).  The lines go to the buffer named, the unnamed one
- * otherwise; u restores them all.  3S changed one line.
+ * cc and S: count lines from the current one become one line of text
+ * input, with the first one's indent where autoindent is set; fewer than
+ * count - 1 lines after the current one is an error, and nothing changes
+ * (POSIX vi: S is c_).  The lines go to the buffer named, the unnamed one
+ * otherwise; u restores them all.  3S changed one line, 2cc gave its line
+ * no indent, and 5cc on two lines changed them both.  -1 on the error.
  */
-static void
+static int
 vi_substitute_lines(buffer_t *b, vi_visual_t *vis, int count, int capture_register)
 {
     int line_no = buf_current_line(b);
     int last;
     char regarg[2];
 
+    if (count > 1 && line_no >= 1 && line_no + count - 1 > b->line_count) {
+        (void)!write(STDOUT_FILENO, "\a", 1);
+        return -1;
+    }
     if (count <= 1 || line_no < 1) {
         vi_substitute_line(b, vis, capture_register);
-        return;
+        return 0;
     }
-    last = vi_clamp_line_target(b, line_no + count - 1);
+    last = line_no + count - 1;
     if (capture_register) {
         vi_take_register_arg(vis, regarg);
     } else {
@@ -4751,6 +4757,7 @@ vi_substitute_lines(buffer_t *b, vi_visual_t *vis, int count, int capture_regist
     vi_substitute_line(b, vis, 0);
     exvi_end_undo_group();
     vi_mark_body_dirty_through_eof(vis, line_no);
+    return 0;
 }
 
 static int
@@ -5481,26 +5488,9 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         vi_linewise_delete(b, vis, line_no, last_line);
         vi_set_last_change(vis, VI_REPEAT_DD, count, 0);
     } else if (vis->pending_op == 'c' && key == 'c') {
-        if (count == 1) {
-            char regarg[2];
-
-            vi_take_register_arg(vis, regarg);
-            handle_yank_command(b, regarg, 1, line_no, last_line);
-            vi_substitute_line(b, vis, 0);
-        } else {
-            line_t *start = buf_get_line(b, line_no);
-            line_t *before = start ? start->prev : NULL;
-            char regarg[2];
-
-            vi_take_register_arg(vis, regarg);
-            handle_yank_command(b, regarg, 1, line_no, last_line);
-            handle_delete_command(b, 1, line_no, last_line);
-            b->cur = buf_insert_after(b, before, "");
-            vis->cursor_col = 0;
-            vis->insert_mode = 1;
-            vis->replace_mode = 0;
+        if (vi_substitute_lines(b, vis, count, 1) == 0) {
+            vi_set_last_change(vis, VI_REPEAT_CC, count, 0);
         }
-        vi_set_last_change(vis, VI_REPEAT_CC, count, 0);
     } else if (vis->pending_op == 'y' && key == 'y') {
         vi_linewise_yank(b, vis, line_no, last_line);
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
@@ -7487,13 +7477,10 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         vi_finish_repeat_insert(b, vis);
         break;
     case VI_REPEAT_S_LINE:
-        vi_substitute_lines(b, vis, count, 1);
-        vi_replay_insert_text(b, vis, vis->last_insert_text);
-        vi_finish_repeat_insert(b, vis);
-        break;
     case VI_REPEAT_CC:
-        last = vi_clamp_line_target(b, line_no + count - 1);
-        vi_linewise_change(b, vis, line_no, last);
+        if (vi_substitute_lines(b, vis, count, 1) != 0) {
+            return;
+        }
         vi_replay_insert_text(b, vis, vis->last_insert_text);
         vi_finish_repeat_insert(b, vis);
         break;
@@ -8911,8 +8898,9 @@ process_normal_key:
             {
                 int count = vi_take_count(&vis);
 
-                vi_substitute_lines(b, &vis, count, 1);
-                vi_set_last_change(&vis, VI_REPEAT_S_LINE, count, 0);
+                if (vi_substitute_lines(b, &vis, count, 1) == 0) {
+                    vi_set_last_change(&vis, VI_REPEAT_S_LINE, count, 0);
+                }
             }
             break;
         case 'U':

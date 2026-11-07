@@ -150,9 +150,14 @@ enters the text that many times;
 .Cm r
 replaces that many characters, or none when the line has fewer;
 .Cm s
+changes that many characters, as many as the line has;
+.Cm cc
 and
 .Cm S
-change that many characters or lines, as many as there are.
+change that many lines, and fail, changing nothing, when fewer than
+count \- 1 lines follow the current one; with
+.Ic autoindent
+set, the new line takes the first changed line's indent.
 A count on
 .Cm \&.
 repeats the change's text that many times.
