@@ -1123,13 +1123,13 @@ run_write_side_effect_test "Invalid file write range leaves target absent" \
     "alpha" \
     "__ABSENT__"
 
-run_write_side_effect_test "Invalid shell write range leaves shell target empty" \
+run_write_side_effect_test "Invalid shell write range runs nothing" \
     "alpha\n" \
     ":2,3w !cat > __OUT_FILE__\n:q!\n" \
-    0 \
+    1 \
     "Invalid write range" \
     "alpha" \
-    ""
+    "__ABSENT__"
 
 run_write_side_effect_test "Write to shell command writes addressed range" \
     "one\ntwo\nthree\n" \
@@ -1868,7 +1868,7 @@ run_stdout_test "Set tags assignment updates value" \
 
 run_stdout_test "Set all prints enabled options" \
     "one\ntwo\n" \
-    ":set number list ignorecase readonly\n:set all\n:q!\n" \
+    ":set number list ignorecase readonly shell=/bin/sh\n:set all\n:q!\n" \
     "number
 list
 ignorecase
@@ -1879,7 +1879,8 @@ magic
 scroll=12
 tabstop=8
 tags=tags
-directory=/var/tmp"
+directory=/var/tmp
+shell=/bin/sh"
 
 run_stdout_test "Set noreadonly disables readonly option" \
     "one\ntwo\n" \

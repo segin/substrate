@@ -919,62 +919,73 @@ test_line_array_random_access(void)
     cleanup_shared_state();
 }
 
+/*
+ * !, r ! and w ! run their command as POSIX ex does, by the shell option's
+ * program, `shell -c cmd` -- so `;` separates commands -- but not at all in
+ * restricted or secure mode; and a range given to ! is filtered through
+ * the command.
+ */
 static void
-test_secure_command_execution(void)
+test_shell_command_execution(void)
 {
     buffer_t b;
-    char cmd_inj[] = "!echo hello; touch /tmp/exvi_pwned";
+    char dir_tmpl[PATH_MAX];
+    char made[PATH_MAX];
+    char cmd[PATH_MAX * 2];
+    const char *tmp = getenv("TMPDIR");
+    char *dir;
+    char line[64];
+    FILE *f;
+
+    snprintf(dir_tmpl, sizeof(dir_tmpl), "%s/exvi_shell.XXXXXX", tmp && *tmp ? tmp : "/tmp");
+    dir = mkdtemp(dir_tmpl);
+    assert(dir != NULL);
+    snprintf(made, sizeof(made), "%s/made", dir);
+    snprintf(cmd, sizeof(cmd), "!echo hello >/dev/null; touch %s", made);
 
     reset_shared_state();
+    replace_saved_string(&option_shell, "/bin/sh");
     buf_init(&b);
     buf_insert_after(&b, NULL, "line 1");
 
-    /* Test 1: Restricted mode should block shell commands */
+    /* restricted and secure mode run nothing */
     restricted_mode = 1;
-    assert(handle_shell_command(cmd_inj) == 1);
-    assert(access("/tmp/exvi_pwned", F_OK) != 0);
-
-    /* Test 2: Secure mode should block shell commands */
-    restricted_mode = 0;
-    secure_mode = 1;
-    assert(handle_shell_command(cmd_inj) == 1);
-    assert(access("/tmp/exvi_pwned", F_OK) != 0);
-
-    /* Test 3: Normal mode should NOT interpret shell metacharacters */
-    secure_mode = 0;
-    handle_shell_command(cmd_inj);
-    assert(access("/tmp/exvi_pwned", F_OK) != 0);
-
-    /* Test 4: exvi_popen should also respect restricted/secure mode */
-    restricted_mode = 1;
+    assert(handle_shell_command(&b, cmd, 0, -1, -1) == 1);
+    assert(access(made, F_OK) != 0);
     assert(exvi_popen("echo test", "r") == NULL);
     restricted_mode = 0;
     secure_mode = 1;
+    assert(handle_shell_command(&b, cmd, 0, -1, -1) == 1);
+    assert(access(made, F_OK) != 0);
     assert(exvi_popen("echo test", "r") == NULL);
-
-    /* Test 5: Verify no shell metacharacters in popen */
     secure_mode = 0;
-    FILE *f = exvi_popen("touch /tmp/exvi_metachar; touch /tmp/exvi_metachar2", "w");
+
+    /* the shell runs it: both commands of the list */
+    assert(handle_shell_command(&b, cmd, 0, -1, -1) == 1);
+    assert(access(made, F_OK) == 0);
+    remove(made);
+
+    /* exvi_popen() too: a pipeline, its output read */
+    f = exvi_popen("echo abc | tr b x", "r");
     assert(f != NULL);
+    assert(fgets(line, sizeof(line), f) != NULL);
+    assert(strcmp(line, "axc\n") == 0);
     exvi_pclose(f);
-    /* Semicolon should NOT be interpreted as command separator.
-       Touch will be called with arguments ["/tmp/exvi_metachar;", "touch", "/tmp/exvi_metachar2"]
-       It will likely fail or create a file with semicolon in name.
-       Importantly, it should NOT create /tmp/exvi_metachar2 unless the first touch created it.
-       Wait, if it was shell it would create both.
-       If it is NOT shell, it creates "/tmp/exvi_metachar;", "touch" and "/tmp/exvi_metachar2".
-       Wait, touch DOES take multiple arguments.
-       Let's use something that doesn't.
-    */
-    remove("/tmp/exvi_metachar;");
-    remove("touch");
-    remove("/tmp/exvi_metachar2");
 
-    FILE *f2 = exvi_popen("ls /tmp/exvi_nonexistent; touch /tmp/exvi_popen_pwned", "r");
-    assert(f2 != NULL);
-    exvi_pclose(f2);
-    assert(access("/tmp/exvi_popen_pwned", F_OK) != 0);
+    /* a range is replaced with what the command writes for it */
+    free_buffer(&b);
+    buf_insert_after(&b, NULL, "c");
+    buf_insert_after(&b, b.tail, "a");
+    buf_insert_after(&b, b.tail, "b");
+    buf_insert_after(&b, b.tail, "end");
+    assert(handle_shell_command(&b, "!sort", 1, 1, 3) == 1);
+    assert(b.line_count == 4);
+    assert(strcmp(buf_get_line(&b, 1)->text, "a") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "b") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "c") == 0);
+    assert(strcmp(buf_get_line(&b, 4)->text, "end") == 0);
 
+    rmdir(dir);
     free_buffer(&b);
     cleanup_shared_state();
 }
@@ -1009,7 +1020,7 @@ main(void)
     test_utf8_prev_offset();
     test_quit_sets_exit_flag();
     test_line_array_random_access();
-    test_secure_command_execution();
+    test_shell_command_execution();
     puts("exvi core tests: ok");
     return 0;
 }

@@ -17,6 +17,7 @@
 #define EXVI_DEFAULT_TAGS "tags"
 /** the directory option's default: recover files go in <it>/exvi-<uid> */
 #define EXVI_DEFAULT_DIRECTORY "/var/tmp"
+#define EXVI_DEFAULT_SHELL "/bin/sh"
 
 typedef struct line {
     struct line *prev;
@@ -96,6 +97,8 @@ extern int option_exrc;
 extern int option_writeany;
 extern char *option_tags;
 extern char *option_directory;
+extern char *option_shell;
+extern char *last_shell_command;
 extern exvi_history_t undo_history;
 extern exvi_history_t redo_history;
 extern buffer_t pending_undo_buf;
@@ -138,6 +141,7 @@ void buf_read_file(buffer_t *b, const char *filename);
 int buf_read_stream(buffer_t *b, FILE *f);
 int buf_write_file(buffer_t *b, const char *filename, int append);
 int buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
+int write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);
 int buf_current_line(buffer_t *b);
 int exvi_regcomp(regex_t *re, const char *pattern);
@@ -233,8 +237,8 @@ size_t vi_utf8_prev_offset(const char *buf, size_t pos);
 int handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2);
 int handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
     int addr2);
-int handle_shell_command(char *cmd);
-char **exvi_tokenize_command(const char *cmd);
+int handle_shell_command(buffer_t *b, const char *cmd, int explicit_range, int addr1, int addr2);
+char *exvi_shell_expand(buffer_t *b, const char *cmd);
 FILE *exvi_popen(const char *cmd, const char *mode);
 int exvi_pclose(FILE *f);
 

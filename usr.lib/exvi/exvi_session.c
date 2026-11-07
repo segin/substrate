@@ -543,6 +543,9 @@ print_enabled_set_options(int include_numeric_defaults)
         printf("directory=%s\n",
             option_directory ? option_directory : EXVI_DEFAULT_DIRECTORY);
     }
+    if (include_numeric_defaults) {
+        printf("shell=%s\n", option_shell ? option_shell : EXVI_DEFAULT_SHELL);
+    }
 }
 
 int
@@ -994,6 +997,31 @@ handle_set_command(const char *args)
                 replace_saved_string(&option_directory, copy);
                 free(copy);
             }
+        } else if ((len == 2 && strncmp(ptr, "sh", 2) == 0)
+                || (len == 5 && strncmp(ptr, "shell", 5) == 0)) {
+            if (query || (!eq && !query)) {
+                printf("shell=%s\n", option_shell ? option_shell : EXVI_DEFAULT_SHELL);
+            } else {
+                char *copy;
+
+                if (secure_mode || restricted_mode) {
+                    exvi_report_shell_forbidden();
+                    return 1;
+                }
+                if (!value || value_len == 0) {
+                    exvi_report_error("Bad shell value");
+                    return 1;
+                }
+                copy = malloc(value_len + 1);
+                if (!copy) {
+                    perror("malloc");
+                    return 1;
+                }
+                memcpy(copy, value, value_len);
+                copy[value_len] = '\0';
+                replace_saved_string(&option_shell, copy);
+                free(copy);
+            }
         } else {
             exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
             return 1;
@@ -1381,8 +1409,12 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
             return 1;
         }
         is_pipe = 1;
-        display_name = ptr + 1;
-        f = exvi_popen(ptr + 1, "r");
+        expanded_name = exvi_shell_expand(b, ptr + 1);
+        if (!expanded_name) {
+            return 1;
+        }
+        display_name = expanded_name;
+        f = exvi_popen(expanded_name, "r");
     } else {
         if (!*ptr) {
             ptr = b->filename;

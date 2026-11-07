@@ -181,6 +181,30 @@ and
 are the special forms.
 A command line that ends in a backslash continues on the next line, the
 backslash and the newline part of the command.
+.Pp
+.Ic \&! Ns Ar command
+runs
+.Ar command
+by the
+.Ic shell
+option's program;
+.Ar addr1 , Ns Ar addr2 Ns Ic \&! Ns Ar command
+replaces those lines with what the command writes when they are its
+input.
+In the commands of
+.Ic \&! ,
+.Ic r \&!
+and
+.Ic w \&! ,
+.Ql %
+stands for the current file name,
+.Ql #
+for the alternate file name and
+.Ql \&!
+for the last such command; a backslash before one of them makes it the
+character.
+When one was expanded, the command is written before it runs, but with
+.Fl s .
 .Sh OPTIONS
 .Bl -tag -width indent
 .It Fl R
@@ -294,6 +318,19 @@ The directory under which the user's recovery directory,
 is kept.
 The default is
 .Pa /var/tmp .
+.It Ic shell= , sh=
+The program that runs the commands of
+.Ic \&! ,
+.Ic r \&!
+and
+.Ic w \&! ,
+as
+.Ar shell Fl c Ar command .
+The default is
+.Ev SHELL ,
+or
+.Pa /bin/sh
+when that is unset.
 .El
 .Sh ENVIRONMENT
 .Bl -tag -width indent
@@ -303,6 +340,10 @@ If set, supplies startup commands, and
 is not loaded.
 Ignored with
 .Fl s .
+.It Ev SHELL
+The default of the
+.Ic shell
+option.
 .El
 .Sh FILES
 .Bl -tag -width indent

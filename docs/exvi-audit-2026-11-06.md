@@ -572,14 +572,14 @@ The number is not reused.
 
 ### EXVI-36 — `!` runs no shell, expands nothing, and ignores its range — *High*
 
-- [ ] **EXVI-36.1** (Ubiquitous) The editor shall run the commands of `!`,
+- [x] **EXVI-36.1** (Ubiquitous) The editor shall run the commands of `!`,
   `r !` and `w !` as the `shell` option's program with `-c` and the command
   as one argument.
-- [ ] **EXVI-36.2** (Ubiquitous) The editor shall expand `%`, `#` and `!` in
+- [x] **EXVI-36.2** (Ubiquitous) The editor shall expand `%`, `#` and `!` in
   those commands before running them.
-- [ ] **EXVI-36.3** (Event-driven) When `!` is given a range, the editor shall
+- [x] **EXVI-36.3** (Event-driven) When `!` is given a range, the editor shall
   replace those lines with the command's output for them as input.
-- [ ] **EXVI-36.4** (Ubiquitous) The editor shall provide the string option
+- [x] **EXVI-36.4** (Ubiquitous) The editor shall provide the string option
   `shell`, defaulting to `$SHELL`.
 
 - **Where**: `exvi_cmd.c:855`, `940-1000` (`exvi_tokenize_command` +
@@ -1204,6 +1204,17 @@ The number is not reused.
   regex and with libregex alike.  vi's searches recheck a leading `\<` and
   a trailing `\>` against the whole line (`vi_match_respects_word_boundaries`),
   so only one written elsewhere in the pattern is wrong there.
+- **Basis**: reproduced.
+
+### EXVI-84 — ex starts on the first line of the file, not the last — *Medium*
+
+- [ ] **EXVI-84.1** (Event-driven) When ex starts editing a file, the editor
+  shall make the last line of the buffer the current line.
+
+- **Where**: the startup in `exvi.c` leaves `b->cur` where `buf_read_file`
+  put it, the first line.
+- **Evidence**: `.p` on a file of 1..4 prints `1` (vim -es: `4`), so `r !cmd`
+  and `a` with no address go after line 1.
 - **Basis**: reproduced.
 
 ### EXVI-85 — `tests/usr.lib/exvi` does not link — *Medium*

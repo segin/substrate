@@ -405,7 +405,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         /* global! is v */
         return handle_global_command(b, cmd, args, force, explicit_range, addr1, addr2);
     } else if (cmd[0] == '!') {
-        return handle_shell_command(cmd);
+        return handle_shell_command(b, cmd, explicit_range, addr1, addr2);
     }
 
     return 0;

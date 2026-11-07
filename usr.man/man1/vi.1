@@ -280,6 +280,19 @@ The directory under which the user's recovery directory,
 is kept.
 The default is
 .Pa /var/tmp .
+.It Ic shell= , sh=
+The program that runs the commands of
+.Ic :! ,
+.Ic :r \&!
+and
+.Ic :w \&! ,
+as
+.Ar shell Fl c Ar command .
+The default is
+.Ev SHELL ,
+or
+.Pa /bin/sh
+when that is unset.
 .El
 .Sh ENVIRONMENT
 .Bl -tag -width indent
@@ -289,6 +302,10 @@ If set, supplies startup commands, and
 is not loaded.
 Ignored with
 .Fl s .
+.It Ev SHELL
+The default of the
+.Ic shell
+option.
 .El
 .Sh FILES
 .Bl -tag -width indent

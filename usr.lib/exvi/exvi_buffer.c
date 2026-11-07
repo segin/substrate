@@ -433,11 +433,27 @@ buf_read_stream(buffer_t *b, FILE *f)
 }
 
 /**
+ * Can lines @p addr1 to @p addr2 of @p b be written: -1, -1 (the whole
+ * buffer), an empty buffer's 1,0, or lines it has?
+ */
+static int
+range_writable(buffer_t *b, int addr1, int addr2)
+{
+    if (addr1 == -1 || addr2 == -1) {
+        return 1;
+    }
+    if (b->line_count == 0 && addr1 == 1 && addr2 == 0) {
+        return 1;
+    }
+    return addr1 >= 1 && addr2 >= addr1 && addr2 <= b->line_count;
+}
+
+/**
  * Write lines addr1..addr2 of b to f (-1, -1: the whole buffer).
  * @return 0; -1 if the range is not valid, nothing written; -2 if a write
  *         failed, errno saying why
  */
-static int
+int
 write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
 {
     line_t *curr;
@@ -445,15 +461,15 @@ write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
     int synthetic_empty_with_content;
     int has_nonempty_line = 0;
 
+    if (!range_writable(b, addr1, addr2)) {
+        return -1;
+    }
     if (addr1 == -1 || addr2 == -1) {
         addr1 = 1;
         addr2 = b->line_count;
     }
     if (b->line_count == 0 && addr1 == 1 && addr2 == 0) {
         return 0;
-    }
-    if (addr1 < 1 || addr2 < addr1 || addr2 > b->line_count) {
-        return -1;
     }
 
     if (b->empty_origin && b->line_count == 1 && addr1 == 1 && addr2 == 1
@@ -847,13 +863,24 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
         struct sigaction old_pipe;
         int rc;
         int werr = 0;
+        char *cmd;
 
         if (secure_mode || restricted_mode) {
             exvi_report_shell_forbidden();
             return -1;
         }
-        f = exvi_popen(filename + 1, "w");
+        /* a range that is not there runs nothing */
+        if (!range_writable(b, addr1, addr2)) {
+            fprintf(stderr, "Invalid write range\n");
+            return -1;
+        }
+        cmd = exvi_shell_expand(b, filename + 1);
+        if (!cmd) {
+            return -1;
+        }
+        f = exvi_popen(cmd, "w");
         if (!f) {
+            free(cmd);
             return -1;
         }
         /*
@@ -874,12 +901,15 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
         sigaction(SIGPIPE, &old_pipe, NULL);
         if (rc == -1) {
             fprintf(stderr, "Invalid write range\n");
+            free(cmd);
             return -1;
         }
         if (werr) {
-            fprintf(stderr, "%s: %s\n", filename + 1, strerror(werr));
+            fprintf(stderr, "%s: %s\n", cmd, strerror(werr));
+            free(cmd);
             return -1;
         }
+        free(cmd);
         return 0;
     }
 

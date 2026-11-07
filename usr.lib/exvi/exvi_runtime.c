@@ -31,6 +31,8 @@ int option_exrc = 0;
 int option_writeany = 0;
 char *option_tags = NULL;
 char *option_directory = NULL;
+char *option_shell = NULL;
+char *last_shell_command = NULL;
 char *last_search_pattern = NULL;
 char *last_sub_pattern = NULL;
 char *last_sub_replacement = NULL;
@@ -1127,6 +1129,14 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     option_writeany = 0;
     replace_saved_string(&option_tags, EXVI_DEFAULT_TAGS);
     replace_saved_string(&option_directory, EXVI_DEFAULT_DIRECTORY);
+    {
+        /* POSIX: the shell option's default is the SHELL environment variable */
+        const char *sh = getenv("SHELL");
+
+        replace_saved_string(&option_shell, sh && *sh ? sh : EXVI_DEFAULT_SHELL);
+    }
+    free(last_shell_command);
+    last_shell_command = NULL;
     exvi_note_recover_cwd();
     free(last_search_pattern);
     last_search_pattern = NULL;
@@ -1169,6 +1179,10 @@ exvi_cleanup_runtime(void)
     option_tags = NULL;
     free(option_directory);
     option_directory = NULL;
+    free(option_shell);
+    option_shell = NULL;
+    free(last_shell_command);
+    last_shell_command = NULL;
     free(last_search_pattern);
     last_search_pattern = NULL;
     free(last_sub_pattern);

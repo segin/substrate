@@ -975,62 +975,79 @@ handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
     return 1;
 }
 
-char **
-exvi_tokenize_command(const char *cmd)
+/**
+ * Expand a command for the shell as POSIX ex does for `!`, `r !` and `w !`:
+ * `%` is the current file's name, `#` the alternate file's and `!` the last
+ * such command's text, and a backslash before one of the three makes it
+ * the character, the backslash gone; every other backslash stays, the
+ * shell's.  The result becomes the last command.  When anything was
+ * expanded, the command is written, as POSIX asks, unless in batch or
+ * visual mode.
+ *
+ * @param b    the buffer, for the file name
+ * @param cmd  the command as written
+ * @return     the command, malloc'd, or NULL -- reported -- when a name or
+ *             a last command it needs does not exist, or out of memory
+ */
+char *
+exvi_shell_expand(buffer_t *b, const char *cmd)
 {
-    int argc = 0;
-    int capacity = 10;
-    char **argv = malloc(sizeof(char *) * (size_t)capacity);
-    const char *p = cmd;
+    sub_text_t t = { NULL, 0, 0 };
+    int expanded = 0;
 
-    if (!argv) {
+    if (sub_text_add(&t, "", 0) != 0) {
+        exvi_report_error("out of memory");
         return NULL;
     }
+    for (const char *p = cmd; *p; p++) {
+        const char *with = NULL;
+        int rc;
 
-    while (*p) {
-        while (*p && isspace((unsigned char)*p)) {
-            p++;
-        }
-        if (!*p) {
-            break;
-        }
-
-        const char *start = p;
-        char *arg = NULL;
-
-        if (*p == '\'' || *p == '"') {
-            char quote = *p++;
-            start = p;
-            while (*p && *p != quote) {
-                p++;
-            }
-            arg = strndup(start, (size_t)(p - start));
-            if (*p == quote) {
-                p++;
-            }
-        } else {
-            while (*p && !isspace((unsigned char)*p)) {
-                p++;
-            }
-            arg = strndup(start, (size_t)(p - start));
-        }
-
-        if (argc >= capacity - 1) {
-            capacity *= 2;
-            char **new_argv = realloc(argv, sizeof(char *) * (size_t)capacity);
-            if (!new_argv) {
-                for (int i = 0; i < argc; i++) {
-                    free(argv[i]);
-                }
-                free(argv);
+        if (p[0] == '\\' && (p[1] == '%' || p[1] == '#' || p[1] == '!')) {
+            rc = sub_text_add(&t, ++p, 1);
+        } else if (*p == '%' || *p == '#' || *p == '!') {
+            with = *p == '%' ? b->filename : *p == '#' ? alternate_filename : last_shell_command;
+            if (!with) {
+                exvi_report_error(*p == '%' ? "No current filename"
+                    : *p == '#' ? "No alternate filename" : "No previous command");
+                free(t.s);
                 return NULL;
             }
-            argv = new_argv;
+            expanded = 1;
+            rc = sub_text_add(&t, with, strlen(with));
+        } else {
+            rc = sub_text_add(&t, p, 1);
         }
-        argv[argc++] = arg;
+        if (rc != 0) {
+            exvi_report_error("out of memory");
+            free(t.s);
+            return NULL;
+        }
     }
-    argv[argc] = NULL;
-    return argv;
+    replace_saved_string(&last_shell_command, t.s);
+    if (expanded && !batch_mode && !visual_mode) {
+        printf("!%s\n", t.s);
+        fflush(stdout);
+    }
+    return t.s;
+}
+
+/**
+ * In a child: give up any set-user-ID or set-group-ID identity and run
+ * @p cmd as the shell option's program does a command, `shell -c cmd`.
+ * Does not return.
+ */
+static void
+exvi_exec_shell(const char *cmd)
+{
+    const char *sh = option_shell && *option_shell ? option_shell : EXVI_DEFAULT_SHELL;
+
+    if (setgid(getgid()) == -1 || setuid(getuid()) == -1) {
+        _exit(127);
+    }
+    execl(sh, sh, "-c", cmd, (char *)NULL);
+    fprintf(stderr, "%s: %s\n", sh, strerror(errno));
+    _exit(127);
 }
 
 typedef struct popen_entry {
@@ -1066,11 +1083,6 @@ exvi_popen(const char *cmd, const char *mode)
     }
 
     if (pid == 0) {
-        char **argv = exvi_tokenize_command(cmd);
-        if (!argv || !argv[0]) {
-            exit(127);
-        }
-
         if (is_read) {
             close(pipe_fds[0]);
             dup2(pipe_fds[1], STDOUT_FILENO);
@@ -1080,17 +1092,7 @@ exvi_popen(const char *cmd, const char *mode)
             dup2(pipe_fds[0], STDIN_FILENO);
             close(pipe_fds[0]);
         }
-
-        if (setgid(getgid()) == -1) {
-            exit(127);
-        }
-        if (setuid(getuid()) == -1) {
-            exit(127);
-        }
-
-        /* Bypass shell to prevent command injection */
-        execvp(argv[0], argv);
-        exit(127);
+        exvi_exec_shell(cmd);
     }
 
     if (is_read) {
@@ -1150,60 +1152,226 @@ exvi_pclose(FILE *f)
     return -1;
 }
 
-int
-handle_shell_command(char *cmd)
+/**
+ * Wait for child @p pid, as the shell's commands are waited for: SIGINT
+ * and SIGQUIT, which the terminal sends the child too, ignored meanwhile.
+ * sigaction, not signal(): restoring with signal() would bring SA_RESTART
+ * back to SIGINT, and an interrupt would wait for input.
+ */
+static void
+exvi_wait_child(pid_t pid)
 {
+    int status;
+    struct sigaction ign;
+    struct sigaction old_int;
+    struct sigaction old_quit;
+
+    memset(&ign, 0, sizeof(ign));
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    sigaction(SIGINT, &ign, &old_int);
+    sigaction(SIGQUIT, &ign, &old_quit);
+    while (waitpid(pid, &status, 0) == -1) {
+        if (errno != EINTR) {
+            break;
+        }
+    }
+    sigaction(SIGINT, &old_int, NULL);
+    sigaction(SIGQUIT, &old_quit, NULL);
+}
+
+/**
+ * Replace lines @p addr1 to @p addr2 with what @p cmd writes when they are
+ * its input, as POSIX ex's `addr1,addr2!cmd` does: a child writes the
+ * lines to the command while the editor reads what it writes, so neither
+ * waits on a full pipe, and the lines read take the range's place, one
+ * change for undo -- none at all, if nothing came.
+ *
+ * @return 1, the command handled
+ */
+static int
+shell_filter(buffer_t *b, const char *cmd, int addr1, int addr2)
+{
+    int in[2];
+    int out[2];
+    pid_t shell_pid;
+    pid_t writer_pid;
+    FILE *f;
+    char **lines = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+    char *line = NULL;
+    size_t line_cap = 0;
+    ssize_t got;
+    int failed = 0;
+    struct sigaction ign;
+    struct sigaction old_int;
+
+    if (pipe(in) == -1) {
+        exvi_report_errorf("pipe: %s", strerror(errno));
+        return 1;
+    }
+    if (pipe(out) == -1) {
+        exvi_report_errorf("pipe: %s", strerror(errno));
+        close(in[0]);
+        close(in[1]);
+        return 1;
+    }
+    fflush(stdout);
+    shell_pid = fork();
+    if (shell_pid == 0) {
+        dup2(in[0], STDIN_FILENO);
+        dup2(out[1], STDOUT_FILENO);
+        close(in[0]);
+        close(in[1]);
+        close(out[0]);
+        close(out[1]);
+        exvi_exec_shell(cmd);
+    }
+    writer_pid = shell_pid == -1 ? -1 : fork();
+    if (writer_pid == 0) {
+        FILE *w;
+
+        close(in[0]);
+        close(out[0]);
+        close(out[1]);
+        /* a command that stops reading ends the writer, not the editor */
+        signal(SIGPIPE, SIG_DFL);
+        w = fdopen(in[1], "w");
+        if (!w || write_range_to_stream(b, w, addr1, addr2) != 0 || fclose(w) != 0) {
+            _exit(1);
+        }
+        _exit(0);
+    }
+    close(in[0]);
+    close(in[1]);
+    close(out[1]);
+    if (shell_pid == -1 || writer_pid == -1) {
+        exvi_report_errorf("fork: %s", strerror(errno));
+        close(out[0]);
+        if (shell_pid > 0) {
+            exvi_wait_child(shell_pid);
+        }
+        return 1;
+    }
+
+    /* an interrupt is the command's to take, which ends what it writes */
+    memset(&ign, 0, sizeof(ign));
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    sigaction(SIGINT, &ign, &old_int);
+    f = fdopen(out[0], "r");
+    if (!f) {
+        close(out[0]);
+        failed = 1;
+    }
+    while (f && (got = getline(&line, &line_cap, f)) != -1) {
+        if (got > 0 && line[got - 1] == '\n') {
+            line[got - 1] = '\0';
+        }
+        if (count == cap) {
+            size_t ncap = cap ? cap * 2 : 16;
+            char **grown = realloc(lines, ncap * sizeof(*lines));
+
+            if (!grown) {
+                failed = 1;
+                break;
+            }
+            lines = grown;
+            cap = ncap;
+        }
+        lines[count] = strdup(line);
+        if (!lines[count]) {
+            failed = 1;
+            break;
+        }
+        count++;
+    }
+    free(line);
+    if (f) {
+        fclose(f);
+    }
+    sigaction(SIGINT, &old_int, NULL);
+    exvi_wait_child(writer_pid);
+    exvi_wait_child(shell_pid);
+
+    if (failed) {
+        exvi_report_error("out of memory");
+    } else {
+        line_t *pos;
+
+        save_undo(b);
+        for (int i = addr1; i <= addr2; i++) {
+            buf_delete(b, buf_get_line(b, addr1));
+        }
+        pos = addr1 > 1 ? buf_get_line(b, addr1 - 1) : NULL;
+        for (size_t i = 0; i < count && !failed; i++) {
+            line_t *l = buf_insert_after(b, pos, lines[i]);
+
+            if (!l) {
+                exvi_report_error("out of memory");
+                failed = 1;
+            } else {
+                pos = l;
+            }
+        }
+        if (pos) {
+            b->cur = pos;
+        } else if (b->head) {
+            b->cur = b->head;
+        }
+    }
+    for (size_t i = 0; i < count; i++) {
+        free(lines[i]);
+    }
+    free(lines);
+    return 1;
+}
+
+/**
+ * `!cmd`, and with a range `addr1,addr2!cmd`: run the command, expanded as
+ * exvi_shell_expand() does, by the shell option's program; with a range,
+ * filter those lines through it.
+ *
+ * @param cmd  the command, from its `!`
+ * @return     1, the command handled
+ */
+int
+handle_shell_command(buffer_t *b, const char *cmd, int explicit_range, int addr1, int addr2)
+{
+    char *text;
     pid_t pid;
 
     if (secure_mode || restricted_mode) {
         exvi_report_shell_forbidden();
         return 1;
     }
+    text = exvi_shell_expand(b, cmd + 1);
+    if (!text) {
+        return 1;
+    }
+    if (explicit_range) {
+        if (addr1 < 1 || addr2 < addr1 || addr2 > b->line_count) {
+            exvi_report_error("Bad range");
+        } else {
+            shell_filter(b, text, addr1, addr2);
+        }
+        free(text);
+        return 1;
+    }
     if (visual_mode) {
         exvi_visual_shell_suspend();
     }
+    fflush(stdout);
     pid = fork();
     if (pid < 0) {
-        perror("fork");
+        exvi_report_errorf("fork: %s", strerror(errno));
     } else if (pid == 0) {
-        char **argv = exvi_tokenize_command(cmd + 1);
-        if (!argv || !argv[0]) {
-            exit(127);
-        }
-        if (setgid(getgid()) == -1) {
-            perror("setgid");
-            exit(127);
-        }
-        if (setuid(getuid()) == -1) {
-            perror("setuid");
-            exit(127);
-        }
-        /* Bypass shell to prevent command injection */
-        execvp(argv[0], argv);
-        perror("execvp");
-        exit(127);
+        exvi_exec_shell(text);
     } else {
-        int status;
-        struct sigaction ign;
-        struct sigaction old_int;
-        struct sigaction old_quit;
-
-        /* sigaction, not signal(): restoring with signal() would bring
-         * SA_RESTART back to SIGINT, and an interrupt would wait for input */
-        memset(&ign, 0, sizeof(ign));
-        ign.sa_handler = SIG_IGN;
-        sigemptyset(&ign.sa_mask);
-        sigaction(SIGINT, &ign, &old_int);
-        sigaction(SIGQUIT, &ign, &old_quit);
-
-        while (waitpid(pid, &status, 0) == -1) {
-            if (errno != EINTR) {
-                break;
-            }
-        }
-        sigaction(SIGINT, &old_int, NULL);
-        sigaction(SIGQUIT, &old_quit, NULL);
+        exvi_wait_child(pid);
     }
+    free(text);
     if (visual_mode) {
         exvi_visual_shell_resume();
     }
