@@ -5631,9 +5631,16 @@ vi_apply_charwise_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_lin
     return 0;
 }
 
+/*
+ * d, c or y from column 0 to a later line, linewise.  A search's match
+ * makes it so only at column 0 (search_only): d/three on one / two three
+ * took the match's line whole.  ) and } (sentence, paragraph) make it so
+ * at any column -- at the end of the buffer } ends on the last character,
+ * and d} there takes the lines whole, as in Vim.
+ */
 static int
-vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_no,
-    line_t *target_line, int target_col)
+vi_apply_linewise_from_bol(buffer_t *b, vi_visual_t *vis, int current_line_no,
+    line_t *target_line, int target_col, int search_only)
 {
     int target_line_no;
 
@@ -5645,7 +5652,8 @@ vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_
         return -1;
     }
     if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
-        (vis->cursor_col != 0 || target_line_no <= current_line_no || target_col != 0)) {
+        (vis->cursor_col != 0 || target_line_no <= current_line_no ||
+         (search_only && target_col != 0))) {
         /*
          * Real vi only coerces search motions linewise for delete/change/yank
          * when a column-zero search target lands on a later line.
@@ -6354,7 +6362,7 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             } else if (vis->pending_op == 'c') {
                 vi_set_last_change(vis, VI_REPEAT_C_MOTION, count, key);
             }
-        } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
+        } else if (vi_apply_linewise_from_bol(b, vis, line_no, target_line, target_col, 0) != 0) {
             if (vis->pending_op == '>' || vis->pending_op == '<' ||
                 vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
                 (void)!write(STDOUT_FILENO, "\a", 1);
@@ -6379,12 +6387,12 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             &target_line, &target_col) != 0) {
             (void)!write(STDOUT_FILENO, "\a", 1);
             vi_set_search_failure_status(vis, pattern);
-        } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) == 0) {
+        } else if (vi_apply_linewise_from_bol(b, vis, line_no, target_line, target_col, 1) == 0) {
             if (vis->pending_op == 'c') {
                 vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
             }
         } else if (vis->pending_op == '>' || vis->pending_op == '<') {
-            if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
+            if (vi_apply_linewise_from_bol(b, vis, line_no, target_line, target_col, 1) != 0) {
                 vi_set_search_failure_status(vis, pattern);
                 (void)!write(STDOUT_FILENO, "\a", 1);
             }
@@ -6530,12 +6538,12 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_search_motion_target(b, vis, "", forward, count,
             &target_line, &target_col) != 0) {
             (void)!write(STDOUT_FILENO, "\a", 1);
-        } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) == 0) {
+        } else if (vi_apply_linewise_from_bol(b, vis, line_no, target_line, target_col, 1) == 0) {
             if (vis->pending_op == 'c') {
                 vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
             }
         } else if (vis->pending_op == '>' || vis->pending_op == '<') {
-            if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
+            if (vi_apply_linewise_from_bol(b, vis, line_no, target_line, target_col, 1) != 0) {
                 (void)!write(STDOUT_FILENO, "\a", 1);
             }
         } else if (vis->pending_op == 'c' && target_line == b->cur &&
@@ -6556,12 +6564,12 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_search_current_word_target(b, vis, key == '*', count,
             &target_line, &target_col) != 0) {
             (void)!write(STDOUT_FILENO, "\a", 1);
-        } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) == 0) {
+        } else if (vi_apply_linewise_from_bol(b, vis, line_no, target_line, target_col, 1) == 0) {
             if (vis->pending_op == 'c') {
                 vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
             }
         } else if (vis->pending_op == '>' || vis->pending_op == '<') {
-            if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
+            if (vi_apply_linewise_from_bol(b, vis, line_no, target_line, target_col, 1) != 0) {
                 (void)!write(STDOUT_FILENO, "\a", 1);
             }
         } else if (vis->pending_op == 'c' && target_line == b->cur &&
@@ -7897,8 +7905,8 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
                 (void)!write(STDOUT_FILENO, "\a", 1);
                 return;
             }
-            if (vi_apply_search_linewise_motion(b, vis, current_line_no, target_line,
-                target_col) != 0) {
+            if (vi_apply_linewise_from_bol(b, vis, current_line_no, target_line,
+                target_col, 1) != 0) {
                 if (target_line == b->cur && target_col == vis->cursor_col) {
                     vi_start_change_insert(b, vis);
                 } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
