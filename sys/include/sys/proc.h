@@ -571,6 +571,11 @@ typedef struct thread {
      */
     struct thread *next;
 
+    /* A turnstile's waiter chain (turnstile_block()).  Not `next`: a
+     * lockmgr() waiter joins the turnstile and then a sleep queue, which
+     * would overwrite it. */
+    struct thread *t_ts_next;
+
     /*
      * Registry links — protected by sched.c's tid_lock.  Every live
      * thread is on `allthread` exactly once and in one tid_hash[]

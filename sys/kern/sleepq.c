@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include <machine/intr.h>
+#include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <sys/preempt.h>
@@ -123,15 +124,33 @@ static sleepq_t *sleepq_alloc(void) {
     __sync_lock_release(&pool_lock);
     preempt_enable_noresched();
 
-    sq = kmalloc(sizeof(*sq));
-    if (sq) {
-        memset(sq, 0, sizeof(*sq));
-    }
-    return sq;
+    /*
+     * No kmalloc here: this runs under a bucket lock with interrupts off,
+     * and often under the caller's own spinlock too (mutex_lock's guard),
+     * where an allocator that can sleep must not be called.  The pool
+     * cannot be empty -- every thread brought a queue to it
+     * (sleepq_reserve()), and a queue in use needs a thread blocked on
+     * it -- so this is a broken invariant, not a shortage.
+     */
+    kprintf("sleepq: pool empty (more sleep queues in use than threads)\n");
+    return NULL;
 }
 
-// Return a sleep queue to the free list
-static void sleepq_free(sleepq_t *sq) {
+/* Threads reaped while every pool queue was in use: their queues are freed
+ * as they come back (sleepq_free()) instead of pooled. */
+static volatile int sleepq_debt;
+
+/*
+ * A new thread brings one sleep queue to the pool, made here where
+ * allocating is safe, so sleepq_add() never has to.  0, or -1 when there
+ * is no memory for it (the thread is then not made).
+ */
+int sleepq_reserve(void) {
+    sleepq_t *sq = kmalloc(sizeof(*sq));
+    if (!sq) {
+        return -1;
+    }
+    memset(sq, 0, sizeof(*sq));
     preempt_disable();
     while (__sync_lock_test_and_set(&pool_lock, 1)) {
         while (pool_lock)
@@ -141,6 +160,53 @@ static void sleepq_free(sleepq_t *sq) {
     sleepq_free_list = sq;
     __sync_lock_release(&pool_lock);
     preempt_enable_noresched();
+    return 0;
+}
+
+/* A reaped thread takes one back: freed now if one is free, else when the
+ * next comes back to the pool. */
+void sleepq_unreserve(void) {
+    sleepq_t *sq;
+
+    preempt_disable();
+    while (__sync_lock_test_and_set(&pool_lock, 1)) {
+        while (pool_lock)
+            __asm__ volatile("pause");
+    }
+    sq = sleepq_free_list;
+    if (sq) {
+        sleepq_free_list = sq->sq_next;
+    } else {
+        sleepq_debt++;
+    }
+    __sync_lock_release(&pool_lock);
+    preempt_enable_noresched();
+    if (sq) {
+        kfree(sq, sizeof(*sq));
+    }
+}
+
+// Return a sleep queue to the free list
+static void sleepq_free(sleepq_t *sq) {
+    int owed = 0;
+
+    preempt_disable();
+    while (__sync_lock_test_and_set(&pool_lock, 1)) {
+        while (pool_lock)
+            __asm__ volatile("pause");
+    }
+    if (sleepq_debt > 0) {
+        sleepq_debt--;              /* a reaped thread's: not pooled */
+        owed = 1;
+    } else {
+        sq->sq_next = sleepq_free_list;
+        sleepq_free_list = sq;
+    }
+    __sync_lock_release(&pool_lock);
+    preempt_enable_noresched();
+    if (owed) {
+        kfree(sq, sizeof(*sq));     /* kfree does not sleep */
+    }
 }
 
 // Find sleep queue for a channel (must hold bucket lock)

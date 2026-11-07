@@ -14,6 +14,12 @@
 
 void sleepq_init(void);
 
+/* Each thread brings one sleep queue to the pool when made and takes one
+ * back when reaped, so sleepq_add() never allocates (sched_alloc_thread(),
+ * sched_reap_thread()). */
+int  sleepq_reserve(void);
+void sleepq_unreserve(void);
+
 /* Standard API (for shared/kernel objects) */
 void sleepq_add(void *chan, thread_t *t);
 thread_t *sleepq_wake_one(void *chan);

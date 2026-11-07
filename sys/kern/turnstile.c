@@ -155,8 +155,8 @@ void turnstile_block(void *lockobj, thread_t *owner) {
         turnstile_insert(ts);
     }
     
-    // Add current thread to waiters
-    current_thread->next = ts->ts_waiters;
+    // Add current thread to waiters (its own link: sleepq_add() follows)
+    current_thread->t_ts_next = ts->ts_waiters;
     ts->ts_waiters = current_thread;
     ts->ts_waiter_count++;
     
@@ -188,8 +188,9 @@ void turnstile_block(void *lockobj, thread_t *owner) {
 //
 // Historically this function ALSO walked ts_waiters and forced each to
 // THREAD_READY.  That was redundant with the sleepq wake AND unsafe:
-//   - turnstile_block() links waiters through thread->next, the SAME field
-//     sleepq_add() then overwrites, so the ts_waiters chain is aliased/stale.
+//   - turnstile_block() linked waiters through thread->next, the SAME field
+//     sleepq_add() then overwrites, so the ts_waiters chain was aliased/stale
+//     (it has its own t_ts_next now, but is still never walked).
 //   - there is no turnstile_remove_thread(), so proc_exit() (which pulls an
 //     exiting thread off its sleepqs, sys/pm/process.c) leaves a dying thread
 //     on ts_waiters.  A later release then flipped a THREAD_ZOMBIE waiter back

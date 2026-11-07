@@ -61,7 +61,13 @@ uint32_t sched_count_threads(void) { return 0; }
 void preempt_disable(void) { }
 void preempt_enable_noresched(void) { }
 void poll_notify(void *chan) { (void)chan; }
-void *kmalloc(size_t size) { return malloc(size); }
+static int kmalloc_calls;
+void *kmalloc(size_t size) { kmalloc_calls++; return malloc(size); }
+void kfree(void *p, size_t size) { (void)size; free(p); }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+
+/* Weak, so this file also builds against a sleepq.c without it. */
+int sleepq_reserve(void) __attribute__((weak));
 
 #include "../../sys/kern/sleepq.c"
 
@@ -84,7 +90,30 @@ static thread_t *init_thread(int slot, int tid) {
     memset(t, 0, sizeof(*t));
     t->tid = tid;
     t->state = THREAD_RUNNING;
+    /* the sleep queue sched_alloc_thread() has a thread bring */
+    if (sleepq_reserve)
+        assert(sleepq_reserve() == 0);
     return t;
+}
+
+/*
+ * sleepq_add() runs under a bucket spinlock with interrupts off -- and
+ * often under its caller's spinlock too -- so it must not allocate: the
+ * queue comes from the pool each thread stocked when it was made.
+ */
+static void test_add_never_allocates(void) {
+    int chan = 0;
+    thread_t *t;
+
+    reset_env();
+    t = init_thread(0, 1);
+    current_process = &proc1;
+    current_thread = t;
+    kmalloc_calls = 0;
+    sleepq_add(&chan, t);
+    assert(kmalloc_calls == 0);
+    assert(t->state == THREAD_BLOCKED);
+    assert(sleepq_wake_one(&chan) == t);
 }
 
 static void test_private_helpers_tolerate_null_process(void) {
@@ -128,6 +157,7 @@ static void test_private_queue_stays_pid_scoped(void) {
 int main(void) {
     test_private_helpers_tolerate_null_process();
     test_private_queue_stays_pid_scoped();
+    test_add_never_allocates();
     puts("host_test_sleepq_private: PASS");
     return 0;
 }

@@ -254,6 +254,12 @@ thread_t *sched_alloc_thread(process_t *proc) {
     if (!thread) {
         return NULL;
     }
+    /* The sleep queue this thread may need, put in the pool now: blocking
+     * must never allocate (sleepq_alloc()). */
+    if (sleepq_reserve() != 0) {
+        sched_storage_free(thread);
+        return NULL;
+    }
 
     /*
      * Initialize ALL fields before linking into allthread.  The
@@ -302,6 +308,7 @@ thread_t *sched_alloc_thread(process_t *proc) {
     tid = sched_alloc_tid_locked(proc);
     if (tid < 0) {
         spinlock_release_irq(&tid_lock, tf);
+        sleepq_unreserve();
         sched_storage_free(thread);
         return NULL;
     }
@@ -1020,6 +1027,7 @@ void sched_reap_thread(thread_t *t) {
     sched_unlink_locked(t);
     spinlock_release_irq(&tid_lock, tf);
 
+    sleepq_unreserve();             /* the sleep queue it brought */
     sched_storage_free(t);
 }
 

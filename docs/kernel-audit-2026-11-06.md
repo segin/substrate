@@ -114,7 +114,8 @@
     - **When** the last process leaves a process group in `__pgrp_remove_proc()`, the **Process Group Manager** **shall** unlink and free the empty `pgrp` and decrement the owning session reference count.
     - **If** `sys_setpgid()` targets a session leader or `wait4()` receives `pid == INT_MIN`, **then** the **Process Manager** **shall** return `-EPERM` and `-ESRCH` respectively.
 
-- [ ] **[REQ-SYS-KERN-001]** *(Critical — `thread->next` List Corruption Between `turnstile_block()` and `sleepq_add()`)*
+- [x] **[REQ-SYS-KERN-001]** *(Critical — `thread->next` List Corruption Between `turnstile_block()` and `sleepq_add()`)*
+  - **Resolution (2026-11-07):** (1) the turnstile chain has its own link, `t_ts_next`; the overwrite itself was harmless -- nothing has walked `ts_waiters` since `turnstile_release()` stopped -- but the field is no longer shared. (2) fixed: each thread puts one sleep queue in the pool when made (`sleepq_reserve()` in `sched_alloc_thread()`) and takes one back when reaped (`sleepq_unreserve()`), so a queue in use always has one to spare and `sleepq_alloc()` never calls kmalloc under the bucket lock. `host_test_sleepq_private`'s `test_add_never_allocates` fails on the old code and passes; the runner's sleepq tests pass.
   - **Location:** `sys/kern/turnstile.c:130-195` (`turnstile_block`), `sys/kern/sleepq.c:238-295` (`sleepq_add_internal`), `sys/kern/sleepq.c:575-690` (`sleepq_requeue_internal`)
   - **Finding:**
     1. `turnstile_block()` chains blocked threads onto `ts->ts_waiters` using `current_thread->next`, and `lockmgr()` immediately follows `turnstile_block()` with `sleepq_add()`, which overwrites `current_thread->next` to link the thread into the sleepqueue bucket.
