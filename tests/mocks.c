@@ -683,6 +683,8 @@ int afinet_getown(int fd, int *owner) { (void)fd; (void)owner; return -ENOTSOCK;
 /* --- tty (include/sys/tty.h) --- */
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg)
 { (void)tty; (void)cmd; (void)arg; return -1; }
+int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg)
+{ (void)tty; (void)cmd; (void)arg; return -1; }
 int tty_revoke(struct tty *tty) { (void)tty; return 0; }
 
 /* --- commit accounting (vm/vm_commit.h) --- */
