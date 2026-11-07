@@ -93,7 +93,8 @@
 
 ## 3. Process Management, Scheduler & Core Kernel (`sys/pm/` & `sys/kern/`)
 
-- [ ] **[REQ-SYS-PM-001]** *(Critical — Premature Kernel Stack Free During Context Switch & Autoreap in `sched_context_switch()` and `proc_exit()`)*
+- [x] **[REQ-SYS-PM-001]** *(Critical — Premature Kernel Stack Free During Context Switch & Autoreap in `sched_context_switch()` and `proc_exit()`)*
+  - **Resolution (2026-11-07):** (1) not reproduced: the APs park in `hlt` (`smp_ap_entry()`) and never run threads or the reaper, and on the BSP the switch runs with interrupts off, so nothing reaps between `current = next` and `arch_switch_to()`. (2) fixed, though what it did was not a free: `proc_remove_child()`'s `proctree_lock`, when contended, slept the exiting thread after it was marked `THREAD_ZOMBIE`, and the wake left it `THREAD_READY` -- never reapable, and back out of its last `sched_yield()` into `while(1)` with preemption off. A `SA_NOCLDWAIT` exit now leaves the child list before its threads go zombie; `host_test_proc_exit` (a contended-mutex mock) fails on the old code and passes. (3) fixed: `sched_reap_process_threads()` finds one thread under `tid_lock`, reaps it and starts again from the head, holding no cursor across the sleepable reap (no test races it).
   - **Location:** `sys/pm/sched.c:341-410` (`sched_context_switch`), `sys/pm/sched.c:924-985` (`sched_reap_process_threads`, `sched_reap_thread`), `sys/pm/process.c:1913-2260` (`proc_reap_autoreap_zombies`, `proc_exit`)
   - **Finding:**
     1. In `sched_context_switch()`, `THIS_CPU()->current = next` is written **before** `futex_wake_exited_thread(prev)`, `pmap_activate()`, and `arch_switch_to(prev, next)`. On SMP, once `THIS_CPU()->current` changes, `sched_thread_running_remote(prev)` returns `false`, allowing another CPU in `sched_reap_thread()` to free `prev->kstack_Owned` while the exiting CPU is still executing on that stack.

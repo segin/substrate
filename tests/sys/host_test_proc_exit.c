@@ -76,7 +76,14 @@ static int mutex_release_calls;
 static const char *last_kprint_msg;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
-void mutex_lock(mutex_t *m) { (void)m; }
+/* Set, a mutex_lock() is contended: the caller sleeps on it and is woken,
+ * which leaves its thread THREAD_READY (sleepq_add, then the wake). */
+static int mutex_contended;
+void mutex_lock(mutex_t *m) {
+    (void)m;
+    if (mutex_contended && current_thread)
+        current_thread->state = THREAD_READY;
+}
 void mutex_unlock(mutex_t *m) { (void)m; }
 void spinlock_init(spinlock_t *lock, const char *name) { (void)lock; (void)name; }
 void spinlock_acquire(spinlock_t *lock) { (void)lock; }
@@ -371,11 +378,17 @@ static void test_proc_exit_autoreap_path(void) {
     current_process = proc;
     current_thread = init_thread(0, 301, proc);
 
+    /* proctree_lock is contended as it leaves the parent's child list: the
+     * sleep on it must not undo the thread's THREAD_ZOMBIE, or it is never
+     * reapable (and comes back out of its last sched_yield()). */
+    mutex_contended = 1;
     if (setjmp(exit_jmp) == 0) {
         proc_exit(9);
         assert(!"proc_exit returned");
     }
+    mutex_contended = 0;
 
+    assert(threads[0].state == THREAD_ZOMBIE);
     assert(proc->state == SZOMB);
     assert(proc->p_flag & P_AUTOREAP);
     assert(parent->p_children == NULL);

@@ -926,11 +926,24 @@ void sched_reap_process_threads(process_t *proc) {
         return;
     }
 
-    thread_t *t, *next;
-    for (t = thread_first(); t; t = next) {
-        next = thread_next(t);
-        if (t->proc != proc) continue;
-        sched_reap_thread(t);
+    /* One victim at a time, found under tid_lock, then the scan starts
+     * again from the head.  The walk used to carry a `next` cursor across
+     * sched_reap_thread(), which can sleep; meanwhile another reaper could
+     * unlink and free the thread `next` named -- another process's -- and
+     * the walk went on through freed memory.  sched_reap_thread() unlinks
+     * its thread, so each pass finds one fewer. */
+    for (;;) {
+        thread_t *victim = NULL;
+        unsigned long tf = spinlock_acquire_irq(&tid_lock);
+        for (thread_t *t = allthread; t; t = t->t_allthread_next) {
+            if (t->proc == proc) {
+                victim = t;
+                break;
+            }
+        }
+        spinlock_release_irq(&tid_lock, tf);
+        if (!victim) break;
+        sched_reap_thread(victim);
     }
 }
 

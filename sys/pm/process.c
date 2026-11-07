@@ -2253,6 +2253,22 @@ void proc_exit(int code) {
      * matters; by the time the parent observes it, everything the
      * reaper needs is in place.
      */
+    /*
+     * A parent ignoring its children (SA_NOCLDWAIT) never waits for this
+     * one: leave its child list NOW, before the threads go zombie.
+     * proc_remove_child() takes proctree_lock, a mutex, and a contended
+     * mutex puts the caller to sleep -- which overwrote this thread's
+     * THREAD_ZOMBIE: the process was then never reapable, and the thread,
+     * no longer a zombie, came back out of its final sched_yield() into
+     * the while(1) below with preemption off.
+     */
+    int nocldwait = 0;
+    if (current_process->p_parent &&
+        (current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDWAIT)) {
+        nocldwait = 1;
+        proc_remove_child(current_process->p_parent, current_process);
+    }
+
     FOREACH_THREAD(thread) {
         if (thread->proc != current_process) continue;
         thread->state = THREAD_ZOMBIE;
@@ -2262,11 +2278,6 @@ void proc_exit(int code) {
     // 8. Notify parent (after the SZOMB + thread-ZOMBIE transition so
     //    the wakeup is observed only when the child is fully reapable)
     if (current_process->p_parent) {
-        // Check SA_NOCLDWAIT
-        int nocldwait = 0;
-        if (current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDWAIT) {
-             nocldwait = 1;
-        }
 
         if (PROC_DEBUG_ENABLED()) {
             PROC_DEBUG("proc: exit pid=%d parent=%d nocldwait=%d flags=%#x code=%d\n",
@@ -2287,7 +2298,7 @@ void proc_exit(int code) {
               * are reaped.  Every thread of ours is already THREAD_ZOMBIE (set
               * above) so we are immediately reapable. */
              __sync_fetch_and_add(&autoreap_pending, 1);
-             proc_remove_child(current_process->p_parent, current_process);
+             /* (already off the parent's child list -- see above) */
              current_process->p_parent = NULL;
         } else {
              psignal(current_process->p_parent, SIGCHLD);
