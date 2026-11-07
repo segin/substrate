@@ -308,9 +308,9 @@ The number is not reused.
 
 ### EXVI-17 — `:recover` discards changes, and `:recover!` does not exist — *Medium*
 
-- [ ] **EXVI-17.1** (State-driven) While the buffer is modified, if `recover`
+- [x] **EXVI-17.1** (State-driven) While the buffer is modified, if `recover`
   is given without `!`, then the editor shall refuse it.
-- [ ] **EXVI-17.2** (Ubiquitous) The editor shall accept `recover!`.
+- [x] **EXVI-17.2** (Ubiquitous) The editor shall accept `recover!`.
 
 - **Where**: `exvi_session.c:1023`; `exvi.c:306` passes no force flag.
 - **Evidence**: `s/a/CHANGED/`, `recover` → "recovered", the change is gone.

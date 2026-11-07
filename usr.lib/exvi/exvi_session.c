@@ -1189,10 +1189,17 @@ handle_preserve_command(buffer_t *b)
 }
 
 int
-handle_recover_command(buffer_t *b, const char *args)
+handle_recover_command(buffer_t *b, const char *args, int force)
 {
     char *recover_name;
     char *ptr = (char *)args;
+
+    /* Recovering replaces the buffer, as edit does: not over unwritten
+     * changes unless forced (POSIX ex: "recover[!]"). */
+    if (b->modified && !force) {
+        exvi_report_error("No write since last change (add ! to override)");
+        return 1;
+    }
 
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;

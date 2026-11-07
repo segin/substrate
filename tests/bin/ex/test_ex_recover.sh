@@ -52,6 +52,17 @@ if ! grep -qx OVER <<<"$out"; then
 	fail ":recover did not get the preserved text: [$out]"
 fi
 
+# but not over unwritten changes (an error, which ends a batch ex)...
+out=$(printf 's/vv/MINE/\nrecover\n1p\nq!\n' | ex v 2>&1)
+if grep -qx OVER <<<"$out" || ! grep -q "No write since last change" <<<"$out"; then
+	fail ":recover replaced a modified buffer: [$out]"
+fi
+# ...which :recover! discards
+out=$(printf 's/vv/MINE/\nrecover!\n1p\nq!\n' | ex v 2>&1)
+if ! grep -qx OVER <<<"$out"; then
+	fail ":recover! did not recover over a modified buffer: [$out]"
+fi
+
 # SIGTERM saves there too, and not through the link
 mkfifo in
 # the binary itself, not the function: $! must be ex's pid

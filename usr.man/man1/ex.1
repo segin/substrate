@@ -116,6 +116,17 @@ The current supported command contract includes:
 .Ic \&!
 .El
 .Pp
+A command that would replace or abandon a modified buffer \(em
+.Ic edit ,
+.Ic next ,
+.Ic prev ,
+.Ic rewind ,
+.Ic recover ,
+.Ic quit
+\(em fails while it has unwritten changes, unless given
+.Ql \&!
+.Pq for example Ic recover! .
+.Pp
 Addresses, ranges, marks, search addresses, relative offsets, and
 delimiter-aware command chaining with
 .Ql |

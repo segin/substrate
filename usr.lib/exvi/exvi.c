@@ -313,8 +313,8 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_rewind_command(b, force);
     } else if (match_command(cmd, "preserve", "pre", &args, NULL)) {
         return handle_preserve_command(b);
-    } else if (match_command(cmd, "recover", "rec", &args, NULL)) {
-        return handle_recover_command(b, args);
+    } else if (match_command(cmd, "recover", "rec", &args, &force)) {
+        return handle_recover_command(b, args, force);
     } else if (match_command(cmd, "pop", "po", &args, &force)) {
         return handle_pop_command(b, force);
     } else if (match_command(cmd, "tags", NULL, &args, NULL)) {

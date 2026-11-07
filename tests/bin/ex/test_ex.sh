@@ -1276,7 +1276,7 @@ two"
 
 run_stdout_with_path_template_test "Recover percent reloads preserved current file" \
     "one\ntwo\n" \
-    ":1change\nRECOVERED\n.\n:preserve\n:recover %\n:1,2p\n:q!\n" \
+    ":1change\nRECOVERED\n.\n:preserve\n:recover! %\n:1,2p\n:q!\n" \
     "File preserved
 \"__FILE__\" recovered, 2 lines
 RECOVERED
