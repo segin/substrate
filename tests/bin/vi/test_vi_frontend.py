@@ -312,8 +312,9 @@ def main():
     for name, initial_bytes, key_steps, expected in (
         ("display-invalid-byte-inside", b"a\xffb\n",
             [b"3|", b"i", b"X", b"\x1b"], b"aX\xffb\n"),
+        # \xff is drawn as \377, columns 2-5: column 6 is the "b"
         ("display-invalid-byte-after", b"a\xffb\n",
-            [b"4|", b"i", b"X", b"\x1b"], b"a\xffXb\n"),
+            [b"6|", b"i", b"X", b"\x1b"], b"a\xffXb\n"),
     ):
         exit_code, decoded, saved = helpers.run_vi_session(
             vi_path,
