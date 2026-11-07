@@ -92,6 +92,14 @@ a negative error code on failure. Capture offsets are expressed as byte offsets 
 .I text
 and are returned as pairs (start, end).
 .PP
+As in GNU and BSD regex,
+.B \e<
+and
+.B \e>
+match the empty string at the start and at the end of a word, in basic
+and extended expressions alike: a word is a run of letters, digits and
+underscores, each byte of a multibyte character counting as a letter.
+.PP
 Replacement supports $0..$9 expansion. The streaming interface accepts chunks and
 returns matches as they become available.
 .SH FLAGS

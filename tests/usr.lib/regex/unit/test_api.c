@@ -226,6 +226,53 @@ int test_bre_ere_repeat(void) {
     return 0;
 }
 
+/* `\<` and `\>`, GNU and BSD regex's word anchors, in both dialects.  They
+ * were read as the characters `<` and `>`, so vi's `\<word\>` found nothing.
+ * Each result is glibc's. */
+int test_word_anchors(void) {
+    static const struct {
+        const char *pattern;
+        int         extended;
+        const char *subject;
+        int         should_match;
+        int         so;
+        int         eo;
+    } cases[] = {
+        { "\\<foo",               0, "a foo",      1, 2, 5 },
+        { "\\<foo",               0, "afoo",       0, -1, -1 },
+        { "foo\\>",               0, "foo bar",    1, 0, 3 },
+        { "foo\\>",               0, "foobar",     0, -1, -1 },
+        { "\\<foo\\>",            0, "foobar foo", 1, 7, 10 },
+        { "\\<",                  0, "  ab",       1, 2, 2 },
+        { "\\>",                  0, "ab cd",      1, 2, 2 },
+        { "\\<\\(a\\)\\1\\>",     0, "baa aa",     1, 4, 6 },   /* the backtracker */
+        { "\\<(ab|cd)\\>",        1, "xab cd",     1, 4, 6 },
+        { "\\<foo\\>",            1, "foo_x foo",  1, 6, 9 },   /* `_` is of a word */
+        { "x\\>",                 0, "x",          1, 0, 1 },
+        { "\\<",                  0, "",           0, -1, -1 },
+        { "\\<a",                 1, "9a a",       1, 3, 4 },   /* so is a digit */
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        regex_t re;
+        regmatch_t m[1];
+        int rc = regcomp(&re, cases[i].pattern,
+                         cases[i].extended ? REG_EXTENDED : 0);
+        TEST_ASSERT(rc == 0);
+        int er = regexec(&re, cases[i].subject, 1, m, 0);
+        if (cases[i].should_match) {
+            TEST_ASSERT(er == 0);
+            TEST_ASSERT(m[0].rm_so == cases[i].so);
+            TEST_ASSERT(m[0].rm_eo == cases[i].eo);
+        } else {
+            TEST_ASSERT(er == REG_NOMATCH);
+        }
+        regfree(&re);
+    }
+    return 0;
+}
+
 /* Leading `]` in a bracket expression.  Regression test: the item loop
  * stopped at `]` before consuming anything, so `[]]` parsed as an empty
  * class plus a stray `]`.  An empty class matches nothing, so `[]]`,

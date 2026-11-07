@@ -31,7 +31,9 @@ typedef enum {
     NODE_GROUP,
     NODE_BACKREF,
     NODE_BOL,
-    NODE_EOL
+    NODE_EOL,
+    NODE_BOW,   /* \< : a word starts here */
+    NODE_EOW    /* \> : a word ends here */
 } node_type_t;
 
 typedef struct regex_node {
@@ -69,7 +71,9 @@ typedef enum {
     NFA_SAVE,
     NFA_BACKREF,
     NFA_BOL,
-    NFA_EOL
+    NFA_EOL,
+    NFA_BOW,
+    NFA_EOW
 } nfa_type_t;
 
 typedef struct nfa_state {
@@ -736,6 +740,19 @@ static regex_node *parse_escape(parser *p) {
     }
     c = parser_get(p);
     switch (c) {
+    case '<':
+        /* GNU and BSD regex's word anchors, in both dialects: vi's patterns need them */
+        n = node_new(NODE_BOW);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+        }
+        return n;
+    case '>':
+        n = node_new(NODE_EOW);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+        }
+        return n;
     case 'd':
     case 'w':
     case 's':
@@ -1566,6 +1583,12 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
         prog->uses_eol = 1;
         f = frag_anchor(prog, NFA_EOL);
         break;
+    case NODE_BOW:
+        f = frag_anchor(prog, NFA_BOW);
+        break;
+    case NODE_EOW:
+        f = frag_anchor(prog, NFA_EOW);
+        break;
     case NODE_CONCAT:
         f = frag_concat(compile_node(prog, n->left), compile_node(prog, n->right));
         break;
@@ -1685,6 +1708,30 @@ static int anchor_at_eol(unsigned flags, size_t pos, size_t text_len, const char
     return (flags & REGEX_FLAG_MULTILINE) && text && text[pos] == '\n';
 }
 
+/* Is the byte at pos of a word, as GNU regex's \< and \> count one: a letter,
+ * a digit or `_`; a byte of a multibyte character counts as a letter.  Out of
+ * the text is not. */
+static int word_byte_at(const char *text, size_t text_len, size_t pos) {
+    unsigned char b;
+
+    if (!text || pos >= text_len) {
+        return 0;
+    }
+    b = (unsigned char)text[pos];
+    return b >= 0x80 || b == '_' || (b >= '0' && b <= '9') ||
+           (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z');
+}
+
+/* Does a `\<` anchor match at pos: a word byte after it and none before? */
+static int anchor_at_bow(size_t pos, size_t text_len, const char *text) {
+    return word_byte_at(text, text_len, pos) && (pos == 0 || !word_byte_at(text, text_len, pos - 1));
+}
+
+/* Does a `\>` anchor match at pos: a word byte before it and none after? */
+static int anchor_at_eow(size_t pos, size_t text_len, const char *text) {
+    return pos > 0 && word_byte_at(text, text_len, pos - 1) && !word_byte_at(text, text_len, pos);
+}
+
 static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_t pos,
                             const char *text, size_t text_len, unsigned flags, int ignore_anchors) {
 #pragma GCC diagnostic push
@@ -1758,6 +1805,20 @@ static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_
             break;
         case NFA_EOL:
             if (ignore_anchors || anchor_at_eol(flags, pos, text_len, text)) {
+                if (s->out) {
+                    PUSH_STACK(s->out->id);
+                }
+            }
+            break;
+        case NFA_BOW:
+            if (ignore_anchors || anchor_at_bow(pos, text_len, text)) {
+                if (s->out) {
+                    PUSH_STACK(s->out->id);
+                }
+            }
+            break;
+        case NFA_EOW:
+            if (ignore_anchors || anchor_at_eow(pos, text_len, text)) {
                 if (s->out) {
                     PUSH_STACK(s->out->id);
                 }
@@ -2130,6 +2191,18 @@ static int add_state(thread_list *list, nfa_state *s, size_t *caps, size_t cap_c
         return 1;
     case NFA_EOL:
         if (anchor_at_eol(flags, pos, text_len, text)) {
+            return add_state(list, s->out, caps, cap_count, list_id, pos, text, text_len, flags, out_err);
+        }
+        free(caps);
+        return 1;
+    case NFA_BOW:
+        if (anchor_at_bow(pos, text_len, text)) {
+            return add_state(list, s->out, caps, cap_count, list_id, pos, text, text_len, flags, out_err);
+        }
+        free(caps);
+        return 1;
+    case NFA_EOW:
+        if (anchor_at_eow(pos, text_len, text)) {
             return add_state(list, s->out, caps, cap_count, list_id, pos, text, text_len, flags, out_err);
         }
         free(caps);
@@ -2660,6 +2733,18 @@ static int nfa_bt(bt_ctx *c, nfa_state *s, size_t pos, size_t depth) {
             return 0;
         case NFA_EOL:
             if (anchor_at_eol(c->flags, pos, c->len, c->text)) {
+                s = s->out;
+                continue;
+            }
+            return 0;
+        case NFA_BOW:
+            if (anchor_at_bow(pos, c->len, c->text)) {
+                s = s->out;
+                continue;
+            }
+            return 0;
+        case NFA_EOW:
+            if (anchor_at_eow(pos, c->len, c->text)) {
                 s = s->out;
                 continue;
             }
