@@ -135,7 +135,8 @@
 
 ## 4. VFS, Filesystems & Exec (`sys/vfs/`, `sys/fs/` & `sys/exec/`)
 
-- [ ] **[REQ-SYS-FS-001]** *(Critical — 368-Byte Heap Buffer Overflow in `fat_mount()` and Open-File Cluster Free in `fat_unlink()`)*
+- [x] **[REQ-SYS-FS-001]** *(Critical — 368-Byte Heap Buffer Overflow in `fat_mount()` and Open-File Cluster Free in `fat_unlink()`)*
+  - **Resolution (2026-11-06):** the boot sector is read into a 512-byte buffer of its own and the BPB copied from it; a file unlinked while open (pinned by more than the lookup) keeps its clusters, marked `unlinked`, until its last `fat_node_close()` frees them, and its entry, gone, is no longer updated.
   - **Location:** `sys/fs/fat/fat.c:989-1035` (`fat_mount`), `sys/fs/fat/fat.c:2097-2160` (`fat_unlink`)
   - **Finding:**
     1. In `fat_mount()`, `fat_read_sectors(fs, 0, 1, &fs->bpb)` reads a full 512-byte sector directly into `&fs->bpb` (`sizeof(fat_bpb_t) == 36` bytes inside `sizeof(fat_fs_t) == 148` bytes), overflowing `fat_fs_t` on the kernel heap by 368 bytes on every FAT mount.

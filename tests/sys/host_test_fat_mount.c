@@ -11,25 +11,40 @@ void kprint(const char *str) {
 }
 
 /*
- * fat_mount() reads a full 512-byte boot sector straight into the
- * 36-byte fat_bpb_t field of the heap-allocated fat_fs_t (fat.c:720,
- * fat_read_sectors(fs, 0, 1, &fs->bpb)).  On-target the UMA slab
- * allocator hands back a rounded-up, page-sized slab so that
- * sector-sized write stays inside the allocation; a bare host malloc()
- * of sizeof(fat_fs_t) (~160 bytes) does not, and the over-read smashes
- * the glibc heap.  Mirror the kernel allocator by rounding every
- * allocation up to at least one sector so the test reflects on-target
- * behaviour without weakening it.
+ * Each allocation is exactly its size, with a canary after it that kfree()
+ * checks: fat_mount() read the whole 512-byte boot sector into fs->bpb, 476
+ * bytes past it, over the rest of fat_fs_t and its neighbours in the
+ * kernel's small-size slab.  (This stub used to round every allocation up
+ * to a page, which hid that.)
  */
+#define CANARY_LEN  1024
+#define CANARY_BYTE 0xA5
+
 void *kmalloc(size_t size) {
-    if (size < 4096)
-        size = 4096;
-    return malloc(size);
+    unsigned char *p = malloc(sizeof(size_t) + size + CANARY_LEN);
+
+    if (!p)
+        return NULL;
+    memcpy(p, &size, sizeof(size));
+    memset(p + sizeof(size_t) + size, CANARY_BYTE, CANARY_LEN);
+    return p + sizeof(size_t);
 }
 
 void kfree(void *ptr, size_t size) {
+    unsigned char *p = (unsigned char *)ptr - sizeof(size_t);
+    size_t real;
+
     (void)size;
-    free(ptr);
+    if (!ptr)
+        return;
+    memcpy(&real, p, sizeof(real));
+    for (size_t i = 0; i < CANARY_LEN; i++) {
+        if (p[sizeof(size_t) + real + i] != CANARY_BYTE) {
+            fprintf(stderr, "heap overflow past a %zu-byte allocation\n", real);
+            abort();
+        }
+    }
+    free(p);
 }
 
 void vfs_register_filesystem(filesystem_t *fs) {
@@ -58,8 +73,18 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
     return 0;
 }
 
+static size_t mock_device_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    (void)node;
+    if (offset < 0 || (size_t)offset + size > sizeof(mock_disk)) {
+        return 0;
+    }
+    memcpy(mock_disk + offset, buffer, size);
+    return size;
+}
+
 static fs_node_t mock_device = {
     .read = mock_device_read,
+    .write = mock_device_write,
 };
 
 static void reset_mock_disk(void) {
@@ -134,9 +159,60 @@ static void test_fat_mount_accepts_minimal_fat16(void) {
     assert(root->unmount(root) == 0);
 }
 
+/*
+ * A file unlinked while open keeps its clusters until its last close: they
+ * were freed at once, the next file written took them, and the open file
+ * read that file's data (and would have written over it).
+ */
+static void test_fat_unlink_open_file_keeps_clusters(void) {
+    fs_node_t *root;
+    fs_node_t *a;
+    fs_node_t *b;
+    uint8_t data[2048];
+    uint8_t back[2048];
+
+    reset_mock_disk();
+    write_mock_fat16_boot_sector();
+    root = fat_mount(NULL, 0, &mock_device);
+    assert(root != NULL);
+
+    assert(root->mknod(root, "A.TXT", 0100644, 0) == 0);
+    a = root->finddir(root, "A.TXT");
+    assert(a != NULL);
+    a->open(a);                     /* as an open descriptor holds it */
+    a->close(a);                    /* finddir's lookup reference */
+    memset(data, 'A', sizeof(data));
+    assert(a->write(a, 0, sizeof(data), data) == sizeof(data));
+
+    assert(root->unlink(root, "A.TXT") == 0);
+    assert(root->finddir(root, "A.TXT") == NULL);
+
+    assert(root->mknod(root, "B.TXT", 0100644, 0) == 0);
+    b = root->finddir(root, "B.TXT");
+    assert(b != NULL);
+    memset(data, 'B', sizeof(data));
+    assert(b->write(b, 0, sizeof(data), data) == sizeof(data));
+
+    memset(back, 0, sizeof(back));
+    assert(a->read(a, 0, sizeof(back), back) == sizeof(back));
+    for (size_t i = 0; i < sizeof(back); i++) {
+        assert(back[i] == 'A');
+    }
+
+    a->close(a);                    /* the last close: its clusters go */
+    memset(back, 0, sizeof(back));
+    assert(b->read(b, 0, sizeof(back), back) == sizeof(back));
+    for (size_t i = 0; i < sizeof(back); i++) {
+        assert(back[i] == 'B');
+    }
+    b->close(b);
+    assert(root->unmount(root) == 0);
+}
+
 int main(void) {
     test_fat_mount_rejects_zeroed_bpb();
     test_fat_mount_accepts_minimal_fat16();
+    test_fat_unlink_open_file_keeps_clusters();
     puts("PASS: host_test_fat_mount");
     return 0;
 }

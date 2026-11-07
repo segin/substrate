@@ -134,6 +134,12 @@ typedef struct fat_node {
      * A slot with pin > 0 is never recycled.
      */
     uint32_t pin;
+    /*
+     * Unlinked while open: its directory entry is gone, its clusters stay
+     * the open file's until the last close frees them (fat_node_close()),
+     * so its writes cannot land in clusters another file has taken.
+     */
+    int unlinked;
 } fat_node_t;
 
 // Public functions

@@ -99,6 +99,7 @@ static int fat_truncate(fs_node_t *node, off_t new_size);
 static int fat_mkdir_vfs(fs_node_t *parent, const char *name, uint16_t permission);
 static int fat_mknod(fs_node_t *parent, const char *name, uint16_t mode, uint32_t dev);
 static int fat_unlink(fs_node_t *parent, const char *name);
+static int fat_free_chain(fat_fs_t *fs, uint32_t cluster);
 static int fat_rmdir_vfs(fs_node_t *parent, const char *name);
 static int fat_rename(fs_node_t *old_parent, const char *old_name,
                       fs_node_t *new_parent, const char *new_name);
@@ -628,11 +629,25 @@ static void fat_node_open(fs_node_t *node) {
 
 static void fat_node_close(fs_node_t *node) {
     fat_node_t *ctx = node ? (fat_node_t *)(uintptr_t)node->impl : NULL;
+    uint32_t free_cluster = 0;
+    fat_fs_t *free_fs = NULL;
+
     if (!ctx) return;
     fat_node_cache_lock_ensure();
     mutex_lock(&fat_node_cache_lock);
     if (ctx->pin > 0) ctx->pin--;
+    /* the last close of a file unlinked while open: its clusters go now */
+    if (ctx->pin == 0 && ctx->unlinked) {
+        free_cluster = ctx->first_cluster;
+        free_fs = ctx->fs;
+        ctx->unlinked = 0;
+        ctx->first_cluster = 0;
+        ctx->fs = NULL;     /* no lookup may find the slot as that file */
+    }
     mutex_unlock(&fat_node_cache_lock);
+    if (free_fs && free_cluster >= 2) {
+        fat_free_chain(free_fs, free_cluster);
+    }
 }
 
 /*
@@ -666,7 +681,7 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
 
     for (int i = 0; i < FAT_NODE_CACHE_SIZE; i++) {
         if (fat_node_cache[i].fs == fs && fat_fs_node_cache[i].inode == inode &&
-            fat_fs_node_cache[i].name[0] != '\0' &&
+            fat_fs_node_cache[i].name[0] != '\0' && !fat_node_cache[i].unlinked &&
             (fat_node_cache[i].pin == 0 ||
              fat_node_cache[i].first_cluster == first_cluster)) {
             ctx  = &fat_node_cache[i];
@@ -1000,11 +1015,26 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     memset(fs, 0, sizeof(*fs));
     fs->device = dev;
     
-    // Read boot sector
-    if (fat_read_sectors(fs, 0, 1, &fs->bpb) != 0) {
-        kprint("FAT: Failed to read boot sector\n");
-        kfree(fs, sizeof(fat_fs_t));
-        return NULL;
+    /*
+     * Read the boot sector -- a whole 512-byte sector -- into a buffer of
+     * its own and take the BPB from it: read into &fs->bpb, the sector ran
+     * 476 bytes past the BPB, over the rest of fs and past its allocation.
+     */
+    {
+        uint8_t *boot = kmalloc(512);
+
+        if (!boot) {
+            kfree(fs, sizeof(fat_fs_t));
+            return NULL;
+        }
+        if (fat_read_sectors(fs, 0, 1, boot) != 0) {
+            kprint("FAT: Failed to read boot sector\n");
+            kfree(boot, 512);
+            kfree(fs, sizeof(fat_fs_t));
+            return NULL;
+        }
+        memcpy(&fs->bpb, boot, sizeof(fs->bpb));
+        kfree(boot, 512);
     }
 
     if (fs->bpb.bytes_per_sector == 0 || fs->bpb.sectors_per_cluster == 0 ||
@@ -2103,13 +2133,30 @@ static int fat_unlink(fs_node_t *parent, const char *name) {
     if (!child) return -ENOENT;
     fat_node_t *cctx = (fat_node_t *)(uintptr_t)child->impl;
     uint32_t first_cluster = cctx->first_cluster;
-    fat_node_close(child);          /* fat_finddir's pin */
 
     /* Remove dir entry */
-    if (fat_dir_remove_entry(fs, pctx->first_cluster, name) != 0) return -EIO;
+    if (fat_dir_remove_entry(fs, pctx->first_cluster, name) != 0) {
+        fat_node_close(child);      /* fat_finddir's pin */
+        return -EIO;
+    }
 
-    /* Free cluster chain */
-    if (first_cluster >= 2)
+    /*
+     * Open elsewhere -- pinned by more than fat_finddir()'s lookup -- the
+     * file keeps its clusters until its last close (fat_node_close()); its
+     * entry, gone, is no longer its to update.  Freed now, they went to the
+     * next file allocated while the open one still wrote into them.
+     */
+    fat_node_cache_lock_ensure();
+    mutex_lock(&fat_node_cache_lock);
+    int held = cctx->pin > 1;
+    if (held) {
+        cctx->unlinked = 1;
+        cctx->dirent_sector = 0;
+    }
+    mutex_unlock(&fat_node_cache_lock);
+    fat_node_close(child);          /* fat_finddir's pin */
+
+    if (!held && first_cluster >= 2)
         fat_free_chain(fs, first_cluster);
 
     return 0;
