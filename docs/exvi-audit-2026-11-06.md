@@ -42,8 +42,9 @@ served only as a sanity check.
 
 This file is the task list for the audit.  Each requirement has a checkbox.
 Fix one requirement (or a tight cluster of one finding) per commit, with a
-test that fails on the old code, and tick its box in the same commit.  When
-every box is ticked, delete this file; git keeps the history.
+test that fails on the old code, and tick its box in the same commit.  A
+box ticked *Won't fix* records a decision not to meet the requirement, and
+why.  When every box is ticked, delete this file; git keeps the history.
 
 **The host binaries.**  `bin/ex` and `bin/vi` cannot be built for the host
 (EXVI-74), so they were linked by hand.  libexvi built for the host compiles
@@ -617,8 +618,10 @@ The number is not reused.
   shall mark the buffer modified relative to the last write.
 - [x] **EXVI-39.3** (Ubiquitous) The editor's `undo` shall keep the marks of
   lines it does not remove.
-- [ ] **EXVI-39.4** (Event-driven) When `undo` follows `undo`, the editor shall
-  reverse the first `undo`.
+- [x] **EXVI-39.4** (Event-driven) When `undo` follows `undo`, the editor shall
+  reverse the first `undo`.  *Won't fix* (2026-11-06): `u` stays multi-level,
+  undoing further back each time, as in vim; the vi oracle tests, judged by
+  vim, rely on it (`multi-undo-join`, `JJuu`).
 
 - **Where**: `exvi_buffer.c:288-322`, `buf_copy` `:328-343`.
 - **Evidence**: (a) `s/orig/changed/`, `w`, `u`, `q` quits with status 0 and the
