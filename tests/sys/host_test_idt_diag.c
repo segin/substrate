@@ -124,6 +124,10 @@ int vm86_gpf_handler(registers_t *regs) {
     return 0;
 }
 
+/* the vm86 monitor's other traps, and the kernel's own BIOS call: not run */
+int vm86_trap(registers_t *regs) { (void)regs; return 0; }
+int vm86_kernel_bios_active(void) { return 0; }
+
 int irq_dispatch(unsigned int irq, void *frame) { (void)irq; (void)frame; return 0; }
 uint32_t preempt_count_get(void) { return 0; }
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {

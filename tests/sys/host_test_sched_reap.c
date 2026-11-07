@@ -38,6 +38,8 @@ uint32_t get_hz(void) { return 100; }
 void fpu_thread_inherit(struct thread *parent, struct thread *child) { (void)parent; (void)child; }
 void fpu_thread_free(struct thread *t) { (void)t; }
 int sleepq_remove_thread(thread_t *t) { (void)t; return 0; }
+int sleepq_reserve(void) { return 0; }
+void sleepq_unreserve(void) {}
 int mutex_release_owned_by_thread(struct thread *owner) { (void)owner; return 0; }
 int smp_get_cpu_count(void) { return 1; }
 

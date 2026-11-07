@@ -41,6 +41,8 @@ void preempt_enable_noresched(void) {}
 void sched_poll_wake_pollers(void) {}
 void poll_notify(void *chan) { (void)chan; }
 void *kmalloc(size_t size) { return malloc(size); }
+void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 
 #include "../../sys/kern/runqueue.c"
 #include "../../sys/kern/turnstile.c"

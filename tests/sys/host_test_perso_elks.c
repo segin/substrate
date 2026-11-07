@@ -111,6 +111,7 @@ typedef int32_t elks_time_t;
 #define sys_signal stub_sys_signal
 #define sys_ioctl  stub_sys_ioctl
 #define kern_ioctl stub_kern_ioctl
+#define kern_ioctl_kbuf stub_kern_ioctl
 #define sys_fcntl  stub_sys_fcntl
 #define sys_umask  stub_sys_umask
 #define sys_stat   stub_sys_stat
