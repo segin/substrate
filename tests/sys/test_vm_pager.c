@@ -502,6 +502,76 @@ void test_vm_mmap_file_shared_fork_visibility(void) {
     kprint("  PASS\n");
 }
 
+static size_t fake_pager_read_err(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    (void)node;
+    (void)offset;
+    (void)size;
+    (void)buffer;
+    return (size_t)-5;      /* read_fs()'s -EIO */
+}
+
+/*
+ * A read error is no page: the vnode pager took read_fs()'s negative errno,
+ * cast to an unsigned count past 4096, for a full read -- no zero fill --
+ * and marked the page valid with whatever the frame held before.
+ */
+void test_vm_vnode_pager_read_error(void) {
+    kprint("Test: vnode pager read error\n");
+
+    fs_node_t fake_file = {0};
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, 0x1000);
+    vm_page_t *pages[1];
+
+    fake_file.read = fake_pager_read_err;
+    fake_file.length = 0x1000;
+    vm_pager_t *pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, &fake_file, 0x1000, 0, 0);
+    TEST_ASSERT(pager != NULL, "pager allocated");
+    pages[0] = vm_page_alloc(obj, 0, 0);
+    TEST_ASSERT(pages[0] != NULL, "page allocated");
+    memset((void *)(uintptr_t)(pages[0]->phys_addr + 0xC0000000), 0x6B, 4096);
+    pages[0]->flags &= ~PG_VALID;
+
+    TEST_ASSERT(vm_pager_get_pages(pager, pages, 1, true) != 0, "get_pages reports the error");
+    TEST_ASSERT((pages[0]->flags & PG_VALID) == 0, "the page is not valid");
+    TEST_ASSERT(((uint8_t *)(uintptr_t)(pages[0]->phys_addr + 0xC0000000))[100] == 0,
+                "the page holds no stale bytes");
+
+    vm_page_free(pages[0]);
+    vm_object_deallocate(obj);
+    vm_pager_deallocate(pager);
+    kprint("  PASS\n");
+}
+
+/*
+ * A vnode pager's pages are the file's from its offset to its end, as the
+ * file is now: page_limit counted the whole file's pages from page 0 and
+ * kept the size it had when mapped, so a mapping at an offset reported
+ * pages past the end, and a file that grew none of its new ones.
+ */
+void test_vm_vnode_pager_limit(void) {
+    kprint("Test: vnode pager limit\n");
+
+    fs_node_t fake_file = {0};
+
+    fake_file.read = fake_pager_read;
+    fake_file.length = 0x2000;
+    vm_pager_t *pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, &fake_file, 0x2000, 0, 0x1000);
+    TEST_ASSERT(pager != NULL, "pager allocated at offset 4096");
+    TEST_ASSERT(vm_pager_has_page(pager, 0), "page 0 (file page 1) is there");
+    TEST_ASSERT(!vm_pager_has_page(pager, 1), "page 1 (file page 2) is past the end");
+    fake_file.length = 0x3000;
+    TEST_ASSERT(vm_pager_has_page(pager, 1), "after growth, page 1 is there");
+    vm_pager_deallocate(pager);
+
+    /* a device's: an index past 2^20 is no page of a one-page device (the
+     * index times 4096 wrapped in 32 bits) */
+    pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE, (void *)0x100000, 0x1000, 0, 0);
+    TEST_ASSERT(pager != NULL, "device pager allocated");
+    TEST_ASSERT(!vm_pager_has_page(pager, 0x100000), "device page 2^20 is not there");
+    vm_pager_deallocate(pager);
+    kprint("  PASS\n");
+}
+
 void run_vm_pager_tests(void) {
     kprint("\n=== VM Pager Unit Tests ===\n");
     test_vm_pager_lifecycle();
@@ -509,6 +579,8 @@ void run_vm_pager_tests(void) {
     test_vm_swap_pager_roundtrip();
     test_vm_swap_pager_full();
     test_vm_device_fault_mapping();
+    test_vm_vnode_pager_read_error();
+    test_vm_vnode_pager_limit();
     test_vm_msync_dirty_writeback();
     test_vm_mmap_file_private_cow();
     test_vm_mmap_file_shared_fork_visibility();

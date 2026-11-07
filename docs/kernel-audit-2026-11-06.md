@@ -64,7 +64,8 @@
     - **When** an off-page UMA slab spans multiple pages, the **UMA Allocator** **shall** register all constituent pages in `uma_page_hash` and compute item offsets relative to `slab->us_data`.
     - The **UMA Allocator** **shall** update zone counters using atomic operations and serialize `uma_zones` list modifications under a lock.
 
-- [ ] **[REQ-SYS-VM-004]** *(High — Integer Overflows & Missing Range Checks in `sys_msync()`, `sys_brk_locked()`, and `device_haspage()`)*
+- [x] **[REQ-SYS-VM-004]** *(High — Integer Overflows & Missing Range Checks in `sys_msync()`, `sys_brk_locked()`, and `device_haspage()`)*
+  - **Resolution (2026-11-06):** `sys_msync()` returns `-ENOMEM` for a range that wraps or runs past user space; `sys_brk_locked()` refuses to grow over any `vm_map` entry (the heap has none of its own) and masks addresses with `~(uintptr_t)0xFFF`; `device_haspage()` compares page counts in 64 bits; the vnode pager zeroes the page and fails on a read error, and counts its pages from the mapping's offset to the file's current end (`vnode_pager_pages()`, replacing the fixed `page_limit`).
   - **Location:** `sys/vm/vm_syscalls.c:539-630` (`sys_brk_locked`), `sys/vm/vm_syscalls.c:708-760` (`sys_msync`), `sys/vm/vm_pager.c:158-175` (`device_haspage`), `sys/vm/vm_pager.c:270-370` (`vnode_pager_getpages`, `vnode_haspage`)
   - **Finding:**
     1. `sys_msync()` computes `(uintptr_t)addr + length + 0xFFF` without overflow or user-range validation.

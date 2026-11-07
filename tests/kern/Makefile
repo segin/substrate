@@ -50,7 +50,7 @@ else
 endif
 
 all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart \
-     vm86guest thrkill truncperm utimeperm shmgrow setredrop shmrange rofault
+     vm86guest thrkill truncperm utimeperm brkover shmgrow setredrop shmrange rofault
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -146,6 +146,12 @@ thrkill: thrkill.c
 # truncperm: truncate(2) needs write permission and refuses a directory.
 # Run as root (on the host too).
 truncperm: truncperm.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
+# brkover: the heap cannot grow over another mapping; msync past user space
+# is ENOMEM.  The host's -m32 build too.
+brkover: brkover.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
@@ -507,7 +513,7 @@ sigretsel.linux: sigretsel.c
 
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
-	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm utimeperm shmgrow \
+	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm utimeperm brkover shmgrow \
 	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault \
 	      sigretsel.linux execipc linkfollow.linux walkrecycle ptsrace
 

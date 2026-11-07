@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <string.h>
 
 #include <machine/pmap.h>
 #include <sys/lock.h>
@@ -10,8 +11,25 @@ typedef struct vm_vnode_pager {
     vm_pager_t base;
     fs_node_t *node;
     uint64_t base_offset;
-    uint64_t page_limit;
 } vm_vnode_pager_t;
+
+/*
+ * How many of the object's pages the file has: those from the mapping's
+ * offset to the file's end, as long as the file is NOW -- it may have grown
+ * or shrunk since it was mapped.  UINT64_MAX when its length says nothing
+ * (0: a node that does not report one).
+ */
+static uint64_t vnode_pager_pages(const vm_vnode_pager_t *pager) {
+    uint64_t file_pages;
+    uint64_t base_page;
+
+    if (!pager->node || pager->node->length == 0) {
+        return UINT64_MAX;
+    }
+    file_pages = ((uint64_t)pager->node->length + 4095) / 4096;
+    base_page = pager->base_offset / 4096;
+    return file_pages > base_page ? file_pages - base_page : 0;
+}
 
 /* The vnode pager no longer maintains a private (node, file_pindex) page
  * cache.  Cached file pages live directly in the shared backing vm_object's
@@ -157,7 +175,9 @@ void vm_pager_device_set_dtor(vm_pager_t *pager, void (*dtor)(void *), void *arg
 
 static bool device_haspage(struct vm_pager *pager, uint64_t pindex) {
     vm_device_pager_t *device = (vm_device_pager_t *)pager;
-    return ((uintptr_t)pindex * 4096) < device->size;
+    /* in pages, 64-bit: pindex * 4096 wrapped in 32 bits, so an index of
+     * 2^20 or more passed for page 0 of any device */
+    return pindex < ((uint64_t)device->size + 4095) / 4096;
 }
 
 bool vm_pager_device_phys(vm_pager_t *pager, uint64_t pindex, uintptr_t *phys_out) {
@@ -242,10 +262,6 @@ static struct vm_pager *vnode_alloc(void *handle, size_t size, uint8_t prot, uin
     pager->base.priv = handle;
     pager->node = node;
     pager->base_offset = offset;
-    /* Derive page_limit from actual file size, not mmap size. This ensures that
-     * all mmaps of the same file share a single backing object without stale
-     * page_limit from the first (possibly smaller) mmap truncating later accesses. */
-    pager->page_limit = node ? (node->length + 4095) / 4096 : 0;
     /* Pin the node in the filesystem node cache so the slot cannot be evicted
      * and reused for a different inode while this pager holds a reference to
      * the fs_node_t pointer.  Without this, closing the fd after mmap() drops
@@ -284,16 +300,22 @@ int vnode_pager_getpages(vm_pager_t *base, vm_page_t **pages, int count, bool sy
 
         uint8_t *dst_buf = (uint8_t *)P2V(dst->phys_addr);
 
-        if (pager->page_limit && dst->pindex >= pager->page_limit) {
+        if (dst->pindex >= vnode_pager_pages(pager)) {
             for (uint32_t j = 0; j < 4096; j++) {
                 dst_buf[j] = 0;
             }
         } else {
             uint64_t file_pindex = base_page + dst->pindex;
             uint64_t offset = file_pindex * 4096;
-            uint32_t bytes = read_fs(pager->node, (int64_t)offset, 4096, dst_buf);
+            ssize_t bytes = read_fs(pager->node, (int64_t)offset, 4096, dst_buf);
+            /* an error is no page: read_fs()'s -errno, taken unsigned for
+             * a full read, left the frame's old bytes marked valid */
+            if (bytes < 0) {
+                memset(dst_buf, 0, 4096);
+                return -1;
+            }
             if (bytes < 4096) {
-                for (uint32_t j = bytes; j < 4096; j++) {
+                for (uint32_t j = (uint32_t)bytes; j < 4096; j++) {
                     dst_buf[j] = 0;
                 }
             }
@@ -318,7 +340,7 @@ int vnode_pager_putpages(vm_pager_t *base, vm_page_t **pages, int count, bool sy
         if (!src) {
             return -1;
         }
-        if (pager->page_limit && src->pindex >= pager->page_limit) {
+        if (src->pindex >= vnode_pager_pages(pager)) {
             continue;
         }
         if (!sync) {
@@ -332,7 +354,7 @@ int vnode_pager_putpages(vm_pager_t *base, vm_page_t **pages, int count, bool sy
          * last page of a file is only partially within it, and POSIX forbids
          * persisting the zero-fill tail past EOF (mmap/11-4).  Clamp the write
          * to the file length; a page wholly past EOF (already filtered by
-         * page_limit) writes nothing. */
+         * vnode_pager_pages()) writes nothing. */
         uint64_t flen = (uint64_t)pager->node->length;
         if (file_offset >= flen) {
             src->flags &= ~PG_DIRTY;
@@ -362,8 +384,7 @@ static int vnode_putpage(struct vm_pager *pager, vm_page_t *m, bool sync) {
 static bool vnode_haspage(struct vm_pager *pager, uint64_t pindex) {
     vm_vnode_pager_t *vpager = (vm_vnode_pager_t *)pager;
     if (!vpager || !vpager->node) return false;
-    if (vpager->page_limit == 0) return true;
-    return pindex < vpager->page_limit;
+    return pindex < vnode_pager_pages(vpager);
 }
 
 // Vnode pager ops

@@ -89,11 +89,12 @@ static void brk_unmap_free_pages(pmap_t pmap, uintptr_t start, uintptr_t end) {
     for (uintptr_t va = start; va < end; va += 0x1000) {
         uintptr_t pa = pmap_extract(pmap, va);
         if (pa != 0) {
-            vm_page_t *page = pmm_get_page(pa & ~0xFFFU);
+            /* ~(uintptr_t): ~0xFFFU is 32 bits, and cut a 64-bit address */
+            vm_page_t *page = pmm_get_page(pa & ~(uintptr_t)0xFFF);
             pmap_remove(pmap, va);
             if (page && page->ref_count <= 1 && page->pv_list == NULL &&
                 page->object == NULL) {
-                pmm_free_block(P2V(pa & ~0xFFFU));
+                pmm_free_block(P2V(pa & ~(uintptr_t)0xFFF));
             }
         }
     }
@@ -596,6 +597,25 @@ static void *sys_brk_locked(void *addr) {
     uintptr_t new_page_end = (new_brk + 0xFFF) & ~0xFFFULL;
 
 
+    /*
+     * The heap has no vm_map entry of its own -- its pages are mapped here
+     * directly -- so any entry in the range it would grow over is another
+     * mapping's (an mmap placed after the break): growing over it replaced
+     * that mapping's pages, and shrinking back unmapped them.  Refuse, as
+     * for any address space the heap cannot have (ENOMEM by the unchanged
+     * break).
+     */
+    if (new_page_end > old_page_end && current_process->vm_map) {
+        vm_map_t *map = current_process->vm_map;
+
+        for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
+            if (cur->start < new_page_end && cur->end > old_page_end) {
+                return (void *)(uintptr_t)old_brk;
+            }
+            if (cur->start >= new_page_end) break;
+        }
+    }
+
     if (new_page_end > old_page_end) {
         /*
          * Strict commit accounting: reserve the heap pages we are about
@@ -650,7 +670,7 @@ static void *sys_brk_locked(void *addr) {
                                  VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
                  for (int k = 0; k < batch_count; k++) {
                      uintptr_t page_va = batch_va_start + ((uintptr_t)k * 0x1000);
-                     uintptr_t mapped_pa = pmap_extract(brk_pmap, page_va) & ~0xFFFU;
+                     uintptr_t mapped_pa = pmap_extract(brk_pmap, page_va) & ~(uintptr_t)0xFFF;
                      if (mapped_pa == pa_batch[k]) {
                          pmap_remove(brk_pmap, page_va);
                      }
@@ -712,6 +732,12 @@ int sys_msync(void *addr, size_t length, int flags) {
     if (length == 0) return 0;
 
     vm_map_t *map = current_process->vm_map;
+    /* a range past user space -- addr + length wrapping among them -- is
+     * no mapping of the process's (POSIX: ENOMEM); wrapped, it was taken
+     * for an empty one and "succeeded" */
+    if (length > USER32_VA_END || (uintptr_t)addr > USER32_VA_END - length) {
+        return -ENOMEM;
+    }
     uintptr_t start = (uintptr_t)addr & ~0xFFF;
     uintptr_t end = ((uintptr_t)addr + length + 0xFFF) & ~0xFFF;
     vm_map_lock_read(map);
