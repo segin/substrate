@@ -15,6 +15,7 @@ extern bool test_zone_exhaustion(void);
 extern bool test_vm_map_init(void);
 extern bool test_vm_map_insert_and_find(void);
 extern bool test_vm_map_remove(void);
+extern bool test_vm_minherit_records(void);
 extern bool test_vm_object_lifecycle(void);
 extern bool test_vm_object_page_mgmt(void);
 extern bool test_vm_page_queue_ops(void);
@@ -227,6 +228,7 @@ test_case_t tests[] = {
     {"map_init", test_vm_map_init},
     {"map_insert", test_vm_map_insert_and_find},
     {"map_remove", test_vm_map_remove},
+    {"minherit_records", test_vm_minherit_records},
     {"object_life", test_vm_object_lifecycle},
     {"object_page", test_vm_object_page_mgmt},
     {"page_queues", test_vm_page_queue_ops},

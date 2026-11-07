@@ -37,6 +37,7 @@
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
+#include <machine/vmparam.h>
 
 /* COMPAT6 lseek (syscall 199): (fd, pad, off_lo, off_hi, whence) with alignment pad */
 int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
@@ -629,15 +630,23 @@ int sys_madvise(void *addr, size_t len, int behav) {
  * libc init (which includes anything calling __libc_setup_tls /
  * __guard_setup → secure RNG setup).
  *
- * Stub: accept any inheritance value and return 0.  We don't honor
- * INHERIT_NONE yet — fork() inherits everything via vm_map_copy().  The
- * worst-case is that an arc4random child shares its parent's seed state
- * for one fork; a future enhancement can record the inheritance flag
- * per-vm_map_entry and have vm_map_copy() honor it.
+ * The inheritance is recorded on the range's map entries
+ * (vm_map_inherit()), which vm_map_fork() honours: an INHERIT_NONE pool is
+ * not in the child, an INHERIT_ZERO one is zeros.  FreeBSD's values are
+ * the kernel's own (VM_INHERIT_*).  It was a stub that returned 0 for
+ * anything, so a child got its parent's arc4random state.
  */
 int sys_minherit(void *addr, size_t len, int inherit) {
-    (void)addr; (void)len; (void)inherit;
-    return 0;
+    uintptr_t start = (uintptr_t)addr;
+    uintptr_t end;
+
+    if (inherit < VM_INHERIT_SHARE || inherit > VM_INHERIT_ZERO) return -EINVAL;
+    if (start & 0xFFF) return -EINVAL;
+    if (len == 0) return 0;
+    if (len > USER32_VA_END || start > USER32_VA_END - len) return -EINVAL;
+    end = (start + len + 0xFFF) & ~(uintptr_t)0xFFF;
+    if (!current_process || !current_process->vm_map) return -EINVAL;
+    return vm_map_inherit(current_process->vm_map, start, end, (uint8_t)inherit) == 0 ? 0 : -EINVAL;
 }
 
 /*

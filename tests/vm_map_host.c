@@ -136,6 +136,27 @@ int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length) {
     return -1;
 }
 
+/* The last vm_map_inherit() call, for the minherit test: the kernel's
+ * splits entries; this records the request and marks whole entries. */
+uintptr_t host_inherit_start;
+uintptr_t host_inherit_end;
+int host_inherit_value = -1;
+
+int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheritance) {
+    if (inheritance > VM_INHERIT_ZERO) {
+        return -1;
+    }
+    host_inherit_start = start;
+    host_inherit_end = end;
+    host_inherit_value = inheritance;
+    for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
+        if (cur->start < end && cur->end > start) {
+            cur->inheritance = inheritance;
+        }
+    }
+    return 0;
+}
+
 int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
     vm_map_entry_t *cur, *tmp;
     vm_map_entry_t *header = map->header;

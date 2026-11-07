@@ -1420,6 +1420,12 @@ int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheri
         vm_map_unlock(map);
         return -1;
     }
+    /* the range, not the whole of every entry it touches: split them at
+     * its ends, as vm_map_protect() does */
+    if (vm_map_clip(map, start) != 0 || vm_map_clip(map, end) != 0) {
+        vm_map_unlock(map);
+        return -1;
+    }
 
     for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
         if (cur->start >= end) {

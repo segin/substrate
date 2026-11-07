@@ -221,7 +221,8 @@
 
 ## 7. Found while fixing
 
-- [ ] **[REQ-SYS-VM-006]** *(Medium — `minherit()` accepted and ignored)*
+- [x] **[REQ-SYS-VM-006]** *(Medium — `minherit()` accepted and ignored)*
+  - **Resolution (2026-11-07):** `sys_minherit()` checks the value and the range and records it with `vm_map_inherit()`, which now splits entries at the range's ends.
   - **Location:** `sys/exec/perso/compat.c` (`sys_minherit`)
   - **Finding:** the BSD personalities' `minherit()` returns 0 for any inheritance and records none, so `INHERIT_NONE` (FreeBSD's `arc4random` pool) and `INHERIT_ZERO` regions are copied into a `fork()` child; `vm_map_inherit()`, which `vm_map_fork()` honours, is never called.
   - **Requirement (Ubiquitous):**
