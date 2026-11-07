@@ -174,7 +174,8 @@
   - **Requirement (Unwanted Behavior):**
     - **If** `copyin()` or `copyout()` fails in `tty_ioctl()`, **then** the **TTY Driver** **shall** immediately return `-EFAULT` and **shall never** fall back to invoking `tty_ioctl_kern()` with an unvalidated pointer.
 
-- [ ] **[REQ-SYS-NET-001]** *(Critical — Direct User-Buffer `memcpy` Under IRQ Spinlock in `netdev_sub_recv()`)*
+- [x] **[REQ-SYS-NET-001]** *(Critical — Direct User-Buffer `memcpy` Under IRQ Spinlock in `netdev_sub_recv()`)*
+  - **Resolution (2026-11-06):** `netdev_sub_recv()` dequeues the frame into a kernel copy under `sub->lock` and copies it to the caller's buffer after releasing it.  The native callers already passed kernel bounce buffers (`sys_read()`, `recv_into_kbuf()`); the personalities' `kern_read()` of a user buffer is REQ-SYS-KERN-004.
   - **Location:** `sys/net/netdev.c:286-335` (`netdev_sub_recv`), `sys/net/af_packet.c` (`afpacket_recvfrom`)
   - **Finding:** `afpacket_recvfrom()` passes the unvalidated user pointer `buf` directly into `netdev_sub_recv()`, which executes `memcpy(buf, s->buf, copy)` while holding `sub->lock` with interrupts disabled (`spinlock_acquire_irq`). Passing a kernel address overwrites kernel memory; passing an unmapped or swapped user page triggers a page fault with interrupts disabled while holding a spinlock.
   - **Requirement (Event-Driven):**

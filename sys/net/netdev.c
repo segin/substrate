@@ -283,17 +283,36 @@ void netdev_rx(netdev_t *dev, const void *frame, size_t len) {
     spinlock_release_irq(&g_sub_lock, fl_g);
 }
 
+/*
+ * Take the oldest frame: dequeued into a kernel copy under sub->lock, and
+ * only then, the lock dropped and interrupts back on, copied to @p buf --
+ * which may take a page fault, as nothing may under a spinlock with
+ * interrupts off.
+ */
 ssize_t netdev_sub_recv(netdev_sub_t *sub, void *buf, size_t size, uint32_t *out_ifindex) {
     if (!sub) return -EINVAL;
+    uint8_t *frame = NULL;
+    if (buf && size > 0) {
+        frame = (uint8_t *)kmalloc(NETDEV_SUB_FRAME_MAX);
+        if (!frame) return -ENOMEM;
+    }
     unsigned long fl = spinlock_acquire_irq(&sub->lock);
-    if (sub->count == 0) { spinlock_release_irq(&sub->lock, fl); return 0; }
+    if (sub->count == 0) {
+        spinlock_release_irq(&sub->lock, fl);
+        if (frame) kfree(frame, NETDEV_SUB_FRAME_MAX);
+        return 0;
+    }
     netdev_frame_t *slot = &sub->ring[sub->tail];
     size_t n = slot->len < size ? slot->len : size;
-    if (buf) memcpy(buf, slot->data, n);
+    if (frame) memcpy(frame, slot->data, n);
     if (out_ifindex) *out_ifindex = slot->ifindex;
     sub->tail = (sub->tail + 1) % NETDEV_SUB_RING_FRAMES;
     sub->count--;
     spinlock_release_irq(&sub->lock, fl);
+    if (frame) {
+        memcpy(buf, frame, n);
+        kfree(frame, NETDEV_SUB_FRAME_MAX);
+    }
     return (ssize_t)n;
 }
 
