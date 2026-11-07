@@ -373,6 +373,31 @@ or
 .It Ic tabstop= , ts=
 Set tab rendering width.
 The default is 8.
+.It Ic shiftwidth= , sw=
+The step of
+.Cm >> ,
+.Cm << ,
+.Cm Ctrl-T
+and
+.Cm Ctrl-D :
+.Cm >>
+and
+.Cm <<
+shift a line's indent by it,
+.Cm Ctrl-T
+and
+.Cm Ctrl-D
+in text input to the next or previous multiple of it.
+.Cm Ctrl-D
+changes the indent only when nothing but the indent comes before the
+cursor;
+.Ql 0
+.Cm Ctrl-D
+typed after the indent removes it, and
+.Ql ^
+.Cm Ctrl-D
+removes it for the current line only.
+The default is 8.
 .It Ic scroll= , sc=
 Set the half-page scroll amount after it is explicitly configured.
 .It Ic tags=

@@ -805,7 +805,8 @@ The number is not reused.
   EXVI-01 (`exrc`), EXVI-03 (`directory`), EXVI-11 (`writeany`), EXVI-29
   (`magic`), EXVI-36 (`shell`), EXVI-67 (`shiftwidth`).  No autoprint after
   `1d`; `ta fooxx` finds no `foo` (no taglength).
-- **Basis**: reproduced.
+- **Basis**: reproduced.  All 37 are now accepted (EXVI-55); `shiftwidth`
+  has its effect since EXVI-67.
 
 ### EXVI-54 — options accepted but without effect, and wrong defaults — *Medium*
 
@@ -1002,20 +1003,22 @@ The number is not reused.
 
 ### EXVI-67 — `^D`, `0^D`, `^^D` and `^T` — *Medium*
 
-- [ ] **EXVI-67.1** (Ubiquitous) The editor's `^D` and `^T` in text input shall
+- [x] **EXVI-67.1** (Ubiquitous) The editor's `^D` and `^T` in text input shall
   shift by `shiftwidth`.
-- [ ] **EXVI-67.2** (Event-driven) When `^D` follows `0` typed at the start of
+- [x] **EXVI-67.2** (Event-driven) When `^D` follows `0` typed at the start of
   the indent, the editor shall remove the indent of the current line only.
-- [ ] **EXVI-67.3** (Event-driven) When `^D` follows `^` typed at the start of
+- [x] **EXVI-67.3** (Event-driven) When `^D` follows `^` typed at the start of
   the indent, the editor shall remove the indent of the current line and
   restore it on the next line.
-- [ ] **EXVI-67.4** (Unwanted behaviour) If `^D` is typed after text other than
+- [x] **EXVI-67.4** (Unwanted behaviour) If `^D` is typed after text other than
   the autoindent, then the editor shall not change the indent.
 
 - **Where**: `exvi_visual.c:7531`, `7618` → `vi_reindent_current_line`
   (`:1111`), which uses `tabstop`.
 - **Evidence**: `o0^Dx` with ai on `\tfoo` gives `0x`.
-- **Basis**: reproduced.
+- **Basis**: reproduced; `tests/bin/vi/test_vi_indent_keys.py`.  `>>` and
+  `<<` now step by `shiftwidth` too (EXVI-53's `shiftwidth`).  67.4 is
+  POSIX's; Vim lowers the indent after text too.
 
 ### EXVI-68 — an exclusive region ending at column 0 leaves an empty line — *Low*
 

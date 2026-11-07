@@ -109,6 +109,7 @@ typedef struct {
     int last_change_op;                 /* VI_REPEAT_OPERATOR's operator */
     /* U: the current line as it was when it became the current line */
     unsigned long u_line_id;
+    char *ai_restore;           /* after ^^D: the next line's autoindent */
     char *u_text;
     size_t u_len;
     int last_change_keys[64];           /* ... and the keys it read after the motion key */
@@ -1266,10 +1267,18 @@ vi_char_display_width_at(line_t *cur, int idx, int col)
     return vi_char_display_width(c, col);
 }
 
+/* the width of a tab in an indent vi makes */
 static int
 vi_indent_unit(void)
 {
     return (option_tabstop > 0) ? option_tabstop : 8;
+}
+
+/* the step >>, <<, ^T and ^D shift by (POSIX vi): they used tabstop */
+static int
+vi_shift_unit(void)
+{
+    return (option_shiftwidth > 0) ? option_shiftwidth : 8;
 }
 
 static int
@@ -1287,8 +1296,13 @@ vi_leading_indent_len(line_t *cur)
     return len;
 }
 
+/*
+ * The current line's indent one shiftwidth more or less: by exactly that
+ * for >> and <<, to the next or previous multiple of it for ^T and ^D
+ * (round).  The indent is made of tabs, tabstop wide, and spaces.
+ */
 static void
-vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
+vi_reindent_line(buffer_t *b, vi_visual_t *vis, int increase, int round)
 {
     line_t *cur = vi_ensure_current_line(b);
     int old_prefix_len;
@@ -1306,20 +1320,20 @@ vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
     }
     old_prefix_len = vi_leading_indent_len(cur);
     old_cols = vi_display_col_for_index(cur, old_prefix_len);
-    unit = vi_indent_unit();
+    unit = vi_shift_unit();
     if (increase) {
-        target_cols = old_cols + unit;
+        target_cols = round ? (old_cols / unit + 1) * unit : old_cols + unit;
     } else {
         if (old_cols <= 0) {
             return;
         }
-        target_cols = old_cols - unit;
+        target_cols = round ? ((old_cols - 1) / unit) * unit : old_cols - unit;
         if (target_cols < 0) {
             target_cols = 0;
         }
     }
-    new_tabs = target_cols / unit;
-    new_spaces = target_cols % unit;
+    new_tabs = target_cols / vi_indent_unit();
+    new_spaces = target_cols % vi_indent_unit();
     new_prefix_len = new_tabs + new_spaces;
     text = malloc((size_t)new_prefix_len + (cur->len - (size_t)old_prefix_len) + 1);
     if (!text) {
@@ -1362,6 +1376,62 @@ vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
     free(text);
 }
 
+/*
+ * ^D in text input (POSIX vi).  After a 0 or ^ typed just after the indent,
+ * the character and the whole indent go -- after ^, only for this line:
+ * the next line's autoindent is the indent as it was.  With nothing but
+ * the indent before the cursor, the indent goes back to the previous
+ * multiple of shiftwidth.  After other text it changes nothing.  ^D went
+ * back by tabstop, wherever it was typed, and took 0 and ^ for text.
+ */
+static void
+vi_input_ctrl_d(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    int col = vis->cursor_col;
+    int indent;
+    char *text;
+
+    if (!cur) {
+        return;
+    }
+    indent = vi_leading_indent_len(cur);
+    if (col >= 1 && col - 1 == indent && (size_t)col <= cur->len &&
+        (cur->text[col - 1] == '0' || cur->text[col - 1] == '^')) {
+        if (cur->text[col - 1] == '^') {
+            char *keep = malloc((size_t)indent + 1);
+
+            if (keep) {
+                memcpy(keep, cur->text, (size_t)indent);
+                keep[indent] = '\0';
+                free(vis->ai_restore);
+                vis->ai_restore = keep;
+            }
+        }
+        text = malloc(cur->len - (size_t)col + 1);
+        if (!text) {
+            return;
+        }
+        memcpy(text, cur->text + col, cur->len - (size_t)col + 1);
+        if (vi_replace_current_text(b, text, cur->len - (size_t)col) == 0) {
+            vis->cursor_col = 0;
+            if (vis->insert_anchor_line == cur) {
+                vis->insert_anchor_col = 0;
+            }
+            if (vis->insert_text_line == cur && vis->insert_text_col > 0) {
+                vis->insert_text_col = 0;
+            }
+            vi_mark_body_dirty_current_line(b, vis);
+        }
+        free(text);
+        return;
+    }
+    if (col > indent) {
+        return;                 /* after text: the indent stays */
+    }
+    vi_reindent_line(b, vis, 0, 1);
+}
+
 static int
 vi_shift_range(buffer_t *b, vi_visual_t *vis, int start_line_no, int end_line_no, int increase)
 {
@@ -1381,7 +1451,7 @@ vi_shift_range(buffer_t *b, vi_visual_t *vis, int start_line_no, int end_line_no
         if (!b->cur) {
             break;
         }
-        vi_reindent_current_line(b, vis, increase);
+        vi_reindent_line(b, vis, increase, 0);
     }
     b->cur = orig;
     vis->cursor_col = vi_first_nonblank_col(orig);
@@ -7031,7 +7101,14 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
         return;
     }
     start_line_no = buf_current_line(b);
-    indent = vi_autoindent_prefix(cur, &indent_len);
+    if (vis->ai_restore && option_autoindent) {
+        /* ^^D took this line's indent away for this line only */
+        indent = vis->ai_restore;
+        indent_len = strlen(indent);
+        vis->ai_restore = NULL;
+    } else {
+        indent = vi_autoindent_prefix(cur, &indent_len);
+    }
     if (!indent) {
         return;
     }
@@ -8136,7 +8213,7 @@ exvi_visual_main(buffer_t *b)
                 vi_replay_insert_text(b, &vis, vis.last_insert_text);
                 break;
             case 0x14:
-                vi_reindent_current_line(b, &vis, 1);
+                vi_reindent_line(b, &vis, 1, 1);
                 break;
             case 0x19:
                 vi_insert_adjacent_char(b, &vis, 0);
@@ -8145,7 +8222,7 @@ exvi_visual_main(buffer_t *b)
                 vi_insert_adjacent_char(b, &vis, 1);
                 break;
             case 0x04:
-                vi_reindent_current_line(b, &vis, 0);
+                vi_input_ctrl_d(b, &vis);
                 break;
             case VI_KEY_UP:
             case VI_KEY_DOWN:
@@ -8186,6 +8263,8 @@ exvi_visual_main(buffer_t *b)
                     }
                 }
                 vis.insert_count = 0;
+                free(vis.ai_restore);
+                vis.ai_restore = NULL;
                 vi_record_last_insert_site(b, &vis);
                 vis.insert_entry_key = 0;
                 vis.insert_mode = 0;
@@ -8230,7 +8309,7 @@ exvi_visual_main(buffer_t *b)
                 vi_replay_insert_text(b, &vis, vis.last_insert_text);
                 break;
             case 0x14:
-                vi_reindent_current_line(b, &vis, 1);
+                vi_reindent_line(b, &vis, 1, 1);
                 break;
             case 0x19:
                 vi_insert_adjacent_char(b, &vis, 0);
@@ -8239,7 +8318,7 @@ exvi_visual_main(buffer_t *b)
                 vi_insert_adjacent_char(b, &vis, 1);
                 break;
             case 0x04:
-                vi_reindent_current_line(b, &vis, 0);
+                vi_input_ctrl_d(b, &vis);
                 break;
             case VI_KEY_UP:
             case VI_KEY_DOWN:
@@ -9300,6 +9379,7 @@ done:
     }
     free(vis.last_insert_text);
     free(vis.u_text);
+    free(vis.ai_restore);
     vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
