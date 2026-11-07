@@ -48,6 +48,7 @@ typedef struct {
     int mark_cols[26];
     line_t **line_array;
     int line_array_cap;
+    int index_hint;             /* where buf_line_index() last found a line: a guess, checked */
 } buffer_t;
 
 /*

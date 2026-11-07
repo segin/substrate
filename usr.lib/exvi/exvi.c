@@ -307,24 +307,42 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args, int force,
     /* the command and every command it runs are one change for undo */
     exvi_begin_undo_group(b);
     exvi_in_global = 1;
-    curr = b->head;
-    while (curr) {
-        if (curr->global_mark) {
+    {
+        /*
+         * After each command, on from the same line number -- the line
+         * there now, the next one if the command deleted this -- never
+         * through curr->next, which the command may have freed.  It went
+         * back to the top after each, which made :g quadratic (a 25,000-
+         * line g/./d ran for minutes).  A command can move a marked line
+         * above that point: one more pass from the top finds any left.
+         */
+        int line_no = 1;
+        int wrapped = 0;
+
+        curr = b->head;
+        for (;;) {
+            while (curr && !curr->global_mark) {
+                curr = curr->next;
+                line_no++;
+            }
+            if (!curr) {
+                if (wrapped) {
+                    break;
+                }
+                wrapped = 1;
+                curr = b->head;
+                line_no = 1;
+                continue;
+            }
+            wrapped = 0;
             curr->global_mark = 0;
             b->cur = curr;
             run_global_list(b, exec_cmd);
             if (exvi_exit_requested || exvi_visual_requested || exvi_interrupted) {
                 break;
             }
-            /*
-             * The executed command may have freed curr->next (e.g. a delete
-             * touching lines past curr).  Restart from the top to avoid
-             * dereferencing a dangling pointer; unexecuted marks are still set.
-             */
-            curr = b->head;
-            continue;
+            curr = line_no <= b->line_count ? buf_get_line(b, line_no) : NULL;
         }
-        curr = curr->next;
     }
     exvi_in_global = 0;
     exvi_end_undo_group();
