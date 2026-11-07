@@ -157,6 +157,8 @@ static int vi_clamp_top_line(buffer_t *b, vi_visual_t *vis, int top_line);
 static int vi_compare_positions(buffer_t *b, line_t *left, int left_col, line_t *right,
     int right_col);
 static void vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch);
+static int vi_insert_repeated(buffer_t *b, vi_visual_t *vis, const char *unit,
+    size_t unit_len, size_t times);
 static void vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch);
 static void vi_replace_insert_bytes(buffer_t *b, vi_visual_t *vis, const char *bytes, int n);
 static int vi_utf8_decode_text_at(const char *text, size_t len, int idx, unsigned int *cp_out);
@@ -440,7 +442,12 @@ vi_replay_insert_text(buffer_t *b, vi_visual_t *vis, const char *text)
             p += n;
             continue;
         } else {
-            vi_insert_char(b, vis, *p);
+            /* the run up to the next newline, at once */
+            size_t n = strcspn((const char *)p, "\n");
+
+            (void)vi_insert_repeated(b, vis, (const char *)p, n, 1);
+            p += n;
+            continue;
         }
         p++;
     }
@@ -7102,32 +7109,75 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     }
 }
 
-static void
-vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
+/*
+ * @p unit, @p times over, at the cursor, which ends after it: the line is
+ * built once, so n characters cost time linear in n.  Inserting them one
+ * at a time copied the line for each, so 1000000. after ix<ESC> took 80 s
+ * and twice that more than 300 s.  ^C stops the filling, keeping the whole
+ * repeats made.  0, or -1 with nothing inserted when there is no memory or
+ * the line would pass INT_MAX bytes.
+ */
+static int
+vi_insert_repeated(buffer_t *b, vi_visual_t *vis, const char *unit, size_t unit_len,
+    size_t times)
 {
     line_t *cur = vi_ensure_current_line(b);
+    size_t col;
+    size_t total;
+    size_t filled;
     char *text;
 
-    if (!cur) {
-        return;
+    if (!cur || unit_len == 0 || times == 0) {
+        return cur ? 0 : -1;
     }
-    text = malloc(cur->len + 2);
+    col = (size_t)vis->cursor_col;
+    if (cur->len >= INT_MAX || times > (INT_MAX - cur->len) / unit_len) {
+        return -1;
+    }
+    total = unit_len * times;
+    text = malloc(cur->len + total + 1);
     if (!text) {
-        return;
+        return -1;
     }
-    memcpy(text, cur->text, (size_t)vis->cursor_col);
-    text[vis->cursor_col] = (char)ch;
-    memcpy(text + vis->cursor_col + 1, cur->text + vis->cursor_col,
-        cur->len - (size_t)vis->cursor_col + 1);
-    if (vi_replace_current_text(b, text, cur->len + 1) == 0) {
+    memcpy(text, cur->text, col);
+    memcpy(text + col, unit, unit_len);
+    filled = unit_len;
+    while (filled < total && !exvi_interrupted) {
+        /* copying what is there doubles it: a megabyte at most between
+         * looks at ^C */
+        size_t n = filled;
+
+        if (n > total - filled) {
+            n = total - filled;
+        }
+        if (n > ((size_t)1 << 20) && unit_len < ((size_t)1 << 20)) {
+            n = ((size_t)1 << 20) / unit_len * unit_len;
+        } else if (n > ((size_t)1 << 20)) {
+            n = unit_len;
+        }
+        memcpy(text + col + filled, text + col, n);
+        filled += n;
+    }
+    filled -= filled % unit_len;
+    memcpy(text + col + filled, cur->text + col, cur->len - col + 1);
+    if (vi_replace_current_text(b, text, cur->len + filled) == 0) {
         if (b->empty_origin && b->line_count == 1 && b->head == cur
                 && b->tail == cur && cur->len > 0) {
             b->trailing_newline = 1;
         }
-        vis->cursor_col++;
+        vis->cursor_col += (int)filled;
         vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
+    return 0;
+}
+
+static void
+vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
+{
+    char c = (char)ch;
+
+    (void)vi_insert_repeated(b, vis, &c, 1, 1);
 }
 
 /*
@@ -7983,6 +8033,13 @@ static void
 vi_repeat_insert_text(buffer_t *b, vi_visual_t *vis, int entry_key, int times)
 {
     if (!vis->last_insert_text || vis->last_insert_text[0] == '\0') {
+        return;
+    }
+    if (times > 0 && entry_key != 'o' && entry_key != 'O' && !vis->replace_mode &&
+        !strchr(vis->last_insert_text, '\n') &&
+        vi_insert_repeated(b, vis, vis->last_insert_text,
+            strlen(vis->last_insert_text), (size_t)times) == 0) {
+        /* one line, built once */
         return;
     }
     while (times-- > 0 && !exvi_interrupted) {

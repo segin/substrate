@@ -4,8 +4,12 @@
 yy8000p took one copy of the buffer per put, ran for 40 s and was 8000
 changes for u; 999999999^E scrolled the whole count, for seconds; and with
 ISIG off ^C reached vi only as a key after the command, so nothing could
-stop a long one (999999999. after ix<ESC> ran until killed).  Each session
-here must finish well within its timeout.
+stop a long one (999999999. after ix<ESC> ran until killed).  And a counted
+text input, or . repeating one, put its text in a character at a time,
+copying the line for each: 1000000. after ix<ESC> took 80 s, 2000000.
+more than 300.  Each session here must finish well within its timeout.
+(999999999. after ix<ESC> now finishes before a ^C reaches it, so the ^C
+case repeats an o, a line at a time.)
 
 Usage: test_vi_large_counts.py path/to/vi
 """
@@ -28,8 +32,17 @@ CASES = [
      lambda s: s == "a\nb\nc\n"),
     ("999999999^Y", "a\nb\nc\n", [b"G999999999\x19"], b":wq\r",
      lambda s: s == "a\nb\nc\n"),
-    ("^C stops a long .", "a\n", [b"ix\x1b", b"999999999.", b"\x03"], b":q!\r",
+    # a line each: still long enough for ^C to arrive while it runs
+    ("^C stops a long .", "a\n", [b"ox\x1b", b"999999999.", b"\x03"], b":q!\r",
      lambda s: s == "a\n"),
+    ("2000000. after ix<ESC>", "a\n", [b"ix\x1b", b"2000000."], b":wq\r",
+     lambda s: s == "x" * 2000001 + "a\n"),
+    ("2000000ixy<ESC>", "a\n", [b"2000000ixy\x1b"], b":wq\r",
+     lambda s: s == "xy" * 2000000 + "a\n"),
+    ("1000000a after a line's end", "ab\n", [b"$1000000az\x1b"], b":wq\r",
+     lambda s: s == "ab" + "z" * 1000000 + "\n"),
+    ("u after 2000000. is one change", "a\n", [b"ix\x1b", b"2000000.", b"u"],
+     b":wq\r", lambda s: s == "xa\n"),
 ]
 
 
