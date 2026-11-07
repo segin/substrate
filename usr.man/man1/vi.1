@@ -380,7 +380,16 @@ or search prompt.
 .Dv SIGHUP
 and
 .Dv SIGTERM
-preserve a modified buffer and end the session.
+preserve a modified buffer and end the session, restoring the terminal.
+.Pp
+.Ql Ctrl-Z
+in command mode restores the terminal and stops
+.Nm
+with
+.Dv SIGTSTP ;
+on
+.Dv SIGCONT
+it takes the terminal back and redraws the screen.
 .Sh EXIT STATUS
 The
 .Nm

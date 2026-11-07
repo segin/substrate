@@ -1045,6 +1045,7 @@ handle_sigint(int sig)
 int
 exvi_take_interrupt(void)
 {
+    exvi_check_terminate();
     if (!exvi_interrupted) {
         return 0;
     }
@@ -1097,12 +1098,41 @@ recover_signal_save(buffer_t *b)
     close(fd);
 }
 
+/* SIGTERM or SIGHUP has arrived: the editor saves and exits at its next
+ * check (exvi_check_terminate()). */
+static volatile sig_atomic_t exvi_terminate_pending;
+
+/*
+ * The handler only notes the signal.  It used to save the buffer here,
+ * walking line lists the interrupted code might have been halfway through
+ * changing, and _exit() past the terminal restore -- leaving the tty raw on
+ * the alternate screen.  A second signal before the editor has got to a
+ * check means it is stuck: that one exits at once.
+ */
 void
 handle_sigterm(int sig)
 {
     (void)sig;
+    if (exvi_terminate_pending) {
+        _exit(1);
+    }
+    exvi_terminate_pending = 1;
+}
+
+/**
+ * If SIGTERM or SIGHUP has arrived, preserve a modified buffer and exit,
+ * through exit() so the terminal is restored (vi's atexit handler).
+ * Called where the editor waits for input and where it checks for SIGINT:
+ * at those points no buffer change is half made.
+ */
+void
+exvi_check_terminate(void)
+{
+    if (!exvi_terminate_pending) {
+        return;
+    }
     recover_signal_save(global_buf_for_sighandler);
-    _exit(1);
+    exit(1);
 }
 
 void

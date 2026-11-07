@@ -847,6 +847,40 @@ vi_handle_winch(int sig)
     vi_resize_pending = 1;
 }
 
+/* Continued after a stop: whoever had the terminal meanwhile -- the shell --
+ * left it cooked and off the alternate screen.  The read loop puts vi's mode
+ * back and redraws (vi_read_visual_key()). */
+static volatile sig_atomic_t vi_cont_pending = 0;
+
+static void
+vi_handle_cont(int sig)
+{
+    (void)sig;
+    vi_cont_pending = 1;
+    vi_resize_pending = 1;
+}
+
+/*
+ * ^Z: give the terminal back as it was and stop, as the shell's job control
+ * expects; vi_handle_cont() brings vi back.  With ISIG off the key arrives
+ * as a byte, so the stop is vi's to make.
+ */
+static void
+vi_suspend(void)
+{
+    struct sigaction dfl;
+    struct sigaction old;
+
+    exvi_visual_shell_suspend();
+    fflush(stdout);
+    memset(&dfl, 0, sizeof(dfl));
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(SIGTSTP, &dfl, &old);
+    raise(SIGTSTP);
+    sigaction(SIGTSTP, &old, NULL);
+}
+
 static int
 vi_enable_raw(vi_visual_t *vis)
 {
@@ -1907,6 +1941,11 @@ vi_read_key(void)
         if (exvi_take_interrupt()) {
             return '\x1b';
         }
+        /* before the read too: a SIGCONT is delivered as the process
+         * resumes, before it reads, and does not interrupt the read */
+        if (vi_resize_pending) {
+            return VI_KEY_RESIZE;
+        }
         n = read(STDIN_FILENO, &c, 1);
         if (n == 1) {
             break;
@@ -1961,6 +2000,12 @@ vi_read_visual_key(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char
             return key;
         }
         vi_resize_pending = 0;
+        if (vi_cont_pending) {
+            vi_cont_pending = 0;
+            exvi_visual_shell_resume();     /* raw again, alternate screen */
+            vis->clear_screen = 1;
+            vis->screen_dirty = 1;
+        }
         vi_render(b, vis, prompt_prefix, prompt);
     }
 }
@@ -7610,7 +7655,9 @@ exvi_visual_main(buffer_t *b)
     vi_visual_t vis;
     struct sigaction sa;
     struct sigaction old_winch;
+    struct sigaction old_cont;
     int have_winch = 0;
+    int have_cont = 0;
     int key;
     int resume_insert_mode = 0;
     int resume_replace_mode = 0;
@@ -7636,7 +7683,12 @@ exvi_visual_main(buffer_t *b)
     if (sigaction(SIGWINCH, &sa, &old_winch) == 0) {
         have_winch = 1;
     }
+    sa.sa_handler = vi_handle_cont;
+    if (sigaction(SIGCONT, &sa, &old_cont) == 0) {
+        have_cont = 1;
+    }
     vi_resize_pending = 0;
+    vi_cont_pending = 0;
 
     for (;;) {
         line_t *cur;
@@ -8713,6 +8765,11 @@ process_normal_key:
             vis.screen_dirty = 1;
             vis.clear_screen = 1;
             break;
+        case 0x1a:              /* ^Z */
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            vi_suspend();
+            break;
         case 0x02:
             vis.pending_g = 0;
             vis.screen_dirty = 0;
@@ -8818,6 +8875,9 @@ done:
     if (have_winch) {
         sigaction(SIGWINCH, &old_winch, NULL);
     }
+    if (have_cont) {
+        sigaction(SIGCONT, &old_cont, NULL);
+    }
     free(vis.last_insert_text);
     vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
@@ -8828,6 +8888,9 @@ done:
 ex_mode:
     if (have_winch) {
         sigaction(SIGWINCH, &old_winch, NULL);
+    }
+    if (have_cont) {
+        sigaction(SIGCONT, &old_cont, NULL);
     }
     vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);

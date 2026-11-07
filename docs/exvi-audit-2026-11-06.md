@@ -386,9 +386,10 @@ The number is not reused.
 
 ### EXVI-23 — the SIGINT handler `longjmp`s, so SIGINT stays blocked and state is left half-changed — *High*
 
-- [ ] **EXVI-23.1** (Ubiquitous) The editor's signal handlers shall call only
+- [x] **EXVI-23.1** (Ubiquitous) The editor's signal handlers shall call only
   async-signal-safe functions.  (SIGINT's handler only sets a flag now;
-  SIGTERM/SIGHUP's still walks the buffer — EXVI-03, EXVI-24.)
+  SIGTERM/SIGHUP's does too, and the editor preserves and exits at its next
+  check -- EXVI-24.)
 - [x] **EXVI-23.2** (Event-driven) When an interrupted command has stopped, the
   editor shall accept further SIGINTs.
 - [x] **EXVI-23.3** (Event-driven) When a command is interrupted, the editor
@@ -407,11 +408,11 @@ The number is not reused.
 
 ### EXVI-24 — SIGTERM and SIGHUP leave the terminal raw; `^Z` does nothing — *Medium*
 
-- [ ] **EXVI-24.1** (Event-driven) When the editor exits on SIGTERM or SIGHUP,
+- [x] **EXVI-24.1** (Event-driven) When the editor exits on SIGTERM or SIGHUP,
   it shall restore the terminal's settings and screen.
-- [ ] **EXVI-24.2** (Event-driven) When `^Z` is typed in vi command mode, the
+- [x] **EXVI-24.2** (Event-driven) When `^Z` is typed in vi command mode, the
   editor shall restore the terminal and stop itself with SIGTSTP.
-- [ ] **EXVI-24.3** (Event-driven) When the editor receives SIGCONT, it shall
+- [x] **EXVI-24.3** (Event-driven) When the editor receives SIGCONT, it shall
   restore vi's terminal mode and redraw the screen.
 
 - **Where**: `exvi_runtime.c:609-614` calls `_exit(1)`, skipping the

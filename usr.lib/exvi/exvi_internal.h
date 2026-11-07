@@ -204,6 +204,9 @@ void handle_sigint(int sig);
 int exvi_take_interrupt(void);
 void exvi_catch_signal(int sig, void (*fn)(int));
 void handle_sigterm(int sig);
+/* Preserve and exit if SIGTERM/SIGHUP has arrived (handle_sigterm() only
+ * notes it). */
+void exvi_check_terminate(void);
 int handle_pop_command(buffer_t *b, int force);
 int handle_tag_command(buffer_t *b, const char *args);
 int handle_tags_command(buffer_t *b);
