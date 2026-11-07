@@ -100,24 +100,8 @@ static void brk_unmap_free_pages(pmap_t pmap, uintptr_t start, uintptr_t end) {
     }
 }
 
-/*
- * Backing-object cache key.  It MUST be a stable file identity, not the
- * fs_node_t pointer: ext2 (and other filesystems) hand back freshly
- * allocated / cache-recycled fs_node_t instances on each open, so keying on
- * the pointer makes every process miss the cache and build its own private
- * backing object -- which is why each program got a private physical copy of
- * every shared library (≈10 MB per xterm).  (mount, inode) is stable across
- * opens and unique across mounts, so two processes mapping the same file now
- * share one backing object and therefore the same read-only physical pages.
- */
-typedef struct shared_file_object_entry {
-    struct mount *mp;
-    uint64_t inode;
-    uint64_t page_offset;
-    vm_object_t *object;
-    struct shared_file_object_entry *next;
-} shared_file_object_entry_t;
-
+/* The backing-object cache; its entry, and why it is keyed as it is, are in
+ * vm_object.h. */
 static shared_file_object_entry_t *shared_file_objects;
 static spinlock_t shared_file_objects_lock = SPINLOCK_INIT("mmap_shared_fileobj");
 

@@ -7,12 +7,6 @@
 #include <vm/vm_kmem.h>
 #include <vm/vm_pager.h>
 
-typedef struct vm_vnode_pager {
-    vm_pager_t base;
-    fs_node_t *node;
-    uint64_t base_offset;
-} vm_vnode_pager_t;
-
 /*
  * How many of the object's pages the file has: those from the mapping's
  * offset to the file's end, as long as the file is NOW -- it may have grown
@@ -46,20 +40,6 @@ uint64_t vnode_pager_cached_pages(void) {
      * for ABI compatibility with the kernel symbol table. */
     return 0;
 }
-
-typedef struct vm_device_pager {
-    vm_pager_t base;
-    uintptr_t phys_base;
-    size_t size;
-    uint64_t valid_pages;  /* in-object pages; a fault at pindex >= this SIGBUSes
-                            * (POSIX mmap-past-object-end).  (uint64_t)-1 == no
-                            * limit (default: MMIO aperture / framebuffer / SysV
-                            * shm).  A real limit of 0 means "all SIGBUS". */
-    uint8_t prot;
-    uint8_t cache_mode;   /* VM_PAGER_CACHE_UC (default) or _WC */
-    void (*dtor)(void *arg);  /* last-unmap callback (shmfs frame release) */
-    void *dtor_arg;
-} vm_device_pager_t;
 
 vm_pager_t *vm_pager_allocate(vm_object_type_t type, void *handle, size_t size, uint8_t prot, uint64_t offset) {
     vm_pager_t *pager = kmalloc(sizeof(vm_pager_t));

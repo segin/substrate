@@ -22,6 +22,31 @@ typedef struct vm_pager {
     void *priv;         // Private data (e.g. vnode pointer, swap block list)
 } vm_pager_t;
 
+struct fs_node;
+
+/* A vnode pager: a mapped file, from base_offset on (vm_pager.c). */
+typedef struct vm_vnode_pager {
+    vm_pager_t base;
+    struct fs_node *node;
+    uint64_t base_offset;
+} vm_vnode_pager_t;
+
+/* A device pager: physical memory -- an MMIO aperture, a framebuffer,
+ * SysV shm frames -- mapped as it is (vm_pager.c). */
+typedef struct vm_device_pager {
+    vm_pager_t base;
+    uintptr_t phys_base;
+    size_t size;
+    uint64_t valid_pages;  /* in-object pages; a fault at pindex >= this SIGBUSes
+                            * (POSIX mmap-past-object-end).  (uint64_t)-1 == no
+                            * limit (default: MMIO aperture / framebuffer / SysV
+                            * shm).  A real limit of 0 means "all SIGBUS". */
+    uint8_t prot;
+    uint8_t cache_mode;   /* VM_PAGER_CACHE_UC (default) or _WC */
+    void (*dtor)(void *arg);  /* last-unmap callback (shmfs frame release) */
+    void *dtor_arg;
+} vm_device_pager_t;
+
 // Supported Pager Types
 extern vm_pager_ops_t swap_pager_ops;
 extern vm_pager_ops_t vnode_pager_ops;
@@ -65,9 +90,7 @@ int vnode_pager_getpages(vm_pager_t *pager, vm_page_t **pages, int count, bool s
 int vnode_pager_putpages(vm_pager_t *pager, vm_page_t **pages, int count, bool sync);
 uint64_t vnode_pager_cached_pages(void);
 
-// Swap management
-int vm_swapon(void *node);
-int vm_swapoff(void);
+/* Swap management (vm_swapon(), vm_swapoff()) is declared in vm_swap.h. */
 
 extern unsigned long vm_pager_vnode_alloc_count;
 extern unsigned long vm_pager_vnode_dealloc_count;

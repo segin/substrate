@@ -75,6 +75,26 @@ int  vm_object_try_reference(vm_object_t *object);
  */
 void vm_syscalls_evict_shared_obj(vm_object_t *object);
 
+/*
+ * An entry of that cache (vm_syscalls.c).  Its key MUST be a stable file
+ * identity, not the fs_node_t pointer: ext2 (and other filesystems) hand
+ * back freshly allocated / cache-recycled fs_node_t instances on each open,
+ * so keying on the pointer makes every process miss the cache and build its
+ * own private backing object -- which is why each program got a private
+ * physical copy of every shared library (≈10 MB per xterm).  (mount, inode)
+ * is stable across opens and unique across mounts, so two processes mapping
+ * the same file share one backing object and therefore the same read-only
+ * physical pages.
+ */
+struct mount;
+typedef struct shared_file_object_entry {
+    struct mount *mp;
+    uint64_t inode;
+    uint64_t page_offset;
+    vm_object_t *object;
+    struct shared_file_object_entry *next;
+} shared_file_object_entry_t;
+
 vm_object_t *vm_object_shadow(vm_object_t *source);
 int vm_object_collapse(vm_object_t *object);
 

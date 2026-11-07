@@ -219,7 +219,8 @@
 
 - **Rule 2 (`extern` in `.c` files):** **PASS** (0 manual `extern` declarations across all non-generated `.c` files in `sys/`).
 - **Rule 3 (Relative `#include "..."` paths):** **PASS** (0 relative `#include "..."` directives across all `.c` and `.h` files in `sys/`).
-- [ ] **[REQ-SYS-STYLE-001]** *(Low — Rule 4: Internal Structs, Typedefs & Constants Defined in `.c` Files)*
+- [x] **[REQ-SYS-STYLE-001]** *(Low — Rule 4: Internal Structs, Typedefs & Constants Defined in `.c` Files)*
+  - **Resolution (2026-11-07):** `vm_vnode_pager_t`/`vm_device_pager_t` moved to `vm_pager.h`, `shared_file_object_entry_t` to `vm_object.h`, and `afi_sock_t` with its `AFI_*` limits to the new `<net/af_inet_var.h>`; `vm_swapon()`/`vm_swapoff()` are declared once, in `vm_swap.h` (the two copies were identical, and nothing calls either).
   - **Location:** `sys/vm/vm_pager.c:39-90`, `sys/vm/vm_syscalls.c:129-135`, `sys/vm/vm_swap.h:15-16` vs `sys/vm/vm_pager.h:56-57`, `sys/net/af_inet.c`
   - **Finding:** Several subsystems define module-internal structs, typedefs, and macros directly inside `.c` implementation files rather than companion `.h` headers (e.g., `vnode_pager_t` / `swap_pager_t` in `sys/vm/vm_pager.c`, `shared_file_obj_entry_t` in `sys/vm/vm_syscalls.c`, `afi_sock_t` in `sys/net/af_inet.c`, and duplicate conflicting prototypes for `vm_swapon`/`vm_swapoff` between `sys/vm/vm_swap.h` and `sys/vm/vm_pager.h`).
   - **Requirement (Ubiquitous):**
