@@ -84,6 +84,8 @@ uint32_t pmm_get_free_memory(void) { return g_free_ram_bytes; }
 static uint8_t g_store[MOCK_STORE_SIZE];
 static int g_strategy_calls;
 static int g_strategy_should_fail;
+static int g_strategy_fail_limit;   /* nonzero: abort past this many failed writes */
+static int g_strategy_failures;
 
 static int mock_strategy(struct vnode *vp, void *bpv)
 {
@@ -94,6 +96,10 @@ static int mock_strategy(struct vnode *vp, void *bpv)
     g_strategy_calls++;
 
     if (g_strategy_should_fail) {
+        if (g_strategy_fail_limit && ++g_strategy_failures > g_strategy_fail_limit) {
+            fprintf(stderr, "bufsync kept retrying a failing write\n");
+            abort();
+        }
         bp->b_error = EIO;
         bp->b_flags |= B_ERROR;
         biodone(bp);
@@ -346,6 +352,36 @@ static bool test_bufsync_flushes_delwri(void)
     bool data_ok = (store_blk[0] == 0xEE && store_blk[511] == 0xEE);
 
     return flushed && data_ok;
+}
+
+/*
+ * A device that keeps failing writes: bufsync() makes one pass over the
+ * buffers dirty when it starts and reports EIO, the buffers left dirty to be
+ * retried.  A failed write puts its buffer back on BQ_DIRTY, and bufsync()
+ * took the queue's head until it was empty -- forever.  (Past 1000 failed
+ * writes this gives up: the old loop.)
+ */
+static bool test_bufsync_bounded_on_write_errors(void)
+{
+    struct buf *bp;
+
+    reset_state();
+    for (int blk = 7; blk <= 8; blk++) {
+        if (bread(&g_vnode, blk, 512, NULL, &bp) != 0) return false;
+        memset(bp->b_data, 0x77, 512);
+        bdwrite(bp);
+    }
+    g_strategy_should_fail = 1;
+    g_strategy_fail_limit = 1000;
+    int calls_before = g_strategy_calls;
+    int err = bufsync(0);
+    int calls = g_strategy_calls - calls_before;
+    g_strategy_fail_limit = 0;
+    g_strategy_should_fail = 0;
+
+    bp = incore(&g_vnode, 7);
+    bool still_dirty = bp && (bp->b_flags & B_DELWRI);
+    return err == EIO && calls == 2 && still_dirty;
 }
 
 static bool test_incore_returns_null_for_uncached(void)
@@ -661,6 +697,7 @@ int main(void)
     /* REQ-04-0194 */
     RUN(test_bdwrite_marks_delwri);
     RUN(test_bufsync_flushes_delwri);
+    RUN(test_bufsync_bounded_on_write_errors);
     RUN(test_incore_returns_null_for_uncached);
 
     /* Device-keyed API */

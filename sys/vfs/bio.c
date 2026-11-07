@@ -696,7 +696,20 @@ bufsync(int freq)
 
     sync_error = 0;
 
-    while (1) {
+    /*
+     * One pass over the buffers dirty when it starts: a write that fails
+     * puts its buffer back on BQ_DIRTY (bwrite(), so it is retried, not
+     * lost), and taking the queue's head until it was empty spun forever on
+     * a device that kept failing.
+     */
+    unsigned int pending = 0;
+    spinlock_acquire(&bio_lock);
+    TAILQ_FOREACH(bp, &bio_queues[BQ_DIRTY], b_freelist) {
+        pending++;
+    }
+    spinlock_release(&bio_lock);
+
+    while (pending-- > 0) {
         spinlock_acquire(&bio_lock);
         bp = TAILQ_FIRST(&bio_queues[BQ_DIRTY]);
         if (!bp) {

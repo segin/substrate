@@ -1389,8 +1389,12 @@ int sys_truncate(const char *path, uint32_t lo, uint32_t hi) {
     char kpath[256];
     COPYIN_STR(path, kpath);
 
-    fs_node_t *node = vfs_lookup(current_process->root_node ? current_process->root_node : fs_root, kpath);
-    if (!node) return -2; // ENOENT
+    /* a relative path from the current directory, as every path syscall */
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
+    fs_node_t *base = (kpath[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup(base, kpath);
+    if (!node) return vfs_lookup_error(base, kpath);
 
     int ret = kern_truncate_node(node, ((off_t)hi << 32) | lo);
     vfs_rele(node);
@@ -2592,6 +2596,23 @@ static int kern_utimens_apply(fs_node_t *node, const struct timespec *kts) {
             a.mtime_nsec = (uint32_t)kts[1].tv_nsec;
         }
         if (a.mask == 0) return 0;   /* both omitted = no-op */
+    }
+
+    /*
+     * POSIX: setting either time to a value of the caller's choosing takes
+     * the file's owner or privilege (EPERM); setting them to now -- times
+     * NULL, or UTIME_NOW -- the owner, privilege or write permission
+     * (EACCES).  Nothing was checked: anyone could change any file's times.
+     */
+    if (current_process && current_process->euid != 0 &&
+        current_process->euid != node->uid) {
+        if (a.mask & (FS_ATTR_ATIME | FS_ATTR_MTIME)) return -EPERM;
+        if (vfs_check_permissions_groups(node, current_process->euid,
+                                         current_process->egid,
+                                         current_process->supp_groups,
+                                         current_process->n_supp_groups,
+                                         W_OK) != 0)
+            return -EACCES;
     }
     return setattr_fs(node, &a);
 }

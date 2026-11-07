@@ -154,7 +154,8 @@
   - **Requirement (State-Driven):**
     - **While** a `struct vnode` or `struct mount` (`mnt_node_covered`) references an `fs_node_t`, the **VFS Layer** **shall** retain a `vfs_hold()` reference until the `vnode` is reclaimed or the filesystem is unmounted.
 
-- [ ] **[REQ-SYS-VFS-002]** *(High — Missing Permission Check in `kern_utimensat()`, Relative Path Bug in `sys_truncate()`, and `bufsync()` Retry Spin)*
+- [x] **[REQ-SYS-VFS-002]** *(High — Missing Permission Check in `kern_utimensat()`, Relative Path Bug in `sys_truncate()`, and `bufsync()` Retry Spin)*
+  - **Resolution (2026-11-06):** `kern_utimens_apply()` takes POSIX's rules (a chosen time: owner or root, else `EPERM`; now: owner, root or write permission, else `EACCES`); `sys_truncate()` resolves a relative path from the current directory; `bufsync()` makes one pass over the buffers dirty when it starts.
   - **Location:** `sys/vfs/vfs.c:2790-2860` (`kern_utimensat`), `sys/vfs/vfs.c:2440-2490` (`sys_truncate`), `sys/vfs/bio.c:581-618` (`bwrite`), `sys/vfs/bio.c:690-719` (`bufsync`)
   - **Finding:**
     1. `kern_utimensat()` updates file timestamps via `setattr_fs()` without verifying that `current_process->euid == 0`, `current_process->euid == node->uid`, or (when `times == NULL` / `UTIME_NOW`) the caller has write permission on the file.

@@ -70,6 +70,20 @@ int main(void) {
     check(!(r & 2), "uid 1000 truncating its own file: allowed");
     check(!(r & 4), "truncating a directory: EISDIR");
 
+    /* a relative path is the current directory's: sys_truncate() looked it
+     * up from the root, so "rel" in /tmp truncated (or missed) /rel */
+    if (chdir("/tmp") == 0) {
+        int rfd = open("truncperm.rel", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        check(rfd >= 0 && write(rfd, "relative\n", 9) == 9, "make /tmp/truncperm.rel");
+        if (rfd >= 0) close(rfd);
+        check(truncate("truncperm.rel", 3) == 0 && size_of("/tmp/truncperm.rel") == 3,
+              "truncate(\"truncperm.rel\") in /tmp truncates /tmp/truncperm.rel");
+        unlink("/tmp/truncperm.rel");
+        chdir("/");
+    } else {
+        check(0, "chdir /tmp");
+    }
+
     unlink(rootf);
     rmdir(dir);
     printf("%s\n", failed ? "truncperm: FAIL" : "truncperm: PASS");
