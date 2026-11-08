@@ -784,19 +784,6 @@ static int rust_parse_v0_const(rust_parser_t *p) {
 	p->out.len = value_off;
 	p->out.data[p->out.len] = '\0';
 
-	if((p->cur[0] == '0' || p->cur[0] == '1') && p->cur[1] == '_') {
-		int is_true = (p->cur[0] == '1');
-		p->cur += 2;
-		return demangle_buf_append(&p->out, is_true ? "true" : "false", is_true ? 4u : 5u);
-	}
-
-	if(p->cur[0] == 'n') {
-		if(demangle_buf_appendc(&p->out, '-') != 0) {
-			return -1;
-		}
-		p->cur++;
-	}
-
 	if(rust_parse_v0_const_int(p, type_tag) != 0) {
 		rust_mark_restore(p, &m);
 		return -1;
@@ -805,58 +792,92 @@ static int rust_parse_v0_const(rust_parser_t *p) {
 	return 0;
 }
 
+/*
+ * <const-data> = ["n"] {<hex-digit>} "_", read as its type says, and
+ * printed as GNU c++filt prints it: an integer in decimal (in hex, 0x...,
+ * only past 64 bits), signed ones alone taking the n; a bool true or false
+ * from 1 or 0; a char quoted, with \t \r \n escaped, the rest of printable
+ * ASCII as it is (' and \ too, as GNU has them), and anything else as
+ * \u{e9}.  This printed every integer in
+ * hex, [u8; 0x5]; took 0_ and 1_ for false and true whatever the type,
+ * so a usize 0 was false; let any type be negative; and escaped chars
+ * its own way.
+ */
 static int rust_parse_v0_const_int(rust_parser_t *p, char type_tag) {
-	if(!is_hex_char(p->cur[0])) {
+	const char *digits;
+	size_t digits_len;
+	uint64_t v = 0u;
+	int negative = 0;
+	int wide = 0;
+	int is_signed = (strchr("aslxni", type_tag) != NULL);
+
+	if(type_tag == '\0' || strchr("bchtmyojaslxni", type_tag) == NULL) {
 		return -1;
 	}
-
-	{
-		const char *digits = p->cur;
-		size_t digits_len = 0u;
-		unsigned long cp = 0ul;
-		int overflow = 0;
-
-		while(is_hex_char(p->cur[0])) {
-			unsigned v;
-			if(p->cur[0] >= '0' && p->cur[0] <= '9') {
-				v = (unsigned)(p->cur[0] - '0');
-			} else if(p->cur[0] >= 'a' && p->cur[0] <= 'f') {
-				v = 10u + (unsigned)(p->cur[0] - 'a');
-			} else {
-				v = 10u + (unsigned)(p->cur[0] - 'A');
-			}
-
-			if(!overflow) {
-				if(cp > (ULONG_MAX - v) / 16ul) {
-					overflow = 1;
-				} else {
-					cp = cp * 16ul + (unsigned long)v;
-				}
-			}
-
-			p->cur++;
-			digits_len++;
-		}
-
-		if(type_tag == 'c' && !overflow && cp <= 0x10FFFFul) {
-			if(cp >= 0x20ul && cp < 0x7Ful && cp != '\'' && cp != '\\') {
-				if(demangle_buf_appendc(&p->out, '\'') != 0 || demangle_buf_appendc(&p->out, (char)cp) != 0 || demangle_buf_appendc(&p->out, '\'') != 0) {
-					return -1;
-				}
-			} else if(demangle_buf_append(&p->out, "'\\u{", 4u) != 0 || demangle_buf_append(&p->out, digits, digits_len) != 0 ||
-			          demangle_buf_append(&p->out, "}'", 2u) != 0) {
-				return -1;
-			}
-		} else if(demangle_buf_append(&p->out, "0x", 2u) != 0 || demangle_buf_append(&p->out, digits, digits_len) != 0) {
+	if(p->cur[0] == 'n') {
+		if(!is_signed) {
 			return -1;
 		}
+		negative = 1;
+		p->cur++;
 	}
+	digits = p->cur;
+	while((p->cur[0] >= '0' && p->cur[0] <= '9') || (p->cur[0] >= 'a' && p->cur[0] <= 'f')) {
+		unsigned d = (p->cur[0] <= '9') ? (unsigned)(p->cur[0] - '0') : 10u + (unsigned)(p->cur[0] - 'a');
 
+		if(v > (UINT64_MAX >> 4)) {
+			wide = 1;
+		}
+		v = (v << 4) | d;
+		p->cur++;
+	}
+	digits_len = (size_t)(p->cur - digits);
 	if(p->cur[0] != '_') {
 		return -1;
 	}
 	p->cur++;
-	return 0;
+
+	if(type_tag == 'b') {
+		if(wide || v > 1u) {
+			return -1;
+		}
+		return v != 0u ? demangle_buf_append(&p->out, "true", 4u) : demangle_buf_append(&p->out, "false", 5u);
+	}
+	if(type_tag == 'c') {
+		char esc[16];
+		int n;
+
+		if(wide || v > 0x10FFFFu || (v >= 0xD800u && v <= 0xDFFFu)) {
+			return -1;
+		}
+		switch(v) {
+		case '\t': n = snprintf(esc, sizeof(esc), "'\\t'"); break;
+		case '\r': n = snprintf(esc, sizeof(esc), "'\\r'"); break;
+		case '\n': n = snprintf(esc, sizeof(esc), "'\\n'"); break;
+		default:
+			if(v >= 0x20u && v < 0x7Fu) {
+				n = snprintf(esc, sizeof(esc), "'%c'", (char)v);
+			} else {
+				n = snprintf(esc, sizeof(esc), "'\\u{%lx}'", (unsigned long)v);
+			}
+			break;
+		}
+		if(n < 0 || (size_t)n >= sizeof(esc)) {
+			return -1;
+		}
+		return demangle_buf_append(&p->out, esc, (size_t)n);
+	}
+
+	if(digits_len == 0u) {
+		return -1;
+	}
+	if(negative && demangle_buf_appendc(&p->out, '-') != 0) {
+		return -1;
+	}
+	if(wide) {
+		return demangle_buf_append(&p->out, "0x", 2u) != 0 ? -1 : demangle_buf_append(&p->out, digits, digits_len);
+	}
+	return rust_buf_append_base10(&p->out, v);
 }
 
 /*

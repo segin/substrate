@@ -203,7 +203,7 @@ test_9k(void)
     expect_contains("9k-3", "_RINvCshgxSpmajvKg_7mycrate3fooQlE", DEMANGLE_AUTO, "<&mut i32>");
     expect_contains("9k-4a", "_RINvCshgxSpmajvKg_7mycrate3fooPlE", DEMANGLE_AUTO, "<*const i32>");
     expect_contains("9k-4b", "_RINvCshgxSpmajvKg_7mycrate3fooOlE", DEMANGLE_AUTO, "<*mut i32>");
-    expect_contains("9k-5", "_RINvCshgxSpmajvKg_7mycrate3fooAljA_E", DEMANGLE_AUTO, "[i32; ");
+    expect_contains("9k-5", "_RINvCshgxSpmajvKg_7mycrate3fooAlja_E", DEMANGLE_AUTO, "[i32; ");
     expect_contains("9k-6", "_RINvCshgxSpmajvKg_7mycrate3fooSlE", DEMANGLE_AUTO, "<[i32]>");
     expect_contains("9k-7", "_RINvCshgxSpmajvKg_7mycrate3fooTlbEE", DEMANGLE_AUTO, "<(i32, bool)>");
     expect_contains("9k-8", "_RINvCshgxSpmajvKg_7mycrate3fooFUKClElE", DEMANGLE_AUTO, "extern \"C\" fn(i32) -> i32");
@@ -213,8 +213,11 @@ test_9k(void)
 static void
 test_9l(void)
 {
-    expect_contains("9l-1", "_RINvCshgxSpmajvKg_7mycrate3fooAljA_E", DEMANGLE_AUTO, "0xA");
-    expect_contains("9l-2", "_RINvCshgxSpmajvKg_7mycrate3fooAljnA_E", DEMANGLE_AUTO, "-0xA");
+    /* in decimal, as GNU c++filt prints a const; v0's hex is lower case,
+     * and only a signed type is negative (GNU refuses jA_ and jnA_) */
+    expect_contains("9l-1", "_RINvCshgxSpmajvKg_7mycrate3fooAlja_E", DEMANGLE_AUTO, "[i32; 10]");
+    expect_contains("9l-2", "_RINvCshgxSpmajvKg_7mycrate3fooAllna_E", DEMANGLE_AUTO, "[i32; -10]");
+    expect_null("9l-2b", "_RINvCshgxSpmajvKg_7mycrate3fooAljnA_E", DEMANGLE_AUTO);
     expect_contains("9l-3a", "_RINvCshgxSpmajvKg_7mycrate3fooAlb0_E", DEMANGLE_AUTO, "false");
     expect_contains("9l-3b", "_RINvCshgxSpmajvKg_7mycrate3fooAlb1_E", DEMANGLE_AUTO, "true");
     expect_contains("9l-4", "_RINvCshgxSpmajvKg_7mycrate3fooAlc41_E", DEMANGLE_AUTO, "'A'");

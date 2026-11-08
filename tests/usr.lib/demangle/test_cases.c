@@ -221,6 +221,16 @@ static const dm_case_t cases[] = {
     { "and with them", "_D3foo1xDFNaNbZv", D, "foo.x: void delegate() pure nothrow" },
     { "a malformed type is still refused", "_D3foo3barFiZ", D | DEMANGLE_NO_PARAMS, NULL },
 
+    /* a Rust v0 const is printed as its type says (an array's length here;
+     * GNU prints past 64 bits 0x0000000000000000_, rustc-demangle as here) */
+    { "an integer in decimal", "_RINvCs91N3l2zy1RL_3lib2idAhj5_EB2_", R, "lib::id::<[u8; 5]>" },
+    { "0 is no bool", "_RINvCs_3lib2idAhj0_E", R, "lib::id::<[u8; 0]>" },
+    { "nor 1", "_RINvCs_3lib2idAhj1_E", R, "lib::id::<[u8; 1]>" },
+    { "the largest", "_RINvCs_3lib2idAhjffffffffffffffff_E", R, "lib::id::<[u8; 18446744073709551615]>" },
+    { "past 64 bits, in hex", "_RINvCs_3lib2idAhj10000000000000000_E", R, "lib::id::<[u8; 0x10000000000000000]>" },
+    { "an unsigned one is never negative", "_RINvCs_3lib2idAhjn5_E", R, NULL },
+    { "a bool is true or false, length or not", "_RINvCs_3lib2idAhb1_E", R, "lib::id::<[u8; true]>" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
