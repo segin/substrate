@@ -273,6 +273,19 @@ static const dm_case_t cases[] = {
     { "a double", "_Z1fILd3ff0000000000000EEvv", I, "void f<(double)[3ff0000000000000]>()" },
     { "an int its value alone", "_Z1fILin1EEvv", I, "void f<-1>()" },
 
+    /* an Itanium local name: its encoding ends at its E */
+    { "a function's variable", "_ZZ4mainvE1x", I, "main()::x" },
+    { "with no parameters", "_ZZ4mainE1x", I, "main::x" },
+    { "its guard variable", "_ZGVZ4mainvE1x", I, "guard variable for main()::x" },
+    { "a local class's member", "_ZZ4mainvEN1S1fEv", I, "main()::S::f()" },
+    { "local in local", "_ZZZ1fvEN1S1gEvE1y", I, "f()::S::g()::y" },
+    { "a discriminator", "_ZZ4mainvE1x_0", I, "main()::x" },
+    { "a long one", "_ZZ4mainvE1x__12_", I, "main()::x" },
+    { "a string literal", "_ZZ4mainvEs", I, "main()::string literal" },
+    { "a const member function's", "_ZZNK1A1fEvE1x", I, "A::f() const::x" },
+    { "a default argument's", "_ZZ1fiEd_1x", I, "f(int)::{default arg#1}::x" },
+    { "the one before it", "_ZZ1fiEd0_1x", I, "f(int)::{default arg#2}::x" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

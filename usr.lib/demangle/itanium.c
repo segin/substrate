@@ -70,6 +70,8 @@ typedef struct dm_itanium_parser {
 	size_t last_template_count;
 
 	int in_type_context;
+	/* local names, Z <encoding> E, being parsed: their encodings end at E */
+	int local_depth;
 	int has_return_type;
 	/* where the encoding being parsed began in the output: a template
 	 * function's return type goes there, after any thunk's words or the
@@ -1127,7 +1129,18 @@ static int parse_unscoped_name(dm_itanium_parser_t *p) {
 	return 0;
 }
 
+/*
+ * <local-name> = Z <encoding> E <entity name> [<discriminator>]
+ *              | Z <encoding> E s [<discriminator>]
+ *              | Z <encoding> E d [<number>] _ <entity name>
+ * main()::x, main()::{lambda()#1}, main()::string literal,
+ * f()::{default arg#1}::x, as GNU c++filt prints them.  The encoding ends
+ * at the E (local_depth), where the top-level one ends at the end of the
+ * symbol.  A discriminator, _<digit> or __<number>_, is not printed.
+ */
 static int parse_local_name(dm_itanium_parser_t *p) {
+	int rc;
+
 	if(p->cur[0] != 'Z') {
 		return -1;
 	}
@@ -1138,14 +1151,11 @@ static int parse_local_name(dm_itanium_parser_t *p) {
 		return -1;
 	}
 
-	if(parse_encoding(p) != 0) {
-		parser_leave(p);
-		return -1;
-	}
-
+	p->local_depth++;
+	rc = parse_encoding(p);
+	p->local_depth--;
 	parser_leave(p);
-
-	if(p->cur[0] != 'E') {
+	if(rc != 0 || p->cur[0] != 'E') {
 		return -1;
 	}
 
@@ -1155,14 +1165,45 @@ static int parse_local_name(dm_itanium_parser_t *p) {
 		return -1;
 	}
 
-	if(parse_name(p) != 0) {
-		return -1;
+	if(p->cur[0] == 's') {
+		p->cur++;
+		if(demangle_buf_append(&p->out, "string literal", 14u) != 0) {
+			return -1;
+		}
+	} else {
+		if(p->cur[0] == 'd') {
+			size_t n = 0u;
+
+			p->cur++;
+			if(isdigit((unsigned char)p->cur[0]) && parse_number(p, &n) != 0) {
+				return -1;
+			}
+			if(p->cur[0] != '_' || n == SIZE_MAX) {
+				return -1;
+			}
+			p->cur++;
+			/* d_ is the last parameter's, numbered from the end: #1 */
+			if(demangle_buf_printf(&p->out, "{default arg#%zu}::", isdigit((unsigned char)p->cur[-2]) ? n + 2u : 1u) != 0) {
+				return -1;
+			}
+		}
+		if(parse_name(p) != 0) {
+			return -1;
+		}
 	}
 
 	if(p->cur[0] == '_') {
-		p->cur++;
-		while(isdigit((unsigned char)p->cur[0])) {
+		if(p->cur[1] == '_') {
+			p->cur += 2;
+			while(isdigit((unsigned char)p->cur[0])) {
+				p->cur++;
+			}
+			if(p->cur[0] != '_') {
+				return -1;
+			}
 			p->cur++;
+		} else if(isdigit((unsigned char)p->cur[1])) {
+			p->cur += 2;
 		}
 	}
 
@@ -1207,6 +1248,13 @@ static int append_member_qualifiers(dm_itanium_parser_t *p) {
 	return 0;
 }
 
+/* The encoding being parsed ends here: at the end of the symbol, or in a
+ * local name, Z <encoding> E, at its E -- which was read as a parameter
+ * type, and every local name refused. */
+static int at_encoding_end(const dm_itanium_parser_t *p) {
+	return p->cur[0] == '\0' || (p->local_depth > 0 && p->cur[0] == 'E');
+}
+
 static int is_void_text(const dm_buf_t *buf, size_t off, size_t len) {
 	return len == 4u && off + len <= buf->len && memcmp(buf->data + off, "void", 4u) == 0;
 }
@@ -1218,7 +1266,7 @@ static int parse_bare_function_type(dm_itanium_parser_t *p) {
 	suppress_params = ((p->options & DEMANGLE_NO_PARAMS) != 0);
 
 	/* Template functions have an explicit return type as the first type */
-	if(p->has_return_type && p->cur[0] != '\0') {
+	if(p->has_return_type && !at_encoding_end(p)) {
 		size_t ret_off = p->out.len;
 		if(parse_type(p) != 0) {
 			return -1;
@@ -1269,7 +1317,7 @@ static int parse_bare_function_type(dm_itanium_parser_t *p) {
 	}
 
 	first = 1;
-	while(p->cur[0] != '\0') {
+	while(!at_encoding_end(p)) {
 		size_t sep;
 		size_t before;
 		size_t parsed_len;
@@ -1287,7 +1335,7 @@ static int parse_bare_function_type(dm_itanium_parser_t *p) {
 		}
 
 		parsed_len = p->out.len - before;
-		if(first && p->cur[0] == '\0' && is_void_text(&p->out, before, parsed_len)) {
+		if(first && at_encoding_end(p) && is_void_text(&p->out, before, parsed_len)) {
 			p->out.len = before;
 			p->out.data[p->out.len] = '\0';
 			break;
@@ -2459,7 +2507,7 @@ static int parse_encoding(dm_itanium_parser_t *p) {
 		goto out;
 	}
 
-	if(p->cur[0] != '\0') {
+	if(!at_encoding_end(p)) {
 		/* Save function's template args for T_ references in the signature */
 		p->func_tmpl_count = p->last_template_count;
 		if(p->func_tmpl_count > 0) {
