@@ -70,6 +70,14 @@ for mode in -no-pie -pie; do
             echo "    ours:"
             readelf -sW ours.out | sed -n '/Symbol table .\.symtab/,$p' | awk -v n="$name" '$8 == n' | sed 's/^/      /'
         done
+        # what decides it: the judge's version, the start files' references
+        # and the link it was given
+        echo "    $(${GNU_LD:-ld} --version | head -1); $(${GCC:-gcc} --version | head -1)"
+        for crt in crt1.o crti.o crtbegin.o crtbeginS.o crtend.o; do
+            echo "    $crt: $(nm "$(${GCC:-gcc} -print-file-name=$crt)" 2>/dev/null | grep ITM | tr -s ' ' | tr '\n' ';')"
+        done
+        ${GCC:-gcc} $mode -o gnu.out prog.o -L. -lt -### 2>&1 | grep collect2 | sed 's/^/    /'
+        readelf -SW gnu.out | grep -E 'tm_clone|\.text|\.init_array' | sed 's/^/    gnu: /'
         fail=1
     fi
     if [ "$(LD_LIBRARY_PATH=. ./ours.out)" != "ports" ]; then

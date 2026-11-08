@@ -93,6 +93,11 @@ fi
 for sec in .dynstr .gnu.hash; do
     if [ "$(size_of gnu.out $sec)" != "$(size_of ours.out $sec)" ]; then
         echo "FAIL: a PIE: $sec is $(size_of ours.out $sec) bytes, GNU ld's $(size_of gnu.out $sec)"; fail=1
+        # which symbols each hashed, and the link that made them
+        echo "    $(${GNU_LD:-ld} --version | head -1); $(${GCC:-gcc} --version | head -1)"
+        readelf --dyn-syms -W gnu.out | awk 'NR > 3 && $7 != "UND"' | sed 's/^/    gnu defines: /'
+        readelf --dyn-syms -W ours.out | awk 'NR > 3 && $7 != "UND"' | sed 's/^/    ours defines: /'
+        ${GCC:-gcc} -pie -o gnu.out prog.o -L. -lt -### 2>&1 | grep collect2 | sed 's/^/    /'
     fi
 done
 
