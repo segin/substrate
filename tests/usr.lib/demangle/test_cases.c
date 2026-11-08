@@ -286,6 +286,17 @@ static const dm_case_t cases[] = {
     { "a default argument's", "_ZZ1fiEd_1x", I, "f(int)::{default arg#1}::x" },
     { "the one before it", "_ZZ1fiEd0_1x", I, "f(int)::{default arg#2}::x" },
 
+    /* an Itanium lambda or unnamed type is numbered from #1, as GNU's */
+    { "a lambda's typeinfo (LLVM's)", "_ZTIZNK4llvm14VPPhiAccessors15incoming_blocksEvEUlmE_", I,
+      "typeinfo for llvm::VPPhiAccessors::incoming_blocks() const::{lambda(unsigned long)#1}" },
+    { "no parameters", "_ZTIZ4mainvEUlvE_", I, "typeinfo for main()::{lambda()#1}" },
+    { "the second", "_ZZ4mainvEUlvE0_", I, "main()::{lambda()#2}" },
+    { "its call operator", "_ZZ4mainvENKUlvE_clEv", I, "main()::{lambda()#1}::operator()() const" },
+    { "as a template argument", "_ZN1A1gIZNS_1fEvEUlvE_EEvT_", I,
+      "void A::g<A::f()::{lambda()#1}>(A::f()::{lambda()#1})" },
+    { "an unnamed type", "_ZN1AUt_E", I, "A::{unnamed type#1}" },
+    { "the second", "_ZN1AUt0_E", I, "A::{unnamed type#2}" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

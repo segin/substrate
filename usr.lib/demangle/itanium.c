@@ -858,6 +858,10 @@ static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 			return -1;
 		}
 
+		/* a lambda of no parameters has the one v: {lambda()#1} */
+		if(p->cur[0] == 'v' && p->cur[1] == 'E') {
+			p->cur++;
+		}
 		first = 1;
 		while(p->cur[0] != '\0' && p->cur[0] != 'E') {
 			/* the separator before the parameter, not inserted after it,
@@ -888,15 +892,17 @@ static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 			has_id = 1;
 		}
 
-		if(p->cur[0] != '_') {
+		if(p->cur[0] != '_' || lambda_id > SIZE_MAX - 2u) {
 			return -1;
 		}
 		p->cur++;
 
-		if(has_id) {
-			return demangle_buf_printf(&p->out, ")#%zu}", lambda_id);
-		}
-		return demangle_buf_append(&p->out, ")}", 2u);
+		/*
+		 * The ABI numbers them from the second, 0_; the first is _ alone.
+		 * GNU c++filt prints the count, #1 and #2 -- this printed
+		 * {lambda(void)} for the first and #0 for the second.
+		 */
+		return demangle_buf_printf(&p->out, ")#%zu}", has_id ? lambda_id + 2u : 1u);
 	}
 
 	if(!(p->cur[0] == 'U' && p->cur[1] == 't')) {
@@ -905,15 +911,16 @@ static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 
 	p->cur += 2;
 
+	/* numbered as lambdas are: _ the first, #1, and N_ #N+2 */
 	if(isdigit((unsigned char)p->cur[0])) {
 		if(parse_number(p, &id) != 0) {
 			return -1;
 		}
-		if(p->cur[0] != '_') {
+		if(p->cur[0] != '_' || id > SIZE_MAX - 2u) {
 			return -1;
 		}
 		p->cur++;
-		return demangle_buf_printf(&p->out, "{unnamed type#%zu}", id);
+		return demangle_buf_printf(&p->out, "{unnamed type#%zu}", id + 2u);
 	}
 
 	if(p->cur[0] != '_') {
@@ -921,7 +928,7 @@ static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 	}
 
 	p->cur++;
-	return demangle_buf_append(&p->out, "{unnamed type}", 14u);
+	return demangle_buf_append(&p->out, "{unnamed type#1}", 16u);
 }
 
 static int parse_unqualified_name(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len, size_t *comp_off, size_t *comp_len) {

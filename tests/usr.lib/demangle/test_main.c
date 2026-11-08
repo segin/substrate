@@ -350,8 +350,9 @@ test_9y(void)
 static void
 test_9z(void)
 {
-    expect_eq("9z-1", "_Z1fUt_", DEMANGLE_AUTO, "f({unnamed type})");
-    expect_eq("9z-2", "_Z1fUt1_", DEMANGLE_AUTO, "f({unnamed type#1})");
+    /* counted from _, #1, as GNU c++filt prints them: 1_ is the third */
+    expect_eq("9z-1", "_Z1fUt_", DEMANGLE_AUTO, "f({unnamed type#1})");
+    expect_eq("9z-2", "_Z1fUt1_", DEMANGLE_AUTO, "f({unnamed type#3})");
 }
 
 int
