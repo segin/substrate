@@ -25,6 +25,10 @@ typedef struct rust_parser {
      * the turbofish, f::<u8>, not a type's, Vec<u8> */
     int in_value;
 
+    /* the path printed last ended in generic arguments, Foo<u8>, which a
+     * dyn trait's associated-type bindings join: Foo<u8, Item = i32> */
+    int path_generic;
+
     rust_buf_t out;
 } rust_parser_t;
 
@@ -931,20 +935,39 @@ rust_parse_v0_const_int(rust_parser_t *p, char type_tag)
     return 0;
 }
 
+/*
+ * <dyn-trait> = <path> {<dyn-trait-assoc-binding>}, a binding being
+ * "p" <undisambiguated-identifier> <type>: Iterator<Item = i32>, the
+ * bindings among the trait's own generic arguments if it has any.  The
+ * p was left unread, and parsed as the type _, with the name after it
+ * then refused: every dyn Iterator<Item = ...> was.
+ */
 static int
 rust_parse_v0_dyn_trait(rust_parser_t *p)
 {
+    int open;
+
     if (rust_parse_v0_path(p) != 0) {
         return -1;
     }
 
-    while (p->cur[0] == 'p' || p->cur[0] == 'B') {
-        if (rust_buf_append(&p->out, " + Assoc=", 9u) != 0) {
+    open = p->path_generic;
+    if (open) {
+        p->out.len--;   /* the '>' of the trait's arguments: reopened */
+        p->out.data[p->out.len] = '\0';
+    }
+    while (p->cur[0] == 'p') {
+        p->cur++;
+        if ((open ? rust_buf_append(&p->out, ", ", 2u) : rust_buf_appendc(&p->out, '<')) != 0 ||
+            rust_parse_v0_identifier(p) != 0 ||
+            rust_buf_append(&p->out, " = ", 3u) != 0 ||
+            rust_parse_v0_type(p) != 0) {
             return -1;
         }
-        if (rust_parse_v0_generic_arg(p) != 0) {
-            return -1;
-        }
+        open = 1;
+    }
+    if (open && rust_buf_appendc(&p->out, '>') != 0) {
+        return -1;
     }
 
     return 0;
@@ -1531,6 +1554,10 @@ rust_parse_v0_path(rust_parser_t *p)
         return -1;
     }
 
+    /* a back reference's path set it already */
+    if (start[0] != 'B') {
+        p->path_generic = (start[0] == 'I');
+    }
     rust_parser_leave(p);
     return 0;
 }

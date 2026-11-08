@@ -112,7 +112,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Call `rust_parse_optional_disambiguator(p, NULL, NULL)` before `rust_parse_v0_path(p)` in the `'M'` and `'X'` branches.
     - Verify: `tests/usr.lib/demangle/`: `_RNvMs0_Cs123_3foo3Bar3baz` demangles to `"<foo::Bar>::baz"`.
 
-- [ ] **DMG-RUST-04** (medium) Rust v0 associated-type bindings in `dyn Trait` (`p`) are misparsed (REQ: REQ-DMGA-0014)
+- [x] **DMG-RUST-04** (medium) Rust v0 associated-type bindings in `dyn Trait` (`p`) are misparsed (REQ: REQ-DMGA-0014)
     - Site: `usr.lib/demangle/rust.c:981-997` (`rust_parse_v0_dyn_trait`)
     - Evidence: In the Rust v0 grammar, `<dyn-trait-assoc-binding> = "p" <undisambiguated-identifier> <type>`. `rust_parse_v0_dyn_trait()` sees `'p'`, outputs `" + Assoc="`, and calls `rust_parse_v0_generic_arg(p)` without consuming `'p'` or the identifier; `'p'` is then parsed as the placeholder type `_` and the identifier causes a parse failure.
     - Fix: Consume `'p'`, parse the associated type name via `rust_parse_v0_identifier(p)`, append `'='`, and parse the bound type via `rust_parse_v0_type(p)`.

@@ -169,6 +169,18 @@ static const dm_case_t cases[] = {
     { "dyn with the erased lifetime", "_RINvCs_3lib2idODNtB2_4SendEL_E", R, "lib::id::<*mut dyn lib::Send>" },
     { "two traits", "_RINvCs_3lib2idODNtB2_4SendNtB2_4SyncEL_E", R, "lib::id::<*mut dyn lib::Send + lib::Sync>" },
 
+    /* a Rust v0 dyn trait's associated-type bindings */
+    { "a binding", "_RINvCs_3lib2idODNtB2_8Iteratorp4ItemlEL_E", R,
+      "lib::id::<*mut dyn lib::Iterator<Item = i32>>" },
+    { "two", "_RINvCs_3lib2idODNtB2_5Traitp1Ahp1BlEL_E", R, "lib::id::<*mut dyn lib::Trait<A = u8, B = i32>>" },
+    { "among the trait's own arguments", "_RINvCs_3lib2idODINtB2_2FnThEEp6OutputhEL_E", R,
+      "lib::id::<*mut dyn lib::Fn<(u8,), Output = u8>>" },
+    { "with another trait after", "_RINvCs_3lib2idODNtB2_8Iteratorp4ItemhNtB2_4SendEL_E", R,
+      "lib::id::<*mut dyn lib::Iterator<Item = u8> + lib::Send>" },
+    { "rustc's", "_RINvCs91N3l2zy1RL_3lib2idODNtNtNtNtCs4bQBTqW3ynz_4core4iter6traits8iterator8Iteratorp4ItemlEL_EB2_", R,
+      "lib::id::<*mut dyn core::iter::traits::iterator::Iterator<Item = i32>>" },
+    { "a binding with no type", "_RINvCs_3lib2idODNtB2_8Iteratorp4ItemEL_E", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
