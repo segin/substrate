@@ -297,6 +297,16 @@ static const dm_case_t cases[] = {
     { "an unnamed type", "_ZN1AUt_E", I, "A::{unnamed type#1}" },
     { "the second", "_ZN1AUt0_E", I, "A::{unnamed type#2}" },
 
+    /* the Itanium assignment and logical operator names */
+    { "operator= (Qt's)", "_ZN4QUrlaSERKS_", I, "QUrl::operator=(QUrl const&)" },
+    { "operator+=", "_ZN1ApLERKS_", I, "A::operator+=(A const&)" },
+    { "operator<<=", "_ZN1AlSEi", I, "A::operator<<=(int)" },
+    { "operator>>=", "_ZN1ArSEi", I, "A::operator>>=(int)" },
+    { "operator%=", "_ZN1ArMEi", I, "A::operator%=(int)" },
+    { "operator&&", "_ZN1AaaEi", I, "A::operator&&(int)" },
+    { "operator||", "_ZN1AooEi", I, "A::operator||(int)" },
+    { "operator co_await", "_ZN1AawEv", I, "A::operator co_await()" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

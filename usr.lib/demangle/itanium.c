@@ -776,7 +776,12 @@ static const char *lookup_operator_name(const char *code) {
 	           {"ne", "operator!="},   {"lt", "operator<"},      {"gt", "operator>"},       {"le", "operator<="},        {"ge", "operator>="},
 	           {"ss", "operator<=>"},  {"nt", "operator!"},      {"pp", "operator++"},      {"mm", "operator--"},        {"cm", "operator,"},
 	           {"pm", "operator->*"},  {"pt", "operator->"},     {"cl", "operator()"},      {"ix", "operator[]"},        {"qu", "operator?"},
-	           {"st", "sizeof"},       {"sz", "sizeof..."},      {"at", "alignof"},         {"az", "alignof..."},        {"li", "operator\"\""}};
+	           {"st", "sizeof"},       {"sz", "sizeof..."},      {"at", "alignof"},         {"az", "alignof..."},        {"li", "operator\"\""},
+	           /* assignment, the logical operators and co_await, which
+	            * were missing: every class's operator= was refused */
+	           {"aS", "operator="},    {"pL", "operator+="},     {"mI", "operator-="},      {"mL", "operator*="},        {"dV", "operator/="},
+	           {"rM", "operator%="},   {"aN", "operator&="},     {"oR", "operator|="},      {"eO", "operator^="},        {"lS", "operator<<="},
+	           {"rS", "operator>>="},  {"aa", "operator&&"},     {"oo", "operator||"},      {"aw", "operator co_await"}};
 	size_t i;
 
 	for(i = 0u; i < sizeof(ops) / sizeof(ops[0]); i++) {
