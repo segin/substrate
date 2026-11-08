@@ -307,6 +307,14 @@ static const dm_case_t cases[] = {
     { "operator||", "_ZN1AooEi", I, "A::operator||(int)" },
     { "operator co_await", "_ZN1AawEv", I, "A::operator co_await()" },
 
+    /* the Itanium builtin types GNU names */
+    { "char8_t (libstdc++'s)", "_ZTIDu", I, "typeinfo for char8_t" },
+    { "_Float16", "_ZTIDF16_", I, "typeinfo for _Float16" },
+    { "_Float32x", "_ZTIPDF32x", I, "typeinfo for _Float32x*" },
+    { "_Float128", "_ZSt8to_charsPcS_DF128_", I, "std::to_chars(char*, char*, _Float128)" },
+    { "std::bfloat16_t", "_ZTIDF16b", I, "typeinfo for std::bfloat16_t" },
+    { "nullptr's type", "_Z1fDn", I, "f(decltype(nullptr))" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

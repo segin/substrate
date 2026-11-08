@@ -2370,7 +2370,11 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 			name = "decltype(auto)";
 			break;
 		case 'n':
-			name = "std::nullptr_t";
+			/* as GNU c++filt prints it (it was std::nullptr_t) */
+			name = "decltype(nullptr)";
+			break;
+		case 'u':
+			name = "char8_t";
 			break;
 		default:
 			break;
@@ -2379,6 +2383,29 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 		if(name != NULL) {
 			p->cur += 2;
 			return demangle_buf_append(&p->out, name, strlen(name));
+		}
+
+		/* DF <bits> _ is _Float<bits>, DF <bits> x _Float<bits>x, and
+		 * DF16b std::bfloat16_t; char8_t and these were refused */
+		if(p->cur[1] == 'F' && isdigit((unsigned char)p->cur[2])) {
+			const char *save = p->cur;
+			size_t bits;
+
+			p->cur += 2;
+			if(parse_number(p, &bits) == 0) {
+				if(p->cur[0] == 'b' && bits == 16u) {
+					p->cur++;
+					return demangle_buf_append(&p->out, "std::bfloat16_t", 15u);
+				}
+				if(p->cur[0] == '_' || p->cur[0] == 'x') {
+					int ext = (p->cur[0] == 'x');
+
+					p->cur++;
+					return demangle_buf_printf(&p->out, ext ? "_Float%zux" : "_Float%zu", bits);
+				}
+			}
+			p->cur = save;
+			return -1;
 		}
 	}
 
