@@ -72,6 +72,10 @@ typedef struct dm_itanium_parser {
     /* the array type parsed last: where its outermost bounds begin, which
      * an outer bound or a pointer's (*) goes in front of */
     size_t array_dims_off;
+    /* the pointer or reference to an array parsed last: where the ) of its
+     * declarator is, (*)[4], which a pointer to it writes its * before;
+     * SIZE_MAX when the type parsed last was no such thing */
+    size_t decl_close;
 
     size_t func_tmpl_off[DM_TEMPLATE_ARG_CAP];
     size_t func_tmpl_len[DM_TEMPLATE_ARG_CAP];
@@ -250,6 +254,7 @@ parser_begin(dm_itanium_parser_t *p)
 {
     memset(p, 0, sizeof(*p));
     p->recursion_limit = DM_RECURSION_DEFAULT_LIMIT;
+    p->decl_close = SIZE_MAX;
 
     p->substitutions = (dm_subst_t *)calloc(DM_SUBST_INITIAL_CAP, sizeof(*p->substitutions));
     if (p->substitutions == NULL) {
@@ -543,6 +548,58 @@ parser_insert_in_type(dm_itanium_parser_t *p, size_t type_off, size_t pos, const
         }
     }
     return buf_insert(&p->out, pos, s, n);
+}
+
+/*
+ * Find, in the type text from @p off to the end of @p out, the array bounds
+ * outside any template argument list or parenthesis: int[4], int (*)[4].
+ * *@p dims gets where they begin.  *@p decl gets the position of the ) of
+ * a pointer's or reference's declarator in front of them, (*), or SIZE_MAX
+ * when there is none.  A bracket that is no bound, Foo[abi:cxx11], is
+ * passed over.  Returns 0 when there are bounds, -1 when the type is no
+ * array.
+ */
+static int
+find_array_declarator(const dm_buf_t *out, size_t off, size_t *dims, size_t *decl)
+{
+    size_t i;
+    size_t depth = 0u;
+    size_t close = SIZE_MAX;
+
+    for (i = off; i < out->len; i++) {
+        char c = out->data[i];
+
+        if (c == '<' || c == '(') {
+            /* a pointer's declarator: " (" then only * & and ")" */
+            if (c == '(' && depth == 0u) {
+                size_t j = i + 1u;
+
+                while (j < out->len && (out->data[j] == '*' || out->data[j] == '&')) {
+                    j++;
+                }
+                if (j > i + 1u && j < out->len && out->data[j] == ')') {
+                    close = j;
+                    i = j;
+                    continue;
+                }
+            }
+            depth++;
+        } else if (c == '>' || c == ')') {
+            if (depth == 0u) {
+                return -1;
+            }
+            depth--;
+        } else if (c == '[' && depth == 0u && i + 1u < out->len &&
+                   (out->data[i + 1u] == ']' ||
+                    isdigit((unsigned char)out->data[i + 1u]))) {
+            *dims = i;
+            *decl = (close != SIZE_MAX && close + 1u == i) ? close : SIZE_MAX;
+            return 0;
+        } else {
+            close = SIZE_MAX;   /* the declarator must be just before the bounds */
+        }
+    }
+    return -1;
 }
 
 static void
@@ -1933,6 +1990,7 @@ parse_array_type(dm_itanium_parser_t *p)
                 return -1;
             }
         }
+        p->decl_close = SIZE_MAX;
         return 0;
     }
 }
@@ -2105,12 +2163,15 @@ parse_type_inner(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'P' || p->cur[0] == 'R' || p->cur[0] == 'O') {
         char kind = p->cur[0];
+        char pointee;
         const char *suffix;
         size_t suffix_len;
         size_t before;
         size_t bracket;
+        size_t decl_at;
 
         p->cur++;
+        pointee = p->cur[0];
         before = p->out.len;
         if (parse_type(p) != 0) {
             return -1;
@@ -2152,17 +2213,52 @@ parse_type_inner(dm_itanium_parser_t *p)
         } else {
             suffix = "&&"; suffix_len = 2;
         }
-        /* Check if inner type has array dimension — insert before '[' */
-        for (bracket = before; bracket < p->out.len; bracket++) {
-            if (p->out.data[bracket] == '[') break;
-        }
-        if (bracket < p->out.len) {
-            /* Array type: insert " (&)" or " (*)" or " (&&)" before '[' */
-            if (buf_insert(&p->out, bracket, ")", 1u) != 0) return -1;
-            if (buf_insert(&p->out, bracket, suffix, suffix_len) != 0) return -1;
-            if (buf_insert(&p->out, bracket, " (", 2u) != 0) return -1;
+        /*
+         * To an array the declarator goes before its bounds, int (*)[4];
+         * to a pointer to one, inside that declarator, int (**)[4].  Only
+         * then: the first [ of the pointee's text was taken for it, so
+         * Foo<int[4]>* came out Foo<int (*)[4]> and Foo[abi:cxx11]*
+         * Foo (*)[abi:cxx11].
+         */
+        if (pointee == 'A') {
+            char decl[8];
+            size_t n = 0u;
+
+            bracket = p->array_dims_off;
+            decl[n++] = ' ';
+            decl[n++] = '(';
+            memcpy(decl + n, suffix, suffix_len);
+            n += suffix_len;
+            decl[n++] = ')';
+            if (parser_insert_in_type(p, before, bracket, decl, n) != 0) return -1;
+            p->decl_close = bracket + n - 1u;
+        } else if ((pointee == 'P' || pointee == 'R' || pointee == 'O') &&
+                   p->decl_close != SIZE_MAX) {
+            bracket = p->decl_close;
+            if (parser_insert_in_type(p, before, bracket, suffix, suffix_len) != 0) return -1;
+            p->decl_close = bracket + suffix_len;
+        } else if ((pointee == 'S' || pointee == 'T') &&
+                   find_array_declarator(&p->out, before, &bracket, &decl_at) == 0) {
+            /* an array, or a pointer to one, by substitution: its text
+             * says where the bounds or the declarator are */
+            if (decl_at != SIZE_MAX) {
+                if (parser_insert_in_type(p, before, decl_at, suffix, suffix_len) != 0) return -1;
+                p->decl_close = decl_at + suffix_len;
+            } else {
+                char decl[8];
+                size_t n = 0u;
+
+                decl[n++] = ' ';
+                decl[n++] = '(';
+                memcpy(decl + n, suffix, suffix_len);
+                n += suffix_len;
+                decl[n++] = ')';
+                if (parser_insert_in_type(p, before, bracket, decl, n) != 0) return -1;
+                p->decl_close = bracket + n - 1u;
+            }
         } else {
             if (buf_append(&p->out, suffix, suffix_len) != 0) return -1;
+            p->decl_close = SIZE_MAX;
         }
         return 0;
     }

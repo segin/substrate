@@ -72,7 +72,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Track the start offset of the active `parse_encoding()` invocation in `dm_itanium_parser_t`, insert the return type at `encoding_off`, and shift only substitution/template offsets >= `encoding_off`.
     - Verify: `tests/usr.lib/demangle/`: `_ZThn8_N3Foo3barIiEEvT_` demangles to `"non-virtual thunk to void Foo::bar<int>(int) [offset -8]"`.
 
-- [ ] **DMG-ITAN-04** (medium) Pointer/reference-to-array formatting corrupts template arguments, ABI tags, and substitution offsets (REQ: REQ-DMGA-0008)
+- [x] **DMG-ITAN-04** (medium) Pointer/reference-to-array formatting corrupts template arguments, ABI tags, and substitution offsets (REQ: REQ-DMGA-0008)
     - Site: `usr.lib/demangle/itanium.c:2002-2013` (`parse_type_inner`)
     - Evidence: To format pointers/references to arrays (`int (*)[4]`), `parse_type_inner()` scans forward from `before` for the first `'['` character and calls `buf_insert()`. If the pointee is a template with an array argument (`Foo<int[4]>*`) or an ABI tag (`Foo[abi:cxx11]*`), `'['` matches inside `<...>` or `[abi:...]`, producing `Foo<int (*)[4]>` or `Foo (*)[abi:cxx11]`. In addition, `buf_insert()` shifts `p->out` without adjusting substitution offsets >= `bracket`.
     - Fix: Only insert `" (*)"` / `" (&)"` / `" (&&)"` before `'['` when the direct pointee production is `A` (`parse_array_type`), and adjust any recorded substitution offsets >= `bracket`.

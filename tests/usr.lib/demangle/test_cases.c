@@ -87,6 +87,20 @@ static const dm_case_t cases[] = {
     { "the element type's entry", "_Z1fA2_A3_iS_", I, "f(int[2][3], int[3])" },
     { "the whole array's entry", "_Z1fA2_A3_iS0_", I, "f(int[2][3], int[2][3])" },
 
+    /* a pointer's or reference's declarator goes before an array's bounds,
+     * and only an array's */
+    { "a pointer to a template with an array argument", "_Z1fP3FooIA4_iE", I, "f(Foo<int[4]>*)" },
+    { "a pointer to an abi-tagged class", "_Z1fP3FooB5cxx11", I, "f(Foo[abi:cxx11]*)" },
+    { "a pointer to an array", "_Z1fPA4_i", I, "f(int (*)[4])" },
+    { "a pointer to a pointer to an array", "_Z1fPPA4_i", I, "f(int (**)[4])" },
+    { "an rvalue reference to an array", "_Z1fOA4_i", I, "f(int (&&)[4])" },
+    { "a pointer to an array of arrays", "_Z1fPA2_A3_i", I, "f(int (*)[2][3])" },
+    { "entries after the declarator", "_Z1fPA4_iS0_", I, "f(int (*)[4], int (*)[4])" },
+    { "the array's entry without it", "_Z1fRA2_A3_iS0_", I, "f(int (&)[2][3], int[2][3])" },
+    { "a reference to an array by substitution", "_Z1fA4_iRS_", I, "f(int[4], int (&)[4])" },
+    { "to a pointer to one by substitution", "_Z1fPA4_iRS0_", I, "f(int (*)[4], int (*&)[4])" },
+    { "to one by template parameter", "_Z1fIPA4_iEvPT_", I, "void f<int (*)[4]>(int (**)[4])" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
