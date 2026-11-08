@@ -31,6 +31,16 @@ start() {
 	exec 3>"$T/in"
 }
 say() { printf '%s\n' "$1" >&3; sleep 0.3; }
+# wait until ex has read the file (a sanitizer build is slow at it): $= is
+# answered with the line count
+ready() {
+	printf '$=\n' >&3
+	for _ in $(seq 1 300); do
+		grep -qx "$1" "$T/out" && return 0
+		sleep 0.1
+	done
+	return 1
+}
 finish() {
 	exec 3>&-
 	wait "$pid"
@@ -59,19 +69,40 @@ if ! grep -qx 'one' "$T/out" || [ "$status" -ne 0 ]; then
 	fail "ex did not go on after the interrupts (status $status): [$(cat "$T/out")]"
 fi
 
-# an interrupted global leaves no marks behind for the next global
-seq 1 4000 >"$T/big"
+# an interrupted global leaves no marks behind for the next global.  (Two
+# million lines: g/./s/$/x/ takes seconds on them, so the interrupt comes
+# while it runs -- on the 4000 this had, it was over in 20 ms, before.)
+seq 1 2000000 >"$T/big"
 start "$T/big"
-sleep 0.3
+ready 2000000
 printf 'g/./s/$/x/\n' >&3
 sleep 0.5
 kill -INT "$pid"; sleep 0.5
 say '1g/^1x$/p'
 say 'q!'
 finish
-printed=$(grep -v -e '^Interrupt$' -e '^$' "$T/out")
+if ! grep -qx Interrupt "$T/out"; then
+	fail "the global was not interrupted while it ran: [$(head -3 "$T/out")]"
+fi
+printed=$(grep -v -e '^Interrupt$' -e '^$' -e '^2000000$' "$T/out")
 if [ "$printed" != "1x" ]; then
 	fail "an interrupted global left its marks set: 1g/^1x\$/p printed $(grep -c . <<<"$printed") lines: [$(head -3 <<<"$printed")]"
+fi
+
+# and undo works after it: 1d then u brings line 1 back
+start "$T/big"
+ready 2000000
+printf 'g/./s/$/x/\n' >&3
+sleep 0.5
+kill -INT "$pid"; sleep 0.5
+say '1d'
+say 'u'
+say '1p'
+say 'q!'
+finish
+printed=$(grep -v -e '^Interrupt$' -e '^$' -e '^2000000$' "$T/out")
+if ! grep -qx Interrupt "$T/out" || [ "$printed" != "1x" ]; then
+	fail "undo after an interrupted command: 1d, u, 1p printed [$(head -3 <<<"$printed")]"
 fi
 
 # `-c vi` before the main loop: hands over to vi (not found here) instead

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""SIGTERM, ^Z and SIGCONT in vi.
+"""SIGTERM, SIGHUP, ^Z and SIGCONT in vi.  (SIGHUP is SIGTERM's case;
+both must leave the terminal in canonical mode with echo, as found.)
 
 SIGTERM's handler saved the buffer from inside the handler, walking lines
 the interrupted code might have been changing, then _exit()ed past the
@@ -23,6 +24,7 @@ import pty
 import signal
 import sys
 import tempfile
+import termios
 import time
 
 VI = sys.argv[1]
@@ -66,11 +68,14 @@ def drain(fd, secs):
     return out
 
 
-def test_sigterm(d):
-    path = os.path.join(d, "t.txt")
+def term_signal(d, sig):
+    """SIGTERM or SIGHUP: preserve, exit 1, the terminal restored -- left
+    the alternate screen, and in canonical mode with echo again."""
+    name = signal.Signals(sig).name
+    path = os.path.join(d, "%s.txt" % name)
     with open(path, "w") as f:
         f.write("abc\n")
-    rdir = os.path.join(d, "rec")
+    rdir = os.path.join(d, "rec-%s" % name)
     os.mkdir(rdir)
     pid, fd = pty.fork()
     if pid == 0:
@@ -80,23 +85,38 @@ def test_sigterm(d):
     drain(fd, 0.6)
     os.write(fd, b"x")
     drain(fd, 0.4)
-    os.kill(pid, signal.SIGTERM)
+    os.kill(pid, sig)
     out = read_for(fd, 3)
     done, status = os.waitpid(pid, os.WNOHANG)
     if done == 0:
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
-        return "vi did not exit on SIGTERM"
+        return "vi did not exit on %s" % name
     if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 1:
-        return "SIGTERM: status %r, expected exit 1" % status
+        return "%s: status %r, expected exit 1" % (name, status)
     if LEAVE not in out:
-        return "SIGTERM left the terminal on the alternate screen: %r" % out[-80:]
+        return "%s left the terminal on the alternate screen: %r" % (name, out[-80:])
+    try:
+        lflag = termios.tcgetattr(fd)[3]
+    except termios.error:
+        lflag = None
+    if lflag is not None and (lflag & (termios.ICANON | termios.ECHO)) != \
+            (termios.ICANON | termios.ECHO):
+        return "%s left the terminal raw (lflag %#o)" % (name, lflag)
     recs = []
     for root, _, files in os.walk(rdir):
         recs += files
     if not recs:
-        return "SIGTERM preserved nothing in %s" % rdir
+        return "%s preserved nothing in %s" % (name, rdir)
     return None
+
+
+def test_sigterm(d):
+    return term_signal(d, signal.SIGTERM)
+
+
+def test_sighup(d):
+    return term_signal(d, signal.SIGHUP)
 
 
 def test_suspend(d):
@@ -151,7 +171,7 @@ def test_suspend(d):
 def main():
     fails = 0
     with tempfile.TemporaryDirectory() as d:
-        for t in (test_sigterm, test_suspend):
+        for t in (test_sigterm, test_sighup, test_suspend):
             err = t(d)
             if err:
                 print("FAIL: %s: %s" % (t.__name__, err))
