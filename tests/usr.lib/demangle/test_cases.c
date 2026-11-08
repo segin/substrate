@@ -165,6 +165,10 @@ static const dm_case_t cases[] = {
       "<lib::Gen<u8> as lib::Trait>::baz" },
     { "a malformed one", "_RNvMs.Cs_3libNtB4_3Bar3two", R, NULL },
 
+    /* a Rust v0 dyn type's erased lifetime bound is not printed */
+    { "dyn with the erased lifetime", "_RINvCs_3lib2idODNtB2_4SendEL_E", R, "lib::id::<*mut dyn lib::Send>" },
+    { "two traits", "_RINvCs_3lib2idODNtB2_4SendNtB2_4SyncEL_E", R, "lib::id::<*mut dyn lib::Send + lib::Sync>" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

@@ -1205,7 +1205,12 @@ rust_parse_v0_type_inner(rust_parser_t *p)
         }
         p->cur++;
 
-        if (p->cur[0] == 'L') {
+        /* the object's lifetime bound -- but not the erased one, L_, which
+         * rustc gives nearly every dyn type and nothing prints: it came
+         * out dyn Send + '_ */
+        if (p->cur[0] == 'L' && p->cur[1] == '_') {
+            p->cur += 2;
+        } else if (p->cur[0] == 'L') {
             if (rust_buf_append(&p->out, " + ", 3u) != 0 || rust_parse_v0_lifetime(p, 1) != 0) {
                 return -1;
             }
