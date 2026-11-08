@@ -75,6 +75,44 @@ for mode in -pie -no-pie; do
     done
 done
 
+# A weak reference nothing defines is in a position-dependent program's
+# .dynsym only when the program reaches it through its GOT: not for an
+# absolute reference or a call, though a shared object of the link wants
+# it (Ubuntu's crtbegin.o refers to _ITM_registerTMCloneTable absolutely;
+# libraries made with crtbeginS.o want it through their GOT, and it went
+# out where GNU ld leaves it).
+cat > wlib.c <<'EOF'
+extern void weak_fn(void) __attribute__((weak));
+void *lib_wants(void) { return (void *)weak_fn; }
+EOF
+cat > wprog.c <<'EOF'
+extern void weak_fn(void) __attribute__((weak));
+extern void *got_user(void);
+void *absolute(void) { return (void *)weak_fn; }
+int main(void) { if (weak_fn) weak_fn(); return got_user() != 0; }
+EOF
+${GCC:-gcc} -O2 -fPIC -shared -o libw.so wlib.c || exit 1
+${GCC:-gcc} -O2 -fno-pie -c -o wprog.o wprog.c || exit 1
+# weak_got through the GOT, as crti.o reaches __gmon_start__
+printf '\t.text\n\t.globl got_user\ngot_user:\n\tmovq weak_got@GOTPCREL(%%rip), %%rax\n\tret\n\t.weak weak_got\n' > wgot.s
+if ${GCC:-gcc} -c -o wgot.o wgot.s 2>/dev/null &&
+   ${GCC:-gcc} -no-pie -o gnu.out wprog.o wgot.o -L. -lw 2>/dev/null; then
+    ${GCC:-gcc} -B"$work/bin/" -no-pie -o ours.out wprog.o wgot.o -L. -lw > said 2>&1 ||
+        { echo "FAIL: ld -no-pie, weak references: $(head -1 said)"; fail=1; }
+    dynsyms gnu.out > want
+    dynsyms ours.out > have
+    if ! cmp -s want have; then
+        echo "FAIL: ld -no-pie, weak references: dynamic symbols differ from GNU ld's:"
+        diff want have | sed 's/^/    /'
+        fail=1
+    fi
+    if ! LD_LIBRARY_PATH=. ./ours.out; then
+        echo "FAIL: ld -no-pie, weak references: the program does not run as it should"; fail=1
+    fi
+else
+    echo "skip: weak references (not an x86-64 gcc)"
+fi
+
 if [ $fail -eq 0 ]; then
     echo "ok   test_pie_exports"
 fi

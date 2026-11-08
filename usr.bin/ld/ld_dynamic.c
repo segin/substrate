@@ -201,6 +201,12 @@ static int dynstr_share_suffixes(uint8_t **buf, size_t *len, size_t *cap, const 
     return 0;
 }
 
+static int dso_definition_type(const ld_ctx_t *ctx, const char *name);
+
+/* The weak references nothing defines that keep a .dynsym entry in a position-dependent executable:
+ * settle_undefined_weak() decides, from the relocations as the inputs gave them. */
+static symset_t weak_kept_dynamic;
+
 static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym) {
     uint8_t bind;
     uint8_t vis;
@@ -228,6 +234,19 @@ static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const 
     /* a shared object exports what it defines; a PIE, ET_DYN too, only what a program does */
     if (elf_type(out) == ET_DYN && !ctx->opt.pie) {
         return 1;
+    }
+    /*
+     * A weak reference nothing in the link defines -- 0, by settle_undefined_weak(), or undefined
+     * again after restore_undefined_weak() -- has a .dynsym entry in a position-dependent executable
+     * as settle_undefined_weak() decided (GNU ld's rule), whatever a shared object of the link refers
+     * to.  crtbegin.o's _ITM_registerTMCloneTable went out because libraries made with crtbeginS.o
+     * want it, where GNU ld, crtbegin.o referring to it absolutely (Ubuntu), left it out; and
+     * __gmon_start__, which crti.o reaches through the GOT, was left out when no library wanted it.
+     */
+    if (elf_type(out) == ET_EXEC && bind == STB_WEAK &&
+        (shndx == SHN_UNDEF || (shndx == SHN_ABS && elf_symbol_value(sym) == 0)) &&
+        dso_definition_type(ctx, elf_symbol_name(sym)) < 0) {
+        return symset_contains(&weak_kept_dynamic, elf_symbol_name(sym));
     }
     if (shndx == SHN_UNDEF) {
         return 1;
@@ -921,11 +940,54 @@ static int dso_import_type(const ld_ctx_t *ctx, const char *name) {
  * apply to the instruction that asks, in memory that cannot be written.
  */
 int settle_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out) {
+    const ld_arch_t *a = ld_arch_of_machine(elf_machine(out));
+    symset_t got_refs = {0};
+    symset_t fixed_refs = {0};
     size_t i;
 
+    symset_free(&weak_kept_dynamic);
     if (elf_type(out) != ET_EXEC || ctx->dso_inputs.count == 0) {
         return 0;
     }
+    /*
+     * Which of them keep a .dynsym entry, as GNU ld decides for a position-dependent executable:
+     * one the program reaches through its GOT, and by nothing that has to be settled at link time --
+     * an absolute address or a pc-relative datum, which then makes it 0 everywhere.  A call is
+     * neither.  Read now, before the relocations are relaxed or applied.
+     */
+    for (i = 0; a != NULL && i < elf_section_count(out); ++i) {
+        elf_section_t *sec = elf_section_get(out, i);
+        size_t ri;
+        size_t rc = sec != NULL ? elf_section_reloc_count(sec) : 0;
+
+        for (ri = 0; ri < rc; ++ri) {
+            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            const elf_symbol_t *rs = rel != NULL ? elf_reloc_symbol(rel) : NULL;
+            const char *name = rs != NULL ? elf_symbol_name(rs) : NULL;
+            uint32_t type;
+
+            if (name == NULL || name[0] == '\0' || elf_symbol_shndx(rs) != SHN_UNDEF ||
+                elf_symbol_bind(rs) != STB_WEAK) {
+                continue;
+            }
+            type = elf_reloc_type(rel);
+            if (a->is_got_ref(type)) {
+                if (symset_add(&got_refs, name) != 0) {
+                    goto fail;
+                }
+            } else if (!a->is_call_ref(type, rs) && symset_add(&fixed_refs, name) != 0) {
+                goto fail;
+            }
+        }
+    }
+    for (i = 0; i < got_refs.count; ++i) {
+        if (!symset_contains(&fixed_refs, got_refs.items[i]) &&
+            symset_add(&weak_kept_dynamic, got_refs.items[i]) != 0) {
+            goto fail;
+        }
+    }
+    symset_free(&got_refs);
+    symset_free(&fixed_refs);
     for (i = 0; i < elf_symbol_count(out); ++i) {
         elf_symbol_t *sym = elf_symbol_at(out, i);
         const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
@@ -939,6 +1001,11 @@ int settle_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out) {
         }
     }
     return 0;
+
+fail:
+    symset_free(&got_refs);
+    symset_free(&fixed_refs);
+    return -1;
 }
 
 /* (below) */
