@@ -27,7 +27,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Record `backref_start = p->cur` before consuming `'B'` in all three sites and reject any backref where `target >= backref_start`. Remove the unused `p->backrefs` array and `rust_parser_add_backref()` dead allocations.
     - Verify: `tests/usr.lib/demangle/`: `_RB_`, `_RIC0B_E`, and self-referential type/const backrefs return `NULL` both with and without `DEMANGLE_NO_RECURSE_LIMIT`.
 
-- [ ] **DMG-DLANG-01** (high) `dlang_take_segment()` invalidates recorded `dlang_name_ref_t` output slices (REQ: REQ-DMGA-0002)
+- [x] **DMG-DLANG-01** (high) `dlang_take_segment()` invalidates recorded `dlang_name_ref_t` output slices (REQ: REQ-DMGA-0002)
     - Site: `usr.lib/demangle/dlang.c:239-301` (`dlang_parser_add_name_ref`, `dlang_parser_append_name_ref`) vs. `usr.lib/demangle/dlang.c:666-689` (`dlang_take_segment`)
     - Evidence: `dlang_name_ref_t` stores `{off, len}` offsets into `p->out.data`. `dlang_take_segment()` rewinds `p->out.len = off` and rewrites `p->out.data` (when wrapping type qualifiers, function return types, pointers, arrays, associative arrays, delegates, or template value arguments). Any `name_ref` recorded inside a taken segment points either past `p->out.len` or into overwritten output bytes.
     - Fix: Store owned copies (or immutable input-span pointers/lengths) in `p->name_refs` instead of mutable offsets into `p->out.data`.
@@ -128,7 +128,7 @@ the end of this document, using the standard EARS patterns:
 
 ## D. D Language Demangling (`dlang.c`)
 
-- [ ] **DMG-DLANG-02** (medium) D `Q` backreferences are parsed as decimal absolute indices instead of base-26 relative offsets (REQ: REQ-DMGA-0016)
+- [x] **DMG-DLANG-02** (medium) D `Q` backreferences are parsed as decimal absolute indices instead of base-26 relative offsets (REQ: REQ-DMGA-0016)
     - Site: `usr.lib/demangle/dlang.c:609-617` (`dlang_parse_symbol_name`)
     - Evidence: `dlang_parse_symbol_name()` parses `'Q'` followed by `dlang_parse_number()` (decimal digits). Under the DMD ABI specification, `Q` backreferences encode a base-26 number (`'A'-'Z'` for upper digits, `'a'-'z'` for the terminal digit) representing a relative backward position in the identifier/type reference table.
     - Fix: Implement base-26 relative backreference decoding for `Q` per the D ABI specification (while optionally retaining decimal fallback only if needed by existing synthetic tests).

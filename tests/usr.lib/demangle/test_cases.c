@@ -25,6 +25,7 @@ typedef struct {
 
 #define R  DEMANGLE_RUST
 #define RN (DEMANGLE_RUST | DEMANGLE_NO_RECURSE_LIMIT)
+#define D  DEMANGLE_DLANG
 
 static const dm_case_t cases[] = {
     /* a Rust v0 backreference reaches only what came before its B */
@@ -34,6 +35,17 @@ static const dm_case_t cases[] = {
     { "the same, no recursion limit", "_RIC0B_E", RN, NULL },
     { "a type referring to its own B", "_RINvC3foo3barBb_E", RN, NULL },
     { "a type referring forward", "_RINvC3foo3barBc_E", RN, NULL },
+
+    /* a D back reference: Q and a base-26 distance back, to an identifier
+     * or a type parsed again there (Phobos's writeln, as DMD mangles it) */
+    { "identifier and type back references", "_D3std5stdio__T7writelnTAyaZQnFNfQjZv", D,
+      "std.stdio.writeln!(immutable(char)[]).writeln: void function(immutable(char)[]) @safe" },
+    { "a type back reference to a basic type", "_D3foo3barFQdZv", D,
+      "foo.bar: void function(char)" },
+    { "a back reference of distance 0", "_D3fooQaFZv", D, NULL },
+    { "a back reference before the name", "_D3fooQzFZv", D, NULL },
+    { "a type back reference to itself", "_D3foo3barFQaZv", D, NULL },
+    { "a back reference too long to count", "_D3fooQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaFZv", D, NULL },
 };
 
 int

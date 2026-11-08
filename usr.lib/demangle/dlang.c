@@ -31,11 +31,6 @@ enum {
 
 typedef demangle_buf_t dlang_buf_t;
 
-typedef struct dlang_name_ref {
-    size_t off;
-    size_t len;
-} dlang_name_ref_t;
-
 typedef struct dlang_parser {
     const char *input;
     const char *cur;
@@ -46,9 +41,9 @@ typedef struct dlang_parser {
 
     dlang_buf_t out;
 
-    dlang_name_ref_t *name_refs;
-    size_t name_ref_count;
-    size_t name_ref_cap;
+    /* the target of the type back reference being parsed: one inside it
+     * must reach further back, so none can lead round to itself */
+    const char *type_backref;
 } dlang_parser_t;
 
 static int starts_with(const char *s, const char *prefix);
@@ -67,8 +62,7 @@ static int dlang_parser_init(dlang_parser_t *p, const char *mangled, int options
 static void dlang_parser_destroy(dlang_parser_t *p);
 static int dlang_parser_enter(dlang_parser_t *p);
 static void dlang_parser_leave(dlang_parser_t *p);
-static int dlang_parser_add_name_ref(dlang_parser_t *p, size_t off, size_t len);
-static int dlang_parser_append_name_ref(dlang_parser_t *p, size_t idx);
+static const char *dlang_decode_backref(dlang_parser_t *p);
 
 static int dlang_parse_number(dlang_parser_t *p, size_t *out);
 static int dlang_parse_lname(dlang_parser_t *p);
@@ -210,10 +204,6 @@ dlang_parser_destroy(dlang_parser_t *p)
     }
 
     dlang_buf_destroy(&p->out);
-    free(p->name_refs);
-    p->name_refs = NULL;
-    p->name_ref_count = 0u;
-    p->name_ref_cap = 0u;
 }
 
 static int
@@ -235,69 +225,46 @@ dlang_parser_leave(dlang_parser_t *p)
     }
 }
 
-static int
-dlang_parser_add_name_ref(dlang_parser_t *p, size_t off, size_t len)
+/*
+ * A back reference (D ABI): Q, at p->cur, and a base-26 number -- upper
+ * case letters for every digit but the last, which is lower case.  What it
+ * refers to starts that many characters before the Q, in the mangled name
+ * itself, and is parsed again there.  They were a decimal index into a
+ * table of slices of the output, which no compiler writes, and which the
+ * rewriting of the output for qualifiers and return types left pointing at
+ * other text.  The target, p->cur past the number; or NULL.
+ */
+static const char *
+dlang_decode_backref(dlang_parser_t *p)
 {
-    dlang_name_ref_t *next;
-    size_t cap;
+    const char *q = p->cur;
+    size_t val = 0u;
 
-    if (p == NULL || off + len > p->out.len) {
-        return -1;
-    }
+    p->cur++;
+    for (;;) {
+        char c = p->cur[0];
+        size_t d;
 
-    if (p->name_ref_count == p->name_ref_cap) {
-        cap = (p->name_ref_cap == 0u) ? 16u : p->name_ref_cap * 2u;
-        if (cap < p->name_ref_cap) {
-            return -1;
+        if (c >= 'A' && c <= 'Z') {
+            d = (size_t)(c - 'A');
+        } else if (c >= 'a' && c <= 'z') {
+            d = (size_t)(c - 'a');
+        } else {
+            return NULL;
         }
-
-        next = (dlang_name_ref_t *)realloc(p->name_refs, cap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
+        if (val > (SIZE_MAX - d) / 26u) {
+            return NULL;
         }
-
-        p->name_refs = next;
-        p->name_ref_cap = cap;
+        val = val * 26u + d;
+        p->cur++;
+        if (c >= 'a') {
+            break;
+        }
     }
-
-    p->name_refs[p->name_ref_count].off = off;
-    p->name_refs[p->name_ref_count].len = len;
-    p->name_ref_count++;
-    return 0;
-}
-
-static int
-dlang_parser_append_name_ref(dlang_parser_t *p, size_t idx)
-{
-    dlang_name_ref_t *ref;
-    char *tmp;
-    int ret;
-
-    if (p == NULL || idx >= p->name_ref_count) {
-        return -1;
+    if (val == 0u || val > (size_t)(q - p->input)) {
+        return NULL;
     }
-
-    ref = &p->name_refs[idx];
-    if (ref->off + ref->len > p->out.len) {
-        return -1;
-    }
-
-    /* dlang_buf_append calls demangle_buf_reserve which may realloc
-     * p->out.data.  We can't pass `p->out.data + ref->off` directly:
-     * the source pointer is captured before the reserve, so after
-     * realloc it points into freed memory.  Stage the slice in a
-     * scratch buffer first. */
-    if (ref->len == 0u) {
-        return 0;
-    }
-    tmp = (char *)malloc(ref->len);
-    if (tmp == NULL) {
-        return -1;
-    }
-    memcpy(tmp, p->out.data + ref->off, ref->len);
-    ret = dlang_buf_append(&p->out, tmp, ref->len);
-    free(tmp);
-    return ret;
+    return q - val;
 }
 
 static int
@@ -391,7 +358,6 @@ dlang_parse_lname(dlang_parser_t *p)
 {
     const char *s;
     size_t len;
-    size_t off;
     int formatted;
 
     if (dlang_parse_number(p, &len) != 0 || len == 0u) {
@@ -403,7 +369,6 @@ dlang_parse_lname(dlang_parser_t *p)
         return -1;
     }
 
-    off = p->out.len;
     formatted = 0;
     if (dlang_format_special_name(&p->out, s, len, &formatted) != 0) {
         return -1;
@@ -413,7 +378,7 @@ dlang_parse_lname(dlang_parser_t *p)
     }
 
     p->cur += len;
-    return dlang_parser_add_name_ref(p, off, p->out.len - off);
+    return 0;
 }
 
 static int
@@ -548,7 +513,6 @@ static int
 dlang_parse_template_instance_name(dlang_parser_t *p)
 {
     int first;
-    size_t off;
 
     if (dlang_parser_enter(p) != 0) {
         return -1;
@@ -560,7 +524,6 @@ dlang_parse_template_instance_name(dlang_parser_t *p)
         return -1;
     }
 
-    off = p->out.len;
     p->cur += 3;
 
     if (dlang_parse_lname(p) != 0 || dlang_buf_append(&p->out, "!(", 2u) != 0) {
@@ -589,11 +552,6 @@ dlang_parse_template_instance_name(dlang_parser_t *p)
     }
 
     p->cur++;
-    if (dlang_parser_add_name_ref(p, off, p->out.len - off) != 0) {
-        dlang_parser_leave(p);
-        return -1;
-    }
-
     dlang_parser_leave(p);
     return 0;
 }
@@ -607,13 +565,18 @@ dlang_parse_symbol_name(dlang_parser_t *p)
     }
 
     if (p->cur[0] == 'Q') {
-        size_t idx;
+        /* an identifier's back reference: the LName at its target */
+        const char *target = dlang_decode_backref(p);
+        const char *resume = p->cur;
+        int rc;
 
-        p->cur++;
-        if (dlang_parse_number(p, &idx) != 0) {
+        if (target == NULL || !isdigit((unsigned char)target[0])) {
             return -1;
         }
-        return dlang_parser_append_name_ref(p, idx);
+        p->cur = target;
+        rc = dlang_parse_lname(p);
+        p->cur = resume;
+        return rc;
     }
 
     return dlang_parse_lname(p);
@@ -656,6 +619,7 @@ dlang_is_type_start(char ch)
     case 'w': case 'A': case 'G': case 'H': case 'P': case 'E': case 'C':
     case 'S': case 'I': case 'D': case 'F': case 'U': case 'W': case 'V':
     case 'R': case 'B': case 'n': case 'x': case 'y': case 'O': case 'N':
+    case 'Q':
         return 1;
     default:
         return 0;
@@ -992,6 +956,25 @@ dlang_parse_type_core(dlang_parser_t *p)
         { 'u', "wchar" }, { 'w', "dchar" }, { 'n', "typeof(null)" }
     };
     size_t i;
+
+    if (p->cur[0] == 'Q') {
+        /* a type's back reference: the type at its target, which must lie
+         * before that of any back reference this one is inside */
+        const char *target = dlang_decode_backref(p);
+        const char *resume = p->cur;
+        const char *outer = p->type_backref;
+        int rc;
+
+        if (target == NULL || (outer != NULL && target >= outer)) {
+            return -1;
+        }
+        p->type_backref = target;
+        p->cur = target;
+        rc = dlang_parse_type(p);
+        p->cur = resume;
+        p->type_backref = outer;
+        return rc;
+    }
 
     for (i = 0u; i < sizeof(basic) / sizeof(basic[0]); i++) {
         if (p->cur[0] == basic[i].code) {
