@@ -90,7 +90,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Track which template parameter index is a pack (and allow 0-length packs in `J...E`), omit the parameter when the pack is empty, and expand the referenced pack parameter index cleanly.
     - Verify: `tests/usr.lib/demangle/`: `_Z1fIJEEvDpT_` demangles to `"void f<>()"` and `_Z1fIiJdcEEvT_DpT0_` demangles to `"void f<int, double, char>(int, double, char)"`.
 
-- [ ] **DMG-ITAN-07** (medium) Standard library substitutions `Sa`, `Sb`, `Ss`, `Si`, `So`, `Sd` are skipped when registering nested template substitutions (REQ: REQ-DMGA-0011)
+- [x] **DMG-ITAN-07** (medium) Standard library substitutions `Sa`, `Sb`, `Ss`, `Si`, `So`, `Sd` are skipped when registering nested template substitutions (REQ: REQ-DMGA-0011)
     - Site: `usr.lib/demangle/itanium.c:982-1026` (`parse_nested_name`)
     - Evidence: `is_wellknown_sub` treats `Sa`, `Sb`, `Ss`, `Si`, `So`, `Sd` identically to `St` and suppresses `parser_add_substitution()` both before and after `<template-args>`. Per the Itanium C++ ABI, only `St` (`::std::`) is a scope prefix that is not itself a substitution candidate; `Sa<...>` and `Sb<...>` are template instantiations that must be added to the substitution table.
     - Fix: Restrict the prefix-only exemption to `St`, or register substitutions for instantiated standard abbreviations per the Itanium ABI grammar.

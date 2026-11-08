@@ -56,6 +56,17 @@ static const dm_case_t cases[] = {
     { "the literal as a template parameter", "_Z1fIL3Foo1EEvT_", I, "void f<(Foo)1>((Foo)1)" },
     { "a builtin literal is its value", "_Z1fILi1EEvv", I, "void f<1>()" },
 
+    /* the substitution table holds what the ABI enters, and only that */
+    { "Sa<char> is a new entry", "_Z1fSaIcES_", I, "f(std::allocator<char>, std::allocator<char>)" },
+    { "and in a nested name", "_Z1fNSaIcE1xES_S0_", I,
+      "f(std::allocator<char>::x, std::allocator<char>, std::allocator<char>::x)" },
+    { "Sb<wchar_t> is too", "_Z1fSbIwES_", I,
+      "f(std::basic_string<wchar_t>, std::basic_string<wchar_t>)" },
+    { "a parameter's entries stay where its text is",
+      "_Z18startFromBeginningRmRN4llvm18DIExpressionCursorENS0_8ArrayRefImEE", I,
+      "startFromBeginning(unsigned long&, llvm::DIExpressionCursor&, llvm::ArrayRef<unsigned long>)" },
+    { "a function's own name is no entry", "_Z1fIL3Foo1EEvS_", I, "void f<(Foo)1>(f)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

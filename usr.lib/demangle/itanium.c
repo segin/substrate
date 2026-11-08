@@ -854,7 +854,11 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
 
         first = 1;
         while (p->cur[0] != '\0' && p->cur[0] != 'E') {
-            size_t before = p->out.len;
+            /* the separator before the parameter, not inserted after it,
+             * which left its substitutions' offsets behind */
+            if (!first && buf_append(&p->out, ", ", 2u) != 0) {
+                return -1;
+            }
             if (parser_enter(p) != 0) {
                 return -1;
             }
@@ -863,9 +867,6 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
                 return -1;
             }
             parser_leave(p);
-            if (!first && buf_insert(&p->out, before, ", ", 2u) != 0) {
-                return -1;
-            }
             first = 0;
         }
 
@@ -986,8 +987,8 @@ parse_nested_name(dm_itanium_parser_t *p)
     }
 
     while (p->cur[0] != '\0' && p->cur[0] != 'E') {
-        int is_wellknown_sub;
         int from_sub;
+        int had_args;
         size_t comp_off, comp_len;
         size_t name_only_off, name_only_len;
         dm_parse_mark_t comp_mark;
@@ -996,13 +997,8 @@ parse_nested_name(dm_itanium_parser_t *p)
             goto out;
         }
 
-        is_wellknown_sub = (p->cur[0] == 'S' &&
-                            (p->cur[1] == 't' || p->cur[1] == 'a' ||
-                             p->cur[1] == 'b' || p->cur[1] == 's' ||
-                             p->cur[1] == 'i' || p->cur[1] == 'o' ||
-                             p->cur[1] == 'd'));
-
         from_sub = 0;
+        had_args = 0;
         if (parse_unqualified_name(p, last_off, last_len, &comp_off, &comp_len) != 0) {
             mark_save(p, &comp_mark);
             comp_off = p->out.len;
@@ -1018,7 +1014,9 @@ parse_nested_name(dm_itanium_parser_t *p)
         name_only_len = comp_len;
 
         if (p->cur[0] == 'I') {
-            if (!is_wellknown_sub && !from_sub) {
+            /* the template's name, before its arguments: a substitution
+             * is one already */
+            if (!from_sub) {
                 if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
                     goto out;
                 }
@@ -1028,6 +1026,7 @@ parse_nested_name(dm_itanium_parser_t *p)
                 goto out;
             }
             comp_len = p->out.len - comp_off;
+            had_args = 1;
             p->has_return_type = 1;
         } else {
             p->has_return_type = 0;
@@ -1036,7 +1035,15 @@ parse_nested_name(dm_itanium_parser_t *p)
         last_off = name_only_off;
         last_len = name_only_len;
 
-        if (!is_wellknown_sub && (p->cur[0] != 'E' || p->in_type_context)) {
+        /*
+         * The prefix so far is a candidate (Itanium ABI 5.1.9) -- but not a
+         * substitution that came as it was, which is in the table already
+         * (NS_3FooE entered S_ again, and every later index was one off),
+         * and not a function's own name.  A substitution given template
+         * arguments is a new template-id: Sa<char>, std::allocator<char>,
+         * was left out with St's std::, which alone is no candidate.
+         */
+        if ((!from_sub || had_args) && (p->cur[0] != 'E' || p->in_type_context)) {
             if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
                 goto out;
             }
@@ -1065,11 +1072,13 @@ parse_unscoped_name(dm_itanium_parser_t *p)
     size_t comp_len;
     int has_std_prefix;
     int from_sub;
+    int had_args;
     dm_parse_mark_t m;
 
     name_off = p->out.len;
     has_std_prefix = 0;
     from_sub = 0;
+    had_args = 0;
 
     if (p->cur[0] == 'S' && p->cur[1] == 't') {
         p->cur += 2;
@@ -1106,11 +1115,20 @@ parse_unscoped_name(dm_itanium_parser_t *p)
             return -1;
         }
         p->has_return_type = 1;
+        had_args = 1;
     } else {
         p->has_return_type = 0;
     }
 
-    if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
+    /*
+     * The name is a candidate in a type -- a class, or a template-id such
+     * as Sa's std::allocator<char> -- and not otherwise: a function's own
+     * name is none (the template name before its arguments is entered
+     * above), nor a substitution that came as it was.  _Z1fSaIcES_ read
+     * S_ as f.
+     */
+    if (p->in_type_context && (had_args || !from_sub) &&
+        parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
         return -1;
     }
 
@@ -1264,9 +1282,17 @@ parse_bare_function_type(dm_itanium_parser_t *p)
 
     first = 1;
     while (p->cur[0] != '\0') {
+        size_t sep;
         size_t before;
         size_t parsed_len;
 
+        /* the separator first: inserted after the parameter, it moved
+         * the parameter's text and not the substitutions entered in it,
+         * which then read two bytes early (", ll" for llvm) */
+        sep = p->out.len;
+        if (!first && !suppress_params && buf_append(&p->out, ", ", 2u) != 0) {
+            return -1;
+        }
         before = p->out.len;
         if (parse_type(p) != 0) {
             return -1;
@@ -1280,12 +1306,8 @@ parse_bare_function_type(dm_itanium_parser_t *p)
         }
 
         if (suppress_params) {
-            p->out.len = before;
+            p->out.len = sep;
             p->out.data[p->out.len] = '\0';
-        } else if (!first) {
-            if (buf_insert(&p->out, before, ", ", 2u) != 0) {
-                return -1;
-            }
         }
 
         first = 0;
@@ -1749,6 +1771,10 @@ parse_function_type(dm_itanium_parser_t *p)
         size_t before;
         size_t parsed_len;
 
+        /* the separator before the parameter (see parse_bare_function_type) */
+        if (!first && buf_append(&p->out, ", ", 2u) != 0) {
+            return -1;
+        }
         before = p->out.len;
         if (parse_type(p) != 0) {
             return -1;
@@ -1759,10 +1785,6 @@ parse_function_type(dm_itanium_parser_t *p)
             p->out.len = before;
             p->out.data[p->out.len] = '\0';
             break;
-        }
-
-        if (!first && buf_insert(&p->out, before, ", ", 2u) != 0) {
-            return -1;
         }
 
         first = 0;
@@ -1932,6 +1954,7 @@ parse_type(dm_itanium_parser_t *p)
     case 'F':
     case 'M':
     case 'C': case 'G':
+    case 'T':   /* a template parameter used as a type (ABI 5.1.9) */
         needs_sub = 1;
         break;
     default:
