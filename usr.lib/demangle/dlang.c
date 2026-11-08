@@ -48,9 +48,7 @@ typedef struct dlang_parser {
 
 static int starts_with(const char *s, const char *prefix);
 static int dlang_is_mangled(const char *mangled);
-static int dlang_is_runtime_symbol(const char *mangled);
 static int dlang_has_n_bytes(const char *s, size_t n);
-static char *dlang_strdup(const char *s);
 
 static int dlang_buf_reserve(dlang_buf_t *buf, size_t extra);
 static int dlang_buf_append(dlang_buf_t *buf, const char *s, size_t n);
@@ -106,12 +104,6 @@ dlang_is_mangled(const char *mangled)
 }
 
 static int
-dlang_is_runtime_symbol(const char *mangled)
-{
-    return starts_with(mangled, "_d_");
-}
-
-static int
 dlang_has_n_bytes(const char *s, size_t n)
 {
     size_t i;
@@ -126,26 +118,6 @@ dlang_has_n_bytes(const char *s, size_t n)
         }
     }
     return 1;
-}
-
-static char *
-dlang_strdup(const char *s)
-{
-    size_t n;
-    char *ret;
-
-    if (s == NULL) {
-        return NULL;
-    }
-
-    n = strlen(s);
-    ret = (char *)malloc(n + 1u);
-    if (ret == NULL) {
-        return NULL;
-    }
-
-    memcpy(ret, s, n + 1u);
-    return ret;
 }
 
 static int
@@ -1389,10 +1361,6 @@ dlang_demangle_symbol(const char *mangled, int options)
     dlang_parser_t p;
     char *ret;
 
-    if (dlang_is_runtime_symbol(mangled)) {
-        return dlang_strdup(mangled);
-    }
-
     if (!dlang_is_mangled(mangled)) {
         return NULL;
     }
@@ -1419,10 +1387,10 @@ demangle_dlang(const char *mangled, int options)
         return NULL;
     }
 
-    if (dlang_is_runtime_symbol(mangled)) {
-        return dlang_strdup(mangled);
-    }
-
+    /* a _d_ name, _d_allocmemory, is a C-linkage runtime function, not a
+     * mangled one: it is refused, as any name that is not mangled is.  It
+     * was returned as it was, a demangling that changed nothing -- and
+     * any C function named _d_... with it. */
     if ((options & DEMANGLE_DLANG) != 0) {
         if (!dlang_is_mangled(mangled)) {
             return NULL;

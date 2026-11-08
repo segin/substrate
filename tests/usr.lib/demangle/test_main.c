@@ -303,7 +303,9 @@ test_9u(void)
 {
     expect_null("9u-1a", "_Dmain", DEMANGLE_DLANG);
     expect_null("9u-1b", "_Dmain", DEMANGLE_AUTO);
-    expect_eq("9u-2", "_d_allocmemory", DEMANGLE_AUTO, "_d_allocmemory");
+    /* a _d_ runtime function is C, not a mangled name */
+    expect_null("9u-2", "_d_allocmemory", DEMANGLE_AUTO);
+    expect_null("9u-2b", "_d_allocmemory", DEMANGLE_DLANG);
     expect_contains("9u-3a", "_D3foo9__lambda1FiZi", DEMANGLE_AUTO, "{lambda#1}");
     expect_contains("9u-3b", "_D3foo11__unittest1FiZi", DEMANGLE_AUTO, "{unittest#1}");
 }

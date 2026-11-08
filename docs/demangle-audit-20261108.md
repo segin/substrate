@@ -140,7 +140,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: When `DEMANGLE_NO_PARAMS` is set, omit the trailing `: <type>` signature in `dlang_parse_mangled_name()`; when `DEMANGLE_NO_VERBOSE` is set, suppress function attribute suffixes in `dlang_append_attrs()`.
     - Verify: `tests/usr.lib/demangle/`: `demangle("_D3foo3barFiZv", DEMANGLE_DLANG | DEMANGLE_NO_PARAMS)` returns `"foo.bar"`.
 
-- [ ] **DMG-DLANG-04** (low) Unmangled `_d_...` runtime helper names are returned as demangled symbols (REQ: REQ-DMGA-0018)
+- [x] **DMG-DLANG-04** (low) Unmangled `_d_...` runtime helper names are returned as demangled symbols (REQ: REQ-DMGA-0018)
     - Site: `usr.lib/demangle/dlang.c:114-118`, `usr.lib/demangle/dlang.c:1389-1391`, `usr.lib/demangle/dlang.c:1419-1421`, `usr.lib/demangle/demangle.c:82-84`
     - Evidence: `_d_...` symbols (such as `_d_allocclass`) are C-linkage runtime functions, not mangled D names, and `_d_` can collide with ordinary C identifiers starting with `_d_`. Returning `strdup(mangled)` reports a successful demangling where the output equals the input.
     - Fix: Confirm whether `tests/usr.lib/demangle` requires `_d_` passthrough; if retained, restrict it to known D runtime entrypoints or document the behavior in `demangle(3)`.
