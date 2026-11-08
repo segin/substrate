@@ -84,7 +84,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Insert the outer dimension before any trailing array dimensions of the element type, or collect consecutive `A<dim>_` prefixes before formatting the element type.
     - Verify: `tests/usr.lib/demangle/`: `_Z1fA2_A3_i` demangles to `"f(int[2][3])"`.
 
-- [ ] **DMG-ITAN-06** (medium) Parameter pack expansion `Dp` fails on empty packs and non-zero pack indices (REQ: REQ-DMGA-0010)
+- [x] **DMG-ITAN-06** (medium) Parameter pack expansion `Dp` fails on empty packs and non-zero pack indices (REQ: REQ-DMGA-0010)
     - Site: `usr.lib/demangle/itanium.c:2049-2091` (`parse_type_inner`)
     - Evidence: `Dp` unconditionally calls `parse_type(p)` once even when the pack has 0 elements (`J E`), causing empty pack instantiations to fail. For non-empty packs, it hardcodes `pack_start = 0` and overwrites `p->func_tmpl_off[0]`, failing when a function template has leading non-pack template parameters (`T_`, `T0_`) and leaking the overwritten `func_tmpl_off[0]` on error return at line 2082.
     - Fix: Track which template parameter index is a pack (and allow 0-length packs in `J...E`), omit the parameter when the pack is empty, and expand the referenced pack parameter index cleanly.

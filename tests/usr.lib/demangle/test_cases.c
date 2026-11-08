@@ -101,6 +101,19 @@ static const dm_case_t cases[] = {
     { "to a pointer to one by substitution", "_Z1fPA4_iRS0_", I, "f(int (*)[4], int (*&)[4])" },
     { "to one by template parameter", "_Z1fIPA4_iEvPT_", I, "void f<int (*)[4]>(int (**)[4])" },
 
+    /* a pack expansion: its pattern once per element of the pack it names
+     * (GNU prints f<, int>(, int) for the empty pack before an argument) */
+    { "an empty pack", "_Z1fIJEEvDpT_", I, "void f<>()" },
+    { "a pack after an argument", "_Z1fIiJdcEEvT_DpT0_", I,
+      "void f<int, double, char>(int, double, char)" },
+    { "a pattern around the parameter", "_Z1fIJidEEvDpRKT_", I,
+      "void f<int, double>(int const&, double const&)" },
+    { "an empty pack after an argument", "_Z1fIiJEEvT_DpT0_", I, "void f<int>(int)" },
+    { "an argument after a pack", "_Z1fIJicEiEvDpT_T0_", I, "void f<int, char, int>(int, char, int)" },
+    { "an empty pack before an argument", "_Z1fIJEiEvDpT_T0_", I, "void f<int>(int)" },
+    { "the pattern's entry is its last element", "_Z1fIJicEEvDpPT_S1_", I,
+      "void f<int, char>(int*, char*, char*)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

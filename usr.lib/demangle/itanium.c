@@ -32,11 +32,24 @@ typedef struct dm_subst {
     char *text;     /* the copy, or NULL: the slice */
 } dm_subst_t;
 
+/*
+ * A template argument list's arguments, as T_, T0_, ... number them: each
+ * is a run of the elements whose text the off/len arrays beside it hold --
+ * one element, or a pack's, J...E, which may be none.
+ */
+typedef struct dm_targ_map {
+    size_t first[DM_TEMPLATE_ARG_CAP];  /* its first element */
+    size_t n[DM_TEMPLATE_ARG_CAP];      /* how many elements */
+    unsigned char pack[DM_TEMPLATE_ARG_CAP];
+    size_t count;
+} dm_targ_map_t;
+
 typedef struct dm_template_frame {
     size_t output_off;
     size_t arg_off[DM_TEMPLATE_ARG_CAP];
     size_t arg_len[DM_TEMPLATE_ARG_CAP];
     size_t arg_count;
+    dm_targ_map_t map;
 } dm_template_frame_t;
 
 typedef struct dm_itanium_parser {
@@ -80,6 +93,16 @@ typedef struct dm_itanium_parser {
     size_t func_tmpl_off[DM_TEMPLATE_ARG_CAP];
     size_t func_tmpl_len[DM_TEMPLATE_ARG_CAP];
     size_t func_tmpl_count;
+
+    dm_targ_map_t last_map;     /* the arguments of last_template_* */
+    dm_targ_map_t func_map;     /* and of func_tmpl_* */
+
+    /* a pack expansion, Dp, being parsed: its pattern is parsed once for
+     * each element of the pack a T_ in it names, the element pack_index;
+     * that T_ notes the pack's length in pack_seen (SIZE_MAX: none yet) */
+    int pack_expanding;
+    size_t pack_index;
+    size_t pack_seen;
 } dm_itanium_parser_t;
 
 /* All a speculative parse can change, so that backtracking undoes it --
@@ -94,6 +117,7 @@ typedef struct dm_parse_mark {
     size_t last_template_count;
     size_t last_template_off[DM_TEMPLATE_ARG_CAP];
     size_t last_template_len[DM_TEMPLATE_ARG_CAP];
+    dm_targ_map_t last_map;
     int has_return_type;
 } dm_parse_mark_t;
 
@@ -115,6 +139,10 @@ static int parser_push_template_frame(dm_itanium_parser_t *p);
 static int parser_pop_template_frame(dm_itanium_parser_t *p);
 static int parser_record_template_arg(dm_itanium_parser_t *p, size_t off, size_t len);
 static int parser_capture_template_frame(dm_itanium_parser_t *p);
+static void targ_map_copy(dm_targ_map_t *dst, const dm_targ_map_t *src);
+static int parser_record_template_map(dm_itanium_parser_t *p, size_t first, size_t n, int pack);
+static int append_template_arg(dm_itanium_parser_t *p, const dm_targ_map_t *map, const size_t *off,
+                               const size_t *len, size_t elems, size_t idx);
 static int parser_add_substitution(dm_itanium_parser_t *p, size_t off, size_t len);
 static int parser_append_output_slice(dm_itanium_parser_t *p, size_t off, size_t len);
 static int parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx);
@@ -446,7 +474,39 @@ parser_capture_template_frame(dm_itanium_parser_t *p)
         p->last_template_off[i] = frame->arg_off[i];
         p->last_template_len[i] = frame->arg_len[i];
     }
+    targ_map_copy(&p->last_map, &frame->map);
 
+    return 0;
+}
+
+/* Copy the arguments in use of one map to another. */
+static void
+targ_map_copy(dm_targ_map_t *dst, const dm_targ_map_t *src)
+{
+    dst->count = src->count;
+    memcpy(dst->first, src->first, src->count * sizeof(dst->first[0]));
+    memcpy(dst->n, src->n, src->count * sizeof(dst->n[0]));
+    memcpy(dst->pack, src->pack, src->count * sizeof(dst->pack[0]));
+}
+
+/* Enter, in the innermost argument list, an argument of the @p n elements
+ * from @p first on: one, or a pack's. */
+static int
+parser_record_template_map(dm_itanium_parser_t *p, size_t first, size_t n, int pack)
+{
+    dm_targ_map_t *map;
+
+    if (p->template_depth == 0u) {
+        return -1;
+    }
+    map = &p->template_frames[p->template_depth - 1u].map;
+    if (map->count >= DM_TEMPLATE_ARG_CAP) {
+        return -1;
+    }
+    map->first[map->count] = first;
+    map->n[map->count] = n;
+    map->pack[map->count] = (unsigned char)(pack != 0);
+    map->count++;
     return 0;
 }
 
@@ -550,6 +610,29 @@ parser_insert_in_type(dm_itanium_parser_t *p, size_t type_off, size_t pos, const
     return buf_insert(&p->out, pos, s, n);
 }
 
+/* Before the output is cut back to @p pos: make the entries that reach
+ * past it copies of their text, which the cut would leave them without. */
+static int
+parser_freeze_from(dm_itanium_parser_t *p, size_t pos)
+{
+    size_t i;
+
+    for (i = 0u; i < p->substitution_count; i++) {
+        dm_subst_t *e = &p->substitutions[i];
+
+        if (e->text != NULL || e->off + e->len <= pos) {
+            continue;
+        }
+        e->text = (char *)malloc(e->len + 1u);
+        if (e->text == NULL) {
+            return -1;
+        }
+        memcpy(e->text, p->out.data + e->off, e->len);
+        e->text[e->len] = '\0';
+    }
+    return 0;
+}
+
 /*
  * Find, in the type text from @p off to the end of @p out, the array bounds
  * outside any template argument list or parenthesis: int[4], int (*)[4].
@@ -615,6 +698,7 @@ mark_save(dm_itanium_parser_t *p, dm_parse_mark_t *m)
         p->last_template_count * sizeof(m->last_template_off[0]));
     memcpy(m->last_template_len, p->last_template_len,
         p->last_template_count * sizeof(m->last_template_len[0]));
+    targ_map_copy(&m->last_map, &p->last_map);
     m->has_return_type = p->has_return_type;
 }
 
@@ -630,6 +714,7 @@ mark_restore(dm_itanium_parser_t *p, const dm_parse_mark_t *m)
         m->last_template_count * sizeof(p->last_template_off[0]));
     memcpy(p->last_template_len, m->last_template_len,
         m->last_template_count * sizeof(p->last_template_len[0]));
+    targ_map_copy(&p->last_map, &m->last_map);
     p->has_return_type = m->has_return_type;
 
     if (m->out_len <= p->out.len) {
@@ -1438,9 +1523,13 @@ parse_bare_function_type(dm_itanium_parser_t *p)
             break;
         }
 
-        if (suppress_params) {
+        if (suppress_params || parsed_len == 0u) {
+            /* an empty pack expansion is no parameter: f<>() for DpT_ */
             p->out.len = sep;
             p->out.data[p->out.len] = '\0';
+            if (parsed_len == 0u) {
+                continue;
+            }
         }
 
         first = 0;
@@ -1478,6 +1567,7 @@ parse_template_args(dm_itanium_parser_t *p)
     first = 1;
     while (p->cur[0] != '\0' && p->cur[0] != 'E') {
         size_t arg_off;
+        size_t elem_first;
         int arg_rc;
 
         if (!first && buf_append(&p->out, ", ", 2u) != 0) {
@@ -1485,6 +1575,7 @@ parse_template_args(dm_itanium_parser_t *p)
         }
 
         arg_off = p->out.len;
+        elem_first = p->template_frames[p->template_depth - 1u].arg_count;
         arg_rc = parse_template_arg(p);
         if (arg_rc < 0) {
             goto fail;
@@ -1495,6 +1586,20 @@ parse_template_args(dm_itanium_parser_t *p)
             if (parser_record_template_arg(p, arg_off, p->out.len - arg_off) != 0) {
                 goto fail;
             }
+        }
+        /* the argument T_ names: the element, or the pack's run of them */
+        if (parser_record_template_map(p, elem_first,
+                p->template_frames[p->template_depth - 1u].arg_count - elem_first,
+                arg_rc == 1) != 0) {
+            goto fail;
+        }
+        if (arg_rc == 1 && p->out.len == arg_off) {
+            /* an empty pack leaves no ", " behind it: f<int> for IiJEE */
+            if (!first) {
+                p->out.len -= 2u;
+                p->out.data[p->out.len] = '\0';
+            }
+            continue;
         }
 
         first = 0;
@@ -1855,18 +1960,51 @@ parse_template_param(dm_itanium_parser_t *p)
     }
 
     /* Prefer function-level template args when available */
-    if (p->func_tmpl_count > 0) {
-        if (idx >= p->func_tmpl_count) {
-            return -1;
-        }
-        return parser_append_output_slice(p, p->func_tmpl_off[idx], p->func_tmpl_len[idx]);
+    if (p->func_map.count > 0) {
+        return append_template_arg(p, &p->func_map, p->func_tmpl_off, p->func_tmpl_len,
+                                   p->func_tmpl_count, idx);
     }
+    return append_template_arg(p, &p->last_map, p->last_template_off, p->last_template_len,
+                               p->last_template_count, idx);
+}
 
-    if (idx >= p->last_template_count) {
+/*
+ * Append the template argument @p idx of @p map, whose elements' text
+ * @p off and @p len give.  A pack in a pack expansion gives its element
+ * pack_index, and its length to pack_seen; elsewhere all its elements.
+ * T_ named an element, not an argument: a pack's elements took every
+ * index after it, and an empty one none.
+ */
+static int
+append_template_arg(dm_itanium_parser_t *p, const dm_targ_map_t *map, const size_t *off,
+                    const size_t *len, size_t elems, size_t idx)
+{
+    size_t i;
+
+    if (idx >= map->count || map->first[idx] + map->n[idx] > elems) {
         return -1;
     }
-
-    return parser_append_output_slice(p, p->last_template_off[idx], p->last_template_len[idx]);
+    if (!map->pack[idx]) {
+        i = map->first[idx];
+        return parser_append_output_slice(p, off[i], len[i]);
+    }
+    if (p->pack_expanding) {
+        p->pack_seen = map->n[idx];
+        if (p->pack_index >= map->n[idx]) {
+            return 0;
+        }
+        i = map->first[idx] + p->pack_index;
+        return parser_append_output_slice(p, off[i], len[i]);
+    }
+    for (i = 0u; i < map->n[idx]; i++) {
+        if (i > 0u && buf_append(&p->out, ", ", 2u) != 0) {
+            return -1;
+        }
+        if (parser_append_output_slice(p, off[map->first[idx] + i], len[map->first[idx] + i]) != 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static int
@@ -1918,6 +2056,12 @@ parse_function_type(dm_itanium_parser_t *p)
             p->out.len = before;
             p->out.data[p->out.len] = '\0';
             break;
+        }
+        if (parsed_len == 0u) {
+            /* an empty pack expansion, and its separator, go */
+            p->out.len = first ? before : before - 2u;
+            p->out.data[p->out.len] = '\0';
+            continue;
         }
 
         first = 0;
@@ -2130,6 +2274,89 @@ parse_type(dm_itanium_parser_t *p)
     return 0;
 }
 
+/*
+ * Dp <type>: a pack expansion, the pattern <type> once for each element of
+ * the pack a template parameter in it names, joined by ", ": DpRKT0_ is
+ * "int const&, char const&" for a pack of int and char, and nothing for an
+ * empty one.  The pattern's substitution candidates are the mangled
+ * name's, entered once, with the text of the last element.  This took T_
+ * to be the pack, whichever parameter the pattern named, and parsed the
+ * pattern once for a pack of none.
+ */
+static int
+parse_pack_expansion_type(dm_itanium_parser_t *p)
+{
+    const char *pattern;
+    const char *end;
+    size_t start;
+    size_t first_sub;
+    size_t subs;
+    size_t n;
+    size_t i;
+    size_t j;
+    int saved_expanding = p->pack_expanding;
+    size_t saved_index = p->pack_index;
+    size_t saved_seen = p->pack_seen;
+    int rc = -1;
+
+    p->cur += 2;
+    pattern = p->cur;
+    start = p->out.len;
+
+    p->pack_expanding = 1;
+    p->pack_index = 0u;
+    p->pack_seen = SIZE_MAX;
+    first_sub = p->substitution_count;
+    if (parse_type(p) != 0) {
+        goto out;
+    }
+    end = p->cur;
+    subs = p->substitution_count;
+    n = p->pack_seen;
+
+    if (n == 0u) {
+        /* the entries made keep the text they had */
+        if (parser_freeze_from(p, start) != 0) {
+            goto out;
+        }
+        p->out.len = start;
+        p->out.data[p->out.len] = '\0';
+    }
+    /* SIZE_MAX: no pack named -- a pack of the enclosing class's, which
+     * this parser keeps no elements of -- and the pattern stands alone */
+    for (i = 1u; n != SIZE_MAX && i < n; i++) {
+        if (buf_append(&p->out, ", ", 2u) != 0) {
+            goto out;
+        }
+        p->pack_index = i;
+        p->cur = pattern;
+        if (parse_type(p) != 0) {
+            goto out;
+        }
+        if (p->cur != end || p->substitution_count - subs != subs - first_sub) {
+            goto out;
+        }
+        /* the entries are what the last element's parse made, as GNU's:
+         * an S_ after DpPT_ for a pack of int and char is char* */
+        for (j = 0u; j < subs - first_sub; j++) {
+            dm_subst_t *to = &p->substitutions[first_sub + j];
+            dm_subst_t *from = &p->substitutions[subs + j];
+
+            free(to->text);
+            *to = *from;
+            from->text = NULL;
+        }
+        p->substitution_count = subs;
+    }
+    rc = 0;
+
+out:
+    p->pack_expanding = saved_expanding;
+    p->pack_index = saved_index;
+    p->pack_seen = saved_seen;
+    return rc;
+}
+
 static int
 parse_type_inner(dm_itanium_parser_t *p)
 {
@@ -2296,47 +2523,7 @@ parse_type_inner(dm_itanium_parser_t *p)
     }
 
     if (p->cur[0] == 'D' && p->cur[1] == 'p') {
-        const char *inner_start;
-        p->cur += 2;
-        inner_start = p->cur;
-
-        /* Parse the first element normally */
-        if (parse_type(p) != 0) {
-            return -1;
-        }
-
-        /* If we're in a function signature with pack template args,
-         * re-parse for remaining pack elements */
-        if (p->func_tmpl_count > 0) {
-            /* Determine which T_ param was used and how many elements it has.
-             * We saved func_tmpl args individually, and T_ (index 0) is the first.
-             * For now, assume all func_tmpl args beyond those used by the name
-             * are pack elements. Output additional comma-separated elements. */
-            size_t pack_start = 0; /* first pack element index */
-            size_t pack_end = p->func_tmpl_count;
-            size_t ei;
-
-            for (ei = pack_start + 1; ei < pack_end; ei++) {
-                const char *saved_cur = p->cur;
-                if (buf_append(&p->out, ", ", 2u) != 0) {
-                    return -1;
-                }
-                /* Temporarily make func_tmpl point to this element as T_ */
-                size_t saved_off_0 = p->func_tmpl_off[0];
-                size_t saved_len_0 = p->func_tmpl_len[0];
-                p->func_tmpl_off[0] = p->func_tmpl_off[ei];
-                p->func_tmpl_len[0] = p->func_tmpl_len[ei];
-                p->cur = inner_start;
-                if (parse_type(p) != 0) {
-                    return -1;
-                }
-                p->func_tmpl_off[0] = saved_off_0;
-                p->func_tmpl_len[0] = saved_len_0;
-                (void)saved_cur; /* cur is restored by re-parse */
-            }
-        }
-
-        return 0;
+        return parse_pack_expansion_type(p);
     }
 
     if (parse_function_type(p) == 0 ||
@@ -2518,10 +2705,12 @@ parse_encoding(dm_itanium_parser_t *p)
             memcpy(p->func_tmpl_off, p->last_template_off, p->func_tmpl_count * sizeof(size_t));
             memcpy(p->func_tmpl_len, p->last_template_len, p->func_tmpl_count * sizeof(size_t));
         }
+        targ_map_copy(&p->func_map, &p->last_map);
         if (parse_bare_function_type(p) != 0) {
             goto out;
         }
         p->func_tmpl_count = 0;
+        p->func_map.count = 0;
     }
     rc = 0;
 
