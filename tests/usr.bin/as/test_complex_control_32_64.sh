@@ -85,7 +85,9 @@ int complicated_main(int n, char **argv) {
 }
 SRC
 
-gcc -m64 -O3 -fPIC -fstack-protector-strong -fno-plt -fverbose-asm -g -S -o "$TMP/complex64.s" "$TMP/complex.c"
+# the compiler's target pinned to what the assembler is given below: a
+# compiler defaulting to x86-64-v3 (CI's) emitted vmovdqu and rorx
+gcc -m64 -march=x86-64-v2 -O3 -fPIC -fstack-protector-strong -fno-plt -fverbose-asm -g -S -o "$TMP/complex64.s" "$TMP/complex.c"
 gcc -m32 -O2 -fPIC -fstack-protector-strong -fno-plt -fverbose-asm -g -S -o "$TMP/complex32.s" "$TMP/complex.c"
 
 "$AS" -64 -march=x86-64-v2 -Wa,--gdwarf-2 -o "$TMP/complex64.o" "$TMP/complex64.s"
