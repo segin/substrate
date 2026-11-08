@@ -111,9 +111,11 @@ jobs:
       # which.  Note it stops at the first failing command in the recipe
       # rather than reporting every failure in one pass.  It includes the
       # kernel's host tests (`make -C tests/sys check`, every one built and
-      # run, each failure's output shown) and the ex and vi suites.
+      # run, each failure's output shown).  The ex and vi suites, which
+      # take hours, run in the ex-suite and vi-suite jobs instead
+      # (SKIP_EXVI=1).
       - name: Build and run host tests
-        run: make -C tests
+        run: make -C tests SKIP_EXVI=1
 
       # The in-tree linker, built for the host by each script: linker
       # scripts, archives read as input, and dynamic links.  They compile
@@ -146,6 +148,41 @@ jobs:
 
       - name: Toolchain manual page install
         run: make -C tests/usr.man run
+
+  # ex and its libexvi unit and source checks (tests/usr.lib/exvi), every
+  # test on a plain and an AddressSanitizer build.  strace lets the fsync
+  # case run rather than skip.
+  ex-suite:
+    name: ex suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 strace
+
+      - name: ex tests, plain and ASan
+        run: make -C tests/bin/ex test
+
+  # vi, every test on a plain and an AddressSanitizer build, and the
+  # oracle against Vim (which skips without vim) on the plain one.
+  vi-suite:
+    name: vi suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 vim
+
+      - name: vi tests, plain and ASan
+        run: make -C tests/bin/vi test
 
   userland:
     name: userland libs and utils

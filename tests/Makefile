@@ -124,9 +124,11 @@ all: test_bc_num test_runner test_getuid test_minix test_ext2_perf test_ext2_rea
 	# the kernel's host tests (tests/sys), every one built and run
 	$(MAKE) -C sys check
 	# ex and vi, each plain and under ASan, and libexvi's unit tests
-	# (tests/bin/ex runs tests/usr.lib/exvi); nothing ran them before
-	$(MAKE) -C bin/ex test
-	$(MAKE) -C bin/vi test
+	# (tests/bin/ex runs tests/usr.lib/exvi); nothing ran them before.
+	# SKIP_EXVI=1 leaves them out: CI runs them in jobs of their own,
+	# as together they take hours.
+	if [ -z "$(SKIP_EXVI)" ]; then $(MAKE) -C bin/ex test; fi
+	if [ -z "$(SKIP_EXVI)" ]; then $(MAKE) -C bin/vi test; fi
 
 test_getpagesize: lib/sys/test_getpagesize.c ../lib/sys/getpagesize.c
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
