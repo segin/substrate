@@ -122,8 +122,9 @@ ${GNU_LD:-ld} $flags --orphan-handling=discard -T nd.lds -o gnu g.o > gnu.err 2>
 if ./ld $flags --orphan-handling=discard -T nd.lds -o our g.o > our.err 2>&1; then
     echo "FAIL discard of a needed GOT: linked"; fail=1
 fi
-sed -n 's/^[^:]*ld: //p' gnu.err > gnu.msg
-sed -n 's/^[^:]*ld: //p' our.err > our.msg
+# (each linker's name off the front: ld, or Ubuntu's .../x86_64-linux-gnu-ld.bfd)
+sed -En 's/^[^:]*ld(\.[a-z]+)?: //p' gnu.err > gnu.msg
+sed -En 's/^[^:]*ld(\.[a-z]+)?: //p' our.err > our.msg
 if ! cmp -s gnu.msg our.msg; then
     echo "FAIL discard of a needed GOT: not GNU ld's words:"; diff gnu.msg our.msg; fail=1
 fi

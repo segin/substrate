@@ -59,7 +59,7 @@ echo 'SECTIONS { .text : { *(.text) } .data : { *(.data*) } }' > s.lds
 # The orphan lines of $1, the linker's own name taken off, without the
 # sections GNU ld makes for itself.
 orphans() {
-    sed -n 's/^[^:]*ld: //p' "$1" | grep 'orphan section' |
+    sed -En 's/^[^:]*ld(\.[a-z]+)?: //p' "$1" | grep 'orphan section' |
         grep -Ev "orphan section \`\\.(got|got\\.plt|rela\\.got|iplt|rela\\.iplt|igot\\.plt|interp|gnu\\.version.*)'"
 }
 secs() { readelf -SW "$1" | awk '/^ *\[ *[0-9]+\]/ { sub(/^ *\[ *[0-9]+\] */, ""); print $1 }' | grep -v '^NULL$'; }

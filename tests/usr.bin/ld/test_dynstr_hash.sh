@@ -53,7 +53,8 @@ mkdir -p bin && ln -sf "$work/ld" bin/ld
         echo "    s += close$i() + fclose$i();"
         i=$((i + 1))
     done
-    echo '    printf("%d\n", s); return 0; }'
+    # (printf, not echo: dash's echo, Ubuntu's sh, makes the \n a newline)
+    printf '%s\n' '    printf("%d\n", s); return 0; }'
 } > prog.c
 
 # the size of SEC in OBJ, and .gnu.hash's header

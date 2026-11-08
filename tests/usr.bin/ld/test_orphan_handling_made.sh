@@ -68,7 +68,7 @@ EOF
 # The orphan lines of $1, the linker's own name taken off, without what
 # GNU ld makes and this linker does not, and without .rela.dyn.
 orphans() {
-    sed -n 's/^[^:]*ld: //p' "$1" | grep 'orphan section' |
+    sed -En 's/^[^:]*ld(\.[a-z]+)?: //p' "$1" | grep 'orphan section' |
         grep -Ev "orphan section \`\\.(gnu\\.version.*|plt|got|got\\.plt|plt\\.got|iplt|igot\\.plt|dynbss|data\\.rel\\.ro|eh_frame|rela\\..*)'"
 }
 
