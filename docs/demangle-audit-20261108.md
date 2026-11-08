@@ -150,7 +150,7 @@ the end of this document, using the standard EARS patterns:
 
 ## E. Code Style, Duplication & Build Hygiene
 
-- [ ] **DMG-MAINT-01** (low) Duplicated buffer wrapper functions across `itanium.c`, `rust.c`, and `dlang.c` (REQ: REQ-DMGA-0019)
+- [x] **DMG-MAINT-01** (low) Duplicated buffer wrapper functions across `itanium.c`, `rust.c`, and `dlang.c` (REQ: REQ-DMGA-0019)
     - Site: `usr.lib/demangle/itanium.c:146-230`, `usr.lib/demangle/rust.c:147-195`, `usr.lib/demangle/dlang.c:158-185`, `usr.lib/demangle/buffer.c`
     - Evidence: `itanium.c`, `rust.c`, and `dlang.c` each define their own `static` wrapper functions around `demangle_buf_*`. In addition, `buf_printf()` in `itanium.c:185-218` duplicates `demangle_buf_printf()` from `buffer.c:111-143`, and `buf_insert()` (`itanium.c:164-182`) is duplicated in `rust_buf_insert()` (`rust.c:164-183`).
     - Fix: Move `demangle_buf_insert()` into `buffer.c` / `demangle_internal.h` and call `demangle_buf_*` directly (or delegate `buf_printf` to `demangle_buf_printf`).

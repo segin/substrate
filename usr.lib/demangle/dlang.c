@@ -50,11 +50,6 @@ static int starts_with(const char *s, const char *prefix);
 static int dlang_is_mangled(const char *mangled);
 static int dlang_has_n_bytes(const char *s, size_t n);
 
-static int dlang_buf_reserve(dlang_buf_t *buf, size_t extra);
-static int dlang_buf_append(dlang_buf_t *buf, const char *s, size_t n);
-static int dlang_buf_appendc(dlang_buf_t *buf, char ch);
-static char *dlang_buf_take(dlang_buf_t *buf);
-static void dlang_buf_destroy(dlang_buf_t *buf);
 
 static int dlang_parser_init(dlang_parser_t *p, const char *mangled, int options);
 static void dlang_parser_destroy(dlang_parser_t *p);
@@ -121,36 +116,6 @@ dlang_has_n_bytes(const char *s, size_t n)
 }
 
 static int
-dlang_buf_reserve(dlang_buf_t *buf, size_t extra)
-{
-    return demangle_buf_reserve(buf, extra);
-}
-
-static int
-dlang_buf_append(dlang_buf_t *buf, const char *s, size_t n)
-{
-    return demangle_buf_append(buf, s, n);
-}
-
-static int
-dlang_buf_appendc(dlang_buf_t *buf, char ch)
-{
-    return demangle_buf_appendc(buf, ch);
-}
-
-static char *
-dlang_buf_take(dlang_buf_t *buf)
-{
-    return demangle_buf_take(buf);
-}
-
-static void
-dlang_buf_destroy(dlang_buf_t *buf)
-{
-    demangle_buf_destroy(buf);
-}
-
-static int
 dlang_parser_init(dlang_parser_t *p, const char *mangled, int options)
 {
     memset(p, 0, sizeof(*p));
@@ -160,7 +125,7 @@ dlang_parser_init(dlang_parser_t *p, const char *mangled, int options)
     p->recursion_limit = (options & DEMANGLE_NO_RECURSE_LIMIT) != 0
                              ? INT_MAX : DLANG_RECURSION_DEFAULT_LIMIT;
 
-    if (dlang_buf_reserve(&p->out, 0u) != 0) {
+    if (demangle_buf_reserve(&p->out, 0u) != 0) {
         return -1;
     }
 
@@ -175,7 +140,7 @@ dlang_parser_destroy(dlang_parser_t *p)
         return;
     }
 
-    dlang_buf_destroy(&p->out);
+    demangle_buf_destroy(&p->out);
 }
 
 static int
@@ -298,9 +263,9 @@ dlang_format_special_name(dlang_buf_t *buf, const char *s, size_t len, int *form
 
     for (i = 0; i < sizeof(pfxs) / sizeof(pfxs[0]); i++) {
         if (len >= pfxs[i].prefix_len && memcmp(s, pfxs[i].prefix, pfxs[i].prefix_len) == 0) {
-            if (dlang_buf_append(buf, pfxs[i].repl, pfxs[i].repl_len) != 0 ||
-                dlang_buf_append(buf, s + pfxs[i].prefix_len, len - pfxs[i].prefix_len) != 0 ||
-                dlang_buf_appendc(buf, '}') != 0) {
+            if (demangle_buf_append(buf, pfxs[i].repl, pfxs[i].repl_len) != 0 ||
+                demangle_buf_append(buf, s + pfxs[i].prefix_len, len - pfxs[i].prefix_len) != 0 ||
+                demangle_buf_appendc(buf, '}') != 0) {
                 return -1;
             }
             if (formatted != NULL) {
@@ -312,7 +277,7 @@ dlang_format_special_name(dlang_buf_t *buf, const char *s, size_t len, int *form
 
     for (i = 0; i < sizeof(exacts) / sizeof(exacts[0]); i++) {
         if (len == exacts[i].exact_len && memcmp(s, exacts[i].exact, exacts[i].exact_len) == 0) {
-            if (dlang_buf_append(buf, exacts[i].repl, exacts[i].repl_len) != 0) {
+            if (demangle_buf_append(buf, exacts[i].repl, exacts[i].repl_len) != 0) {
                 return -1;
             }
             if (formatted != NULL) {
@@ -345,7 +310,7 @@ dlang_parse_lname(dlang_parser_t *p)
     if (dlang_format_special_name(&p->out, s, len, &formatted) != 0) {
         return -1;
     }
-    if (!formatted && dlang_buf_append(&p->out, s, len) != 0) {
+    if (!formatted && demangle_buf_append(&p->out, s, len) != 0) {
         return -1;
     }
 
@@ -358,7 +323,7 @@ dlang_parse_template_value(dlang_parser_t *p)
 {
     if (p->cur[0] == 'n') {
         p->cur++;
-        if (dlang_buf_appendc(&p->out, '-') != 0) {
+        if (demangle_buf_appendc(&p->out, '-') != 0) {
             return -1;
         }
     }
@@ -375,7 +340,7 @@ dlang_parse_template_value(dlang_parser_t *p)
             } else {
                 n = n * 10u + d;
             }
-            if (dlang_buf_appendc(&p->out, p->cur[0]) != 0) {
+            if (demangle_buf_appendc(&p->out, p->cur[0]) != 0) {
                 return -1;
             }
             p->cur++;
@@ -387,9 +352,9 @@ dlang_parse_template_value(dlang_parser_t *p)
         }
 
         if (!too_big && n > 0u && dlang_has_n_bytes(p->cur, n)) {
-            if (dlang_buf_appendc(&p->out, '"') != 0 ||
-                dlang_buf_append(&p->out, p->cur, n) != 0 ||
-                dlang_buf_appendc(&p->out, '"') != 0) {
+            if (demangle_buf_appendc(&p->out, '"') != 0 ||
+                demangle_buf_append(&p->out, p->cur, n) != 0 ||
+                demangle_buf_appendc(&p->out, '"') != 0) {
                 return -1;
             }
             p->cur += n;
@@ -399,14 +364,14 @@ dlang_parse_template_value(dlang_parser_t *p)
 
     if (p->cur[0] == 'N') {
         p->cur++;
-        return dlang_buf_append(&p->out, "null", 4u);
+        return demangle_buf_append(&p->out, "null", 4u);
     }
 
     if (p->cur[0] == '\0') {
         return -1;
     }
 
-    if (dlang_buf_appendc(&p->out, p->cur[0]) != 0) {
+    if (demangle_buf_appendc(&p->out, p->cur[0]) != 0) {
         return -1;
     }
     p->cur++;
@@ -441,10 +406,10 @@ dlang_parse_template_arg_value(dlang_parser_t *p)
         return -1;
     }
 
-    if (dlang_buf_append(&p->out, ty, strlen(ty)) != 0 ||
-        dlang_buf_appendc(&p->out, '(') != 0 ||
-        dlang_buf_append(&p->out, val, strlen(val)) != 0 ||
-        dlang_buf_appendc(&p->out, ')') != 0) {
+    if (demangle_buf_append(&p->out, ty, strlen(ty)) != 0 ||
+        demangle_buf_appendc(&p->out, '(') != 0 ||
+        demangle_buf_append(&p->out, val, strlen(val)) != 0 ||
+        demangle_buf_appendc(&p->out, ')') != 0) {
         free(ty);
         free(val);
         return -1;
@@ -479,7 +444,7 @@ dlang_parse_template_arg(dlang_parser_t *p)
         if (dlang_parse_number(p, &n) != 0 || n == 0u || !dlang_has_n_bytes(p->cur, n)) {
             return -1;
         }
-        if (dlang_buf_append(&p->out, p->cur, n) != 0) {
+        if (demangle_buf_append(&p->out, p->cur, n) != 0) {
             return -1;
         }
         p->cur += n;
@@ -506,14 +471,14 @@ dlang_parse_template_instance_name(dlang_parser_t *p)
 
     p->cur += 3;
 
-    if (dlang_parse_lname(p) != 0 || dlang_buf_append(&p->out, "!(", 2u) != 0) {
+    if (dlang_parse_lname(p) != 0 || demangle_buf_append(&p->out, "!(", 2u) != 0) {
         dlang_parser_leave(p);
         return -1;
     }
 
     first = 1;
     while (p->cur[0] != '\0' && p->cur[0] != 'Z') {
-        if (!first && dlang_buf_append(&p->out, ", ", 2u) != 0) {
+        if (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) {
             dlang_parser_leave(p);
             return -1;
         }
@@ -526,7 +491,7 @@ dlang_parse_template_instance_name(dlang_parser_t *p)
         first = 0;
     }
 
-    if (p->cur[0] != 'Z' || dlang_buf_appendc(&p->out, ')') != 0) {
+    if (p->cur[0] != 'Z' || demangle_buf_appendc(&p->out, ')') != 0) {
         dlang_parser_leave(p);
         return -1;
     }
@@ -571,7 +536,7 @@ dlang_parse_qualified_name(dlang_parser_t *p)
     while (isdigit((unsigned char)p->cur[0]) ||
            (dlang_has_n_bytes(p->cur, 3u) && p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T') ||
            p->cur[0] == 'Q') {
-        if (!first && dlang_buf_appendc(&p->out, '.') != 0) {
+        if (!first && demangle_buf_appendc(&p->out, '.') != 0) {
             return -1;
         }
 
@@ -670,28 +635,28 @@ dlang_append_attrs(dlang_parser_t *p, unsigned attrs)
     if ((p->options & DEMANGLE_NO_VERBOSE) != 0) {
         return 0;
     }
-    if ((attrs & DLANG_ATTR_PURE) != 0 && dlang_buf_append(buf, " pure", 5u) != 0) {
+    if ((attrs & DLANG_ATTR_PURE) != 0 && demangle_buf_append(buf, " pure", 5u) != 0) {
         return -1;
     }
-    if ((attrs & DLANG_ATTR_NOTHROW) != 0 && dlang_buf_append(buf, " nothrow", 8u) != 0) {
+    if ((attrs & DLANG_ATTR_NOTHROW) != 0 && demangle_buf_append(buf, " nothrow", 8u) != 0) {
         return -1;
     }
-    if ((attrs & DLANG_ATTR_REF) != 0 && dlang_buf_append(buf, " ref", 4u) != 0) {
+    if ((attrs & DLANG_ATTR_REF) != 0 && demangle_buf_append(buf, " ref", 4u) != 0) {
         return -1;
     }
-    if ((attrs & DLANG_ATTR_PROPERTY) != 0 && dlang_buf_append(buf, " @property", 10u) != 0) {
+    if ((attrs & DLANG_ATTR_PROPERTY) != 0 && demangle_buf_append(buf, " @property", 10u) != 0) {
         return -1;
     }
-    if ((attrs & DLANG_ATTR_TRUSTED) != 0 && dlang_buf_append(buf, " @trusted", 9u) != 0) {
+    if ((attrs & DLANG_ATTR_TRUSTED) != 0 && demangle_buf_append(buf, " @trusted", 9u) != 0) {
         return -1;
     }
-    if ((attrs & DLANG_ATTR_SAFE) != 0 && dlang_buf_append(buf, " @safe", 6u) != 0) {
+    if ((attrs & DLANG_ATTR_SAFE) != 0 && demangle_buf_append(buf, " @safe", 6u) != 0) {
         return -1;
     }
-    if ((attrs & DLANG_ATTR_NOGC) != 0 && dlang_buf_append(buf, " @nogc", 6u) != 0) {
+    if ((attrs & DLANG_ATTR_NOGC) != 0 && demangle_buf_append(buf, " @nogc", 6u) != 0) {
         return -1;
     }
-    if ((attrs & DLANG_ATTR_RETREF) != 0 && dlang_buf_append(buf, " return ref", 11u) != 0) {
+    if ((attrs & DLANG_ATTR_RETREF) != 0 && demangle_buf_append(buf, " return ref", 11u) != 0) {
         return -1;
     }
 
@@ -873,7 +838,7 @@ dlang_parse_function_type(dlang_parser_t *p, char cconv)
         goto fail;
     }
 
-    if (dlang_buf_append(&p->out, ret, strlen(ret)) != 0 || dlang_buf_appendc(&p->out, ' ') != 0) {
+    if (demangle_buf_append(&p->out, ret, strlen(ret)) != 0 || demangle_buf_appendc(&p->out, ' ') != 0) {
         goto fail;
     }
 
@@ -886,25 +851,25 @@ dlang_parse_function_type(dlang_parser_t *p, char cconv)
         case 'R': cc = "extern(C++) "; break;
         default: break;
         }
-        if (cc != NULL && dlang_buf_append(&p->out, cc, strlen(cc)) != 0) {
+        if (cc != NULL && demangle_buf_append(&p->out, cc, strlen(cc)) != 0) {
             goto fail;
         }
     }
 
-    if (dlang_buf_append(&p->out, "function(", 9u) != 0) {
+    if (demangle_buf_append(&p->out, "function(", 9u) != 0) {
         goto fail;
     }
 
     for (size_t i = 0u; i < param_count; i++) {
-        if (i > 0u && dlang_buf_append(&p->out, ", ", 2u) != 0) {
+        if (i > 0u && demangle_buf_append(&p->out, ", ", 2u) != 0) {
             goto fail;
         }
-        if (dlang_buf_append(&p->out, params[i], strlen(params[i])) != 0) {
+        if (demangle_buf_append(&p->out, params[i], strlen(params[i])) != 0) {
             goto fail;
         }
     }
 
-    if (dlang_buf_appendc(&p->out, ')') != 0) {
+    if (demangle_buf_appendc(&p->out, ')') != 0) {
         goto fail;
     }
 
@@ -966,7 +931,7 @@ dlang_parse_type_core(dlang_parser_t *p)
     for (i = 0u; i < sizeof(basic) / sizeof(basic[0]); i++) {
         if (p->cur[0] == basic[i].code) {
             p->cur++;
-            return dlang_buf_append(&p->out, basic[i].name, strlen(basic[i].name));
+            return demangle_buf_append(&p->out, basic[i].name, strlen(basic[i].name));
         }
     }
 
@@ -983,8 +948,8 @@ dlang_parse_type_core(dlang_parser_t *p)
         if (inner == NULL) {
             return -1;
         }
-        if (dlang_buf_append(&p->out, inner, strlen(inner)) != 0 ||
-            dlang_buf_append(&p->out, "[]", 2u) != 0) {
+        if (demangle_buf_append(&p->out, inner, strlen(inner)) != 0 ||
+            demangle_buf_append(&p->out, "[]", 2u) != 0) {
             free(inner);
             return -1;
         }
@@ -1010,8 +975,8 @@ dlang_parse_type_core(dlang_parser_t *p)
         if (inner == NULL) {
             return -1;
         }
-        if (dlang_buf_append(&p->out, inner, strlen(inner)) != 0 ||
-            dlang_buf_appendc(&p->out, '[') != 0) {
+        if (demangle_buf_append(&p->out, inner, strlen(inner)) != 0 ||
+            demangle_buf_appendc(&p->out, '[') != 0) {
             free(inner);
             return -1;
         }
@@ -1027,8 +992,8 @@ dlang_parse_type_core(dlang_parser_t *p)
             if (app_len >= sizeof(numbuf)) {
                 app_len = sizeof(numbuf) - 1u;
             }
-            if (dlang_buf_append(&p->out, numbuf, app_len) != 0 ||
-                dlang_buf_appendc(&p->out, ']') != 0) {
+            if (demangle_buf_append(&p->out, numbuf, app_len) != 0 ||
+                demangle_buf_appendc(&p->out, ']') != 0) {
                 free(inner);
                 return -1;
             }
@@ -1065,10 +1030,10 @@ dlang_parse_type_core(dlang_parser_t *p)
             return -1;
         }
 
-        if (dlang_buf_append(&p->out, val, strlen(val)) != 0 ||
-            dlang_buf_appendc(&p->out, '[') != 0 ||
-            dlang_buf_append(&p->out, key, strlen(key)) != 0 ||
-            dlang_buf_appendc(&p->out, ']') != 0) {
+        if (demangle_buf_append(&p->out, val, strlen(val)) != 0 ||
+            demangle_buf_appendc(&p->out, '[') != 0 ||
+            demangle_buf_append(&p->out, key, strlen(key)) != 0 ||
+            demangle_buf_appendc(&p->out, ']') != 0) {
             free(key);
             free(val);
             return -1;
@@ -1092,7 +1057,7 @@ dlang_parse_type_core(dlang_parser_t *p)
         if (inner == NULL) {
             return -1;
         }
-        if (dlang_buf_append(&p->out, inner, strlen(inner)) != 0 || dlang_buf_appendc(&p->out, '*') != 0) {
+        if (demangle_buf_append(&p->out, inner, strlen(inner)) != 0 || demangle_buf_appendc(&p->out, '*') != 0) {
             free(inner);
             return -1;
         }
@@ -1125,7 +1090,7 @@ dlang_parse_type_core(dlang_parser_t *p)
             return -1;
         }
 
-        if (dlang_buf_append(&p->out, delegate_text, strlen(delegate_text)) != 0) {
+        if (demangle_buf_append(&p->out, delegate_text, strlen(delegate_text)) != 0) {
             free(delegate_text);
             return -1;
         }
@@ -1151,21 +1116,21 @@ dlang_parse_type_core(dlang_parser_t *p)
             return -1;
         }
 
-        if (dlang_buf_append(&p->out, "Tuple!(", 7u) != 0) {
+        if (demangle_buf_append(&p->out, "Tuple!(", 7u) != 0) {
             free(inner);
             return -1;
         }
         for (size_t i = 0u; i < n; i++) {
-            if (i > 0u && dlang_buf_append(&p->out, ", ", 2u) != 0) {
+            if (i > 0u && demangle_buf_append(&p->out, ", ", 2u) != 0) {
                 free(inner);
                 return -1;
             }
-            if (dlang_buf_append(&p->out, inner, strlen(inner)) != 0) {
+            if (demangle_buf_append(&p->out, inner, strlen(inner)) != 0) {
                 free(inner);
                 return -1;
             }
         }
-        if (dlang_buf_appendc(&p->out, ')') != 0) {
+        if (demangle_buf_appendc(&p->out, ')') != 0) {
             free(inner);
             return -1;
         }
@@ -1290,7 +1255,7 @@ dlang_parse_type(dlang_parser_t *p)
         goto out;
     }
 
-    if (dlang_buf_append(&p->out, seg, strlen(seg)) != 0) {
+    if (demangle_buf_append(&p->out, seg, strlen(seg)) != 0) {
         goto out;
     }
     free(seg);
@@ -1343,8 +1308,8 @@ dlang_parse_mangled_name(dlang_parser_t *p)
         return 0;
     }
 
-    if (dlang_buf_append(&p->out, ": ", 2u) != 0 ||
-        dlang_buf_append(&p->out, type_text, strlen(type_text)) != 0) {
+    if (demangle_buf_append(&p->out, ": ", 2u) != 0 ||
+        demangle_buf_append(&p->out, type_text, strlen(type_text)) != 0) {
         free(type_text);
         dlang_parser_leave(p);
         return -1;
@@ -1375,7 +1340,7 @@ dlang_demangle_symbol(const char *mangled, int options)
         return NULL;
     }
 
-    ret = dlang_buf_take(&p.out);
+    ret = demangle_buf_take(&p.out);
     dlang_parser_destroy(&p);
     return ret;
 }

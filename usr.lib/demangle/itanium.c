@@ -1,6 +1,5 @@
 #include <ctype.h>
 #include <limits.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,13 +120,6 @@ typedef struct dm_parse_mark {
     int has_return_type;
 } dm_parse_mark_t;
 
-static int buf_reserve(dm_buf_t *buf, size_t extra);
-static int buf_append(dm_buf_t *buf, const char *s, size_t n);
-static int buf_appendc(dm_buf_t *buf, char ch);
-static int buf_insert(dm_buf_t *buf, size_t off, const char *s, size_t n);
-static int buf_printf(dm_buf_t *buf, const char *fmt, ...);
-static char *buf_take(dm_buf_t *buf);
-static void buf_destroy(dm_buf_t *buf);
 
 static int parser_begin(dm_itanium_parser_t *p);
 static void parser_destroy(dm_itanium_parser_t *p);
@@ -191,93 +183,6 @@ static int is_void_text(const dm_buf_t *buf, size_t off, size_t len);
 static int has_n_bytes(const char *s, size_t n);
 
 static int
-buf_reserve(dm_buf_t *buf, size_t extra)
-{
-    return demangle_buf_reserve(buf, extra);
-}
-
-static int
-buf_append(dm_buf_t *buf, const char *s, size_t n)
-{
-    return demangle_buf_append(buf, s, n);
-}
-
-static int
-buf_appendc(dm_buf_t *buf, char ch)
-{
-    return demangle_buf_appendc(buf, ch);
-}
-
-static int
-buf_insert(dm_buf_t *buf, size_t off, const char *s, size_t n)
-{
-    if (buf == NULL || s == NULL || off > buf->len) {
-        return -1;
-    }
-
-    if (n == 0u) {
-        return 0;
-    }
-
-    if (buf_reserve(buf, n) != 0) {
-        return -1;
-    }
-
-    memmove(buf->data + off + n, buf->data + off, buf->len - off + 1u);
-    memcpy(buf->data + off, s, n);
-    buf->len += n;
-    return 0;
-}
-
-static int
-buf_printf(dm_buf_t *buf, const char *fmt, ...)
-{
-    va_list ap;
-    va_list ap_copy;
-    int need;
-    int ret;
-
-    if (buf == NULL || fmt == NULL) {
-        return -1;
-    }
-
-    va_start(ap, fmt);
-    va_copy(ap_copy, ap);
-    need = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
-    if (need < 0) {
-        va_end(ap_copy);
-        return -1;
-    }
-
-    if (demangle_buf_reserve(buf, (size_t)need) != 0) {
-        va_end(ap_copy);
-        return -1;
-    }
-
-    ret = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap_copy);
-    va_end(ap_copy);
-    if (ret != need) {
-        return -1;
-    }
-
-    buf->len += (size_t)need;
-    return 0;
-}
-
-static char *
-buf_take(dm_buf_t *buf)
-{
-    return demangle_buf_take(buf);
-}
-
-static void
-buf_destroy(dm_buf_t *buf)
-{
-    demangle_buf_destroy(buf);
-}
-
-static int
 parser_begin(dm_itanium_parser_t *p)
 {
     memset(p, 0, sizeof(*p));
@@ -300,7 +205,7 @@ parser_begin(dm_itanium_parser_t *p)
     }
     p->template_cap = DM_TEMPLATE_STACK_INITIAL_CAP;
 
-    if (buf_reserve(&p->out, 0u) != 0) {
+    if (demangle_buf_reserve(&p->out, 0u) != 0) {
         parser_destroy(p);
         return -1;
     }
@@ -333,7 +238,7 @@ parser_destroy(dm_itanium_parser_t *p)
     p->template_depth = 0u;
     p->template_cap = 0u;
 
-    buf_destroy(&p->out);
+    demangle_buf_destroy(&p->out);
 }
 
 static int
@@ -542,7 +447,7 @@ parser_append_output_slice(dm_itanium_parser_t *p, size_t off, size_t len)
         return -1;
     }
 
-    if (buf_reserve(&p->out, len) != 0) {
+    if (demangle_buf_reserve(&p->out, len) != 0) {
         return -1;
     }
 
@@ -560,7 +465,7 @@ parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx)
     }
 
     if (p->substitutions[idx].text != NULL) {
-        return buf_append(&p->out, p->substitutions[idx].text, p->substitutions[idx].len);
+        return demangle_buf_append(&p->out, p->substitutions[idx].text, p->substitutions[idx].len);
     }
     return parser_append_output_slice(p, p->substitutions[idx].off, p->substitutions[idx].len);
 }
@@ -570,7 +475,7 @@ parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx)
  * began at @p type_off, keeping the tables right: what lies after @p pos
  * moves along, and an entry made inside that type that @p pos falls
  * within keeps the text it had, as a copy.  One that began before the
- * type holds the whole of it, insertion and all, and grows.  buf_insert()
+ * type holds the whole of it, insertion and all, and grows.  demangle_buf_insert()
  * alone left every offset after @p pos behind.
  */
 static int
@@ -607,7 +512,7 @@ parser_insert_in_type(dm_itanium_parser_t *p, size_t type_off, size_t pos, const
             p->func_tmpl_off[i] += n;
         }
     }
-    return buf_insert(&p->out, pos, s, n);
+    return demangle_buf_insert(&p->out, pos, s, n);
 }
 
 /* Before the output is cut back to @p pos: make the entries that reach
@@ -855,7 +760,7 @@ parse_source_name(dm_itanium_parser_t *p)
         return -1;
     }
 
-    if (buf_append(&p->out, id, len) != 0) {
+    if (demangle_buf_append(&p->out, id, len) != 0) {
         return -1;
     }
 
@@ -867,10 +772,10 @@ parse_source_name(dm_itanium_parser_t *p)
         if (parse_number(p, &tag_len) != 0 || tag_len == 0u || !has_n_bytes(p->cur, tag_len)) {
             return -1;
         }
-        if (buf_appendc(&p->out, '[') != 0 ||
-            buf_append(&p->out, "abi:", 4u) != 0 ||
-            buf_append(&p->out, p->cur, tag_len) != 0 ||
-            buf_appendc(&p->out, ']') != 0) {
+        if (demangle_buf_appendc(&p->out, '[') != 0 ||
+            demangle_buf_append(&p->out, "abi:", 4u) != 0 ||
+            demangle_buf_append(&p->out, p->cur, tag_len) != 0 ||
+            demangle_buf_appendc(&p->out, ']') != 0) {
             return -1;
         }
         p->cur += tag_len;
@@ -896,25 +801,25 @@ parse_substitution(dm_itanium_parser_t *p)
     switch (p->cur[1]) {
     case 't':
         p->cur += 2;
-        return buf_append(&p->out, "std", 3u);
+        return demangle_buf_append(&p->out, "std", 3u);
     case 'a':
         p->cur += 2;
-        return buf_append(&p->out, "std::allocator", 14u);
+        return demangle_buf_append(&p->out, "std::allocator", 14u);
     case 'b':
         p->cur += 2;
-        return buf_append(&p->out, "std::basic_string", 17u);
+        return demangle_buf_append(&p->out, "std::basic_string", 17u);
     case 's':
         p->cur += 2;
-        return buf_append(&p->out, "std::string", 11u);
+        return demangle_buf_append(&p->out, "std::string", 11u);
     case 'i':
         p->cur += 2;
-        return buf_append(&p->out, "std::istream", 12u);
+        return demangle_buf_append(&p->out, "std::istream", 12u);
     case 'o':
         p->cur += 2;
-        return buf_append(&p->out, "std::ostream", 12u);
+        return demangle_buf_append(&p->out, "std::ostream", 12u);
     case 'd':
         p->cur += 2;
-        return buf_append(&p->out, "std::iostream", 13u);
+        return demangle_buf_append(&p->out, "std::iostream", 13u);
     default:
         break;
     }
@@ -993,7 +898,7 @@ parse_operator_name(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'c' && p->cur[1] == 'v') {
         p->cur += 2;
-        if (buf_append(&p->out, "operator ", 9u) != 0) {
+        if (demangle_buf_append(&p->out, "operator ", 9u) != 0) {
             return -1;
         }
         return parse_type(p);
@@ -1001,7 +906,7 @@ parse_operator_name(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'v' && isdigit((unsigned char)p->cur[1])) {
         p->cur += 2;
-        if (buf_append(&p->out, "operator ", 9u) != 0) {
+        if (demangle_buf_append(&p->out, "operator ", 9u) != 0) {
             return -1;
         }
         return parse_source_name(p);
@@ -1010,7 +915,7 @@ parse_operator_name(dm_itanium_parser_t *p)
     name = lookup_operator_name(p->cur);
     if (name != NULL) {
         p->cur += 2;
-        return buf_append(&p->out, name, strlen(name));
+        return demangle_buf_append(&p->out, name, strlen(name));
     }
 
     return -1;
@@ -1038,7 +943,7 @@ parse_ctor_dtor_name(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len)
         return -1;
     }
 
-    if (is_dtor && buf_appendc(&p->out, '~') != 0) {
+    if (is_dtor && demangle_buf_appendc(&p->out, '~') != 0) {
         return -1;
     }
 
@@ -1059,7 +964,7 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
         has_id = 0;
         lambda_id = 0u;
 
-        if (buf_append(&p->out, "{lambda(", 8u) != 0) {
+        if (demangle_buf_append(&p->out, "{lambda(", 8u) != 0) {
             return -1;
         }
 
@@ -1067,7 +972,7 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
         while (p->cur[0] != '\0' && p->cur[0] != 'E') {
             /* the separator before the parameter, not inserted after it,
              * which left its substitutions' offsets behind */
-            if (!first && buf_append(&p->out, ", ", 2u) != 0) {
+            if (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) {
                 return -1;
             }
             if (parser_enter(p) != 0) {
@@ -1099,9 +1004,9 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
         p->cur++;
 
         if (has_id) {
-            return buf_printf(&p->out, ")#%zu}", lambda_id);
+            return demangle_buf_printf(&p->out, ")#%zu}", lambda_id);
         }
-        return buf_append(&p->out, ")}", 2u);
+        return demangle_buf_append(&p->out, ")}", 2u);
     }
 
     if (!(p->cur[0] == 'U' && p->cur[1] == 't')) {
@@ -1118,7 +1023,7 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
             return -1;
         }
         p->cur++;
-        return buf_printf(&p->out, "{unnamed type#%zu}", id);
+        return demangle_buf_printf(&p->out, "{unnamed type#%zu}", id);
     }
 
     if (p->cur[0] != '_') {
@@ -1126,7 +1031,7 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
     }
 
     p->cur++;
-    return buf_append(&p->out, "{unnamed type}", 14u);
+    return demangle_buf_append(&p->out, "{unnamed type}", 14u);
 }
 
 static int
@@ -1204,7 +1109,7 @@ parse_nested_name(dm_itanium_parser_t *p)
         size_t name_only_off, name_only_len;
         dm_parse_mark_t comp_mark;
 
-        if (!first && buf_append(&p->out, "::", 2u) != 0) {
+        if (!first && demangle_buf_append(&p->out, "::", 2u) != 0) {
             goto out;
         }
 
@@ -1293,7 +1198,7 @@ parse_unscoped_name(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'S' && p->cur[1] == 't') {
         p->cur += 2;
-        if (buf_append(&p->out, "std::", 5u) != 0) {
+        if (demangle_buf_append(&p->out, "std::", 5u) != 0) {
             return -1;
         }
         has_std_prefix = 1;
@@ -1372,7 +1277,7 @@ parse_local_name(dm_itanium_parser_t *p)
 
     p->cur++;
 
-    if (buf_append(&p->out, "::", 2u) != 0) {
+    if (demangle_buf_append(&p->out, "::", 2u) != 0) {
         return -1;
     }
 
@@ -1412,19 +1317,19 @@ append_member_qualifiers(dm_itanium_parser_t *p)
         return 0;
     }
 
-    if ((p->member_quals & DM_MEMBER_CONST) != 0 && buf_append(&p->out, " const", 6u) != 0) {
+    if ((p->member_quals & DM_MEMBER_CONST) != 0 && demangle_buf_append(&p->out, " const", 6u) != 0) {
         return -1;
     }
-    if ((p->member_quals & DM_MEMBER_VOLATILE) != 0 && buf_append(&p->out, " volatile", 9u) != 0) {
+    if ((p->member_quals & DM_MEMBER_VOLATILE) != 0 && demangle_buf_append(&p->out, " volatile", 9u) != 0) {
         return -1;
     }
-    if ((p->member_quals & DM_MEMBER_RESTRICT) != 0 && buf_append(&p->out, " restrict", 9u) != 0) {
+    if ((p->member_quals & DM_MEMBER_RESTRICT) != 0 && demangle_buf_append(&p->out, " restrict", 9u) != 0) {
         return -1;
     }
-    if ((p->member_quals & DM_MEMBER_REF_LVALUE) != 0 && buf_append(&p->out, " &", 2u) != 0) {
+    if ((p->member_quals & DM_MEMBER_REF_LVALUE) != 0 && demangle_buf_append(&p->out, " &", 2u) != 0) {
         return -1;
     }
-    if ((p->member_quals & DM_MEMBER_REF_RVALUE) != 0 && buf_append(&p->out, " &&", 3u) != 0) {
+    if ((p->member_quals & DM_MEMBER_REF_RVALUE) != 0 && demangle_buf_append(&p->out, " &&", 3u) != 0) {
         return -1;
     }
 
@@ -1472,8 +1377,8 @@ parse_bare_function_type(dm_itanium_parser_t *p)
             memcpy(ret_text, p->out.data + ret_off, ret_len);
             p->out.len = ret_off;
             p->out.data[p->out.len] = '\0';
-            if (at > ret_off || buf_insert(&p->out, at, " ", 1u) != 0 ||
-                buf_insert(&p->out, at, ret_text, ret_len) != 0) {
+            if (at > ret_off || demangle_buf_insert(&p->out, at, " ", 1u) != 0 ||
+                demangle_buf_insert(&p->out, at, ret_text, ret_len) != 0) {
                 free(ret_text);
                 return -1;
             }
@@ -1494,7 +1399,7 @@ parse_bare_function_type(dm_itanium_parser_t *p)
         p->has_return_type = 0;
     }
 
-    if (!suppress_params && buf_appendc(&p->out, '(') != 0) {
+    if (!suppress_params && demangle_buf_appendc(&p->out, '(') != 0) {
         return -1;
     }
 
@@ -1508,7 +1413,7 @@ parse_bare_function_type(dm_itanium_parser_t *p)
          * the parameter's text and not the substitutions entered in it,
          * which then read two bytes early (", ll" for llvm) */
         sep = p->out.len;
-        if (!first && !suppress_params && buf_append(&p->out, ", ", 2u) != 0) {
+        if (!first && !suppress_params && demangle_buf_append(&p->out, ", ", 2u) != 0) {
             return -1;
         }
         before = p->out.len;
@@ -1535,7 +1440,7 @@ parse_bare_function_type(dm_itanium_parser_t *p)
         first = 0;
     }
 
-    if (!suppress_params && buf_appendc(&p->out, ')') != 0) {
+    if (!suppress_params && demangle_buf_appendc(&p->out, ')') != 0) {
         return -1;
     }
 
@@ -1560,7 +1465,7 @@ parse_template_args(dm_itanium_parser_t *p)
     }
     pushed = 1;
 
-    if (buf_appendc(&p->out, '<') != 0) {
+    if (demangle_buf_appendc(&p->out, '<') != 0) {
         goto fail;
     }
 
@@ -1570,7 +1475,7 @@ parse_template_args(dm_itanium_parser_t *p)
         size_t elem_first;
         int arg_rc;
 
-        if (!first && buf_append(&p->out, ", ", 2u) != 0) {
+        if (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) {
             goto fail;
         }
 
@@ -1611,7 +1516,7 @@ parse_template_args(dm_itanium_parser_t *p)
 
     p->cur++;
 
-    if (buf_appendc(&p->out, '>') != 0) {
+    if (demangle_buf_appendc(&p->out, '>') != 0) {
         goto fail;
     }
 
@@ -1668,7 +1573,7 @@ parse_template_arg(dm_itanium_parser_t *p)
         first = 1;
         while (p->cur[0] != '\0' && p->cur[0] != 'E') {
             size_t elem_off;
-            if (!first && buf_append(&p->out, ", ", 2u) != 0) {
+            if (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) {
                 parser_leave(p);
                 return -1;
             }
@@ -1721,7 +1626,7 @@ parse_expr_primary(dm_itanium_parser_t *p)
 
         if (p->cur[0] == 'D' && p->cur[1] == 'n' && p->cur[2] == 'E') {
             p->cur += 3;
-            return buf_append(&p->out, "nullptr", 7u);
+            return demangle_buf_append(&p->out, "nullptr", 7u);
         }
 
         /*
@@ -1733,19 +1638,19 @@ parse_expr_primary(dm_itanium_parser_t *p)
          * A type that fails to parse undoes all it did.
          */
         mark_save(p, &m);
-        if (buf_appendc(&p->out, '(') != 0 || parse_type(p) != 0) {
+        if (demangle_buf_appendc(&p->out, '(') != 0 || parse_type(p) != 0) {
             mark_restore(p, &m);
             return -1;
         }
         if (p->substitution_count == m.substitution_count) {
             p->out.len = m.out_len;
             p->out.data[p->out.len] = '\0';
-        } else if (buf_appendc(&p->out, ')') != 0) {
+        } else if (demangle_buf_appendc(&p->out, ')') != 0) {
             return -1;
         }
 
         if (p->cur[0] == 'n') {
-            if (buf_appendc(&p->out, '-') != 0) {
+            if (demangle_buf_appendc(&p->out, '-') != 0) {
                 return -1;
             }
             p->cur++;
@@ -1760,7 +1665,7 @@ parse_expr_primary(dm_itanium_parser_t *p)
             return -1;
         }
 
-        if (buf_append(&p->out, p->cur, num_len) != 0) {
+        if (demangle_buf_append(&p->out, p->cur, num_len) != 0) {
             return -1;
         }
 
@@ -1779,13 +1684,13 @@ parse_cast_expression(dm_itanium_parser_t *p)
     }
 
     p->cur += 2;
-    if (buf_appendc(&p->out, '(') != 0) {
+    if (demangle_buf_appendc(&p->out, '(') != 0) {
         return -1;
     }
     if (parse_type(p) != 0) {
         return -1;
     }
-    if (buf_appendc(&p->out, ')') != 0) {
+    if (demangle_buf_appendc(&p->out, ')') != 0) {
         return -1;
     }
     return parse_expression(p);
@@ -1799,7 +1704,7 @@ parse_fold_expression(dm_itanium_parser_t *p)
         return -1;
     }
 
-    if (buf_printf(&p->out, "fold[%c%c](", p->cur[0], p->cur[1]) != 0) {
+    if (demangle_buf_printf(&p->out, "fold[%c%c](", p->cur[0], p->cur[1]) != 0) {
         return -1;
     }
     p->cur += 2;
@@ -1809,7 +1714,7 @@ parse_fold_expression(dm_itanium_parser_t *p)
     }
 
     if (p->cur[0] != 'E') {
-        if (buf_append(&p->out, ", ", 2u) != 0) {
+        if (demangle_buf_append(&p->out, ", ", 2u) != 0) {
             return -1;
         }
         if (parse_expression(p) != 0) {
@@ -1817,7 +1722,7 @@ parse_fold_expression(dm_itanium_parser_t *p)
         }
     }
 
-    return buf_appendc(&p->out, ')');
+    return demangle_buf_appendc(&p->out, ')');
 }
 
 static int
@@ -1828,13 +1733,13 @@ parse_pack_expansion(dm_itanium_parser_t *p)
     }
 
     p->cur += 2;
-    if (buf_append(&p->out, "pack_expand(", 12u) != 0) {
+    if (demangle_buf_append(&p->out, "pack_expand(", 12u) != 0) {
         return -1;
     }
     if (parse_expression(p) != 0) {
         return -1;
     }
-    return buf_appendc(&p->out, ')');
+    return demangle_buf_appendc(&p->out, ')');
 }
 
 static int
@@ -1863,13 +1768,13 @@ parse_expression_operator(dm_itanium_parser_t *p)
     for (i = 0u; i < sizeof(ops) / sizeof(ops[0]); i++) {
         if (p->cur[0] == ops[i].code[0] && p->cur[1] == ops[i].code[1]) {
             p->cur += 2;
-            if (buf_append(&p->out, ops[i].name, strlen(ops[i].name)) != 0 ||
-                buf_appendc(&p->out, '(') != 0) {
+            if (demangle_buf_append(&p->out, ops[i].name, strlen(ops[i].name)) != 0 ||
+                demangle_buf_appendc(&p->out, '(') != 0) {
                 return -1;
             }
 
             for (argi = 0; argi < ops[i].arity; argi++) {
-                if (argi > 0 && buf_append(&p->out, ", ", 2u) != 0) {
+                if (argi > 0 && demangle_buf_append(&p->out, ", ", 2u) != 0) {
                     return -1;
                 }
                 if (parse_expression(p) != 0) {
@@ -1877,7 +1782,7 @@ parse_expression_operator(dm_itanium_parser_t *p)
                 }
             }
 
-            return buf_appendc(&p->out, ')');
+            return demangle_buf_appendc(&p->out, ')');
         }
     }
 
@@ -1997,7 +1902,7 @@ append_template_arg(dm_itanium_parser_t *p, const dm_targ_map_t *map, const size
         return parser_append_output_slice(p, off[i], len[i]);
     }
     for (i = 0u; i < map->n[idx]; i++) {
-        if (i > 0u && buf_append(&p->out, ", ", 2u) != 0) {
+        if (i > 0u && demangle_buf_append(&p->out, ", ", 2u) != 0) {
             return -1;
         }
         if (parser_append_output_slice(p, off[map->first[idx] + i], len[map->first[idx] + i]) != 0) {
@@ -2025,7 +1930,7 @@ parse_function_type(dm_itanium_parser_t *p)
         p->cur++;
     }
 
-    if (extern_c && buf_append(&p->out, "extern \"C\" ", 11u) != 0) {
+    if (extern_c && demangle_buf_append(&p->out, "extern \"C\" ", 11u) != 0) {
         return -1;
     }
 
@@ -2033,7 +1938,7 @@ parse_function_type(dm_itanium_parser_t *p)
         return -1;
     }
 
-    if (buf_append(&p->out, " (", 2u) != 0) {
+    if (demangle_buf_append(&p->out, " (", 2u) != 0) {
         return -1;
     }
 
@@ -2043,7 +1948,7 @@ parse_function_type(dm_itanium_parser_t *p)
         size_t parsed_len;
 
         /* the separator before the parameter (see parse_bare_function_type) */
-        if (!first && buf_append(&p->out, ", ", 2u) != 0) {
+        if (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) {
             return -1;
         }
         before = p->out.len;
@@ -2073,7 +1978,7 @@ parse_function_type(dm_itanium_parser_t *p)
 
     p->cur++;
 
-    return buf_appendc(&p->out, ')');
+    return demangle_buf_appendc(&p->out, ')');
 }
 
 static int
@@ -2130,7 +2035,7 @@ parse_array_type(dm_itanium_parser_t *p)
             p->array_dims_off = at;
         } else {
             p->array_dims_off = p->out.len;
-            if (buf_append(&p->out, dims, (size_t)n) != 0) {
+            if (demangle_buf_append(&p->out, dims, (size_t)n) != 0) {
                 return -1;
             }
         }
@@ -2157,7 +2062,7 @@ parse_pointer_to_member(dm_itanium_parser_t *p)
     }
     class_len = p->out.len - class_off;
 
-    if (buf_append(&p->out, "::*", 3u) != 0) {
+    if (demangle_buf_append(&p->out, "::*", 3u) != 0) {
         return -1;
     }
 
@@ -2178,7 +2083,7 @@ parse_decltype_type(dm_itanium_parser_t *p)
 
     p->cur += 2;
 
-    if (buf_append(&p->out, "decltype(", 9u) != 0) {
+    if (demangle_buf_append(&p->out, "decltype(", 9u) != 0) {
         return -1;
     }
 
@@ -2191,7 +2096,7 @@ parse_decltype_type(dm_itanium_parser_t *p)
     }
 
     p->cur++;
-    return buf_appendc(&p->out, ')');
+    return demangle_buf_appendc(&p->out, ')');
 }
 
 static int
@@ -2202,7 +2107,7 @@ parse_vendor_type(dm_itanium_parser_t *p)
     }
 
     p->cur++;
-    if (buf_append(&p->out, "vendor(", 7u) != 0) {
+    if (demangle_buf_append(&p->out, "vendor(", 7u) != 0) {
         return -1;
     }
 
@@ -2210,7 +2115,7 @@ parse_vendor_type(dm_itanium_parser_t *p)
         return -1;
     }
 
-    return buf_appendc(&p->out, ')');
+    return demangle_buf_appendc(&p->out, ')');
 }
 
 static int parse_type_inner(dm_itanium_parser_t *p);
@@ -2325,7 +2230,7 @@ parse_pack_expansion_type(dm_itanium_parser_t *p)
     /* SIZE_MAX: no pack named -- a pack of the enclosing class's, which
      * this parser keeps no elements of -- and the pattern stands alone */
     for (i = 1u; n != SIZE_MAX && i < n; i++) {
-        if (buf_append(&p->out, ", ", 2u) != 0) {
+        if (demangle_buf_append(&p->out, ", ", 2u) != 0) {
             goto out;
         }
         p->pack_index = i;
@@ -2484,7 +2389,7 @@ parse_type_inner(dm_itanium_parser_t *p)
                 p->decl_close = bracket + n - 1u;
             }
         } else {
-            if (buf_append(&p->out, suffix, suffix_len) != 0) return -1;
+            if (demangle_buf_append(&p->out, suffix, suffix_len) != 0) return -1;
             p->decl_close = SIZE_MAX;
         }
         return 0;
@@ -2497,11 +2402,11 @@ parse_type_inner(dm_itanium_parser_t *p)
             return -1;
         }
         if (qual == 'K') {
-            if (buf_append(&p->out, " const", 6u) != 0) return -1;
+            if (demangle_buf_append(&p->out, " const", 6u) != 0) return -1;
         } else if (qual == 'V') {
-            if (buf_append(&p->out, " volatile", 9u) != 0) return -1;
+            if (demangle_buf_append(&p->out, " volatile", 9u) != 0) return -1;
         } else {
-            if (buf_append(&p->out, " restrict", 9u) != 0) return -1;
+            if (demangle_buf_append(&p->out, " restrict", 9u) != 0) return -1;
         }
         return 0;
     }
@@ -2511,7 +2416,7 @@ parse_type_inner(dm_itanium_parser_t *p)
         if (parse_type(p) != 0) {
             return -1;
         }
-        return buf_append(&p->out, " _Complex", 9u);
+        return demangle_buf_append(&p->out, " _Complex", 9u);
     }
 
     if (p->cur[0] == 'G') {
@@ -2519,7 +2424,7 @@ parse_type_inner(dm_itanium_parser_t *p)
         if (parse_type(p) != 0) {
             return -1;
         }
-        return buf_append(&p->out, " _Imaginary", 11u);
+        return demangle_buf_append(&p->out, " _Imaginary", 11u);
     }
 
     if (p->cur[0] == 'D' && p->cur[1] == 'p') {
@@ -2553,14 +2458,14 @@ parse_type_inner(dm_itanium_parser_t *p)
 
         if (name != NULL) {
             p->cur += 2;
-            return buf_append(&p->out, name, strlen(name));
+            return demangle_buf_append(&p->out, name, strlen(name));
         }
     }
 
     for (i = 0u; i < sizeof(builtin) / sizeof(builtin[0]); i++) {
         if (p->cur[0] == builtin[i].code) {
             p->cur++;
-            return buf_append(&p->out, builtin[i].name, strlen(builtin[i].name));
+            return demangle_buf_append(&p->out, builtin[i].name, strlen(builtin[i].name));
         }
     }
 
@@ -2572,7 +2477,7 @@ parse_special_name(dm_itanium_parser_t *p)
 {
     if (p->cur[0] == 'T' && p->cur[1] == 'V') {
         p->cur += 2;
-        if (buf_append(&p->out, "vtable for ", 11u) != 0) {
+        if (demangle_buf_append(&p->out, "vtable for ", 11u) != 0) {
             return -1;
         }
         return parse_type(p);
@@ -2580,7 +2485,7 @@ parse_special_name(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'T' && p->cur[1] == 'T') {
         p->cur += 2;
-        if (buf_append(&p->out, "VTT for ", 8u) != 0) {
+        if (demangle_buf_append(&p->out, "VTT for ", 8u) != 0) {
             return -1;
         }
         return parse_type(p);
@@ -2588,7 +2493,7 @@ parse_special_name(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'T' && p->cur[1] == 'I') {
         p->cur += 2;
-        if (buf_append(&p->out, "typeinfo for ", 13u) != 0) {
+        if (demangle_buf_append(&p->out, "typeinfo for ", 13u) != 0) {
             return -1;
         }
         return parse_type(p);
@@ -2596,7 +2501,7 @@ parse_special_name(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'T' && p->cur[1] == 'S') {
         p->cur += 2;
-        if (buf_append(&p->out, "typeinfo name for ", 18u) != 0) {
+        if (demangle_buf_append(&p->out, "typeinfo name for ", 18u) != 0) {
             return -1;
         }
         return parse_type(p);
@@ -2604,7 +2509,7 @@ parse_special_name(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'G' && p->cur[1] == 'V') {
         p->cur += 2;
-        if (buf_append(&p->out, "guard variable for ", 19u) != 0) {
+        if (demangle_buf_append(&p->out, "guard variable for ", 19u) != 0) {
             return -1;
         }
         return parse_name(p);
@@ -2627,15 +2532,15 @@ parse_special_name(dm_itanium_parser_t *p)
         }
 
         if (kind == 'c') {
-            if (buf_append(&p->out, "covariant return thunk to ", 26u) != 0) {
+            if (demangle_buf_append(&p->out, "covariant return thunk to ", 26u) != 0) {
                 return -1;
             }
         } else if (kind == 'h') {
-            if (buf_append(&p->out, "non-virtual thunk to ", 21u) != 0) {
+            if (demangle_buf_append(&p->out, "non-virtual thunk to ", 21u) != 0) {
                 return -1;
             }
         } else {
-            if (buf_append(&p->out, "virtual thunk to ", 17u) != 0) {
+            if (demangle_buf_append(&p->out, "virtual thunk to ", 17u) != 0) {
                 return -1;
             }
         }
@@ -2651,9 +2556,9 @@ parse_special_name(dm_itanium_parser_t *p)
 
         if (have1) {
             if (have2) {
-                return buf_printf(&p->out, " [offsets %lld, %lld]", off1, off2);
+                return demangle_buf_printf(&p->out, " [offsets %lld, %lld]", off1, off2);
             }
-            return buf_printf(&p->out, " [offset %lld]", off1);
+            return demangle_buf_printf(&p->out, " [offset %lld]", off1);
         }
 
         return 0;
@@ -2661,7 +2566,7 @@ parse_special_name(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'T') {
         p->cur++;
-        if (buf_append(&p->out, "transaction clone for ", 22u) != 0) {
+        if (demangle_buf_append(&p->out, "transaction clone for ", 22u) != 0) {
             return -1;
         }
 
@@ -2769,7 +2674,7 @@ demangle_itanium(const char *mangled, int options)
 
     parser_leave(&parser);
 
-    ret = buf_take(&parser.out);
+    ret = demangle_buf_take(&parser.out);
     parser_destroy(&parser);
     return ret;
 }

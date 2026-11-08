@@ -107,6 +107,28 @@ demangle_buf_appendc(demangle_buf_t *buf, char ch)
     return 0;
 }
 
+/* Insert n bytes of s at off, moving what follows along. */
+int
+demangle_buf_insert(demangle_buf_t *buf, size_t off, const char *s, size_t n)
+{
+    if (buf == NULL || s == NULL || off > buf->len) {
+        return -1;
+    }
+
+    if (n == 0u) {
+        return 0;
+    }
+
+    if (demangle_buf_reserve(buf, n) != 0) {
+        return -1;
+    }
+
+    memmove(buf->data + off + n, buf->data + off, buf->len - off + 1u);
+    memcpy(buf->data + off, s, n);
+    buf->len += n;
+    return 0;
+}
+
 int
 demangle_buf_printf(demangle_buf_t *buf, const char *fmt, ...)
 {

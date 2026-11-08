@@ -12,6 +12,7 @@ typedef struct demangle_buf {
 int demangle_buf_reserve(demangle_buf_t *buf, size_t extra);
 int demangle_buf_append(demangle_buf_t *buf, const char *s, size_t n);
 int demangle_buf_appendc(demangle_buf_t *buf, char ch);
+int demangle_buf_insert(demangle_buf_t *buf, size_t off, const char *s, size_t n);
 int demangle_buf_printf(demangle_buf_t *buf, const char *fmt, ...);
 char *demangle_buf_take(demangle_buf_t *buf);
 void demangle_buf_destroy(demangle_buf_t *buf);
