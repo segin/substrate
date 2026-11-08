@@ -21,6 +21,10 @@ typedef struct rust_parser {
     int recursion_depth;
     int recursion_limit;
 
+    /* the path being printed is a value's, whose generic arguments take
+     * the turbofish, f::<u8>, not a type's, Vec<u8> */
+    int in_value;
+
     rust_buf_t out;
 } rust_parser_t;
 
@@ -57,6 +61,7 @@ static int rust_parse_optional_disambiguator(rust_parser_t *p, int *present, uin
 static int rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, size_t len);
 static int rust_parse_v0_identifier(rust_parser_t *p);
 static int rust_parse_v0_type(rust_parser_t *p);
+static int rust_parse_v0_type_path(rust_parser_t *p);
 static int rust_parse_v0_const(rust_parser_t *p);
 static int rust_parse_v0_const_int(rust_parser_t *p, char type_tag);
 static int rust_parse_v0_lifetime(rust_parser_t *p, int display);
@@ -957,11 +962,29 @@ rust_parse_v0_type(rust_parser_t *p)
      * all eventually call back here.  Path productions also re-enter
      * via rust_parse_v0_generic_arg → rust_parse_v0_type.  Bound the
      * descent so deeply-nested generic args can't blow the stack. */
+    int saved_in_value = p->in_value;
+
     if (rust_parser_enter(p) != 0) {
         return -1;
     }
+    p->in_value = 0;
     rc = rust_parse_v0_type_inner(p);
+    p->in_value = saved_in_value;
     rust_parser_leave(p);
+    return rc;
+}
+
+/* A path that names a type or trait, in a value's path: an impl's
+ * trait, <Foo as Trait<u8>>, takes no turbofish. */
+static int
+rust_parse_v0_type_path(rust_parser_t *p)
+{
+    int saved_in_value = p->in_value;
+    int rc;
+
+    p->in_value = 0;
+    rc = rust_parse_v0_path(p);
+    p->in_value = saved_in_value;
     return rc;
 }
 
@@ -1236,24 +1259,32 @@ static int
 rust_parse_v0_generic_arg(rust_parser_t *p)
 {
     rust_mark_t m;
+    int saved_in_value = p->in_value;
+    int rc = 0;
 
+    /* an argument is a type's, or a const's: no turbofish in it */
+    p->in_value = 0;
     rust_mark_save(p, &m);
     if (rust_parse_v0_type(p) == 0) {
-        return 0;
+        goto out;
     }
 
     rust_mark_restore(p, &m);
     if (rust_parse_v0_const(p) == 0) {
-        return 0;
+        goto out;
     }
 
     rust_mark_restore(p, &m);
     if (rust_parse_v0_lifetime(p, 1) == 0) {
-        return 0;
+        goto out;
     }
 
     rust_mark_restore(p, &m);
-    return rust_parse_v0_path(p);
+    rc = rust_parse_v0_path(p);
+
+out:
+    p->in_value = saved_in_value;
+    return rc;
 }
 
 static int
@@ -1427,7 +1458,7 @@ rust_parse_v0_path(rust_parser_t *p)
         if (rust_buf_appendc(&p->out, '<') != 0 ||
             rust_parse_v0_type(p) != 0 ||
             rust_buf_append(&p->out, " as ", 4u) != 0 ||
-            rust_parse_v0_path(p) != 0 ||
+            rust_parse_v0_type_path(p) != 0 ||
             rust_buf_appendc(&p->out, '>') != 0) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
@@ -1438,7 +1469,7 @@ rust_parse_v0_path(rust_parser_t *p)
         if (rust_buf_appendc(&p->out, '<') != 0 ||
             rust_parse_v0_type(p) != 0 ||
             rust_buf_append(&p->out, " as ", 4u) != 0 ||
-            rust_parse_v0_path(p) != 0 ||
+            rust_parse_v0_type_path(p) != 0 ||
             rust_buf_appendc(&p->out, '>') != 0) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
@@ -1448,7 +1479,9 @@ rust_parse_v0_path(rust_parser_t *p)
         int first;
 
         p->cur++;
-        if (rust_parse_v0_path(p) != 0 || rust_buf_append(&p->out, "::<", 3u) != 0) {
+        /* f::<u8> for a value, Vec<u8> for a type: it was ::< for both */
+        if (rust_parse_v0_path(p) != 0 ||
+            (p->in_value ? rust_buf_append(&p->out, "::<", 3u) : rust_buf_appendc(&p->out, '<')) != 0) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
             return -1;
@@ -1504,9 +1537,11 @@ rust_parse_v0_symbol(rust_parser_t *p)
 {
     size_t len;
 
+    p->in_value = 1;    /* the symbol is a value: f::<u8> */
     if (rust_parse_v0_path(p) != 0) {
         return -1;
     }
+    p->in_value = 0;
     if (p->cur[0] == '\0') {
         return 0;
     }

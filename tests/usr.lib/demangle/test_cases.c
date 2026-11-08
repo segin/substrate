@@ -150,6 +150,12 @@ static const dm_case_t cases[] = {
     { "nor need it point back", "_RINvCs_3lib1fhEBz_", R, "lib::f::<u8>" },
     { "but it must be one", "_RINvCs_3lib1fhEB.", R, NULL },
 
+    /* a Rust v0 value's generic arguments take the turbofish, a type's not */
+    { "a type's in a value's", "_RINvNtCs4bQBTqW3ynz_4core3ptr9drop_glueINtNtCskDOlpTX1PlC_5alloc7raw_vec6RawVechEECs91N3l2zy1RL_3lib",
+      R, "core::ptr::drop_glue::<alloc::raw_vec::RawVec<u8>>" },
+    { "an impl's trait", "_RNvXCs_3libINtB2_3GenhENtB2_5Trait3baz", R, "<lib::Gen<u8> as lib::Trait>::baz" },
+    { "a value inside a type's argument", "_RINvCs_3lib1fINtB2_3FooKINvB2_1ghEEE", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
