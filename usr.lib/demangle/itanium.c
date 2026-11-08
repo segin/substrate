@@ -72,6 +72,11 @@ typedef struct dm_itanium_parser {
 	int in_type_context;
 	/* local names, Z <encoding> E, being parsed: their encodings end at E */
 	int local_depth;
+	/* a substitution is being read as a nested name's prefix; and the one
+	 * read last, if a standard abbreviation, the length of its template's
+	 * name after "std::" (basic_string), which names its constructor */
+	int sub_is_prefix;
+	size_t std_last_len;
 	int has_return_type;
 	/* where the encoding being parsed began in the output: a template
 	 * function's return type goes there, after any thunk's words or the
@@ -730,30 +735,45 @@ static int parse_substitution(dm_itanium_parser_t *p) {
 		return parser_lookup_substitution(p, 0u);
 	}
 
-	switch(p->cur[1]) {
-	case 't':
-		p->cur += 2;
-		return demangle_buf_append(&p->out, "std", 3u);
-	case 'a':
-		p->cur += 2;
-		return demangle_buf_append(&p->out, "std::allocator", 14u);
-	case 'b':
-		p->cur += 2;
-		return demangle_buf_append(&p->out, "std::basic_string", 17u);
-	case 's':
-		p->cur += 2;
-		return demangle_buf_append(&p->out, "std::string", 11u);
-	case 'i':
-		p->cur += 2;
-		return demangle_buf_append(&p->out, "std::istream", 12u);
-	case 'o':
-		p->cur += 2;
-		return demangle_buf_append(&p->out, "std::ostream", 12u);
-	case 'd':
-		p->cur += 2;
-		return demangle_buf_append(&p->out, "std::iostream", 13u);
-	default:
-		break;
+	/*
+	 * The standard abbreviations, as GNU c++filt prints them: Ss, Si, So and
+	 * Sd in full -- c++filt is verbose -- and short only for
+	 * DEMANGLE_NO_VERBOSE, but for a constructor or destructor, which
+	 * is named for the template, basic_string(), as in full.  std_last_len
+	 * is the length of that name, after "std::".  This printed std::string
+	 * whatever the options, and its constructor std::string::std::string().
+	 */
+	p->std_last_len = 0u;
+	{
+		static const struct {
+			char code;
+			const char *simple;
+			const char *full;
+			size_t last_len;
+		} std_subs[] = {
+		    {'a', "std::allocator", "std::allocator", 9u},
+		    {'b', "std::basic_string", "std::basic_string", 12u},
+		    {'s', "std::string", "std::basic_string<char, std::char_traits<char>, std::allocator<char>>", 12u},
+		    {'i', "std::istream", "std::basic_istream<char, std::char_traits<char>>", 13u},
+		    {'o', "std::ostream", "std::basic_ostream<char, std::char_traits<char>>", 13u},
+		    {'d', "std::iostream", "std::basic_iostream<char, std::char_traits<char>>", 14u},
+		};
+		size_t k;
+
+		if(p->cur[1] == 't') {
+			p->cur += 2;
+			return demangle_buf_append(&p->out, "std", 3u);
+		}
+		for(k = 0u; k < sizeof(std_subs) / sizeof(std_subs[0]); k++) {
+			if(p->cur[1] == std_subs[k].code) {
+				int full = (p->options & DEMANGLE_NO_VERBOSE) == 0 || (p->sub_is_prefix && (p->cur[2] == 'C' || p->cur[2] == 'D'));
+				const char *s = full ? std_subs[k].full : std_subs[k].simple;
+
+				p->cur += 2;
+				p->std_last_len = std_subs[k].last_len;
+				return demangle_buf_append(&p->out, s, strlen(s));
+			}
+		}
 	}
 
 	p->cur++;
@@ -1009,9 +1029,14 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 		from_sub = 0;
 		had_args = 0;
 		if(parse_unqualified_name(p, last_off, last_len, &comp_off, &comp_len) != 0) {
+			int sub_rc;
+
 			mark_save(p, &comp_mark);
 			comp_off = p->out.len;
-			if(parse_substitution(p) != 0) {
+			p->sub_is_prefix = 1;
+			sub_rc = parse_substitution(p);
+			p->sub_is_prefix = 0;
+			if(sub_rc != 0) {
 				mark_restore(p, &comp_mark);
 				goto out;
 			}
@@ -1021,6 +1046,12 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 
 		name_only_off = comp_off;
 		name_only_len = comp_len;
+		/* a constructor of std::basic_string<...> is basic_string(): the
+		 * name after "std::" (a short std::string is never one's) */
+		if(from_sub && p->std_last_len != 0u && comp_len >= 5u + p->std_last_len) {
+			name_only_off = comp_off + 5u;
+			name_only_len = p->std_last_len;
+		}
 
 		if(p->cur[0] == 'I') {
 			/* the template's name, before its arguments: a substitution

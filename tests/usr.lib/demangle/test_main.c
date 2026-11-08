@@ -116,7 +116,9 @@ test_9f(void)
 {
     expect_null("9f-1", "_ZN3Foo3barES0_", DEMANGLE_AUTO);
     expect_not_null("9f-2", "_ZNSt6vectorIiSaIiEEC1Ev", DEMANGLE_AUTO);
-    expect_eq("9f-3", "_ZNSsC1Ev", DEMANGLE_AUTO, "std::string::std::string()");
+    /* as GNU c++filt prints it: in full, the constructor named for it */
+    expect_eq("9f-3", "_ZNSsC1Ev", DEMANGLE_AUTO,
+              "std::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string()");
 }
 
 static void

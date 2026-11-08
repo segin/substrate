@@ -326,6 +326,20 @@ static const dm_case_t cases[] = {
     { "a module's initializer (libstdc++'s)", "_ZGIW3stdW6compat", I, "initializer for module std.compat" },
     { "a T that is none of them", "_ZTX1x", I, NULL },
 
+    /* the Itanium standard abbreviations, in full as GNU c++filt prints them */
+    { "std::ostream (Boost's)", "_ZN5boost10test_tools9tt_detail15print_log_valueIPKcEclERSoS4_", I,
+      "boost::test_tools::tt_detail::print_log_value<char const*>::operator()(std::basic_ostream<char, "
+      "std::char_traits<char>>&, char const*)" },
+    { "std::string", "_Z1fSs", I, "f(std::basic_string<char, std::char_traits<char>, std::allocator<char>>)" },
+    { "a member of it", "_ZNSs4sizeEv", I, "std::basic_string<char, std::char_traits<char>, std::allocator<char>>::size()" },
+    { "its destructor", "_ZNSsD1Ev", I,
+      "std::basic_string<char, std::char_traits<char>, std::allocator<char>>::~basic_string()" },
+    { "std::allocator's constructor", "_ZNSaIcEC1ERKS_", I, "std::allocator<char>::allocator(std::allocator<char> const&)" },
+    { "std::basic_iostream's", "_ZNSdC2Ev", I, "std::basic_iostream<char, std::char_traits<char>>::basic_iostream()" },
+    { "short, if not verbose", "_Z1fSs", I | DEMANGLE_NO_VERBOSE, "f(std::string)" },
+    { "but a constructor's in full", "_ZNSoC1Ev", I | DEMANGLE_NO_VERBOSE,
+      "std::basic_ostream<char, std::char_traits<char>>::basic_ostream()" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

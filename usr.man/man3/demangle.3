@@ -48,6 +48,13 @@ For a D symbol, leave out its type: the name alone,
 .TP
 .B DEMANGLE_NO_VERBOSE
 Suppress verbose qualifiers where supported.
+For a C++ symbol, print the standard abbreviations short, as
+.B std::string
+rather than
+.BR "std::basic_string<char, std::char_traits<char>, std::allocator<char>>" ,
+which is otherwise printed as GNU
+.BR c++filt (1)
+prints it.
 For a D symbol, leave out function attributes such as
 .BR pure ,
 .B nothrow
