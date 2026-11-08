@@ -41,6 +41,7 @@ run: test_exvi_core test_exvi_prop test_vi_record_replace_char test_exvi_visual
 	./test_vi_record_replace_char
 	./test_exvi_visual
 	python3 ./check_signal_handlers.py ../../../usr.lib/exvi
+	bash ./check_build.sh ../../..
 
 clean:
 	rm -f test_main.o test_property.o test_vi_record_replace_char.o test_visual.o test_exvi_core test_exvi_prop test_vi_record_replace_char test_exvi_visual
