@@ -63,6 +63,13 @@ for mode in -no-pie -pie; do
     if [ ! -s want ] || ! cmp -s want have; then
         echo "FAIL: ld $mode: the imports in .symtab differ from GNU ld's:"
         diff want have | sed 's/^/    /'
+        # and every .symtab line, both linkers', for each name they differ on
+        for name in $(diff want have | awk '/^[<>]/ { print $NF }' | sort -u); do
+            echo "    GNU ld's .symtab for $name:"
+            readelf -sW gnu.out | sed -n '/Symbol table .\.symtab/,$p' | awk -v n="$name" '$8 == n' | sed 's/^/      /'
+            echo "    ours:"
+            readelf -sW ours.out | sed -n '/Symbol table .\.symtab/,$p' | awk -v n="$name" '$8 == n' | sed 's/^/      /'
+        done
         fail=1
     fi
     if [ "$(LD_LIBRARY_PATH=. ./ours.out)" != "ports" ]; then
