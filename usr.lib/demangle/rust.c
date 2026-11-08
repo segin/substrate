@@ -1492,10 +1492,37 @@ rust_parse_v0_path(rust_parser_t *p)
     return 0;
 }
 
+/*
+ * _R <path> [<instantiating-crate>]: a generic instance names, after its
+ * path, the crate it was instantiated in -- B2_, or Cs..._3lib -- which is
+ * not printed (rustc-demangle, GNU).  rustc puts it on every instance,
+ * and every one was refused.  A back reference there is not followed, as
+ * GNU c++filt follows none it does not print: it need only be well formed.
+ */
 static int
 rust_parse_v0_symbol(rust_parser_t *p)
 {
-    return rust_parse_v0_path(p);
+    size_t len;
+
+    if (rust_parse_v0_path(p) != 0) {
+        return -1;
+    }
+    if (p->cur[0] == '\0') {
+        return 0;
+    }
+    if (p->cur[0] == 'B') {
+        size_t off;
+
+        p->cur++;
+        return rust_parse_base62(p, &off);
+    }
+    len = p->out.len;
+    if (rust_parse_v0_path(p) != 0) {
+        return -1;
+    }
+    p->out.len = len;
+    p->out.data[p->out.len] = '\0';
+    return 0;
 }
 
 static char *

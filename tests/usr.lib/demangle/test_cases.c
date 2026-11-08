@@ -140,6 +140,16 @@ static const dm_case_t cases[] = {
     { "another namespace", "_RNXCs_3lib1x", R, "lib::{X:x#0}" },
     { "no namespace", "_RN0Cs_3lib1x", R, NULL },
 
+    /* a Rust v0 instance's instantiating crate is part of it, unprinted */
+    { "by back reference", "_RINvCs91N3l2zy1RL_3lib22takes_dyn_iter_generichEB2_", R,
+      "lib::takes_dyn_iter_generic::<u8>" },
+    { "by crate root", "_RINvNtNtNtCs4bQBTqW3ynz_4core4iter7sources5empty5emptyhECs91N3l2zy1RL_3lib",
+      R, "core::iter::sources::empty::empty::<u8>" },
+    { "two of them", "_RINvCs_3lib1fhEB2_B2_", R, NULL },
+    { "a back reference there is not followed", "_RINvCs_3lib1fhEB9_", R, "lib::f::<u8>" },
+    { "nor need it point back", "_RINvCs_3lib1fhEBz_", R, "lib::f::<u8>" },
+    { "but it must be one", "_RINvCs_3lib1fhEB.", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
