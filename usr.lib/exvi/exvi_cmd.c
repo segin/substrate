@@ -1557,6 +1557,7 @@ exvi_exec_shell(const char *cmd)
     if (setgid(getgid()) == -1 || setuid(getuid()) == -1) {
         _exit(127);
     }
+    signal(SIGXFSZ, SIG_DFL);           /* the editor's ignoring it is its own */
     execl(sh, sh, "-c", cmd, (char *)NULL);
     fprintf(stderr, "%s: %s\n", sh, strerror(errno));
     _exit(127);

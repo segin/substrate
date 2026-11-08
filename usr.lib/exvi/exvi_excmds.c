@@ -113,6 +113,7 @@ handle_shell_interactive(void)
         if (setgid(getgid()) == -1 || setuid(getuid()) == -1) {
             _exit(127);
         }
+        signal(SIGXFSZ, SIG_DFL);       /* the editor's ignoring it is its own */
         execl(sh, sh, (char *)NULL);
         fprintf(stderr, "%s: %s\n", sh, strerror(errno));
         _exit(127);

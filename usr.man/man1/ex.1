@@ -743,6 +743,12 @@ and returns to the command prompt with the buffer as the command left it.
 and
 .Dv SIGTERM
 preserve a modified buffer and end the session.
+.Dv SIGXFSZ
+is ignored: a write past the file size limit fails, is reported as
+.Ql File too large ,
+and leaves the buffer modified; the commands
+.Nm
+runs get the signal back.
 .Sh EXIT STATUS
 The
 .Nm

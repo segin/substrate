@@ -705,6 +705,11 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     exvi_reset_runtime(frontend);
     exvi_cleanup_session_state();
     exvi_exit_requested = 0;
+    /* a write past the file size limit fails with EFBIG and is reported,
+     * the buffer kept, as a full disk is -- from the first command on (-c,
+     * startup files); SIGXFSZ killed the editor and every change not yet
+     * written.  The commands it runs get it back (exvi_exec_shell()). */
+    signal(SIGXFSZ, SIG_IGN);
     if (invoked_as(argv[0], "rex") || invoked_as(argv[0], "rvi")) {
         restricted_mode = 1;
         secure_mode = 1;

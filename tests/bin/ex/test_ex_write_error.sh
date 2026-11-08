@@ -5,7 +5,8 @@
 # the buffer was marked written and `q` left without a word (status 0).
 #
 # The file size limit (with SIGXFSZ ignored, so the write fails with EFBIG
-# instead of killing the editor) stands in for a full disk.
+# instead of killing the editor) stands in for a full disk; and last, the
+# limit with SIGXFSZ left alone, which the editor now ignores itself.
 #
 # Usage: test_ex_write_error.sh path/to/ex
 set -u
@@ -55,6 +56,30 @@ fi
 )
 if ! grep -q 'File too large' "$T/out"; then
 	fail "a failed :w >> was not reported: [$(cat "$T/out")]"
+fi
+
+# and with SIGXFSZ as it comes, not ignored: the editor ignores it itself,
+# so the write fails and is reported, and the session goes on.  SIGXFSZ
+# killed it, the changes unwritten lost.
+cp "$T/big.orig" "$T/big"
+(
+	ulimit -f 4
+	"$EX_BIN" -s -c '1s/1/X/' -c w -c 1p -c 'q!' "$T/big" </dev/null >"$T/out" 2>&1
+	echo "status $?" >>"$T/out"
+)
+if ! grep -q 'File too large' "$T/out" || ! grep -qx X "$T/out" ||
+   ! cmp -s "$T/big" "$T/big.orig"; then
+	fail "SIGXFSZ not ignored by the editor: [$(tail -3 "$T/out")]"
+fi
+# a command the editor runs gets SIGXFSZ back as it was: dd past the limit
+# is killed by it (128 + 25)
+(
+	ulimit -f 4
+	"$EX_BIN" -s -c "!dd if=/dev/zero of=$T/dd.out bs=1024 count=64 2>/dev/null; echo st=\$?" \
+		-c 'q!' "$T/big" </dev/null >"$T/out" 2>&1
+)
+if ! grep -q 'st=153' "$T/out"; then
+	fail "a command run from ex inherited SIGXFSZ ignored: [$(cat "$T/out")]"
 fi
 
 if [ "$fails" -ne 0 ]; then
