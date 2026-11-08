@@ -51,6 +51,17 @@ imports() {
             print $4, $5, $3, ($7 == "UND" ? "UND" : "DEF"), $8 }' | sort
 }
 
+# GNU ld before 2.47 leaves the start files' weak _ITM_ references out of
+# a position-dependent executable's .symtab; 2.47 keeps them, and so does
+# ours.  Judged by an older one, those two lines are not compared.
+gnu_ld_version=$(${GNU_LD:-ld} --version | head -1 | sed -E 's/.* ([0-9]+)\.([0-9]+)[^ ]*$/\1 \2/')
+old_itm=0
+set -- $gnu_ld_version
+if [ "$1" -lt 2 ] || { [ "$1" -eq 2 ] && [ "$2" -lt 47 ]; }; then
+    old_itm=1
+    echo "note: GNU ld $1.$2 drops the weak _ITM_ symbols of -no-pie; not compared"
+fi
+
 for mode in -no-pie -pie; do
     if [ $mode = -pie ]; then pic=-fPIE; else pic=-fno-pie; fi
     ${GCC:-gcc} -O2 $pic -c -o prog.o prog.c || exit 1
@@ -60,6 +71,10 @@ for mode in -no-pie -pie; do
     fi
     imports gnu.out > want
     imports ours.out > have
+    if [ $old_itm -eq 1 ] && [ $mode = -no-pie ]; then
+        grep -v ' UND _ITM_' want > want.f; mv want.f want
+        grep -v ' UND _ITM_' have > have.f; mv have.f have
+    fi
     if [ ! -s want ] || ! cmp -s want have; then
         echo "FAIL: ld $mode: the imports in .symtab differ from GNU ld's:"
         diff want have | sed 's/^/    /'

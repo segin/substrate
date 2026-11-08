@@ -90,7 +90,17 @@ ${GCC:-gcc} -pie -o gnu.out prog.o -L. -lt || exit 1
 if ! ${GCC:-gcc} -B"$work/bin/" -pie -o ours.out prog.o -L. -lt > said 2>&1; then
     echo "FAIL: ld -pie: $(head -1 said)"; exit 1
 fi
-for sec in .dynstr .gnu.hash; do
+# GNU ld 2.46 (Ubuntu's, on CI) hashes two of this PIE's undefined symbols
+# -- its .gnu.hash is 0x24 bytes, two chain entries -- where 2.47 hashes
+# none, 0x1c, and so does ours.  Judged by an older one, the PIE's
+# .gnu.hash is not compared.
+pie_secs=".dynstr .gnu.hash"
+set -- $(${GNU_LD:-ld} --version | head -1 | sed -E 's/.* ([0-9]+)\.([0-9]+)[^ ]*$/\1 \2/')
+if [ "$1" -lt 2 ] || { [ "$1" -eq 2 ] && [ "$2" -lt 47 ]; }; then
+    pie_secs=".dynstr"
+    echo "note: GNU ld $1.$2 hashes a PIE's undefined symbols; its .gnu.hash not compared"
+fi
+for sec in $pie_secs; do
     if [ "$(size_of gnu.out $sec)" != "$(size_of ours.out $sec)" ]; then
         echo "FAIL: a PIE: $sec is $(size_of ours.out $sec) bytes, GNU ld's $(size_of gnu.out $sec)"; fail=1
         # which symbols each hashed, and the link that made them
