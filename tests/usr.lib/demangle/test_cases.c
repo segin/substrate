@@ -350,6 +350,15 @@ static const dm_case_t cases[] = {
     { "to the function by substitution", "_Z1fPFviERS_", I, "f(void (*)(int), void (&)(int))" },
     { "by template parameter", "_Z1fIFviEEvPT_", I, "void f<void (int)>(void (*)(int))" },
 
+    /* the function an Itanium local name is in has no return type printed */
+    { "a static in a template function", "_ZZN1A1fIiEEPiT_E1x", I, "A::f<int>(int)::x" },
+    { "its guard variable", "_ZGVZN1A1fIiEEPiT_E1x", I, "guard variable for A::f<int>(int)::x" },
+    { "a lambda's call operator", "_ZZ1fIiEvvENKUlvE_clEv", I, "f<int>()::{lambda()#1}::operator()() const" },
+    { "as a template argument", "_ZN1B1gIZN1A1fIiEEvvEUlvE_EEvT_", I,
+      "void B::g<A::f<int>()::{lambda()#1}>(A::f<int>()::{lambda()#1})" },
+    { "but the outer function's is", "_ZN1B1gIZN1A1fIiEEvvEUlvE_EEPiT_", I,
+      "int* B::g<A::f<int>()::{lambda()#1}>(A::f<int>()::{lambda()#1})" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

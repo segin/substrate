@@ -77,6 +77,11 @@ typedef struct dm_itanium_parser {
 	 * name after "std::" (basic_string), which names its constructor */
 	int sub_is_prefix;
 	size_t std_last_len;
+	/* the encoding parsed next is a local name's, and its function's
+	 * return type is then not printed (drop_return_type, for the bare
+	 * function type that follows its name) */
+	int next_encoding_is_local;
+	int drop_return_type;
 	int has_return_type;
 	/* where the encoding being parsed began in the output: a template
 	 * function's return type goes there, after any thunk's words or the
@@ -1208,6 +1213,7 @@ static int parse_local_name(dm_itanium_parser_t *p) {
 	}
 
 	p->local_depth++;
+	p->next_encoding_is_local = 1;
 	rc = parse_encoding(p);
 	p->local_depth--;
 	parser_leave(p);
@@ -1318,16 +1324,34 @@ static int is_void_text(const dm_buf_t *buf, size_t off, size_t len) {
 static int parse_bare_function_type(dm_itanium_parser_t *p) {
 	int suppress_params;
 	int first;
+	int drop;
 
 	suppress_params = ((p->options & DEMANGLE_NO_PARAMS) != 0);
+
+	drop = p->drop_return_type;
+	p->drop_return_type = 0;
 
 	/* Template functions have an explicit return type as the first type */
 	if(p->has_return_type && !at_encoding_end(p)) {
 		size_t ret_off = p->out.len;
+
 		if(parse_type(p) != 0) {
 			return -1;
 		}
 		size_t ret_len = p->out.len - ret_off;
+		/*
+		 * The function a local name is in is printed without its return
+		 * type, as GNU c++filt prints it: A::f<int>()::x, not
+		 * void A::f<int>()::x.  Its entries keep their text.
+		 */
+		if(drop && ret_len > 0) {
+			if(parser_freeze_from(p, ret_off) != 0) {
+				return -1;
+			}
+			p->out.len = ret_off;
+			p->out.data[p->out.len] = '\0';
+			ret_len = 0;
+		}
 		if(ret_len > 0) {
 			/*
 			 * The return type, written after the name, goes before it: at
@@ -2654,7 +2678,10 @@ static int parse_encoding(dm_itanium_parser_t *p) {
 	dm_parse_mark_t m;
 	size_t outer_off = p->encoding_off;
 	int rc = -1;
+	/* this encoding, not one nested in its name, is a local name's */
+	int is_local = p->next_encoding_is_local;
 
+	p->next_encoding_is_local = 0;
 	p->encoding_off = p->out.len;
 	mark_save(p, &m);
 	if(parse_special_name(p) == 0) {
@@ -2675,6 +2702,7 @@ static int parse_encoding(dm_itanium_parser_t *p) {
 			memcpy(p->func_tmpl_len, p->last_template_len, p->func_tmpl_count * sizeof(size_t));
 		}
 		targ_map_copy(&p->func_map, &p->last_map);
+		p->drop_return_type = is_local;
 		if(parse_bare_function_type(p) != 0) {
 			goto out;
 		}
