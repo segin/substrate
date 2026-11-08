@@ -45,6 +45,10 @@ check '2,3!sort -r\n%p' '1 3 2 4'
 check '%!tr 1-4 a-d\n%p' 'a b c d'
 check '2!echo x; echo y\n%p' '1 x y 3 4'
 check '2,3!true\n%p' '1 4'
+# the lines replaced go to the unnamed buffer, in line mode; the current
+# line is the last line read in
+check '2,3!sort -r\n$put\n%p' '1 3 2 4 2 3'
+check '2,3!sort -r\n.=' '3'
 # r ! and w ! go through the shell too
 check '$r !echo x | tr x z\n%p' '1 2 3 4 z'
 check 'w !tr 1 X' 'X 2 3 4'

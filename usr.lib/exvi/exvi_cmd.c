@@ -1813,6 +1813,9 @@ shell_filter(buffer_t *b, const char *cmd, int addr1, int addr2)
         line_t *pos;
 
         save_undo(b);
+        /* the lines replaced go to the unnamed buffer, in line mode (POSIX
+         * ex !); they went nowhere */
+        handle_yank_command(b, "", 1, addr1, addr2);
         for (int i = addr1; i <= addr2; i++) {
             buf_delete(b, buf_get_line(b, addr1));
         }
