@@ -376,6 +376,14 @@ static const dm_case_t cases[] = {
     { "operator<", "_ZltIiEbRK1AIT_ES4_", I, "bool operator< <int>(A<int> const&, A<int> const&)" },
     { "operator> needs none", "_ZgtIiEbRK1AIT_ES4_", I, "bool operator><int>(A<int> const&, A<int> const&)" },
 
+    /* an Itanium array's qualifier is its elements', before its bounds */
+    { "a const array", "_Z1fKA4_i", I, "f(int const[4])" },
+    { "a reference to one", "_Z1fRKA22_c", I, "f(char const (&)[22])" },
+    { "a reference to a volatile one", "_Z1fRVA2_A3_i", I, "f(int volatile (&)[2][3])" },
+    { "by template parameter", "_Z1fIA22_cEvRKT_", I, "void f<char[22]>(char const (&)[22])" },
+    { "by substitution", "_Z1fA4_iRKS_", I, "f(int[4], int const (&)[4])" },
+    { "a const function's pointer", "_Z1fPKFviE", I, "f(void (*)(int) const)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

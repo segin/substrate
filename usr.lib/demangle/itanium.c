@@ -2322,6 +2322,17 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 
 		p->cur++;
 		pointee = p->cur[0];
+		/* past qualifiers, to a const array or function under them */
+		if(pointee == 'K' || pointee == 'V' || pointee == 'r') {
+			const char *q = p->cur;
+
+			while(*q == 'K' || *q == 'V' || *q == 'r') {
+				q++;
+			}
+			if(*q == 'A' || *q == 'F' || *q == 'S' || *q == 'T') {
+				pointee = *q;
+			}
+		}
 		before = p->out.len;
 		if(parse_type(p) != 0) {
 			return -1;
@@ -2427,21 +2438,36 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 
 	if(p->cur[0] == 'K' || p->cur[0] == 'V' || p->cur[0] == 'r') {
 		char qual = p->cur[0];
+		const char *q;
+		const char *text = (qual == 'K') ? " const" : (qual == 'V') ? " volatile" : " restrict";
+		size_t before, at, decl_at;
+		int is_func;
+
 		p->cur++;
+		for(q = p->cur; *q == 'K' || *q == 'V' || *q == 'r'; q++) {
+		}
+		before = p->out.len;
 		if(parse_type(p) != 0) {
 			return -1;
 		}
-		if(qual == 'K') {
-			if(demangle_buf_append(&p->out, " const", 6u) != 0)
+		/*
+		 * An array's qualifier is its elements', and goes before its
+		 * bounds, char const[22] -- as GNU c++filt prints it, and so a
+		 * reference to it char const (&)[22], where this had
+		 * char[22] const&.
+		 */
+		if(*q == 'A' || ((*q == 'S' || *q == 'T') && find_array_declarator(&p->out, before, &at, &decl_at, &is_func) == 0 && !is_func &&
+		                 decl_at == SIZE_MAX)) {
+			if(*q == 'A') {
+				at = p->array_dims_off;
+			}
+			if(parser_insert_in_type(p, before, at, text, strlen(text)) != 0) {
 				return -1;
-		} else if(qual == 'V') {
-			if(demangle_buf_append(&p->out, " volatile", 9u) != 0)
-				return -1;
-		} else {
-			if(demangle_buf_append(&p->out, " restrict", 9u) != 0)
-				return -1;
+			}
+			p->array_dims_off = at + strlen(text);
+			return 0;
 		}
-		return 0;
+		return demangle_buf_append(&p->out, text, strlen(text));
 	}
 
 	if(p->cur[0] == 'C') {
