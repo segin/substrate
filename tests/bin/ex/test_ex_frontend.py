@@ -157,6 +157,43 @@ def main():
             f"ex -r (no file) stdout mismatch: {proc.stdout!r}")
     require(proc.stderr == b"", f"ex -r (no file) stderr mismatch: {proc.stderr!r}")
 
+    # and after :preserve, the file preserved (dir set by a command: -s
+    # reads no EXINIT)
+    with tempfile.TemporaryDirectory() as rdir:
+        env = dict(os.environ, EXINIT=f"set dir={rdir}")
+        target = os.path.join(rdir, "listed.txt")
+        with open(target, "w") as f:
+            f.write("one\ntwo\n")
+        proc = subprocess.run([ex_path, "-s", target],
+                              input=f"set dir={rdir}\n1d\npreserve\nq!\n".encode(),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        require(proc.returncode == 0, f"ex :preserve status mismatch: {proc.returncode}")
+        proc = subprocess.run([ex_path, "-r"], input=b"",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    require(proc.returncode == 0, f"ex -r (listing) status mismatch: {proc.returncode}")
+    require(proc.stdout.decode("latin1").split() == ["listed.txt"],
+            f"ex -r does not list the preserved file: {proc.stdout!r}")
+
+    # -w size sets window; a size that is no number is an error; - is -s
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("one\ntwo\n")
+        path = f.name
+    try:
+        proc = subprocess.run([ex_path, "-s", "-w", "5", path], input=b"set window?\nq!\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode == 0 and proc.stdout == b"window=5\n",
+                f"ex -w 5: status {proc.returncode}, {proc.stdout!r} {proc.stderr!r}")
+        proc = subprocess.run([ex_path, "-s", "-w", "x", path], input=b"q!\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode != 0 and b"-w" in proc.stderr,
+                f"ex -w x: status {proc.returncode}, {proc.stderr!r}")
+        proc = subprocess.run([ex_path, "-", path], input=b"1p\nq!\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode == 0 and proc.stdout == b"one\n",
+                f"ex - is not ex -s: status {proc.returncode}, {proc.stdout!r}")
+    finally:
+        os.unlink(path)
+
     # :preserve, then ex -r: the recover image is in <directory>/exvi-<uid>
     # (EXINIT points directory at a scratch directory), and a .recover
     # planted beside the file is not what comes back

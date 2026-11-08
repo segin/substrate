@@ -37,6 +37,13 @@ if [ "$status" -eq 0 ] || grep -qx 1 <<<"$out"; then
 fi
 
 seq 1 5 >f
+out=$(printf 'g/5/v/x/p\nq!\n' | "$EX_BIN" -s f 2>&1)
+status=$?
+if [ "$status" -eq 0 ] || grep -qx 1 <<<"$out"; then
+	fail "v within global: status $status [$out]"
+fi
+
+seq 1 5 >f
 out=$(printf 'g/5/u\nq!\n' | "$EX_BIN" -s f 2>&1)
 status=$?
 [ "$status" -ne 0 ] || fail "undo within global: status $status [$out]"

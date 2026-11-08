@@ -42,6 +42,16 @@ if [ "$out" != "$(printf 'x\nA\nb')" ]; then
 	fail "s// inside g/a/: [$out]"
 fi
 
+# and v's, though it runs on the lines that do not match
+out=$(printf 'v/a/p\n2s//X/\n%%p\nq!\n' | "$EX_BIN" -s f 2>&1)
+if [ "$out" != "$(printf 'x\nb\nx\nX\nb')" ]; then
+	fail "s// after v/a/: [$out]"
+fi
+out=$(printf 'v/a/p\ng//p\nq!\n' | "$EX_BIN" -s f 2>&1)
+if [ "$out" != "$(printf 'x\nb\na')" ]; then
+	fail "g// after v/a/: [$out]"
+fi
+
 # the c option asks about each match (in batch nothing echoes the answer,
 # so the line printed after follows the last prompt)
 printf 'x x x\n' >c

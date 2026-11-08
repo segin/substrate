@@ -34,6 +34,18 @@ out=$(
 if ! grep -qx R <<<"$out"; then
 	fail "wq! quit although its write failed: [$out]"
 fi
+# and x and x!, the same
+for c in x 'x!' wq; do
+	seq 1 2000 >big
+	out=$(
+		trap '' XFSZ
+		ulimit -f 4
+		"$EX_BIN" -s -c '1s/1/R/' -c "$c" -c 1p -c 'q!' big </dev/null 2>&1
+	)
+	if ! grep -qx R <<<"$out"; then
+		fail "$c quit although its write failed: [$out]"
+	fi
+done
 
 # wq file / x file write that file, and leave the current one alone
 for c in wq x; do
