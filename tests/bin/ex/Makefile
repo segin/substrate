@@ -17,7 +17,7 @@ EX_SHELL_TESTS = \
 	test_ex_commands.sh test_ex_options.sh
 EX_PY_TESTS = test_ex_frontend.py test_ex_visual.py test_ex_undo_memory.py \
 	test_ex_scaling.py test_ex_open.py test_ex_autoindent.py \
-	test_ex_options_tty.py
+	test_ex_options_tty.py test_ex_suspend.py
 
 .PHONY: all clean test
 
