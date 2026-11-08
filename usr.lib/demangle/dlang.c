@@ -11,45 +11,39 @@
 
 #define DLANG_RECURSION_DEFAULT_LIMIT 128
 
-enum {
-    DLANG_QUAL_CONST = 1u << 0,
-    DLANG_QUAL_IMMUTABLE = 1u << 1,
-    DLANG_QUAL_SHARED = 1u << 2,
-    DLANG_QUAL_INOUT = 1u << 3
-};
+enum { DLANG_QUAL_CONST = 1u << 0, DLANG_QUAL_IMMUTABLE = 1u << 1, DLANG_QUAL_SHARED = 1u << 2, DLANG_QUAL_INOUT = 1u << 3 };
 
 enum {
-    DLANG_ATTR_PURE = 1u << 0,
-    DLANG_ATTR_NOTHROW = 1u << 1,
-    DLANG_ATTR_REF = 1u << 2,
-    DLANG_ATTR_PROPERTY = 1u << 3,
-    DLANG_ATTR_TRUSTED = 1u << 4,
-    DLANG_ATTR_SAFE = 1u << 5,
-    DLANG_ATTR_NOGC = 1u << 6,
-    DLANG_ATTR_RETREF = 1u << 7
+	DLANG_ATTR_PURE = 1u << 0,
+	DLANG_ATTR_NOTHROW = 1u << 1,
+	DLANG_ATTR_REF = 1u << 2,
+	DLANG_ATTR_PROPERTY = 1u << 3,
+	DLANG_ATTR_TRUSTED = 1u << 4,
+	DLANG_ATTR_SAFE = 1u << 5,
+	DLANG_ATTR_NOGC = 1u << 6,
+	DLANG_ATTR_RETREF = 1u << 7
 };
 
 typedef demangle_buf_t dlang_buf_t;
 
 typedef struct dlang_parser {
-    const char *input;
-    const char *cur;
-    int options;
+	const char *input;
+	const char *cur;
+	int options;
 
-    int recursion_depth;
-    int recursion_limit;
+	int recursion_depth;
+	int recursion_limit;
 
-    dlang_buf_t out;
+	dlang_buf_t out;
 
-    /* the target of the type back reference being parsed: one inside it
-     * must reach further back, so none can lead round to itself */
-    const char *type_backref;
+	/* the target of the type back reference being parsed: one inside it
+	 * must reach further back, so none can lead round to itself */
+	const char *type_backref;
 } dlang_parser_t;
 
 static int starts_with(const char *s, const char *prefix);
 static int dlang_is_mangled(const char *mangled);
 static int dlang_has_n_bytes(const char *s, size_t n);
-
 
 static int dlang_parser_init(dlang_parser_t *p, const char *mangled, int options);
 static void dlang_parser_destroy(dlang_parser_t *p);
@@ -79,87 +73,72 @@ static char *dlang_delegate_from_function(const char *inner);
 
 static char *dlang_demangle_symbol(const char *mangled, int options);
 
-static int
-starts_with(const char *s, const char *prefix)
-{
-    size_t n;
+static int starts_with(const char *s, const char *prefix) {
+	size_t n;
 
-    if (s == NULL || prefix == NULL) {
-        return 0;
-    }
+	if(s == NULL || prefix == NULL) {
+		return 0;
+	}
 
-    n = strlen(prefix);
-    return strncmp(s, prefix, n) == 0;
+	n = strlen(prefix);
+	return strncmp(s, prefix, n) == 0;
 }
 
-static int
-dlang_is_mangled(const char *mangled)
-{
-    return starts_with(mangled, "_D");
+static int dlang_is_mangled(const char *mangled) {
+	return starts_with(mangled, "_D");
 }
 
-static int
-dlang_has_n_bytes(const char *s, size_t n)
-{
-    size_t i;
+static int dlang_has_n_bytes(const char *s, size_t n) {
+	size_t i;
 
-    if (s == NULL) {
-        return 0;
-    }
+	if(s == NULL) {
+		return 0;
+	}
 
-    for (i = 0u; i < n; i++) {
-        if (s[i] == '\0') {
-            return 0;
-        }
-    }
-    return 1;
+	for(i = 0u; i < n; i++) {
+		if(s[i] == '\0') {
+			return 0;
+		}
+	}
+	return 1;
 }
 
-static int
-dlang_parser_init(dlang_parser_t *p, const char *mangled, int options)
-{
-    memset(p, 0, sizeof(*p));
-    p->input = mangled;
-    p->cur = mangled;
-    p->options = options;
-    p->recursion_limit = (options & DEMANGLE_NO_RECURSE_LIMIT) != 0
-                             ? INT_MAX : DLANG_RECURSION_DEFAULT_LIMIT;
+static int dlang_parser_init(dlang_parser_t *p, const char *mangled, int options) {
+	memset(p, 0, sizeof(*p));
+	p->input = mangled;
+	p->cur = mangled;
+	p->options = options;
+	p->recursion_limit = (options & DEMANGLE_NO_RECURSE_LIMIT) != 0 ? INT_MAX : DLANG_RECURSION_DEFAULT_LIMIT;
 
-    if (demangle_buf_reserve(&p->out, 0u) != 0) {
-        return -1;
-    }
+	if(demangle_buf_reserve(&p->out, 0u) != 0) {
+		return -1;
+	}
 
-    p->out.data[0] = '\0';
-    return 0;
+	p->out.data[0] = '\0';
+	return 0;
 }
 
-static void
-dlang_parser_destroy(dlang_parser_t *p)
-{
-    if (p == NULL) {
-        return;
-    }
+static void dlang_parser_destroy(dlang_parser_t *p) {
+	if(p == NULL) {
+		return;
+	}
 
-    demangle_buf_destroy(&p->out);
+	demangle_buf_destroy(&p->out);
 }
 
-static int
-dlang_parser_enter(dlang_parser_t *p)
-{
-    if (p->recursion_depth >= p->recursion_limit) {
-        return -1;
-    }
+static int dlang_parser_enter(dlang_parser_t *p) {
+	if(p->recursion_depth >= p->recursion_limit) {
+		return -1;
+	}
 
-    p->recursion_depth++;
-    return 0;
+	p->recursion_depth++;
+	return 0;
 }
 
-static void
-dlang_parser_leave(dlang_parser_t *p)
-{
-    if (p->recursion_depth > 0) {
-        p->recursion_depth--;
-    }
+static void dlang_parser_leave(dlang_parser_t *p) {
+	if(p->recursion_depth > 0) {
+		p->recursion_depth--;
+	}
 }
 
 /*
@@ -171,1201 +150,1219 @@ dlang_parser_leave(dlang_parser_t *p)
  * rewriting of the output for qualifiers and return types left pointing at
  * other text.  The target, p->cur past the number; or NULL.
  */
-static const char *
-dlang_decode_backref(dlang_parser_t *p)
-{
-    const char *q = p->cur;
-    size_t val = 0u;
+static const char *dlang_decode_backref(dlang_parser_t *p) {
+	const char *q = p->cur;
+	size_t val = 0u;
 
-    p->cur++;
-    for (;;) {
-        char c = p->cur[0];
-        size_t d;
+	p->cur++;
+	for(;;) {
+		char c = p->cur[0];
+		size_t d;
 
-        if (c >= 'A' && c <= 'Z') {
-            d = (size_t)(c - 'A');
-        } else if (c >= 'a' && c <= 'z') {
-            d = (size_t)(c - 'a');
-        } else {
-            return NULL;
-        }
-        if (val > (SIZE_MAX - d) / 26u) {
-            return NULL;
-        }
-        val = val * 26u + d;
-        p->cur++;
-        if (c >= 'a') {
-            break;
-        }
-    }
-    if (val == 0u || val > (size_t)(q - p->input)) {
-        return NULL;
-    }
-    return q - val;
+		if(c >= 'A' && c <= 'Z') {
+			d = (size_t)(c - 'A');
+		} else if(c >= 'a' && c <= 'z') {
+			d = (size_t)(c - 'a');
+		} else {
+			return NULL;
+		}
+		if(val > (SIZE_MAX - d) / 26u) {
+			return NULL;
+		}
+		val = val * 26u + d;
+		p->cur++;
+		if(c >= 'a') {
+			break;
+		}
+	}
+	if(val == 0u || val > (size_t)(q - p->input)) {
+		return NULL;
+	}
+	return q - val;
 }
 
-static int
-dlang_parse_number(dlang_parser_t *p, size_t *out)
-{
-    size_t v;
+static int dlang_parse_number(dlang_parser_t *p, size_t *out) {
+	size_t v;
 
-    if (p == NULL || out == NULL || !isdigit((unsigned char)p->cur[0])) {
-        return -1;
-    }
+	if(p == NULL || out == NULL || !isdigit((unsigned char)p->cur[0])) {
+		return -1;
+	}
 
-    v = 0u;
-    while (isdigit((unsigned char)p->cur[0])) {
-        unsigned d = (unsigned)(p->cur[0] - '0');
-        /* Pre-multiply saturation; see itanium parse_number. */
-        if (v > ((size_t)-1 - d) / 10u) {
-            return -1;
-        }
-        v = v * 10u + d;
-        p->cur++;
-    }
+	v = 0u;
+	while(isdigit((unsigned char)p->cur[0])) {
+		unsigned d = (unsigned)(p->cur[0] - '0');
+		/* Pre-multiply saturation; see itanium parse_number. */
+		if(v > ((size_t)-1 - d) / 10u) {
+			return -1;
+		}
+		v = v * 10u + d;
+		p->cur++;
+	}
 
-    *out = v;
-    return 0;
+	*out = v;
+	return 0;
 }
 
-static int
-dlang_format_special_name(dlang_buf_t *buf, const char *s, size_t len, int *formatted)
-{
-    static const struct {
-        const char *prefix;
-        size_t prefix_len;
-        const char *repl;
-        size_t repl_len;
-    } pfxs[] = {
-        { "__lambda", 8u, "{lambda#", 8u },
-        { "__dgliteral", 11u, "{delegate literal#", 18u },
-        { "__unittest", 10u, "{unittest#", 10u },
-        { "__aggr", 6u, "{aggregate#", 11u }
-    };
-    static const struct {
-        const char *exact;
-        size_t exact_len;
-        const char *repl;
-        size_t repl_len;
-    } exacts[] = {
-        { "__modctor", 9u, "{module ctor}", 13u },
-        { "__moddtor", 9u, "{module dtor}", 13u },
-        { "__initZ", 7u, "{init}", 6u },
-        { "__ClassZ", 8u, "{classinfo}", 11u },
-        { "__vtblZ", 7u, "{vtable}", 8u },
-        { "__InterfaceZ", 12u, "{interfaceinfo}", 15u }
-    };
-    size_t i;
+static int dlang_format_special_name(dlang_buf_t *buf, const char *s, size_t len, int *formatted) {
+	static const struct {
+		const char *prefix;
+		size_t prefix_len;
+		const char *repl;
+		size_t repl_len;
+	} pfxs[] = {{"__lambda", 8u, "{lambda#", 8u},
+	            {"__dgliteral", 11u, "{delegate literal#", 18u},
+	            {"__unittest", 10u, "{unittest#", 10u},
+	            {"__aggr", 6u, "{aggregate#", 11u}};
+	static const struct {
+		const char *exact;
+		size_t exact_len;
+		const char *repl;
+		size_t repl_len;
+	} exacts[] = {{"__modctor", 9u, "{module ctor}", 13u}, {"__moddtor", 9u, "{module dtor}", 13u}, {"__initZ", 7u, "{init}", 6u},
+	              {"__ClassZ", 8u, "{classinfo}", 11u},    {"__vtblZ", 7u, "{vtable}", 8u},         {"__InterfaceZ", 12u, "{interfaceinfo}", 15u}};
+	size_t i;
 
-    if (formatted != NULL) {
-        *formatted = 0;
-    }
+	if(formatted != NULL) {
+		*formatted = 0;
+	}
 
-    for (i = 0; i < sizeof(pfxs) / sizeof(pfxs[0]); i++) {
-        if (len >= pfxs[i].prefix_len && memcmp(s, pfxs[i].prefix, pfxs[i].prefix_len) == 0) {
-            if (demangle_buf_append(buf, pfxs[i].repl, pfxs[i].repl_len) != 0 ||
-                demangle_buf_append(buf, s + pfxs[i].prefix_len, len - pfxs[i].prefix_len) != 0 ||
-                demangle_buf_appendc(buf, '}') != 0) {
-                return -1;
-            }
-            if (formatted != NULL) {
-                *formatted = 1;
-            }
-            return 0;
-        }
-    }
+	for(i = 0; i < sizeof(pfxs) / sizeof(pfxs[0]); i++) {
+		if(len >= pfxs[i].prefix_len && memcmp(s, pfxs[i].prefix, pfxs[i].prefix_len) == 0) {
+			if(demangle_buf_append(buf, pfxs[i].repl, pfxs[i].repl_len) != 0 ||
+			   demangle_buf_append(buf, s + pfxs[i].prefix_len, len - pfxs[i].prefix_len) != 0 || demangle_buf_appendc(buf, '}') != 0) {
+				return -1;
+			}
+			if(formatted != NULL) {
+				*formatted = 1;
+			}
+			return 0;
+		}
+	}
 
-    for (i = 0; i < sizeof(exacts) / sizeof(exacts[0]); i++) {
-        if (len == exacts[i].exact_len && memcmp(s, exacts[i].exact, exacts[i].exact_len) == 0) {
-            if (demangle_buf_append(buf, exacts[i].repl, exacts[i].repl_len) != 0) {
-                return -1;
-            }
-            if (formatted != NULL) {
-                *formatted = 1;
-            }
-            return 0;
-        }
-    }
+	for(i = 0; i < sizeof(exacts) / sizeof(exacts[0]); i++) {
+		if(len == exacts[i].exact_len && memcmp(s, exacts[i].exact, exacts[i].exact_len) == 0) {
+			if(demangle_buf_append(buf, exacts[i].repl, exacts[i].repl_len) != 0) {
+				return -1;
+			}
+			if(formatted != NULL) {
+				*formatted = 1;
+			}
+			return 0;
+		}
+	}
 
-    return 0;
+	return 0;
 }
 
-static int
-dlang_parse_lname(dlang_parser_t *p)
-{
-    const char *s;
-    size_t len;
-    int formatted;
+static int dlang_parse_lname(dlang_parser_t *p) {
+	const char *s;
+	size_t len;
+	int formatted;
 
-    if (dlang_parse_number(p, &len) != 0 || len == 0u) {
-        return -1;
-    }
+	if(dlang_parse_number(p, &len) != 0 || len == 0u) {
+		return -1;
+	}
 
-    s = p->cur;
-    if (!dlang_has_n_bytes(s, len)) {
-        return -1;
-    }
+	s = p->cur;
+	if(!dlang_has_n_bytes(s, len)) {
+		return -1;
+	}
 
-    formatted = 0;
-    if (dlang_format_special_name(&p->out, s, len, &formatted) != 0) {
-        return -1;
-    }
-    if (!formatted && demangle_buf_append(&p->out, s, len) != 0) {
-        return -1;
-    }
+	formatted = 0;
+	if(dlang_format_special_name(&p->out, s, len, &formatted) != 0) {
+		return -1;
+	}
+	if(!formatted && demangle_buf_append(&p->out, s, len) != 0) {
+		return -1;
+	}
 
-    p->cur += len;
-    return 0;
+	p->cur += len;
+	return 0;
 }
 
-static int
-dlang_parse_template_value(dlang_parser_t *p)
-{
-    if (p->cur[0] == 'n') {
-        p->cur++;
-        if (demangle_buf_appendc(&p->out, '-') != 0) {
-            return -1;
-        }
-    }
+static int dlang_parse_template_value(dlang_parser_t *p) {
+	if(p->cur[0] == 'n') {
+		p->cur++;
+		if(demangle_buf_appendc(&p->out, '-') != 0) {
+			return -1;
+		}
+	}
 
-    if (isdigit((unsigned char)p->cur[0])) {
-        size_t n = 0u;
-        int too_big = 0;    /* past SIZE_MAX: no length, only a number */
+	if(isdigit((unsigned char)p->cur[0])) {
+		size_t n = 0u;
+		int too_big = 0; /* past SIZE_MAX: no length, only a number */
 
-        while (isdigit((unsigned char)p->cur[0])) {
-            size_t d = (size_t)(p->cur[0] - '0');
+		while(isdigit((unsigned char)p->cur[0])) {
+			size_t d = (size_t)(p->cur[0] - '0');
 
-            if (n > (SIZE_MAX - d) / 10u) {
-                too_big = 1;
-            } else {
-                n = n * 10u + d;
-            }
-            if (demangle_buf_appendc(&p->out, p->cur[0]) != 0) {
-                return -1;
-            }
-            p->cur++;
-        }
+			if(n > (SIZE_MAX - d) / 10u) {
+				too_big = 1;
+			} else {
+				n = n * 10u + d;
+			}
+			if(demangle_buf_appendc(&p->out, p->cur[0]) != 0) {
+				return -1;
+			}
+			p->cur++;
+		}
 
-        if (p->cur[0] == '_') {
-            p->cur++;
-            return 0;
-        }
+		if(p->cur[0] == '_') {
+			p->cur++;
+			return 0;
+		}
 
-        if (!too_big && n > 0u && dlang_has_n_bytes(p->cur, n)) {
-            if (demangle_buf_appendc(&p->out, '"') != 0 ||
-                demangle_buf_append(&p->out, p->cur, n) != 0 ||
-                demangle_buf_appendc(&p->out, '"') != 0) {
-                return -1;
-            }
-            p->cur += n;
-            return 0;
-        }
-    }
+		if(!too_big && n > 0u && dlang_has_n_bytes(p->cur, n)) {
+			if(demangle_buf_appendc(&p->out, '"') != 0 || demangle_buf_append(&p->out, p->cur, n) != 0 || demangle_buf_appendc(&p->out, '"') != 0) {
+				return -1;
+			}
+			p->cur += n;
+			return 0;
+		}
+	}
 
-    if (p->cur[0] == 'N') {
-        p->cur++;
-        return demangle_buf_append(&p->out, "null", 4u);
-    }
+	if(p->cur[0] == 'N') {
+		p->cur++;
+		return demangle_buf_append(&p->out, "null", 4u);
+	}
 
-    if (p->cur[0] == '\0') {
-        return -1;
-    }
+	if(p->cur[0] == '\0') {
+		return -1;
+	}
 
-    if (demangle_buf_appendc(&p->out, p->cur[0]) != 0) {
-        return -1;
-    }
-    p->cur++;
-    return 0;
+	if(demangle_buf_appendc(&p->out, p->cur[0]) != 0) {
+		return -1;
+	}
+	p->cur++;
+	return 0;
 }
 
-static int
-dlang_parse_template_arg_value(dlang_parser_t *p)
-{
-    size_t off;
-    char *ty;
-    char *val;
+static int dlang_parse_template_arg_value(dlang_parser_t *p) {
+	size_t off;
+	char *ty;
+	char *val;
 
-    p->cur++;
-    off = p->out.len;
-    if (dlang_parse_type(p) != 0) {
-        return -1;
-    }
-    ty = dlang_take_segment(p, off);
-    if (ty == NULL) {
-        return -1;
-    }
+	p->cur++;
+	off = p->out.len;
+	if(dlang_parse_type(p) != 0) {
+		return -1;
+	}
+	ty = dlang_take_segment(p, off);
+	if(ty == NULL) {
+		return -1;
+	}
 
-    off = p->out.len;
-    if (dlang_parse_template_value(p) != 0) {
-        free(ty);
-        return -1;
-    }
-    val = dlang_take_segment(p, off);
-    if (val == NULL) {
-        free(ty);
-        return -1;
-    }
+	off = p->out.len;
+	if(dlang_parse_template_value(p) != 0) {
+		free(ty);
+		return -1;
+	}
+	val = dlang_take_segment(p, off);
+	if(val == NULL) {
+		free(ty);
+		return -1;
+	}
 
-    if (demangle_buf_append(&p->out, ty, strlen(ty)) != 0 ||
-        demangle_buf_appendc(&p->out, '(') != 0 ||
-        demangle_buf_append(&p->out, val, strlen(val)) != 0 ||
-        demangle_buf_appendc(&p->out, ')') != 0) {
-        free(ty);
-        free(val);
-        return -1;
-    }
+	if(demangle_buf_append(&p->out, ty, strlen(ty)) != 0 || demangle_buf_appendc(&p->out, '(') != 0 || demangle_buf_append(&p->out, val, strlen(val)) != 0 ||
+	   demangle_buf_appendc(&p->out, ')') != 0) {
+		free(ty);
+		free(val);
+		return -1;
+	}
 
-    free(ty);
-    free(val);
-    return 0;
+	free(ty);
+	free(val);
+	return 0;
 }
 
-static int
-dlang_parse_template_arg(dlang_parser_t *p)
-{
-    size_t n;
+static int dlang_parse_template_arg(dlang_parser_t *p) {
+	size_t n;
 
-    if (p->cur[0] == 'T') {
-        p->cur++;
-        return dlang_parse_type(p);
-    }
+	if(p->cur[0] == 'T') {
+		p->cur++;
+		return dlang_parse_type(p);
+	}
 
-    if (p->cur[0] == 'V') {
-        return dlang_parse_template_arg_value(p);
-    }
+	if(p->cur[0] == 'V') {
+		return dlang_parse_template_arg_value(p);
+	}
 
-    if (p->cur[0] == 'S') {
-        p->cur++;
-        return dlang_parse_qualified_name(p);
-    }
+	if(p->cur[0] == 'S') {
+		p->cur++;
+		return dlang_parse_qualified_name(p);
+	}
 
-    if (p->cur[0] == 'X') {
-        p->cur++;
-        if (dlang_parse_number(p, &n) != 0 || n == 0u || !dlang_has_n_bytes(p->cur, n)) {
-            return -1;
-        }
-        if (demangle_buf_append(&p->out, p->cur, n) != 0) {
-            return -1;
-        }
-        p->cur += n;
-        return 0;
-    }
+	if(p->cur[0] == 'X') {
+		p->cur++;
+		if(dlang_parse_number(p, &n) != 0 || n == 0u || !dlang_has_n_bytes(p->cur, n)) {
+			return -1;
+		}
+		if(demangle_buf_append(&p->out, p->cur, n) != 0) {
+			return -1;
+		}
+		p->cur += n;
+		return 0;
+	}
 
-    return -1;
+	return -1;
 }
 
-static int
-dlang_parse_template_instance_name(dlang_parser_t *p)
-{
-    int first;
+static int dlang_parse_template_instance_name(dlang_parser_t *p) {
+	int first;
 
-    if (dlang_parser_enter(p) != 0) {
-        return -1;
-    }
+	if(dlang_parser_enter(p) != 0) {
+		return -1;
+	}
 
-    if (!dlang_has_n_bytes(p->cur, 3u) ||
-        !(p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T')) {
-        dlang_parser_leave(p);
-        return -1;
-    }
+	if(!dlang_has_n_bytes(p->cur, 3u) || !(p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T')) {
+		dlang_parser_leave(p);
+		return -1;
+	}
 
-    p->cur += 3;
+	p->cur += 3;
 
-    if (dlang_parse_lname(p) != 0 || demangle_buf_append(&p->out, "!(", 2u) != 0) {
-        dlang_parser_leave(p);
-        return -1;
-    }
+	if(dlang_parse_lname(p) != 0 || demangle_buf_append(&p->out, "!(", 2u) != 0) {
+		dlang_parser_leave(p);
+		return -1;
+	}
 
-    first = 1;
-    while (p->cur[0] != '\0' && p->cur[0] != 'Z') {
-        if (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) {
-            dlang_parser_leave(p);
-            return -1;
-        }
+	first = 1;
+	while(p->cur[0] != '\0' && p->cur[0] != 'Z') {
+		if(!first && demangle_buf_append(&p->out, ", ", 2u) != 0) {
+			dlang_parser_leave(p);
+			return -1;
+		}
 
-        if (dlang_parse_template_arg(p) != 0) {
-            dlang_parser_leave(p);
-            return -1;
-        }
+		if(dlang_parse_template_arg(p) != 0) {
+			dlang_parser_leave(p);
+			return -1;
+		}
 
-        first = 0;
-    }
+		first = 0;
+	}
 
-    if (p->cur[0] != 'Z' || demangle_buf_appendc(&p->out, ')') != 0) {
-        dlang_parser_leave(p);
-        return -1;
-    }
+	if(p->cur[0] != 'Z' || demangle_buf_appendc(&p->out, ')') != 0) {
+		dlang_parser_leave(p);
+		return -1;
+	}
 
-    p->cur++;
-    dlang_parser_leave(p);
-    return 0;
+	p->cur++;
+	dlang_parser_leave(p);
+	return 0;
 }
 
-static int
-dlang_parse_symbol_name(dlang_parser_t *p)
-{
-    if (dlang_has_n_bytes(p->cur, 3u) &&
-        p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T') {
-        return dlang_parse_template_instance_name(p);
-    }
+static int dlang_parse_symbol_name(dlang_parser_t *p) {
+	if(dlang_has_n_bytes(p->cur, 3u) && p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T') {
+		return dlang_parse_template_instance_name(p);
+	}
 
-    if (p->cur[0] == 'Q') {
-        /* an identifier's back reference: the LName at its target */
-        const char *target = dlang_decode_backref(p);
-        const char *resume = p->cur;
-        int rc;
+	if(p->cur[0] == 'Q') {
+		/* an identifier's back reference: the LName at its target */
+		const char *target = dlang_decode_backref(p);
+		const char *resume = p->cur;
+		int rc;
 
-        if (target == NULL || !isdigit((unsigned char)target[0])) {
-            return -1;
-        }
-        p->cur = target;
-        rc = dlang_parse_lname(p);
-        p->cur = resume;
-        return rc;
-    }
+		if(target == NULL || !isdigit((unsigned char)target[0])) {
+			return -1;
+		}
+		p->cur = target;
+		rc = dlang_parse_lname(p);
+		p->cur = resume;
+		return rc;
+	}
 
-    return dlang_parse_lname(p);
+	return dlang_parse_lname(p);
 }
 
-static int
-dlang_parse_qualified_name(dlang_parser_t *p)
-{
-    int first;
+static int dlang_parse_qualified_name(dlang_parser_t *p) {
+	int first;
 
-    first = 1;
-    while (isdigit((unsigned char)p->cur[0]) ||
-           (dlang_has_n_bytes(p->cur, 3u) && p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T') ||
-           p->cur[0] == 'Q') {
-        if (!first && demangle_buf_appendc(&p->out, '.') != 0) {
-            return -1;
-        }
+	first = 1;
+	while(isdigit((unsigned char)p->cur[0]) || (dlang_has_n_bytes(p->cur, 3u) && p->cur[0] == '_' && p->cur[1] == '_' && p->cur[2] == 'T') ||
+	      p->cur[0] == 'Q') {
+		if(!first && demangle_buf_appendc(&p->out, '.') != 0) {
+			return -1;
+		}
 
-        if (dlang_parse_symbol_name(p) != 0) {
-            return -1;
-        }
+		if(dlang_parse_symbol_name(p) != 0) {
+			return -1;
+		}
 
-        first = 0;
-    }
+		first = 0;
+	}
 
-    return first ? -1 : 0;
+	return first ? -1 : 0;
 }
 
-static int
-dlang_is_type_start(char ch)
-{
-    if (ch == '\0') {
-        return 0;
-    }
+static int dlang_is_type_start(char ch) {
+	if(ch == '\0') {
+		return 0;
+	}
 
-    switch (ch) {
-    case 'v': case 'g': case 'h': case 's': case 't': case 'i': case 'k':
-    case 'l': case 'm': case 'f': case 'd': case 'e': case 'o': case 'p':
-    case 'j': case 'q': case 'r': case 'c': case 'b': case 'a': case 'u':
-    case 'w': case 'A': case 'G': case 'H': case 'P': case 'E': case 'C':
-    case 'S': case 'I': case 'D': case 'F': case 'U': case 'W': case 'V':
-    case 'R': case 'B': case 'n': case 'x': case 'y': case 'O': case 'N':
-    case 'Q':
-        return 1;
-    default:
-        return 0;
-    }
+	switch(ch) {
+	case 'v':
+	case 'g':
+	case 'h':
+	case 's':
+	case 't':
+	case 'i':
+	case 'k':
+	case 'l':
+	case 'm':
+	case 'f':
+	case 'd':
+	case 'e':
+	case 'o':
+	case 'p':
+	case 'j':
+	case 'q':
+	case 'r':
+	case 'c':
+	case 'b':
+	case 'a':
+	case 'u':
+	case 'w':
+	case 'A':
+	case 'G':
+	case 'H':
+	case 'P':
+	case 'E':
+	case 'C':
+	case 'S':
+	case 'I':
+	case 'D':
+	case 'F':
+	case 'U':
+	case 'W':
+	case 'V':
+	case 'R':
+	case 'B':
+	case 'n':
+	case 'x':
+	case 'y':
+	case 'O':
+	case 'N':
+	case 'Q':
+		return 1;
+	default:
+		return 0;
+	}
 }
 
-static char *
-dlang_take_segment(dlang_parser_t *p, size_t off)
-{
-    size_t len;
-    char *seg;
+static char *dlang_take_segment(dlang_parser_t *p, size_t off) {
+	size_t len;
+	char *seg;
 
-    if (off > p->out.len) {
-        return NULL;
-    }
+	if(off > p->out.len) {
+		return NULL;
+	}
 
-    len = p->out.len - off;
-    seg = (char *)malloc(len + 1u);
-    if (seg == NULL) {
-        return NULL;
-    }
+	len = p->out.len - off;
+	seg = (char *)malloc(len + 1u);
+	if(seg == NULL) {
+		return NULL;
+	}
 
-    if (len > 0u) {
-        memcpy(seg, p->out.data + off, len);
-    }
-    seg[len] = '\0';
+	if(len > 0u) {
+		memcpy(seg, p->out.data + off, len);
+	}
+	seg[len] = '\0';
 
-    p->out.len = off;
-    p->out.data[p->out.len] = '\0';
-    return seg;
+	p->out.len = off;
+	p->out.data[p->out.len] = '\0';
+	return seg;
 }
 
-static char *
-dlang_wrap_type(const char *prefix, const char *inner, const char *suffix)
-{
-    size_t a;
-    size_t b;
-    size_t c;
-    char *ret;
+static char *dlang_wrap_type(const char *prefix, const char *inner, const char *suffix) {
+	size_t a;
+	size_t b;
+	size_t c;
+	char *ret;
 
-    if (prefix == NULL || inner == NULL || suffix == NULL) {
-        return NULL;
-    }
+	if(prefix == NULL || inner == NULL || suffix == NULL) {
+		return NULL;
+	}
 
-    a = strlen(prefix);
-    b = strlen(inner);
-    c = strlen(suffix);
+	a = strlen(prefix);
+	b = strlen(inner);
+	c = strlen(suffix);
 
-    ret = (char *)malloc(a + b + c + 1u);
-    if (ret == NULL) {
-        return NULL;
-    }
+	ret = (char *)malloc(a + b + c + 1u);
+	if(ret == NULL) {
+		return NULL;
+	}
 
-    memcpy(ret, prefix, a);
-    memcpy(ret + a, inner, b);
-    memcpy(ret + a + b, suffix, c);
-    ret[a + b + c] = '\0';
-    return ret;
+	memcpy(ret, prefix, a);
+	memcpy(ret + a, inner, b);
+	memcpy(ret + a + b, suffix, c);
+	ret[a + b + c] = '\0';
+	return ret;
 }
 
 /* A function type's attributes, pure, nothrow, @safe and the rest --
  * which DEMANGLE_NO_VERBOSE leaves out, and they were printed anyway. */
-static int
-dlang_append_attrs(dlang_parser_t *p, unsigned attrs)
-{
-    dlang_buf_t *buf = &p->out;
+static int dlang_append_attrs(dlang_parser_t *p, unsigned attrs) {
+	dlang_buf_t *buf = &p->out;
 
-    if ((p->options & DEMANGLE_NO_VERBOSE) != 0) {
-        return 0;
-    }
-    if ((attrs & DLANG_ATTR_PURE) != 0 && demangle_buf_append(buf, " pure", 5u) != 0) {
-        return -1;
-    }
-    if ((attrs & DLANG_ATTR_NOTHROW) != 0 && demangle_buf_append(buf, " nothrow", 8u) != 0) {
-        return -1;
-    }
-    if ((attrs & DLANG_ATTR_REF) != 0 && demangle_buf_append(buf, " ref", 4u) != 0) {
-        return -1;
-    }
-    if ((attrs & DLANG_ATTR_PROPERTY) != 0 && demangle_buf_append(buf, " @property", 10u) != 0) {
-        return -1;
-    }
-    if ((attrs & DLANG_ATTR_TRUSTED) != 0 && demangle_buf_append(buf, " @trusted", 9u) != 0) {
-        return -1;
-    }
-    if ((attrs & DLANG_ATTR_SAFE) != 0 && demangle_buf_append(buf, " @safe", 6u) != 0) {
-        return -1;
-    }
-    if ((attrs & DLANG_ATTR_NOGC) != 0 && demangle_buf_append(buf, " @nogc", 6u) != 0) {
-        return -1;
-    }
-    if ((attrs & DLANG_ATTR_RETREF) != 0 && demangle_buf_append(buf, " return ref", 11u) != 0) {
-        return -1;
-    }
+	if((p->options & DEMANGLE_NO_VERBOSE) != 0) {
+		return 0;
+	}
+	if((attrs & DLANG_ATTR_PURE) != 0 && demangle_buf_append(buf, " pure", 5u) != 0) {
+		return -1;
+	}
+	if((attrs & DLANG_ATTR_NOTHROW) != 0 && demangle_buf_append(buf, " nothrow", 8u) != 0) {
+		return -1;
+	}
+	if((attrs & DLANG_ATTR_REF) != 0 && demangle_buf_append(buf, " ref", 4u) != 0) {
+		return -1;
+	}
+	if((attrs & DLANG_ATTR_PROPERTY) != 0 && demangle_buf_append(buf, " @property", 10u) != 0) {
+		return -1;
+	}
+	if((attrs & DLANG_ATTR_TRUSTED) != 0 && demangle_buf_append(buf, " @trusted", 9u) != 0) {
+		return -1;
+	}
+	if((attrs & DLANG_ATTR_SAFE) != 0 && demangle_buf_append(buf, " @safe", 6u) != 0) {
+		return -1;
+	}
+	if((attrs & DLANG_ATTR_NOGC) != 0 && demangle_buf_append(buf, " @nogc", 6u) != 0) {
+		return -1;
+	}
+	if((attrs & DLANG_ATTR_RETREF) != 0 && demangle_buf_append(buf, " return ref", 11u) != 0) {
+		return -1;
+	}
 
-    return 0;
+	return 0;
 }
 
-static int
-dlang_is_attr_code(char ch)
-{
-    switch (ch) {
-    case 'a':
-    case 'b':
-    case 'c':
-    case 'd':
-    case 'e':
-    case 'f':
-    case 'i':
-    case 'j':
-        return 1;
-    default:
-        return 0;
-    }
+static int dlang_is_attr_code(char ch) {
+	switch(ch) {
+	case 'a':
+	case 'b':
+	case 'c':
+	case 'd':
+	case 'e':
+	case 'f':
+	case 'i':
+	case 'j':
+		return 1;
+	default:
+		return 0;
+	}
 }
 
-static char *
-dlang_delegate_from_function(const char *inner)
-{
-    const char *needle;
-    const char *pos;
-    size_t head_len;
-    size_t tail_len;
-    char *out;
+static char *dlang_delegate_from_function(const char *inner) {
+	const char *needle;
+	const char *pos;
+	size_t head_len;
+	size_t tail_len;
+	char *out;
 
-    if (inner == NULL) {
-        return NULL;
-    }
+	if(inner == NULL) {
+		return NULL;
+	}
 
-    needle = " function(";
-    pos = strstr(inner, needle);
-    if (pos == NULL) {
-        return dlang_wrap_type("", inner, " delegate");
-    }
+	needle = " function(";
+	pos = strstr(inner, needle);
+	if(pos == NULL) {
+		return dlang_wrap_type("", inner, " delegate");
+	}
 
-    head_len = (size_t)(pos - inner);
-    tail_len = strlen(pos + strlen(needle));
-    out = (char *)malloc(head_len + 10u + tail_len + 1u);
-    if (out == NULL) {
-        return NULL;
-    }
+	head_len = (size_t)(pos - inner);
+	tail_len = strlen(pos + strlen(needle));
+	out = (char *)malloc(head_len + 10u + tail_len + 1u);
+	if(out == NULL) {
+		return NULL;
+	}
 
-    if (head_len > 0u) {
-        memcpy(out, inner, head_len);
-    }
-    memcpy(out + head_len, " delegate(", 10u);
-    memcpy(out + head_len + 10u, pos + strlen(needle), tail_len);
-    out[head_len + 10u + tail_len] = '\0';
-    return out;
+	if(head_len > 0u) {
+		memcpy(out, inner, head_len);
+	}
+	memcpy(out + head_len, " delegate(", 10u);
+	memcpy(out + head_len + 10u, pos + strlen(needle), tail_len);
+	out[head_len + 10u + tail_len] = '\0';
+	return out;
 }
 
-static int
-dlang_parse_function_type(dlang_parser_t *p, char cconv)
-{
-    unsigned attrs;
-    char **params;
-    size_t param_count;
-    size_t param_cap;
-    char *ret;
-    size_t ret_off;
+static int dlang_parse_function_type(dlang_parser_t *p, char cconv) {
+	unsigned attrs;
+	char **params;
+	size_t param_count;
+	size_t param_cap;
+	char *ret;
+	size_t ret_off;
 
-    attrs = 0u;
-    params = NULL;
-    param_count = 0u;
-    param_cap = 0u;
-    ret = NULL;
+	attrs = 0u;
+	params = NULL;
+	param_count = 0u;
+	param_cap = 0u;
+	ret = NULL;
 
-    while (dlang_has_n_bytes(p->cur, 2u) &&
-           p->cur[0] == 'N' && dlang_is_attr_code(p->cur[1])) {
-        switch (p->cur[1]) {
-        case 'a': attrs |= DLANG_ATTR_PURE; break;
-        case 'b': attrs |= DLANG_ATTR_NOTHROW; break;
-        case 'c': attrs |= DLANG_ATTR_REF; break;
-        case 'd': attrs |= DLANG_ATTR_PROPERTY; break;
-        case 'e': attrs |= DLANG_ATTR_TRUSTED; break;
-        case 'f': attrs |= DLANG_ATTR_SAFE; break;
-        case 'i': attrs |= DLANG_ATTR_NOGC; break;
-        case 'j': attrs |= DLANG_ATTR_RETREF; break;
-        default: break;
-        }
-        p->cur += 2;
-    }
+	while(dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N' && dlang_is_attr_code(p->cur[1])) {
+		switch(p->cur[1]) {
+		case 'a':
+			attrs |= DLANG_ATTR_PURE;
+			break;
+		case 'b':
+			attrs |= DLANG_ATTR_NOTHROW;
+			break;
+		case 'c':
+			attrs |= DLANG_ATTR_REF;
+			break;
+		case 'd':
+			attrs |= DLANG_ATTR_PROPERTY;
+			break;
+		case 'e':
+			attrs |= DLANG_ATTR_TRUSTED;
+			break;
+		case 'f':
+			attrs |= DLANG_ATTR_SAFE;
+			break;
+		case 'i':
+			attrs |= DLANG_ATTR_NOGC;
+			break;
+		case 'j':
+			attrs |= DLANG_ATTR_RETREF;
+			break;
+		default:
+			break;
+		}
+		p->cur += 2;
+	}
 
-    while (p->cur[0] != '\0' && p->cur[0] != 'Z') {
-        char prefix[64];
-        size_t prefix_len;
-        size_t off;
-        char *param;
+	while(p->cur[0] != '\0' && p->cur[0] != 'Z') {
+		char prefix[64];
+		size_t prefix_len;
+		size_t off;
+		char *param;
 
-        if (p->cur[0] == 'X') {
-            p->cur++;
-            param = (char *)malloc(4u);
-            if (param == NULL) {
-                goto fail;
-            }
-            memcpy(param, "...", 4u);
-        } else {
-            prefix[0] = '\0';
-            prefix_len = 0u;
+		if(p->cur[0] == 'X') {
+			p->cur++;
+			param = (char *)malloc(4u);
+			if(param == NULL) {
+				goto fail;
+			}
+			memcpy(param, "...", 4u);
+		} else {
+			prefix[0] = '\0';
+			prefix_len = 0u;
 
-            while (p->cur[0] == 'J' || p->cur[0] == 'K' || p->cur[0] == 'L' ||
-                   p->cur[0] == 'M' ||
-                   (dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N' &&
-                    !dlang_is_attr_code(p->cur[1]) && p->cur[1] != 'g')) {
-                const char *tok = NULL;
-                size_t tok_len = 0u;
+			while(p->cur[0] == 'J' || p->cur[0] == 'K' || p->cur[0] == 'L' || p->cur[0] == 'M' ||
+			      (dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N' && !dlang_is_attr_code(p->cur[1]) && p->cur[1] != 'g')) {
+				const char *tok = NULL;
+				size_t tok_len = 0u;
 
-                switch (p->cur[0]) {
-                case 'J': tok = "out "; tok_len = 4u; break;
-                case 'K': tok = "ref "; tok_len = 4u; break;
-                case 'L': tok = "lazy "; tok_len = 5u; break;
-                case 'M': tok = "scope "; tok_len = 6u; break;
-                case 'N': tok = "return "; tok_len = 7u; break;
-                default: break;
-                }
+				switch(p->cur[0]) {
+				case 'J':
+					tok = "out ";
+					tok_len = 4u;
+					break;
+				case 'K':
+					tok = "ref ";
+					tok_len = 4u;
+					break;
+				case 'L':
+					tok = "lazy ";
+					tok_len = 5u;
+					break;
+				case 'M':
+					tok = "scope ";
+					tok_len = 6u;
+					break;
+				case 'N':
+					tok = "return ";
+					tok_len = 7u;
+					break;
+				default:
+					break;
+				}
 
-                if (tok != NULL && prefix_len + tok_len < sizeof(prefix)) {
-                    memcpy(prefix + prefix_len, tok, tok_len);
-                    prefix_len += tok_len;
-                    prefix[prefix_len] = '\0';
-                }
+				if(tok != NULL && prefix_len + tok_len < sizeof(prefix)) {
+					memcpy(prefix + prefix_len, tok, tok_len);
+					prefix_len += tok_len;
+					prefix[prefix_len] = '\0';
+				}
 
-                p->cur++;
-            }
+				p->cur++;
+			}
 
-            off = p->out.len;
-            if (dlang_parse_type(p) != 0) {
-                goto fail;
-            }
+			off = p->out.len;
+			if(dlang_parse_type(p) != 0) {
+				goto fail;
+			}
 
-            param = dlang_take_segment(p, off);
-            if (param == NULL) {
-                goto fail;
-            }
+			param = dlang_take_segment(p, off);
+			if(param == NULL) {
+				goto fail;
+			}
 
-            if (prefix_len > 0u) {
-                char *tmp = dlang_wrap_type(prefix, param, "");
-                free(param);
-                param = tmp;
-                if (param == NULL) {
-                    goto fail;
-                }
-            }
-        }
+			if(prefix_len > 0u) {
+				char *tmp = dlang_wrap_type(prefix, param, "");
+				free(param);
+				param = tmp;
+				if(param == NULL) {
+					goto fail;
+				}
+			}
+		}
 
-        if (param_count == param_cap) {
-            size_t next_cap = (param_cap == 0u) ? 8u : param_cap * 2u;
-            char **next = (char **)realloc(params, next_cap * sizeof(*next));
-            if (next == NULL) {
-                free(param);
-                goto fail;
-            }
-            params = next;
-            param_cap = next_cap;
-        }
+		if(param_count == param_cap) {
+			size_t next_cap = (param_cap == 0u) ? 8u : param_cap * 2u;
+			char **next = (char **)realloc(params, next_cap * sizeof(*next));
+			if(next == NULL) {
+				free(param);
+				goto fail;
+			}
+			params = next;
+			param_cap = next_cap;
+		}
 
-        params[param_count++] = param;
-    }
+		params[param_count++] = param;
+	}
 
-    if (p->cur[0] != 'Z') {
-        goto fail;
-    }
-    p->cur++;
+	if(p->cur[0] != 'Z') {
+		goto fail;
+	}
+	p->cur++;
 
-    ret_off = p->out.len;
-    if (dlang_parse_type(p) != 0) {
-        goto fail;
-    }
-    ret = dlang_take_segment(p, ret_off);
-    if (ret == NULL) {
-        goto fail;
-    }
+	ret_off = p->out.len;
+	if(dlang_parse_type(p) != 0) {
+		goto fail;
+	}
+	ret = dlang_take_segment(p, ret_off);
+	if(ret == NULL) {
+		goto fail;
+	}
 
-    if (demangle_buf_append(&p->out, ret, strlen(ret)) != 0 || demangle_buf_appendc(&p->out, ' ') != 0) {
-        goto fail;
-    }
+	if(demangle_buf_append(&p->out, ret, strlen(ret)) != 0 || demangle_buf_appendc(&p->out, ' ') != 0) {
+		goto fail;
+	}
 
-    if (cconv != 'F') {
-        const char *cc = NULL;
-        switch (cconv) {
-        case 'U': cc = "extern(C) "; break;
-        case 'W': cc = "extern(Windows) "; break;
-        case 'V': cc = "extern(Pascal) "; break;
-        case 'R': cc = "extern(C++) "; break;
-        default: break;
-        }
-        if (cc != NULL && demangle_buf_append(&p->out, cc, strlen(cc)) != 0) {
-            goto fail;
-        }
-    }
+	if(cconv != 'F') {
+		const char *cc = NULL;
+		switch(cconv) {
+		case 'U':
+			cc = "extern(C) ";
+			break;
+		case 'W':
+			cc = "extern(Windows) ";
+			break;
+		case 'V':
+			cc = "extern(Pascal) ";
+			break;
+		case 'R':
+			cc = "extern(C++) ";
+			break;
+		default:
+			break;
+		}
+		if(cc != NULL && demangle_buf_append(&p->out, cc, strlen(cc)) != 0) {
+			goto fail;
+		}
+	}
 
-    if (demangle_buf_append(&p->out, "function(", 9u) != 0) {
-        goto fail;
-    }
+	if(demangle_buf_append(&p->out, "function(", 9u) != 0) {
+		goto fail;
+	}
 
-    for (size_t i = 0u; i < param_count; i++) {
-        if (i > 0u && demangle_buf_append(&p->out, ", ", 2u) != 0) {
-            goto fail;
-        }
-        if (demangle_buf_append(&p->out, params[i], strlen(params[i])) != 0) {
-            goto fail;
-        }
-    }
+	for(size_t i = 0u; i < param_count; i++) {
+		if(i > 0u && demangle_buf_append(&p->out, ", ", 2u) != 0) {
+			goto fail;
+		}
+		if(demangle_buf_append(&p->out, params[i], strlen(params[i])) != 0) {
+			goto fail;
+		}
+	}
 
-    if (demangle_buf_appendc(&p->out, ')') != 0) {
-        goto fail;
-    }
+	if(demangle_buf_appendc(&p->out, ')') != 0) {
+		goto fail;
+	}
 
-    if (dlang_append_attrs(p, attrs) != 0) {
-        goto fail;
-    }
+	if(dlang_append_attrs(p, attrs) != 0) {
+		goto fail;
+	}
 
-    free(ret);
-    for (size_t i = 0u; i < param_count; i++) {
-        free(params[i]);
-    }
-    free(params);
-    return 0;
+	free(ret);
+	for(size_t i = 0u; i < param_count; i++) {
+		free(params[i]);
+	}
+	free(params);
+	return 0;
 
 fail:
-    free(ret);
-    for (size_t i = 0u; i < param_count; i++) {
-        free(params[i]);
-    }
-    free(params);
-    return -1;
+	free(ret);
+	for(size_t i = 0u; i < param_count; i++) {
+		free(params[i]);
+	}
+	free(params);
+	return -1;
 }
 
-static int
-dlang_parse_type_core(dlang_parser_t *p)
-{
-    static const struct {
-        char code;
-        const char *name;
-    } basic[] = {
-        { 'v', "void" }, { 'g', "byte" }, { 'h', "ubyte" }, { 's', "short" },
-        { 't', "ushort" }, { 'i', "int" }, { 'k', "uint" }, { 'l', "long" },
-        { 'm', "ulong" }, { 'f', "float" }, { 'd', "double" }, { 'e', "real" },
-        { 'o', "ifloat" }, { 'p', "idouble" }, { 'j', "ireal" }, { 'q', "cfloat" },
-        { 'r', "cdouble" }, { 'c', "creal" }, { 'b', "bool" }, { 'a', "char" },
-        { 'u', "wchar" }, { 'w', "dchar" }, { 'n', "typeof(null)" }
-    };
-    size_t i;
+static int dlang_parse_type_core(dlang_parser_t *p) {
+	static const struct {
+		char code;
+		const char *name;
+	} basic[] = {{'v', "void"},    {'g', "byte"},  {'h', "ubyte"},  {'s', "short"}, {'t', "ushort"}, {'i', "int"},     {'k', "uint"},        {'l', "long"},
+	             {'m', "ulong"},   {'f', "float"}, {'d', "double"}, {'e', "real"},  {'o', "ifloat"}, {'p', "idouble"}, {'j', "ireal"},       {'q', "cfloat"},
+	             {'r', "cdouble"}, {'c', "creal"}, {'b', "bool"},   {'a', "char"},  {'u', "wchar"},  {'w', "dchar"},   {'n', "typeof(null)"}};
+	size_t i;
 
-    if (p->cur[0] == 'Q') {
-        /* a type's back reference: the type at its target, which must lie
-         * before that of any back reference this one is inside */
-        const char *target = dlang_decode_backref(p);
-        const char *resume = p->cur;
-        const char *outer = p->type_backref;
-        int rc;
+	if(p->cur[0] == 'Q') {
+		/* a type's back reference: the type at its target, which must lie
+		 * before that of any back reference this one is inside */
+		const char *target = dlang_decode_backref(p);
+		const char *resume = p->cur;
+		const char *outer = p->type_backref;
+		int rc;
 
-        if (target == NULL || (outer != NULL && target >= outer)) {
-            return -1;
-        }
-        p->type_backref = target;
-        p->cur = target;
-        rc = dlang_parse_type(p);
-        p->cur = resume;
-        p->type_backref = outer;
-        return rc;
-    }
+		if(target == NULL || (outer != NULL && target >= outer)) {
+			return -1;
+		}
+		p->type_backref = target;
+		p->cur = target;
+		rc = dlang_parse_type(p);
+		p->cur = resume;
+		p->type_backref = outer;
+		return rc;
+	}
 
-    for (i = 0u; i < sizeof(basic) / sizeof(basic[0]); i++) {
-        if (p->cur[0] == basic[i].code) {
-            p->cur++;
-            return demangle_buf_append(&p->out, basic[i].name, strlen(basic[i].name));
-        }
-    }
+	for(i = 0u; i < sizeof(basic) / sizeof(basic[0]); i++) {
+		if(p->cur[0] == basic[i].code) {
+			p->cur++;
+			return demangle_buf_append(&p->out, basic[i].name, strlen(basic[i].name));
+		}
+	}
 
-    if (p->cur[0] == 'A') {
-        size_t off;
-        char *inner;
+	if(p->cur[0] == 'A') {
+		size_t off;
+		char *inner;
 
-        p->cur++;
-        off = p->out.len;
-        if (dlang_parse_type(p) != 0) {
-            return -1;
-        }
-        inner = dlang_take_segment(p, off);
-        if (inner == NULL) {
-            return -1;
-        }
-        if (demangle_buf_append(&p->out, inner, strlen(inner)) != 0 ||
-            demangle_buf_append(&p->out, "[]", 2u) != 0) {
-            free(inner);
-            return -1;
-        }
-        free(inner);
-        return 0;
-    }
+		p->cur++;
+		off = p->out.len;
+		if(dlang_parse_type(p) != 0) {
+			return -1;
+		}
+		inner = dlang_take_segment(p, off);
+		if(inner == NULL) {
+			return -1;
+		}
+		if(demangle_buf_append(&p->out, inner, strlen(inner)) != 0 || demangle_buf_append(&p->out, "[]", 2u) != 0) {
+			free(inner);
+			return -1;
+		}
+		free(inner);
+		return 0;
+	}
 
-    if (p->cur[0] == 'G') {
-        size_t n;
-        size_t off;
-        char *inner;
+	if(p->cur[0] == 'G') {
+		size_t n;
+		size_t off;
+		char *inner;
 
-        p->cur++;
-        if (dlang_parse_number(p, &n) != 0) {
-            return -1;
-        }
+		p->cur++;
+		if(dlang_parse_number(p, &n) != 0) {
+			return -1;
+		}
 
-        off = p->out.len;
-        if (dlang_parse_type(p) != 0) {
-            return -1;
-        }
-        inner = dlang_take_segment(p, off);
-        if (inner == NULL) {
-            return -1;
-        }
-        if (demangle_buf_append(&p->out, inner, strlen(inner)) != 0 ||
-            demangle_buf_appendc(&p->out, '[') != 0) {
-            free(inner);
-            return -1;
-        }
-        {
-            char numbuf[32];
-            int numlen = snprintf(numbuf, sizeof(numbuf), "%zu", n);
-            size_t app_len;
-            if (numlen < 0) {
-                free(inner);
-                return -1;
-            }
-            app_len = (size_t)numlen;
-            if (app_len >= sizeof(numbuf)) {
-                app_len = sizeof(numbuf) - 1u;
-            }
-            if (demangle_buf_append(&p->out, numbuf, app_len) != 0 ||
-                demangle_buf_appendc(&p->out, ']') != 0) {
-                free(inner);
-                return -1;
-            }
-        }
-        free(inner);
-        return 0;
-    }
+		off = p->out.len;
+		if(dlang_parse_type(p) != 0) {
+			return -1;
+		}
+		inner = dlang_take_segment(p, off);
+		if(inner == NULL) {
+			return -1;
+		}
+		if(demangle_buf_append(&p->out, inner, strlen(inner)) != 0 || demangle_buf_appendc(&p->out, '[') != 0) {
+			free(inner);
+			return -1;
+		}
+		{
+			char numbuf[32];
+			int numlen = snprintf(numbuf, sizeof(numbuf), "%zu", n);
+			size_t app_len;
+			if(numlen < 0) {
+				free(inner);
+				return -1;
+			}
+			app_len = (size_t)numlen;
+			if(app_len >= sizeof(numbuf)) {
+				app_len = sizeof(numbuf) - 1u;
+			}
+			if(demangle_buf_append(&p->out, numbuf, app_len) != 0 || demangle_buf_appendc(&p->out, ']') != 0) {
+				free(inner);
+				return -1;
+			}
+		}
+		free(inner);
+		return 0;
+	}
 
-    if (p->cur[0] == 'H') {
-        size_t key_off;
-        size_t val_off;
-        char *key;
-        char *val;
+	if(p->cur[0] == 'H') {
+		size_t key_off;
+		size_t val_off;
+		char *key;
+		char *val;
 
-        p->cur++;
+		p->cur++;
 
-        key_off = p->out.len;
-        if (dlang_parse_type(p) != 0) {
-            return -1;
-        }
-        key = dlang_take_segment(p, key_off);
-        if (key == NULL) {
-            return -1;
-        }
+		key_off = p->out.len;
+		if(dlang_parse_type(p) != 0) {
+			return -1;
+		}
+		key = dlang_take_segment(p, key_off);
+		if(key == NULL) {
+			return -1;
+		}
 
-        val_off = p->out.len;
-        if (dlang_parse_type(p) != 0) {
-            free(key);
-            return -1;
-        }
-        val = dlang_take_segment(p, val_off);
-        if (val == NULL) {
-            free(key);
-            return -1;
-        }
+		val_off = p->out.len;
+		if(dlang_parse_type(p) != 0) {
+			free(key);
+			return -1;
+		}
+		val = dlang_take_segment(p, val_off);
+		if(val == NULL) {
+			free(key);
+			return -1;
+		}
 
-        if (demangle_buf_append(&p->out, val, strlen(val)) != 0 ||
-            demangle_buf_appendc(&p->out, '[') != 0 ||
-            demangle_buf_append(&p->out, key, strlen(key)) != 0 ||
-            demangle_buf_appendc(&p->out, ']') != 0) {
-            free(key);
-            free(val);
-            return -1;
-        }
+		if(demangle_buf_append(&p->out, val, strlen(val)) != 0 || demangle_buf_appendc(&p->out, '[') != 0 ||
+		   demangle_buf_append(&p->out, key, strlen(key)) != 0 || demangle_buf_appendc(&p->out, ']') != 0) {
+			free(key);
+			free(val);
+			return -1;
+		}
 
-        free(key);
-        free(val);
-        return 0;
-    }
+		free(key);
+		free(val);
+		return 0;
+	}
 
-    if (p->cur[0] == 'P') {
-        size_t off;
-        char *inner;
+	if(p->cur[0] == 'P') {
+		size_t off;
+		char *inner;
 
-        p->cur++;
-        off = p->out.len;
-        if (dlang_parse_type(p) != 0) {
-            return -1;
-        }
-        inner = dlang_take_segment(p, off);
-        if (inner == NULL) {
-            return -1;
-        }
-        if (demangle_buf_append(&p->out, inner, strlen(inner)) != 0 || demangle_buf_appendc(&p->out, '*') != 0) {
-            free(inner);
-            return -1;
-        }
-        free(inner);
-        return 0;
-    }
+		p->cur++;
+		off = p->out.len;
+		if(dlang_parse_type(p) != 0) {
+			return -1;
+		}
+		inner = dlang_take_segment(p, off);
+		if(inner == NULL) {
+			return -1;
+		}
+		if(demangle_buf_append(&p->out, inner, strlen(inner)) != 0 || demangle_buf_appendc(&p->out, '*') != 0) {
+			free(inner);
+			return -1;
+		}
+		free(inner);
+		return 0;
+	}
 
-    if (p->cur[0] == 'E' || p->cur[0] == 'C' || p->cur[0] == 'S' || p->cur[0] == 'I') {
-        p->cur++;
-        return dlang_parse_qualified_name(p);
-    }
+	if(p->cur[0] == 'E' || p->cur[0] == 'C' || p->cur[0] == 'S' || p->cur[0] == 'I') {
+		p->cur++;
+		return dlang_parse_qualified_name(p);
+	}
 
-    if (p->cur[0] == 'D') {
-        size_t off;
-        char *inner;
-        char *delegate_text;
+	if(p->cur[0] == 'D') {
+		size_t off;
+		char *inner;
+		char *delegate_text;
 
-        p->cur++;
-        off = p->out.len;
-        if (dlang_parse_type(p) != 0) {
-            return -1;
-        }
-        inner = dlang_take_segment(p, off);
-        if (inner == NULL) {
-            return -1;
-        }
-        delegate_text = dlang_delegate_from_function(inner);
-        free(inner);
-        if (delegate_text == NULL) {
-            return -1;
-        }
+		p->cur++;
+		off = p->out.len;
+		if(dlang_parse_type(p) != 0) {
+			return -1;
+		}
+		inner = dlang_take_segment(p, off);
+		if(inner == NULL) {
+			return -1;
+		}
+		delegate_text = dlang_delegate_from_function(inner);
+		free(inner);
+		if(delegate_text == NULL) {
+			return -1;
+		}
 
-        if (demangle_buf_append(&p->out, delegate_text, strlen(delegate_text)) != 0) {
-            free(delegate_text);
-            return -1;
-        }
-        free(delegate_text);
-        return 0;
-    }
-    if (p->cur[0] == 'B') {
-        size_t n;
-        size_t off;
-        char *inner;
+		if(demangle_buf_append(&p->out, delegate_text, strlen(delegate_text)) != 0) {
+			free(delegate_text);
+			return -1;
+		}
+		free(delegate_text);
+		return 0;
+	}
+	if(p->cur[0] == 'B') {
+		size_t n;
+		size_t off;
+		char *inner;
 
-        p->cur++;
-        if (dlang_parse_number(p, &n) != 0 || n == 0u) {
-            return -1;
-        }
+		p->cur++;
+		if(dlang_parse_number(p, &n) != 0 || n == 0u) {
+			return -1;
+		}
 
-        off = p->out.len;
-        if (dlang_parse_type(p) != 0) {
-            return -1;
-        }
-        inner = dlang_take_segment(p, off);
-        if (inner == NULL) {
-            return -1;
-        }
+		off = p->out.len;
+		if(dlang_parse_type(p) != 0) {
+			return -1;
+		}
+		inner = dlang_take_segment(p, off);
+		if(inner == NULL) {
+			return -1;
+		}
 
-        if (demangle_buf_append(&p->out, "Tuple!(", 7u) != 0) {
-            free(inner);
-            return -1;
-        }
-        for (size_t i = 0u; i < n; i++) {
-            if (i > 0u && demangle_buf_append(&p->out, ", ", 2u) != 0) {
-                free(inner);
-                return -1;
-            }
-            if (demangle_buf_append(&p->out, inner, strlen(inner)) != 0) {
-                free(inner);
-                return -1;
-            }
-        }
-        if (demangle_buf_appendc(&p->out, ')') != 0) {
-            free(inner);
-            return -1;
-        }
+		if(demangle_buf_append(&p->out, "Tuple!(", 7u) != 0) {
+			free(inner);
+			return -1;
+		}
+		for(size_t i = 0u; i < n; i++) {
+			if(i > 0u && demangle_buf_append(&p->out, ", ", 2u) != 0) {
+				free(inner);
+				return -1;
+			}
+			if(demangle_buf_append(&p->out, inner, strlen(inner)) != 0) {
+				free(inner);
+				return -1;
+			}
+		}
+		if(demangle_buf_appendc(&p->out, ')') != 0) {
+			free(inner);
+			return -1;
+		}
 
-        free(inner);
-        return 0;
-    }
+		free(inner);
+		return 0;
+	}
 
-    if (p->cur[0] == 'F' || p->cur[0] == 'U' || p->cur[0] == 'W' || p->cur[0] == 'V' || p->cur[0] == 'R') {
-        char cconv;
-        cconv = p->cur[0];
-        p->cur++;
-        return dlang_parse_function_type(p, cconv);
-    }
+	if(p->cur[0] == 'F' || p->cur[0] == 'U' || p->cur[0] == 'W' || p->cur[0] == 'V' || p->cur[0] == 'R') {
+		char cconv;
+		cconv = p->cur[0];
+		p->cur++;
+		return dlang_parse_function_type(p, cconv);
+	}
 
-    return -1;
+	return -1;
 }
 
-static int
-dlang_apply_type_quals(char **seg, unsigned quals)
-{
-    char *tmp;
+static int dlang_apply_type_quals(char **seg, unsigned quals) {
+	char *tmp;
 
-    if ((quals & DLANG_QUAL_INOUT) != 0) {
-        tmp = dlang_wrap_type("inout(", *seg, ")");
-        free(*seg);
-        *seg = tmp;
-        if (*seg == NULL) {
-            return -1;
-        }
-    }
-    if ((quals & DLANG_QUAL_CONST) != 0) {
-        tmp = dlang_wrap_type("const(", *seg, ")");
-        free(*seg);
-        *seg = tmp;
-        if (*seg == NULL) {
-            return -1;
-        }
-    }
-    if ((quals & DLANG_QUAL_IMMUTABLE) != 0) {
-        tmp = dlang_wrap_type("immutable(", *seg, ")");
-        free(*seg);
-        *seg = tmp;
-        if (*seg == NULL) {
-            return -1;
-        }
-    }
-    if ((quals & DLANG_QUAL_SHARED) != 0) {
-        tmp = dlang_wrap_type("shared(", *seg, ")");
-        free(*seg);
-        *seg = tmp;
-        if (*seg == NULL) {
-            return -1;
-        }
-    }
+	if((quals & DLANG_QUAL_INOUT) != 0) {
+		tmp = dlang_wrap_type("inout(", *seg, ")");
+		free(*seg);
+		*seg = tmp;
+		if(*seg == NULL) {
+			return -1;
+		}
+	}
+	if((quals & DLANG_QUAL_CONST) != 0) {
+		tmp = dlang_wrap_type("const(", *seg, ")");
+		free(*seg);
+		*seg = tmp;
+		if(*seg == NULL) {
+			return -1;
+		}
+	}
+	if((quals & DLANG_QUAL_IMMUTABLE) != 0) {
+		tmp = dlang_wrap_type("immutable(", *seg, ")");
+		free(*seg);
+		*seg = tmp;
+		if(*seg == NULL) {
+			return -1;
+		}
+	}
+	if((quals & DLANG_QUAL_SHARED) != 0) {
+		tmp = dlang_wrap_type("shared(", *seg, ")");
+		free(*seg);
+		*seg = tmp;
+		if(*seg == NULL) {
+			return -1;
+		}
+	}
 
-    return 0;
+	return 0;
 }
 
-static int
-dlang_parse_type(dlang_parser_t *p)
-{
-    int rc;
-    unsigned quals;
-    unsigned attrs;
-    size_t off;
-    char *seg;
+static int dlang_parse_type(dlang_parser_t *p) {
+	int rc;
+	unsigned quals;
+	unsigned attrs;
+	size_t off;
+	char *seg;
 
-    if (dlang_parser_enter(p) != 0) {
-        return -1;
-    }
+	if(dlang_parser_enter(p) != 0) {
+		return -1;
+	}
 
-    rc = -1;
-    seg = NULL;
-    quals = 0u;
-    attrs = 0u;
+	rc = -1;
+	seg = NULL;
+	quals = 0u;
+	attrs = 0u;
 
-    while (p->cur[0] == 'x' || p->cur[0] == 'y' || p->cur[0] == 'O' ||
-           (dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N' &&
-            (p->cur[1] == 'g' || p->cur[1] == 'a' || p->cur[1] == 'b' ||
-             p->cur[1] == 'c' || p->cur[1] == 'd' || p->cur[1] == 'e' ||
-             p->cur[1] == 'f' || p->cur[1] == 'i' || p->cur[1] == 'j'))) {
-        if (p->cur[0] == 'x') {
-            quals |= DLANG_QUAL_CONST;
-            p->cur++;
-        } else if (p->cur[0] == 'y') {
-            quals |= DLANG_QUAL_IMMUTABLE;
-            p->cur++;
-        } else if (p->cur[0] == 'O') {
-            quals |= DLANG_QUAL_SHARED;
-            p->cur++;
-        } else if (dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N' && p->cur[1] == 'g') {
-            quals |= DLANG_QUAL_INOUT;
-            p->cur += 2;
-        } else if (dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N') {
-            switch (p->cur[1]) {
-            case 'a': attrs |= DLANG_ATTR_PURE; break;
-            case 'b': attrs |= DLANG_ATTR_NOTHROW; break;
-            case 'c': attrs |= DLANG_ATTR_REF; break;
-            case 'd': attrs |= DLANG_ATTR_PROPERTY; break;
-            case 'e': attrs |= DLANG_ATTR_TRUSTED; break;
-            case 'f': attrs |= DLANG_ATTR_SAFE; break;
-            case 'i': attrs |= DLANG_ATTR_NOGC; break;
-            case 'j': attrs |= DLANG_ATTR_RETREF; break;
-            default: break;
-            }
-            p->cur += 2;
-        }
-    }
+	while(p->cur[0] == 'x' || p->cur[0] == 'y' || p->cur[0] == 'O' ||
+	      (dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N' &&
+	       (p->cur[1] == 'g' || p->cur[1] == 'a' || p->cur[1] == 'b' || p->cur[1] == 'c' || p->cur[1] == 'd' || p->cur[1] == 'e' || p->cur[1] == 'f' ||
+	        p->cur[1] == 'i' || p->cur[1] == 'j'))) {
+		if(p->cur[0] == 'x') {
+			quals |= DLANG_QUAL_CONST;
+			p->cur++;
+		} else if(p->cur[0] == 'y') {
+			quals |= DLANG_QUAL_IMMUTABLE;
+			p->cur++;
+		} else if(p->cur[0] == 'O') {
+			quals |= DLANG_QUAL_SHARED;
+			p->cur++;
+		} else if(dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N' && p->cur[1] == 'g') {
+			quals |= DLANG_QUAL_INOUT;
+			p->cur += 2;
+		} else if(dlang_has_n_bytes(p->cur, 2u) && p->cur[0] == 'N') {
+			switch(p->cur[1]) {
+			case 'a':
+				attrs |= DLANG_ATTR_PURE;
+				break;
+			case 'b':
+				attrs |= DLANG_ATTR_NOTHROW;
+				break;
+			case 'c':
+				attrs |= DLANG_ATTR_REF;
+				break;
+			case 'd':
+				attrs |= DLANG_ATTR_PROPERTY;
+				break;
+			case 'e':
+				attrs |= DLANG_ATTR_TRUSTED;
+				break;
+			case 'f':
+				attrs |= DLANG_ATTR_SAFE;
+				break;
+			case 'i':
+				attrs |= DLANG_ATTR_NOGC;
+				break;
+			case 'j':
+				attrs |= DLANG_ATTR_RETREF;
+				break;
+			default:
+				break;
+			}
+			p->cur += 2;
+		}
+	}
 
-    off = p->out.len;
-    if (dlang_parse_type_core(p) != 0) {
-        goto out;
-    }
+	off = p->out.len;
+	if(dlang_parse_type_core(p) != 0) {
+		goto out;
+	}
 
-    seg = dlang_take_segment(p, off);
-    if (seg == NULL) {
-        goto out;
-    }
+	seg = dlang_take_segment(p, off);
+	if(seg == NULL) {
+		goto out;
+	}
 
-    if (dlang_apply_type_quals(&seg, quals) != 0) {
-        goto out;
-    }
+	if(dlang_apply_type_quals(&seg, quals) != 0) {
+		goto out;
+	}
 
-    if (demangle_buf_append(&p->out, seg, strlen(seg)) != 0) {
-        goto out;
-    }
-    free(seg);
-    seg = NULL;
+	if(demangle_buf_append(&p->out, seg, strlen(seg)) != 0) {
+		goto out;
+	}
+	free(seg);
+	seg = NULL;
 
-    rc = dlang_append_attrs(p, attrs);
+	rc = dlang_append_attrs(p, attrs);
 
 out:
-    free(seg);
-    dlang_parser_leave(p);
-    return rc;
+	free(seg);
+	dlang_parser_leave(p);
+	return rc;
 }
 
-static int
-dlang_parse_mangled_name(dlang_parser_t *p)
-{
-    size_t type_off;
-    char *type_text;
+static int dlang_parse_mangled_name(dlang_parser_t *p) {
+	size_t type_off;
+	char *type_text;
 
-    if (dlang_parser_enter(p) != 0) {
-        return -1;
-    }
+	if(dlang_parser_enter(p) != 0) {
+		return -1;
+	}
 
-    if (dlang_parse_qualified_name(p) != 0) {
-        dlang_parser_leave(p);
-        return -1;
-    }
+	if(dlang_parse_qualified_name(p) != 0) {
+		dlang_parser_leave(p);
+		return -1;
+	}
 
-    if (!dlang_is_type_start(p->cur[0])) {
-        dlang_parser_leave(p);
-        return -1;
-    }
+	if(!dlang_is_type_start(p->cur[0])) {
+		dlang_parser_leave(p);
+		return -1;
+	}
 
-    type_off = p->out.len;
-    if (dlang_parse_type(p) != 0) {
-        dlang_parser_leave(p);
-        return -1;
-    }
+	type_off = p->out.len;
+	if(dlang_parse_type(p) != 0) {
+		dlang_parser_leave(p);
+		return -1;
+	}
 
-    type_text = dlang_take_segment(p, type_off);
-    if (type_text == NULL) {
-        dlang_parser_leave(p);
-        return -1;
-    }
+	type_text = dlang_take_segment(p, type_off);
+	if(type_text == NULL) {
+		dlang_parser_leave(p);
+		return -1;
+	}
 
-    /* the type, parameters and all, is read and left out: foo.bar */
-    if ((p->options & DEMANGLE_NO_PARAMS) != 0) {
-        free(type_text);
-        dlang_parser_leave(p);
-        return 0;
-    }
+	/* the type, parameters and all, is read and left out: foo.bar */
+	if((p->options & DEMANGLE_NO_PARAMS) != 0) {
+		free(type_text);
+		dlang_parser_leave(p);
+		return 0;
+	}
 
-    if (demangle_buf_append(&p->out, ": ", 2u) != 0 ||
-        demangle_buf_append(&p->out, type_text, strlen(type_text)) != 0) {
-        free(type_text);
-        dlang_parser_leave(p);
-        return -1;
-    }
-    free(type_text);
+	if(demangle_buf_append(&p->out, ": ", 2u) != 0 || demangle_buf_append(&p->out, type_text, strlen(type_text)) != 0) {
+		free(type_text);
+		dlang_parser_leave(p);
+		return -1;
+	}
+	free(type_text);
 
-    dlang_parser_leave(p);
-    return 0;
+	dlang_parser_leave(p);
+	return 0;
 }
 
-static char *
-dlang_demangle_symbol(const char *mangled, int options)
-{
-    dlang_parser_t p;
-    char *ret;
+static char *dlang_demangle_symbol(const char *mangled, int options) {
+	dlang_parser_t p;
+	char *ret;
 
-    if (!dlang_is_mangled(mangled)) {
-        return NULL;
-    }
+	if(!dlang_is_mangled(mangled)) {
+		return NULL;
+	}
 
-    if (dlang_parser_init(&p, mangled, options) != 0) {
-        return NULL;
-    }
+	if(dlang_parser_init(&p, mangled, options) != 0) {
+		return NULL;
+	}
 
-    p.cur = mangled + 2;
-    if (dlang_parse_mangled_name(&p) != 0 || p.cur[0] != '\0') {
-        dlang_parser_destroy(&p);
-        return NULL;
-    }
+	p.cur = mangled + 2;
+	if(dlang_parse_mangled_name(&p) != 0 || p.cur[0] != '\0') {
+		dlang_parser_destroy(&p);
+		return NULL;
+	}
 
-    ret = demangle_buf_take(&p.out);
-    dlang_parser_destroy(&p);
-    return ret;
+	ret = demangle_buf_take(&p.out);
+	dlang_parser_destroy(&p);
+	return ret;
 }
 
-char *
-demangle_dlang(const char *mangled, int options)
-{
-    if (mangled == NULL || mangled[0] == '\0') {
-        return NULL;
-    }
+char *demangle_dlang(const char *mangled, int options) {
+	if(mangled == NULL || mangled[0] == '\0') {
+		return NULL;
+	}
 
-    /* a _d_ name, _d_allocmemory, is a C-linkage runtime function, not a
-     * mangled one: it is refused, as any name that is not mangled is.  It
-     * was returned as it was, a demangling that changed nothing -- and
-     * any C function named _d_... with it. */
-    if ((options & DEMANGLE_DLANG) != 0) {
-        if (!dlang_is_mangled(mangled)) {
-            return NULL;
-        }
-        return dlang_demangle_symbol(mangled, options);
-    }
+	/* a _d_ name, _d_allocmemory, is a C-linkage runtime function, not a
+	 * mangled one: it is refused, as any name that is not mangled is.  It
+	 * was returned as it was, a demangling that changed nothing -- and
+	 * any C function named _d_... with it. */
+	if((options & DEMANGLE_DLANG) != 0) {
+		if(!dlang_is_mangled(mangled)) {
+			return NULL;
+		}
+		return dlang_demangle_symbol(mangled, options);
+	}
 
-    if (dlang_is_mangled(mangled)) {
-        return dlang_demangle_symbol(mangled, options);
-    }
+	if(dlang_is_mangled(mangled)) {
+		return dlang_demangle_symbol(mangled, options);
+	}
 
-    return NULL;
+	return NULL;
 }

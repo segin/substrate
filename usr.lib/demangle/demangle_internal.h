@@ -4,9 +4,9 @@
 #include <stddef.h>
 
 typedef struct demangle_buf {
-    char *data;
-    size_t len;
-    size_t cap;
+	char *data;
+	size_t len;
+	size_t cap;
 } demangle_buf_t;
 
 int demangle_buf_reserve(demangle_buf_t *buf, size_t extra);

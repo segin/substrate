@@ -162,7 +162,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Remove `$(OBJS:.o=.d)` and `$(PIC_OBJS:.pic.o=.pic.d)` in `clean`, and remove untracked build artifacts from the source directory.
     - Verify: `make -C usr.lib/demangle clean` removes all generated `.o`, `.pic.o`, `.d`, and `.pic.d` files.
 
-- [ ] **DMG-STYLE-01** (low) Source formatting deviates from `.agent/rules/code-style-guide.md` (REQ: REQ-DMGA-0021)
+- [x] **DMG-STYLE-01** (low) Source formatting deviates from `.agent/rules/code-style-guide.md` (REQ: REQ-DMGA-0021)
     - Site: `usr.lib/demangle/buffer.c`, `usr.lib/demangle/demangle.c`, `usr.lib/demangle/itanium.c`, `usr.lib/demangle/rust.c`, `usr.lib/demangle/dlang.c`
     - Evidence: The files use 4-space indentation instead of tabs, multi-line function headers (`static int\nfoo(...)`), spaces after control keywords (`if (...)`), and unparenthesized return statements (`return 0;` instead of `return(0);`), contrary to `.agent/rules/code-style-guide.md`.
     - Fix: Conform new and modified code in `usr.lib/demangle/` to `.agent/rules/code-style-guide.md`.

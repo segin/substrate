@@ -13,183 +13,167 @@
  * pre-grow `need` check or the post-grow capacity. */
 #define DEMANGLE_BUF_MAX_BYTES (1u * 1024u * 1024u)
 
-static int
-demangle_buf_compute_need(const demangle_buf_t *buf, size_t extra, size_t *need)
-{
-    if (buf == NULL || need == NULL) {
-        return -1;
-    }
+static int demangle_buf_compute_need(const demangle_buf_t *buf, size_t extra, size_t *need) {
+	if(buf == NULL || need == NULL) {
+		return -1;
+	}
 
-    if (extra > (size_t)-1 - buf->len - 1u) {
-        return -1;
-    }
+	if(extra > (size_t)-1 - buf->len - 1u) {
+		return -1;
+	}
 
-    *need = buf->len + extra + 1u;
-    return 0;
+	*need = buf->len + extra + 1u;
+	return 0;
 }
 
-int
-demangle_buf_reserve(demangle_buf_t *buf, size_t extra)
-{
-    size_t need;
-    size_t cap;
-    char *next;
+int demangle_buf_reserve(demangle_buf_t *buf, size_t extra) {
+	size_t need;
+	size_t cap;
+	char *next;
 
-    if (buf == NULL) {
-        return -1;
-    }
+	if(buf == NULL) {
+		return -1;
+	}
 
-    if (demangle_buf_compute_need(buf, extra, &need) != 0) {
-        return -1;
-    }
-    /* Reject before allocating — a hostile mangled name should fail
-     * cleanly here, not after we've already paid the cost of growing
-     * to gigabytes. */
-    if (need > DEMANGLE_BUF_MAX_BYTES) {
-        return -1;
-    }
-    if (need <= buf->cap) {
-        return 0;
-    }
+	if(demangle_buf_compute_need(buf, extra, &need) != 0) {
+		return -1;
+	}
+	/* Reject before allocating — a hostile mangled name should fail
+	 * cleanly here, not after we've already paid the cost of growing
+	 * to gigabytes. */
+	if(need > DEMANGLE_BUF_MAX_BYTES) {
+		return -1;
+	}
+	if(need <= buf->cap) {
+		return 0;
+	}
 
-    cap = (buf->cap == 0u) ? DEMANGLE_BUF_INITIAL_CAP : buf->cap;
-    while (cap < need) {
-        size_t doubled = cap << 1;
-        if (doubled < cap) {
-            return -1;
-        }
-        cap = doubled;
-    }
+	cap = (buf->cap == 0u) ? DEMANGLE_BUF_INITIAL_CAP : buf->cap;
+	while(cap < need) {
+		size_t doubled = cap << 1;
+		if(doubled < cap) {
+			return -1;
+		}
+		cap = doubled;
+	}
 
-    next = (char *)realloc(buf->data, cap);
-    if (next == NULL) {
-        return -1;
-    }
+	next = (char *)realloc(buf->data, cap);
+	if(next == NULL) {
+		return -1;
+	}
 
-    buf->data = next;
-    buf->cap = cap;
-    return 0;
+	buf->data = next;
+	buf->cap = cap;
+	return 0;
 }
 
-int
-demangle_buf_append(demangle_buf_t *buf, const char *s, size_t n)
-{
-    if (buf == NULL || s == NULL) {
-        return -1;
-    }
+int demangle_buf_append(demangle_buf_t *buf, const char *s, size_t n) {
+	if(buf == NULL || s == NULL) {
+		return -1;
+	}
 
-    if (demangle_buf_reserve(buf, n) != 0) {
-        return -1;
-    }
+	if(demangle_buf_reserve(buf, n) != 0) {
+		return -1;
+	}
 
-    if (n > 0u) {
-        memcpy(buf->data + buf->len, s, n);
-        buf->len += n;
-    }
+	if(n > 0u) {
+		memcpy(buf->data + buf->len, s, n);
+		buf->len += n;
+	}
 
-    buf->data[buf->len] = '\0';
-    return 0;
+	buf->data[buf->len] = '\0';
+	return 0;
 }
 
-int
-demangle_buf_appendc(demangle_buf_t *buf, char ch)
-{
-    if (buf == NULL) {
-        return -1;
-    }
+int demangle_buf_appendc(demangle_buf_t *buf, char ch) {
+	if(buf == NULL) {
+		return -1;
+	}
 
-    if (demangle_buf_reserve(buf, 1u) != 0) {
-        return -1;
-    }
+	if(demangle_buf_reserve(buf, 1u) != 0) {
+		return -1;
+	}
 
-    buf->data[buf->len++] = ch;
-    buf->data[buf->len] = '\0';
-    return 0;
+	buf->data[buf->len++] = ch;
+	buf->data[buf->len] = '\0';
+	return 0;
 }
 
 /* Insert n bytes of s at off, moving what follows along. */
-int
-demangle_buf_insert(demangle_buf_t *buf, size_t off, const char *s, size_t n)
-{
-    if (buf == NULL || s == NULL || off > buf->len) {
-        return -1;
-    }
+int demangle_buf_insert(demangle_buf_t *buf, size_t off, const char *s, size_t n) {
+	if(buf == NULL || s == NULL || off > buf->len) {
+		return -1;
+	}
 
-    if (n == 0u) {
-        return 0;
-    }
+	if(n == 0u) {
+		return 0;
+	}
 
-    if (demangle_buf_reserve(buf, n) != 0) {
-        return -1;
-    }
+	if(demangle_buf_reserve(buf, n) != 0) {
+		return -1;
+	}
 
-    memmove(buf->data + off + n, buf->data + off, buf->len - off + 1u);
-    memcpy(buf->data + off, s, n);
-    buf->len += n;
-    return 0;
+	memmove(buf->data + off + n, buf->data + off, buf->len - off + 1u);
+	memcpy(buf->data + off, s, n);
+	buf->len += n;
+	return 0;
 }
 
-int
-demangle_buf_printf(demangle_buf_t *buf, const char *fmt, ...)
-{
-    va_list ap;
-    va_list ap_copy;
-    int need;
+int demangle_buf_printf(demangle_buf_t *buf, const char *fmt, ...) {
+	va_list ap;
+	va_list ap_copy;
+	int need;
 
-    if (buf == NULL || fmt == NULL) {
-        return -1;
-    }
+	if(buf == NULL || fmt == NULL) {
+		return -1;
+	}
 
-    va_start(ap, fmt);
-    va_copy(ap_copy, ap);
-    need = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
-    if (need < 0) {
-        va_end(ap_copy);
-        return -1;
-    }
+	va_start(ap, fmt);
+	va_copy(ap_copy, ap);
+	need = vsnprintf(NULL, 0, fmt, ap);
+	va_end(ap);
+	if(need < 0) {
+		va_end(ap_copy);
+		return -1;
+	}
 
-    if (demangle_buf_reserve(buf, (size_t)need) != 0) {
-        va_end(ap_copy);
-        return -1;
-    }
+	if(demangle_buf_reserve(buf, (size_t)need) != 0) {
+		va_end(ap_copy);
+		return -1;
+	}
 
-    if (vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap_copy) != need) {
-        va_end(ap_copy);
-        return -1;
-    }
-    va_end(ap_copy);
+	if(vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap_copy) != need) {
+		va_end(ap_copy);
+		return -1;
+	}
+	va_end(ap_copy);
 
-    buf->len += (size_t)need;
-    return 0;
+	buf->len += (size_t)need;
+	return 0;
 }
 
-char *
-demangle_buf_take(demangle_buf_t *buf)
-{
-    char *ret;
+char *demangle_buf_take(demangle_buf_t *buf) {
+	char *ret;
 
-    if (buf == NULL || buf->data == NULL) {
-        return NULL;
-    }
+	if(buf == NULL || buf->data == NULL) {
+		return NULL;
+	}
 
-    buf->data[buf->len] = '\0';
-    ret = buf->data;
-    buf->data = NULL;
-    buf->len = 0u;
-    buf->cap = 0u;
-    return ret;
+	buf->data[buf->len] = '\0';
+	ret = buf->data;
+	buf->data = NULL;
+	buf->len = 0u;
+	buf->cap = 0u;
+	return ret;
 }
 
-void
-demangle_buf_destroy(demangle_buf_t *buf)
-{
-    if (buf == NULL) {
-        return;
-    }
+void demangle_buf_destroy(demangle_buf_t *buf) {
+	if(buf == NULL) {
+		return;
+	}
 
-    free(buf->data);
-    buf->data = NULL;
-    buf->len = 0u;
-    buf->cap = 0u;
+	free(buf->data);
+	buf->data = NULL;
+	buf->len = 0u;
+	buf->cap = 0u;
 }
