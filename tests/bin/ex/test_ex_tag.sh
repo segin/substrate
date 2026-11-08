@@ -55,6 +55,21 @@ if [ "$(grep -c 'Tag not found' <<<"$out")" -ne 1 ]; then
 	fail "a tag in no tags file: [$out]"
 fi
 
+# the error paths free what they took: a tag in no file, a tags file that
+# cannot be read, a bad address, a tag found with the buffer modified (the
+# one that leaked the tags file's name).  (-c, so each error does not end
+# the session; the ASan build's LeakSanitizer reports at exit, failing it.)
+printf 'unread\tf.c\t1\n' >unread.tags
+chmod 000 unread.tags
+out=$("$EX_BIN" -s -c 'set tags=unread.tags,first.tags' -c 'tag nowhere' \
+	-c 'tag unread' -c 'set tags=tags' -c 'tag evil' -c '1s/^/x/' -c 'tag bar' \
+	-c 'q!' f.c </dev/null 2>&1)
+status=$?
+chmod 600 unread.tags
+if grep -q 'Sanitizer' <<<"$out" || [ "$status" -ne 0 ]; then
+	fail ":tag's error paths: status $status [$(grep -A3 'Sanitizer' <<<"$out" | head -5)]"
+fi
+
 if [ "$fails" -ne 0 ]; then
 	exit 1
 fi
