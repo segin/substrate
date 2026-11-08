@@ -81,6 +81,12 @@ static const dm_case_t cases[] = {
       "virtual thunk to void Foo::bar<int>(int) [offsets 0, -24]" },
     { "with its entries", "_ZN3FooIiE3barIiEEPS0_T_", I, "Foo<int>* Foo<int>::bar<int>(int)" },
 
+    /* an array of arrays: the outer bound first */
+    { "two bounds", "_Z1fA2_A3_i", I, "f(int[2][3])" },
+    { "three bounds", "_Z1fA2_A3_A4_i", I, "f(int[2][3][4])" },
+    { "the element type's entry", "_Z1fA2_A3_iS_", I, "f(int[2][3], int[3])" },
+    { "the whole array's entry", "_Z1fA2_A3_iS0_", I, "f(int[2][3], int[2][3])" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

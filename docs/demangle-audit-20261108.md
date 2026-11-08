@@ -78,7 +78,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Only insert `" (*)"` / `" (&)"` / `" (&&)"` before `'['` when the direct pointee production is `A` (`parse_array_type`), and adjust any recorded substitution offsets >= `bracket`.
     - Verify: `tests/usr.lib/demangle/`: `_Z1fP3FooIA4_iE` demangles to `"f(Foo<int[4]>*)"` and `_Z1fP3FooB5cxx11` demangles to `"f(Foo[abi:cxx11]*)"`.
 
-- [ ] **DMG-ITAN-05** (medium) Multi-dimensional array bounds are emitted in reverse order (REQ: REQ-DMGA-0009)
+- [x] **DMG-ITAN-05** (medium) Multi-dimensional array bounds are emitted in reverse order (REQ: REQ-DMGA-0009)
     - Site: `usr.lib/demangle/itanium.c:1751-1786` (`parse_array_type`)
     - Evidence: `A2_A3_i` (`int[2][3]`) parses the element type `A3_i` (`int[3]`) first and appends `[2]` afterward, yielding `int[3][2]`.
     - Fix: Insert the outer dimension before any trailing array dimensions of the element type, or collect consecutive `A<dim>_` prefixes before formatting the element type.

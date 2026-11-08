@@ -24,9 +24,12 @@ enum {
 
 typedef demangle_buf_t dm_buf_t;
 
+/* An entry is a slice of the output -- or, once text was inserted inside
+ * it (a pointer's (*) into an array's int[4]), a copy of what it was. */
 typedef struct dm_subst {
     size_t off;
     size_t len;
+    char *text;     /* the copy, or NULL: the slice */
 } dm_subst_t;
 
 typedef struct dm_template_frame {
@@ -66,6 +69,9 @@ typedef struct dm_itanium_parser {
      * function's return type goes there, after any thunk's words or the
      * scope of a local name */
     size_t encoding_off;
+    /* the array type parsed last: where its outermost bounds begin, which
+     * an outer bound or a pointer's (*) goes in front of */
+    size_t array_dims_off;
 
     size_t func_tmpl_off[DM_TEMPLATE_ARG_CAP];
     size_t func_tmpl_len[DM_TEMPLATE_ARG_CAP];
@@ -277,6 +283,13 @@ parser_destroy(dm_itanium_parser_t *p)
         return;
     }
 
+    if (p->substitutions != NULL) {
+        size_t i;
+
+        for (i = 0u; i < p->substitution_cap; i++) {
+            free(p->substitutions[i].text);
+        }
+    }
     free(p->substitutions);
     p->substitutions = NULL;
     p->substitution_count = 0u;
@@ -333,6 +346,7 @@ parser_ensure_substitution_capacity(dm_itanium_parser_t *p, size_t need)
         return -1;
     }
 
+    memset(next + p->substitution_cap, 0, (cap - p->substitution_cap) * sizeof(*next));
     p->substitutions = next;
     p->substitution_cap = cap;
     return 0;
@@ -446,6 +460,9 @@ parser_add_substitution(dm_itanium_parser_t *p, size_t off, size_t len)
         return -1;
     }
 
+    /* a slot backtracking gave up may still hold a copy */
+    free(p->substitutions[p->substitution_count].text);
+    p->substitutions[p->substitution_count].text = NULL;
     p->substitutions[p->substitution_count].off = off;
     p->substitutions[p->substitution_count].len = len;
 
@@ -477,7 +494,55 @@ parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx)
         return -1;
     }
 
+    if (p->substitutions[idx].text != NULL) {
+        return buf_append(&p->out, p->substitutions[idx].text, p->substitutions[idx].len);
+    }
     return parser_append_output_slice(p, p->substitutions[idx].off, p->substitutions[idx].len);
+}
+
+/*
+ * Insert @p n bytes of @p s at @p pos in the output, inside the type that
+ * began at @p type_off, keeping the tables right: what lies after @p pos
+ * moves along, and an entry made inside that type that @p pos falls
+ * within keeps the text it had, as a copy.  One that began before the
+ * type holds the whole of it, insertion and all, and grows.  buf_insert()
+ * alone left every offset after @p pos behind.
+ */
+static int
+parser_insert_in_type(dm_itanium_parser_t *p, size_t type_off, size_t pos, const char *s, size_t n)
+{
+    size_t i;
+
+    for (i = 0u; i < p->substitution_count; i++) {
+        dm_subst_t *e = &p->substitutions[i];
+
+        if (e->text != NULL || e->off + e->len <= pos) {
+            continue;
+        }
+        if (e->off >= pos) {
+            e->off += n;
+        } else if (e->off >= type_off) {
+            e->text = (char *)malloc(e->len + 1u);
+            if (e->text == NULL) {
+                return -1;
+            }
+            memcpy(e->text, p->out.data + e->off, e->len);
+            e->text[e->len] = '\0';
+        } else {
+            e->len += n;
+        }
+    }
+    for (i = 0u; i < p->last_template_count; i++) {
+        if (p->last_template_off[i] >= pos) {
+            p->last_template_off[i] += n;
+        }
+    }
+    for (i = 0u; i < p->func_tmpl_count; i++) {
+        if (p->func_tmpl_off[i] >= pos) {
+            p->func_tmpl_off[i] += n;
+        }
+    }
+    return buf_insert(&p->out, pos, s, n);
 }
 
 static void
@@ -1837,15 +1902,39 @@ parse_array_type(dm_itanium_parser_t *p)
 
     p->cur++;
 
-    if (parse_type(p) != 0) {
-        return -1;
-    }
+    {
+        size_t elem_off = p->out.len;
+        int elem_is_array = (p->cur[0] == 'A');
+        char dims[32];
+        int n;
 
-    if (has_dim) {
-        return buf_printf(&p->out, "[%zu]", dim);
-    }
+        if (parse_type(p) != 0) {
+            return -1;
+        }
+        n = has_dim ? snprintf(dims, sizeof(dims), "[%zu]", dim) : snprintf(dims, sizeof(dims), "[]");
+        if (n < 0 || (size_t)n >= sizeof(dims)) {
+            return -1;
+        }
+        /*
+         * An array of arrays: this bound is the outer one, and goes before
+         * the element's, int[2][3] for A2_A3_i -- appended, it came out
+         * int[3][2].
+         */
+        if (elem_is_array) {
+            size_t at = p->array_dims_off;
 
-    return buf_append(&p->out, "[]", 2u);
+            if (parser_insert_in_type(p, elem_off, at, dims, (size_t)n) != 0) {
+                return -1;
+            }
+            p->array_dims_off = at;
+        } else {
+            p->array_dims_off = p->out.len;
+            if (buf_append(&p->out, dims, (size_t)n) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
 }
 
 static int
