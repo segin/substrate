@@ -294,6 +294,14 @@ and
 replace the whole character under the cursor, and in
 .Ql R
 backspace restores it.
+A character and the combining marks after it, such as
+.Ql e
+followed by U+0301, are one cursor position: the motions step over them
+together, and
+.Ql x ,
+.Ql X ,
+.Ql r
+and the operators take or replace them together.
 .Ql Ctrl-@
 inserts the text last entered and ends text input;
 .Ql Ctrl-A

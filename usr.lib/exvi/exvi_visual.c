@@ -1098,6 +1098,7 @@ vi_is_utf8_continuation_byte(unsigned char c)
 }
 
 static int vi_char_start(const char *text, size_t len, int idx);
+static int vi_codepoint_width(unsigned int cp);
 
 size_t
 vi_utf8_prev_offset(const char *buf, size_t pos)
@@ -1185,6 +1186,34 @@ vi_char_start(const char *text, size_t len, int idx)
     return idx;
 }
 
+/*
+ * Whether the character at @p idx is a combining mark: a zero-width
+ * character that joins the one before it (U+0301 on e makes é).  Zero-width
+ * format characters -- spaces, joiners, direction marks, the BOM -- are
+ * characters of their own, as in Vim.
+ */
+static int
+vi_is_combining_at(const char *text, size_t len, int idx)
+{
+    unsigned int cp = 0;
+
+    if (idx <= 0 || (size_t)idx >= len || (unsigned char)text[idx] < 0xc2 ||
+        vi_utf8_decode_text_at(text, len, idx, &cp) < 2) {
+        return 0;
+    }
+    if ((cp >= 0x200b && cp <= 0x200f) || (cp >= 0x2028 && cp <= 0x202e) ||
+        (cp >= 0x2060 && cp <= 0x206f) || cp == 0xfeff) {
+        return 0;
+    }
+    return vi_codepoint_width(cp) == 0;
+}
+
+/*
+ * The cursor's characters are a base and the combining marks after it, one
+ * unit, as Vim has them: l stepped onto the accent of e+U+0301, x took the e
+ * from under it and r put Z under the accent.  The start of the unit the
+ * byte at @p idx belongs to.
+ */
 static int
 vi_normalize_char_index(line_t *cur, int idx)
 {
@@ -1194,7 +1223,11 @@ vi_normalize_char_index(line_t *cur, int idx)
     if ((size_t)idx >= cur->len) {
         return (int)cur->len;
     }
-    return vi_char_start(cur->text, cur->len, idx);
+    idx = vi_char_start(cur->text, cur->len, idx);
+    while (idx > 0 && vi_is_combining_at(cur->text, cur->len, idx)) {
+        idx = vi_char_start(cur->text, cur->len, idx - 1);
+    }
+    return idx;
 }
 
 static int
@@ -1207,7 +1240,7 @@ vi_prev_char_index(line_t *cur, int idx)
     if (idx <= 0) {
         return 0;
     }
-    return vi_char_start(cur->text, cur->len, idx - 1);
+    return vi_normalize_char_index(cur, idx - 1);
 }
 
 static int
@@ -1227,6 +1260,10 @@ vi_next_char_index(line_t *cur, int idx)
         width = 1;
     }
     idx += width;
+    /* and the combining marks on it */
+    while ((size_t)idx < cur->len && vi_is_combining_at(cur->text, cur->len, idx)) {
+        idx += vi_utf8_decode_text_at(cur->text, cur->len, idx, NULL);
+    }
     if ((size_t)idx > cur->len) {
         idx = (int)cur->len;
     }
@@ -1675,7 +1712,8 @@ static struct {
 } vi_col_marks[VI_COL_MARKS];
 static int vi_col_mark_next;
 
-/* how many bytes from @p i, before @p limit, are printable ASCII */
+/* how many bytes from @p i, before @p limit, are printable ASCII -- less
+ * the last when combining marks follow it, as they are one character */
 static int
 vi_ascii_run(const line_t *cur, int i, int limit)
 {
@@ -1684,6 +1722,9 @@ vi_ascii_run(const line_t *cur, int i, int limit)
 
     while (j < limit && p[j] >= 0x20 && p[j] < 0x7f) {
         j++;
+    }
+    if (j > i && vi_is_combining_at(cur->text, cur->len, j)) {
+        j--;
     }
     return j - i;
 }
