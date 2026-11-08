@@ -100,7 +100,7 @@ the end of this document, using the standard EARS patterns:
 
 ## C. Rust Symbol Demangling (`rust.c`)
 
-- [ ] **DMG-RUST-02** (medium) `DEMANGLE_RUST` rejects all legacy Rust symbols (REQ: REQ-DMGA-0012)
+- [x] **DMG-RUST-02** (medium) `DEMANGLE_RUST` rejects all legacy Rust symbols (REQ: REQ-DMGA-0012)
     - Site: `usr.lib/demangle/rust.c:1807-1829` (`demangle_rust`)
     - Evidence: When `(options & DEMANGLE_RUST) != 0`, `demangle_rust()` checks `if (!rust_is_v0(mangled)) return NULL;` and never calls `rust_demangle_legacy()`, contradicting `demangle(3)`.
     - Fix: Allow `demangle_rust()` to fall through to `rust_demangle_legacy()` when `rust_is_legacy(mangled)` is true under both `DEMANGLE_RUST` and `DEMANGLE_AUTO`.

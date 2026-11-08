@@ -1774,13 +1774,8 @@ demangle_rust(const char *mangled, int options)
         return NULL;
     }
 
-    if ((options & DEMANGLE_RUST) != 0) {
-        if (!rust_is_v0(mangled)) {
-            return NULL;
-        }
-        return rust_demangle_v0(mangled, options);
-    }
-
+    /* both schemes, whether Rust was asked for or guessed: DEMANGLE_RUST
+     * refused every legacy name, which demangle(3) says it takes */
     if (rust_is_v0(mangled)) {
         return rust_demangle_v0(mangled, options);
     }

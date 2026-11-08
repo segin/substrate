@@ -114,6 +114,10 @@ static const dm_case_t cases[] = {
     { "the pattern's entry is its last element", "_Z1fIJicEEvDpPT_S1_", I,
       "void f<int, char>(int*, char*, char*)" },
 
+    /* DEMANGLE_RUST takes both of Rust's schemes */
+    { "a legacy name", "_ZN3foo3bar17h0123456789abcdefE", R, "foo::bar" },
+    { "a C++ name is no Rust one", "_ZN3foo3barEv", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
