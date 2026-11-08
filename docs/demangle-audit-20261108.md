@@ -66,7 +66,7 @@ the end of this document, using the standard EARS patterns:
 
 ## B. Itanium C++ ABI Compliance (`itanium.c`)
 
-- [ ] **DMG-ITAN-03** (medium) Function return types are inserted at buffer offset `0` instead of the current encoding start (REQ: REQ-DMGA-0007)
+- [x] **DMG-ITAN-03** (medium) Function return types are inserted at buffer offset `0` instead of the current encoding start (REQ: REQ-DMGA-0007)
     - Site: `usr.lib/demangle/itanium.c:1204-1242` (`parse_bare_function_type`)
     - Evidence: `buf_insert(&p->out, 0, ...)` inserts the return type at offset `0` of `p->out`. When `parse_encoding()` is called recursively from `parse_local_name()` (`_ZZ...`) or `parse_special_name()` (thunks, transaction clones), the return type is inserted before the outer scope or `"non-virtual thunk to "` prefix (e.g., `int non-virtual thunk to foo<int>()`).
     - Fix: Track the start offset of the active `parse_encoding()` invocation in `dm_itanium_parser_t`, insert the return type at `encoding_off`, and shift only substitution/template offsets >= `encoding_off`.

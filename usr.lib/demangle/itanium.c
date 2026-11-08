@@ -62,6 +62,10 @@ typedef struct dm_itanium_parser {
 
     int in_type_context;
     int has_return_type;
+    /* where the encoding being parsed began in the output: a template
+     * function's return type goes there, after any thunk's words or the
+     * scope of a local name */
+    size_t encoding_off;
 
     size_t func_tmpl_off[DM_TEMPLATE_ARG_CAP];
     size_t func_tmpl_len[DM_TEMPLATE_ARG_CAP];
@@ -1243,35 +1247,42 @@ parse_bare_function_type(dm_itanium_parser_t *p)
         }
         size_t ret_len = p->out.len - ret_off;
         if (ret_len > 0) {
-            /* Extract return type text, remove from end, insert at beginning */
+            /*
+             * The return type, written after the name, goes before it: at
+             * the start of this encoding, not of the whole output, which
+             * put it ahead of a thunk's "non-virtual thunk to " or a local
+             * name's scope.  The offsets the tables hold move with their
+             * text: those inside the return type to its new place, those
+             * between the encoding's start and it along by its length;
+             * all of them were shifted alike.
+             */
+            size_t at = p->encoding_off;
+            size_t shift = ret_len + 1u;    /* the return type and a space */
             char *ret_text = (char *)malloc(ret_len + 1);
+            size_t si;
+
             if (!ret_text) return -1;
             memcpy(ret_text, p->out.data + ret_off, ret_len);
             p->out.len = ret_off;
             p->out.data[p->out.len] = '\0';
-            if (buf_insert(&p->out, 0, " ", 1u) != 0) {
-                free(ret_text);
-                return -1;
-            }
-            if (buf_insert(&p->out, 0, ret_text, ret_len) != 0) {
+            if (at > ret_off || buf_insert(&p->out, at, " ", 1u) != 0 ||
+                buf_insert(&p->out, at, ret_text, ret_len) != 0) {
                 free(ret_text);
                 return -1;
             }
             free(ret_text);
-            /* Adjust all substitution offsets for the insertion */
-            {
-                size_t shift = ret_len + 1; /* ret_text + space */
-                size_t si;
-                for (si = 0; si < p->substitution_count; si++) {
-                    p->substitutions[si].off += shift;
-                }
-                for (si = 0; si < p->last_template_count; si++) {
-                    p->last_template_off[si] += shift;
-                }
-                for (si = 0; si < p->func_tmpl_count; si++) {
-                    p->func_tmpl_off[si] += shift;
-                }
+#define DM_MOVE_OFF(o) \
+            ((o) >= ret_off ? at + ((o) - ret_off) : (o) >= at ? (o) + shift : (o))
+            for (si = 0; si < p->substitution_count; si++) {
+                p->substitutions[si].off = DM_MOVE_OFF(p->substitutions[si].off);
             }
+            for (si = 0; si < p->last_template_count; si++) {
+                p->last_template_off[si] = DM_MOVE_OFF(p->last_template_off[si]);
+            }
+            for (si = 0; si < p->func_tmpl_count; si++) {
+                p->func_tmpl_off[si] = DM_MOVE_OFF(p->func_tmpl_off[si]);
+            }
+#undef DM_MOVE_OFF
         }
         p->has_return_type = 0;
     }
@@ -2300,15 +2311,19 @@ static int
 parse_encoding(dm_itanium_parser_t *p)
 {
     dm_parse_mark_t m;
+    size_t outer_off = p->encoding_off;
+    int rc = -1;
 
+    p->encoding_off = p->out.len;
     mark_save(p, &m);
     if (parse_special_name(p) == 0) {
-        return 0;
+        rc = 0;
+        goto out;
     }
     mark_restore(p, &m);
 
     if (parse_name(p) != 0) {
-        return -1;
+        goto out;
     }
 
     if (p->cur[0] != '\0') {
@@ -2319,12 +2334,15 @@ parse_encoding(dm_itanium_parser_t *p)
             memcpy(p->func_tmpl_len, p->last_template_len, p->func_tmpl_count * sizeof(size_t));
         }
         if (parse_bare_function_type(p) != 0) {
-            return -1;
+            goto out;
         }
         p->func_tmpl_count = 0;
     }
+    rc = 0;
 
-    return 0;
+out:
+    p->encoding_off = outer_off;
+    return rc;
 }
 
 char *

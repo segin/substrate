@@ -62,10 +62,24 @@ static const dm_case_t cases[] = {
       "f(std::allocator<char>::x, std::allocator<char>, std::allocator<char>::x)" },
     { "Sb<wchar_t> is too", "_Z1fSbIwES_", I,
       "f(std::basic_string<wchar_t>, std::basic_string<wchar_t>)" },
+    { "a substitution as a prefix is no new entry",
+      "_ZN4llvm10WriteGraphINS_11EdgeBundlesEEERNS_11raw_ostreamES3_RKT_bRKNS_5TwineE", I,
+      "llvm::raw_ostream& llvm::WriteGraph<llvm::EdgeBundles>(llvm::raw_ostream&, "
+      "llvm::EdgeBundles const&, bool, llvm::Twine const&)" },
+    { "a template parameter as a type is an entry",
+      "_ZN4llvm6detail27unwrapReferencedTypedefTypeINS_8DWARFDieEEET_S3_", I,
+      "llvm::DWARFDie llvm::detail::unwrapReferencedTypedefType<llvm::DWARFDie>(llvm::DWARFDie)" },
     { "a parameter's entries stay where its text is",
       "_Z18startFromBeginningRmRN4llvm18DIExpressionCursorENS0_8ArrayRefImEE", I,
       "startFromBeginning(unsigned long&, llvm::DIExpressionCursor&, llvm::ArrayRef<unsigned long>)" },
     { "a function's own name is no entry", "_Z1fIL3Foo1EEvS_", I, "void f<(Foo)1>(f)" },
+
+    /* a template function's return type goes before its own name */
+    { "after a thunk's words", "_ZThn8_N3Foo3barIiEEvT_", I,
+      "non-virtual thunk to void Foo::bar<int>(int) [offset -8]" },
+    { "after a virtual thunk's", "_ZTv0_n24_N3Foo3barIiEEvT_", I,
+      "virtual thunk to void Foo::bar<int>(int) [offsets 0, -24]" },
+    { "with its entries", "_ZN3FooIiE3barIiEEPS0_T_", I, "Foo<int>* Foo<int>::bar<int>(int)" },
 
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
