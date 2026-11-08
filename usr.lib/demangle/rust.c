@@ -1425,8 +1425,11 @@ rust_parse_v0_path(rust_parser_t *p)
 
         p->cur++;
 
+        /* <impl-path> = [<disambiguator>] <path>: a second impl of a
+         * type in one module, Ms_..., was refused */
         before = p->out.len;
-        if (rust_parse_v0_path(p) != 0) {
+        if (rust_parse_optional_disambiguator(p, NULL, NULL) != 0 ||
+            rust_parse_v0_path(p) != 0) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
             return -1;
@@ -1446,8 +1449,10 @@ rust_parse_v0_path(rust_parser_t *p)
 
         p->cur++;
 
+        /* <impl-path>, as for M */
         before = p->out.len;
-        if (rust_parse_v0_path(p) != 0) {
+        if (rust_parse_optional_disambiguator(p, NULL, NULL) != 0 ||
+            rust_parse_v0_path(p) != 0) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
             return -1;

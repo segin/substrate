@@ -106,7 +106,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Allow `demangle_rust()` to fall through to `rust_demangle_legacy()` when `rust_is_legacy(mangled)` is true under both `DEMANGLE_RUST` and `DEMANGLE_AUTO`.
     - Verify: `tests/usr.lib/demangle/`: `demangle("_ZN3foo3bar17h0123456789abcdefE", DEMANGLE_RUST)` returns `"foo::bar"`.
 
-- [ ] **DMG-RUST-03** (medium) Rust v0 `M` and `X` impl paths reject optional `<impl-path>` disambiguators (REQ: REQ-DMGA-0013)
+- [x] **DMG-RUST-03** (medium) Rust v0 `M` and `X` impl paths reject optional `<impl-path>` disambiguators (REQ: REQ-DMGA-0013)
     - Site: `usr.lib/demangle/rust.c:1432-1475` (`rust_parse_v0_path`)
     - Evidence: In the Rust v0 grammar, `M` and `X` begin with `<impl-path> = [<disambiguator>] <path>`. `rust_parse_v0_path()` calls `rust_parse_v0_path(p)` directly without parsing the optional `s<base62>_` disambiguator first, failing on any inherent or trait impl with a disambiguated `<impl-path>` (e.g., `_RMs_...` or `_RXs_...`).
     - Fix: Call `rust_parse_optional_disambiguator(p, NULL, NULL)` before `rust_parse_v0_path(p)` in the `'M'` and `'X'` branches.

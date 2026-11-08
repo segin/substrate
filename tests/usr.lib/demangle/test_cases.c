@@ -156,6 +156,15 @@ static const dm_case_t cases[] = {
     { "an impl's trait", "_RNvXCs_3libINtB2_3GenhENtB2_5Trait3baz", R, "<lib::Gen<u8> as lib::Trait>::baz" },
     { "a value inside a type's argument", "_RINvCs_3lib1fINtB2_3FooKINvB2_1ghEEE", R, NULL },
 
+    /* a Rust v0 impl path may have a disambiguator (rustc 1.99's symbols) */
+    { "the first inherent impl", "_RNvMCs91N3l2zy1RL_3libNtB2_3Bar3one", R, "<lib::Bar>::one" },
+    { "the second", "_RNvMs_Cs91N3l2zy1RL_3libNtB4_3Bar3two", R, "<lib::Bar>::two" },
+    { "a trait impl", "_RNvXs0_Cs91N3l2zy1RL_3libNtB5_3BarNtB5_5Trait3baz", R,
+      "<lib::Bar as lib::Trait>::baz" },
+    { "a generic one", "_RNvXs1_Cs91N3l2zy1RL_3libINtB5_3GenhENtB5_5Trait3bazB5_", R,
+      "<lib::Gen<u8> as lib::Trait>::baz" },
+    { "a malformed one", "_RNvMs.Cs_3libNtB4_3Bar3two", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
