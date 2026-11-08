@@ -507,14 +507,20 @@ static int parser_freeze_from(dm_itanium_parser_t *p, size_t pos) {
  * *@p dims gets where they begin.  *@p decl gets the position of the ) of
  * a pointer's or reference's declarator in front of them, (*), or SIZE_MAX
  * when there is none.  A bracket that is no bound, Foo[abi:cxx11], is
- * passed over.  Returns 0 when there are bounds, -1 when the type is no
- * array.
+ * passed over.  A function type's parameters count as its bounds -- void
+ * (int), void (*)(int) -- and *@p is_func says which it found.  Returns 0
+ * when there are bounds or parameters, -1 when the type has neither.
  */
-static int find_array_declarator(const dm_buf_t *out, size_t off, size_t *dims, size_t *decl) {
+static int find_array_declarator(const dm_buf_t *out, size_t off, size_t *dims, size_t *decl, int *is_func) {
 	size_t i;
 	size_t depth = 0u;
 	size_t close = SIZE_MAX;
 
+	*is_func = 0;
+	/* decltype (x) is no function */
+	if(out->len - off >= 8u && memcmp(out->data + off, "decltype", 8u) == 0) {
+		return -1;
+	}
 	for(i = off; i < out->len; i++) {
 		char c = out->data[i];
 
@@ -530,6 +536,13 @@ static int find_array_declarator(const dm_buf_t *out, size_t off, size_t *dims, 
 					close = j;
 					i = j;
 					continue;
+				}
+				/* else a function's parameters, after a space or a declarator */
+				if(i > off && (out->data[i - 1u] == ' ' || (close != SIZE_MAX && close + 1u == i))) {
+					*dims = i;
+					*decl = (close != SIZE_MAX && close + 1u == i) ? close : SIZE_MAX;
+					*is_func = 1;
+					return 0;
 				}
 			}
 			depth++;
@@ -1865,6 +1878,7 @@ static int append_template_arg(dm_itanium_parser_t *p, const dm_targ_map_t *map,
 static int parse_function_type(dm_itanium_parser_t *p) {
 	int first;
 	int extern_c;
+	size_t params_off;
 
 	if(p->cur[0] != 'F') {
 		return -1;
@@ -1889,6 +1903,7 @@ static int parse_function_type(dm_itanium_parser_t *p) {
 	if(demangle_buf_append(&p->out, " (", 2u) != 0) {
 		return -1;
 	}
+	params_off = p->out.len - 1u;
 
 	first = 1;
 	while(p->cur[0] != '\0' && p->cur[0] != 'E') {
@@ -1926,6 +1941,10 @@ static int parse_function_type(dm_itanium_parser_t *p) {
 
 	p->cur++;
 
+	/* where a pointer's or reference's declarator goes, (*): before the
+	 * parameters, as for an array before its bounds */
+	p->array_dims_off = params_off;
+	p->decl_close = SIZE_MAX;
 	return demangle_buf_appendc(&p->out, ')');
 }
 
@@ -2228,6 +2247,7 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 		size_t before;
 		size_t bracket;
 		size_t decl_at;
+		int is_func;
 
 		p->cur++;
 		pointee = p->cur[0];
@@ -2282,12 +2302,16 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 		 * Foo<int[4]>* came out Foo<int (*)[4]> and Foo[abi:cxx11]*
 		 * Foo (*)[abi:cxx11].
 		 */
-		if(pointee == 'A') {
+		/* and to a function before its parameters, void (*)(int): it was
+		 * void (int)*, as if the pointer were the return type's */
+		if(pointee == 'A' || pointee == 'F') {
 			char decl[8];
 			size_t n = 0u;
 
 			bracket = p->array_dims_off;
-			decl[n++] = ' ';
+			if(pointee == 'A') {
+				decl[n++] = ' ';
+			}
 			decl[n++] = '(';
 			memcpy(decl + n, suffix, suffix_len);
 			n += suffix_len;
@@ -2300,9 +2324,9 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 			if(parser_insert_in_type(p, before, bracket, suffix, suffix_len) != 0)
 				return -1;
 			p->decl_close = bracket + suffix_len;
-		} else if((pointee == 'S' || pointee == 'T') && find_array_declarator(&p->out, before, &bracket, &decl_at) == 0) {
-			/* an array, or a pointer to one, by substitution: its text
-			 * says where the bounds or the declarator are */
+		} else if((pointee == 'S' || pointee == 'T') && find_array_declarator(&p->out, before, &bracket, &decl_at, &is_func) == 0) {
+			/* an array or function, or a pointer to one, by substitution:
+			 * its text says where the bounds or the declarator are */
 			if(decl_at != SIZE_MAX) {
 				if(parser_insert_in_type(p, before, decl_at, suffix, suffix_len) != 0)
 					return -1;
@@ -2311,7 +2335,9 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 				char decl[8];
 				size_t n = 0u;
 
-				decl[n++] = ' ';
+				if(!is_func) {
+					decl[n++] = ' ';
+				}
 				decl[n++] = '(';
 				memcpy(decl + n, suffix, suffix_len);
 				n += suffix_len;

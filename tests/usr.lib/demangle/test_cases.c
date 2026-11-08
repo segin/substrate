@@ -340,6 +340,16 @@ static const dm_case_t cases[] = {
     { "but a constructor's in full", "_ZNSoC1Ev", I | DEMANGLE_NO_VERBOSE,
       "std::basic_ostream<char, std::char_traits<char>>::basic_ostream()" },
 
+    /* an Itanium pointer or reference to a function: void (*)(int) */
+    { "a pointer (Qt's)", "_ZN16QLoggingCategory13installFilterEPFvPS_E", I,
+      "QLoggingCategory::installFilter(void (*)(QLoggingCategory*))" },
+    { "a reference", "_Z1fRFviE", I, "f(void (&)(int))" },
+    { "a pointer to one", "_Z1fPPFviE", I, "f(void (**)(int))" },
+    { "by substitution", "_Z1fPFviES0_", I, "f(void (*)(int), void (*)(int))" },
+    { "a reference to one by substitution", "_Z1fPFviERS0_", I, "f(void (*)(int), void (*&)(int))" },
+    { "to the function by substitution", "_Z1fPFviERS_", I, "f(void (*)(int), void (&)(int))" },
+    { "by template parameter", "_Z1fIFviEEvPT_", I, "void f<void (int)>(void (*)(int))" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
