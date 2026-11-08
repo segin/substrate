@@ -26,6 +26,7 @@ typedef struct {
 #define R  DEMANGLE_RUST
 #define RN (DEMANGLE_RUST | DEMANGLE_NO_RECURSE_LIMIT)
 #define D  DEMANGLE_DLANG
+#define I  DEMANGLE_ITANIUM
 
 static const dm_case_t cases[] = {
     /* a Rust v0 backreference reaches only what came before its B */
@@ -46,6 +47,14 @@ static const dm_case_t cases[] = {
     { "a back reference before the name", "_D3fooQzFZv", D, NULL },
     { "a type back reference to itself", "_D3foo3barFQaZv", D, NULL },
     { "a back reference too long to count", "_D3fooQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaFZv", D, NULL },
+
+    /* a literal of a type that is a substitution candidate keeps its type,
+     * (Foo)1, where a substitution after it points */
+    { "a substitution after a literal's type", "_Z1fIL3Foo1EEvS0_", I, "void f<(Foo)1>(Foo)" },
+    { "a nested literal type's substitution", "_Z1fILN1A1BE3EEvS1_", I, "void f<(A::B)3>(A::B)" },
+    { "inside a template argument", "_Z1fIN1AIL3Foo2EEEEvS1_", I, "void f<A<(Foo)2>>(Foo)" },
+    { "the literal as a template parameter", "_Z1fIL3Foo1EEvT_", I, "void f<(Foo)1>((Foo)1)" },
+    { "a builtin literal is its value", "_Z1fILi1EEvv", I, "void f<1>()" },
 };
 
 int

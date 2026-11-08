@@ -33,7 +33,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Store owned copies (or immutable input-span pointers/lengths) in `p->name_refs` instead of mutable offsets into `p->out.data`.
     - Verify: `tests/usr.lib/demangle/`: a D symbol whose `Q` backreference refers to a symbol parsed inside a qualified type or function parameter list resolves to the original identifier text rather than overwritten qualifier/return-type text.
 
-- [ ] **DMG-ITAN-01** (high) `parse_expr_primary()` leaves dangling substitution offsets and dirty parser state on rewind/failure (REQ: REQ-DMGA-0003)
+- [x] **DMG-ITAN-01** (high) `parse_expr_primary()` leaves dangling substitution offsets and dirty parser state on rewind/failure (REQ: REQ-DMGA-0003)
     - Site: `usr.lib/demangle/itanium.c:1450-1455` (`parse_expr_primary`)
     - Evidence: `parse_expr_primary()` saves `mark_save(p, &m)`, calls `parse_type(p)` to skip the literal's type, and then rewinds `p->out.len = m.out_len` without restoring `p->substitution_count` (or calling `mark_restore(p, &m)` when `parse_type(p)` fails). Substitutions registered inside `parse_type(p)` retain `.off >= m.out_len`, later resolving to unrelated characters appended to `p->out`.
     - Fix: Restore `mark_restore(p, &m)` on failure, and either suppress substitution registration while skipping the literal type or restore `p->substitution_count` when rewinding `p->out.len`.

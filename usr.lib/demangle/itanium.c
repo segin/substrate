@@ -1463,12 +1463,25 @@ parse_expr_primary(dm_itanium_parser_t *p)
             return buf_append(&p->out, "nullptr", 7u);
         }
 
+        /*
+         * The literal's type: a builtin one is no substitution candidate,
+         * and is dropped for the value alone (1, not (int)1).  One that is
+         * a candidate stays, as (Foo)1 -- as c++filt writes it -- since
+         * its substitution's offsets point at that text: the text was
+         * dropped regardless, and an S_ after it read whatever came next.
+         * A type that fails to parse undoes all it did.
+         */
         mark_save(p, &m);
-        if (parse_type(p) != 0) {
+        if (buf_appendc(&p->out, '(') != 0 || parse_type(p) != 0) {
+            mark_restore(p, &m);
             return -1;
         }
-        p->out.len = m.out_len;
-        p->out.data[p->out.len] = '\0';
+        if (p->substitution_count == m.substitution_count) {
+            p->out.len = m.out_len;
+            p->out.data[p->out.len] = '\0';
+        } else if (buf_appendc(&p->out, ')') != 0) {
+            return -1;
+        }
 
         if (p->cur[0] == 'n') {
             if (buf_appendc(&p->out, '-') != 0) {
