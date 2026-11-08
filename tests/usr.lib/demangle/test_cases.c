@@ -181,6 +181,17 @@ static const dm_case_t cases[] = {
       "lib::id::<*mut dyn core::iter::traits::iterator::Iterator<Item = i32>>" },
     { "a binding with no type", "_RINvCs_3lib2idODNtB2_8Iteratorp4ItemEL_E", R, NULL },
 
+    /* a Rust v0 function type's ABI (rustc 1.99's symbols) */
+    { "extern \"C\"", "_RINvCs91N3l2zy1RL_3lib2idFKCmEmEB2_", R, "lib::id::<extern \"C\" fn(u32) -> u32>" },
+    { "extern \"system\"", "_RINvCs91N3l2zy1RL_3lib2idFK6systemmEmEB2_", R,
+      "lib::id::<extern \"system\" fn(u32) -> u32>" },
+    { "a - in the ABI's name", "_RINvCs91N3l2zy1RL_3lib2idFK8C_unwindEuEB2_", R,
+      "lib::id::<extern \"C-unwind\" fn()>" },
+    { "and unsafe", "_RINvCs91N3l2zy1RL_3lib2idFUK6systemEuEB2_", R,
+      "lib::id::<unsafe extern \"system\" fn()>" },
+    { "no ABI", "_RINvCs_3lib2idFmEmE", R, "lib::id::<fn(u32) -> u32>" },
+    { "an ABI that is no identifier", "_RINvCs_3lib2idFK.EuE", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

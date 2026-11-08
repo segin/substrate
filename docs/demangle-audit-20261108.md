@@ -118,7 +118,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Consume `'p'`, parse the associated type name via `rust_parse_v0_identifier(p)`, append `'='`, and parse the bound type via `rust_parse_v0_type(p)`.
     - Verify: `tests/usr.lib/demangle/`: `_RNDp4ItemlEL_...` formats the associated type binding as `Trait<Item = i32>`.
 
-- [ ] **DMG-RUST-05** (medium) Rust v0 function pointers with non-`"C"` extern ABIs fail to parse (REQ: REQ-DMGA-0015)
+- [x] **DMG-RUST-05** (medium) Rust v0 function pointers with non-`"C"` extern ABIs fail to parse (REQ: REQ-DMGA-0015)
     - Site: `usr.lib/demangle/rust.c:1143-1150` (`rust_parse_v0_type_inner`)
     - Evidence: In the Rust v0 grammar, `<abi> = "C" | <undisambiguated-identifier>`. After consuming `'K'`, the parser only checks `if (p->cur[0] == 'C')` and fails to consume `<undisambiguated-identifier>` for any other ABI (such as `K6system` for `extern "system"`).
     - Fix: When `p->cur[0] != 'C'`, parse the ABI name via `rust_parse_v0_identifier()` (converting `'_'` to `'-'` per the Rust v0 specification) and emit `extern "<abi>" `.

@@ -1114,8 +1114,6 @@ rust_parse_v0_type_inner(rust_parser_t *p)
 
     if (p->cur[0] == 'F') {
         int is_unsafe = 0;
-        int has_abi = 0;
-        const char *abi = "Rust";
         size_t ret_off;
         size_t ret_len;
 
@@ -1135,22 +1133,39 @@ rust_parse_v0_type_inner(rust_parser_t *p)
             p->cur++;
         }
 
-        if (p->cur[0] == 'K') {
-            has_abi = 1;
-            p->cur++;
-            if (p->cur[0] == 'C') {
-                abi = "C";
-                p->cur++;
-            }
-        }
-
         if (is_unsafe && rust_buf_append(&p->out, "unsafe ", 7u) != 0) {
             return -1;
         }
-        if (has_abi) {
-            if (rust_buf_append(&p->out, "extern \"", 8u) != 0 ||
-                rust_buf_append(&p->out, abi, strlen(abi)) != 0 ||
-                rust_buf_append(&p->out, "\" ", 2u) != 0) {
+        /*
+         * K <abi>, <abi> = "C" | <undisambiguated-identifier>, the
+         * identifier's _ standing for - : K6system, K8C_unwind.  Only C
+         * was read; any other ABI was left for the parameters, and the
+         * type refused.
+         */
+        if (p->cur[0] == 'K') {
+            p->cur++;
+            if (rust_buf_append(&p->out, "extern \"", 8u) != 0) {
+                return -1;
+            }
+            if (p->cur[0] == 'C') {
+                p->cur++;
+                if (rust_buf_appendc(&p->out, 'C') != 0) {
+                    return -1;
+                }
+            } else {
+                size_t abi_off = p->out.len;
+                size_t i;
+
+                if (p->cur[0] == 'u' || rust_parse_v0_identifier(p) != 0) {
+                    return -1;
+                }
+                for (i = abi_off; i < p->out.len; i++) {
+                    if (p->out.data[i] == '_') {
+                        p->out.data[i] = '-';
+                    }
+                }
+            }
+            if (rust_buf_append(&p->out, "\" ", 2u) != 0) {
                 return -1;
             }
         }
