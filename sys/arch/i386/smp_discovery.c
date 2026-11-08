@@ -629,18 +629,35 @@ acpi_failed:
     early_uart_print("SMP: no usable CPU topology, falling back to UP.\n");
 }
 
+/*
+ * Each AP's idle stack: a kernel stack, the size every thread's has
+ * (THREAD_KSTACK_PAGES), allocated when the AP is first booted, so only the
+ * processors there are take memory.  They were static 4 KiB arrays, a
+ * quarter of what a thread's deep VFS or network path needs.
+ */
+static uint8_t *ap_stacks[MAX_CPUS];
+
+/* The top of AP @p cpu_idx's stack (one past its last byte), allocating it
+ * the first time; 0 when there is no memory for it. */
+static uintptr_t smp_ap_stack_top(int cpu_idx) {
+    if (cpu_idx < 0 || cpu_idx >= MAX_CPUS) {
+        return 0;
+    }
+    if (!ap_stacks[cpu_idx]) {
+        ap_stacks[cpu_idx] = pmm_alloc_contiguous(THREAD_KSTACK_PAGES);
+        if (!ap_stacks[cpu_idx]) {
+            return 0;
+        }
+    }
+    return (uintptr_t)(ap_stacks[cpu_idx] + THREAD_KSTACK_SIZE);
+}
+
 #ifndef HOST_TEST
 
 #define SMP_LOWMEM_PAGE_SIZE       0x1000u
 #define SMP_LOWMEM_TRAMP_BASE      0x8000u
 #define SMP_LOWMEM_TRAMP_LIMIT     0x100000u
 
-/*
- * Each AP's idle stack: a kernel stack, the size every thread's has
- * (THREAD_KSTACK_PAGES), allocated when the AP is first booted, so only the
- * processors there are take memory.
- */
-static uint8_t *ap_stacks[MAX_CPUS];
 static volatile int aps_ready = 0;
 static uint32_t smp_lowmem_cursor = SMP_LOWMEM_TRAMP_BASE;
 static uint32_t smp_trampoline_phys = 0;
@@ -731,14 +748,11 @@ int smp_boot_ap(uint8_t apic_id) {
         }
     }
     if (cpu_idx < 0) return -1;
-    if (!ap_stacks[cpu_idx]) {
-        ap_stacks[cpu_idx] = pmm_alloc_contiguous(THREAD_KSTACK_PAGES);
-        if (!ap_stacks[cpu_idx]) {
-            kprint("SMP: no memory for an AP's kernel stack.\n");
-            return -1;
-        }
+    uint32_t ap_stack_top = (uint32_t)smp_ap_stack_top(cpu_idx);
+    if (!ap_stack_top) {
+        kprint("SMP: no memory for an AP's kernel stack.\n");
+        return -1;
     }
-    uint32_t ap_stack_top = (uint32_t)(uintptr_t)(ap_stacks[cpu_idx] + THREAD_KSTACK_SIZE);
 
     // 2a. Initialize Per-CPU structures for the new core
     percpu_init_cpu(cpu_idx);

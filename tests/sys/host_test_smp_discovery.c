@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define HOST_TEST 1
@@ -211,9 +212,41 @@ static void test_mp_tables_cached_after_page_zero_removed(void) {
     assert(mock_ioapic_gsi_base == 0);
 }
 
+static size_t pmm_contig_pages;
+static int pmm_contig_calls;
+
+void *pmm_alloc_contiguous(size_t count) {
+    pmm_contig_calls++;
+    pmm_contig_pages = count;
+    return aligned_alloc(4096, count * 4096);
+}
+
+/*
+ * An AP's idle stack is a kernel stack the size a thread's is -- 16 KiB,
+ * THREAD_KSTACK_PAGES -- made once, on first boot, and kept.  They were
+ * static 4 KiB arrays, a quarter of what deep VFS, ext2 and network paths
+ * need.
+ */
+static void test_ap_stack_is_a_kernel_stack(void) {
+    uintptr_t top;
+
+    pmm_contig_calls = 0;
+    top = smp_ap_stack_top(1);
+    assert(top != 0);
+    assert(pmm_contig_calls == 1);
+    assert(pmm_contig_pages == THREAD_KSTACK_PAGES);
+    assert(THREAD_KSTACK_SIZE == 16384);
+    assert(top - (uintptr_t)ap_stacks[1] == THREAD_KSTACK_SIZE);
+    /* the same stack when that AP boots again */
+    assert(smp_ap_stack_top(1) == top);
+    assert(pmm_contig_calls == 1);
+    assert(smp_ap_stack_top(MAX_CPUS) == 0);
+}
+
 int main(void) {
     test_mp_tables_from_ebda();
     test_mp_tables_cached_after_page_zero_removed();
+    test_ap_stack_is_a_kernel_stack();
     puts("PASS: MP-table discovery fallback");
     return 0;
 }
