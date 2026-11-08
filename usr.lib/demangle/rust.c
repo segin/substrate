@@ -1217,32 +1217,27 @@ static int rust_parse_v0_type_inner(rust_parser_t *p) {
 	return -1;
 }
 
+/*
+ * <generic-arg> = <lifetime> | <type> | "K" <const>: its first letter
+ * says which.  This tried a type, then a const, then a lifetime, then a
+ * path, backtracking through each: K was never read, so const generics,
+ * f::<4>, were refused, and on a malformed name the guessing took time
+ * exponential in its nesting (_RIC0B_E once ran for minutes).
+ */
 static int rust_parse_v0_generic_arg(rust_parser_t *p) {
-	rust_mark_t m;
 	int saved_in_value = p->in_value;
-	int rc = 0;
+	int rc;
 
 	/* an argument is a type's, or a const's: no turbofish in it */
 	p->in_value = 0;
-	rust_mark_save(p, &m);
-	if(rust_parse_v0_type(p) == 0) {
-		goto out;
+	if(p->cur[0] == 'L') {
+		rc = rust_parse_v0_lifetime(p, 1);
+	} else if(p->cur[0] == 'K') {
+		p->cur++;
+		rc = rust_parse_v0_const(p);
+	} else {
+		rc = rust_parse_v0_type(p);
 	}
-
-	rust_mark_restore(p, &m);
-	if(rust_parse_v0_const(p) == 0) {
-		goto out;
-	}
-
-	rust_mark_restore(p, &m);
-	if(rust_parse_v0_lifetime(p, 1) == 0) {
-		goto out;
-	}
-
-	rust_mark_restore(p, &m);
-	rc = rust_parse_v0_path(p);
-
-out:
 	p->in_value = saved_in_value;
 	return rc;
 }

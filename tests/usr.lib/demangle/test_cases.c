@@ -231,6 +231,19 @@ static const dm_case_t cases[] = {
     { "an unsigned one is never negative", "_RINvCs_3lib2idAhjn5_E", R, NULL },
     { "a bool is true or false, length or not", "_RINvCs_3lib2idAhb1_E", R, "lib::id::<[u8; true]>" },
 
+    /* a Rust v0 generic argument is told by its first letter: K a const
+     * (rustc 1.99's const generics), L a lifetime, anything else a type */
+    { "a usize", "_RINvCs91N3l2zy1RL_3lib2cuKj4_EB2_", R, "lib::cu::<4>" },
+    { "a negative i32", "_RINvCs91N3l2zy1RL_3lib2ciKln7_EB2_", R, "lib::ci::<-7>" },
+    { "a bool", "_RINvCs91N3l2zy1RL_3lib2cbKb1_EB2_", R, "lib::cb::<true>" },
+    { "a char", "_RINvCs91N3l2zy1RL_3lib2ccKc61_EB2_", R, "lib::cc::<'a'>" },
+    { "a newline", "_RINvCs91N3l2zy1RL_3lib2ccKca_EB2_", R, "lib::cc::<'\\n'>" },
+    { "beyond ASCII", "_RINvCs91N3l2zy1RL_3lib2ccKce9_EB2_", R, "lib::cc::<'\\u{e9}'>" },
+    { "after a type", "_RINvCs91N3l2zy1RL_3lib3arrhKj3_EB2_", R, "lib::arr::<u8, 3>" },
+    { "a const placeholder", "_RINvCs_3lib1fKpE", R, "lib::f::<_>" },
+    { "a K with no const", "_RINvCs_3lib1fKE", R, NULL },
+    { "a lifetime", "_RINvCs_3lib1fL_E", R, "lib::f::<'_>" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
