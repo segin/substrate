@@ -40,7 +40,7 @@ static int rust_buf_appendc(rust_buf_t *buf, char ch);
 static int rust_buf_insert(rust_buf_t *buf, size_t off, const char *s, size_t n);
 static char *rust_buf_take(rust_buf_t *buf);
 static void rust_buf_destroy(rust_buf_t *buf);
-static int rust_buf_append_base10(rust_buf_t *buf, size_t v);
+static int rust_buf_append_base10(rust_buf_t *buf, uint64_t v);
 
 static int rust_parser_init(rust_parser_t *p, const char *mangled, int options);
 static void rust_parser_destroy(rust_parser_t *p);
@@ -53,7 +53,7 @@ static void rust_mark_restore(rust_parser_t *p, const rust_mark_t *m);
 
 static int rust_parse_decimal(rust_parser_t *p, size_t *out);
 static int rust_parse_base62(rust_parser_t *p, size_t *out);
-static int rust_parse_optional_disambiguator(rust_parser_t *p, int *present, size_t *value);
+static int rust_parse_optional_disambiguator(rust_parser_t *p, int *present, uint64_t *value);
 static int rust_ident_contains(const char *s, size_t len, const char *needle);
 static int rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, size_t len);
 static int rust_parse_v0_identifier(rust_parser_t *p);
@@ -184,7 +184,7 @@ rust_buf_destroy(rust_buf_t *buf)
 }
 
 static int
-rust_buf_append_base10(rust_buf_t *buf, size_t v)
+rust_buf_append_base10(rust_buf_t *buf, uint64_t v)
 {
     char numbuf[32];
     size_t n = 0u;
@@ -372,11 +372,17 @@ rust_parse_base62(rust_parser_t *p, size_t *out)
     return 0;
 }
 
+/*
+ * [<disambiguator>] = "s" <base-62-number>; *value gets the number, s_ 0,
+ * s0_ 1, and so on.  It is 64 bits wide -- a crate's is a hash, which
+ * overflowed a size_t on i386 and had every crate refused -- and it is no
+ * part of the name: it was printed, {s7577941804541299114}lib for the
+ * crate lib.  A malformed one is an error, not an identifier.
+ */
 static int
-rust_parse_optional_disambiguator(rust_parser_t *p, int *present, size_t *value)
+rust_parse_optional_disambiguator(rust_parser_t *p, int *present, uint64_t *value)
 {
-    size_t tmp;
-    const char *save;
+    uint64_t v = 0u;
 
     if (present != NULL) {
         *present = 0;
@@ -388,33 +394,42 @@ rust_parse_optional_disambiguator(rust_parser_t *p, int *present, size_t *value)
     if (p->cur[0] != 's') {
         return 0;
     }
-
-    save = p->cur;
     p->cur++;
-    if (rust_parse_base62(p, &tmp) != 0) {
-        p->cur = save;
-        return 0;
+
+    if (p->cur[0] != '_') {
+        while (p->cur[0] != '_') {
+            unsigned d;
+
+            if (p->cur[0] >= '0' && p->cur[0] <= '9') {
+                d = (unsigned)(p->cur[0] - '0');
+            } else if (p->cur[0] >= 'a' && p->cur[0] <= 'z') {
+                d = 10u + (unsigned)(p->cur[0] - 'a');
+            } else if (p->cur[0] >= 'A' && p->cur[0] <= 'Z') {
+                d = 36u + (unsigned)(p->cur[0] - 'A');
+            } else {
+                return -1;
+            }
+            if (v > (UINT64_MAX - d) / 62u) {
+                return -1;
+            }
+            v = v * 62u + d;
+            p->cur++;
+        }
+        /* the number is one more than its digits, and a disambiguator
+         * one more again (rustc-demangle's, GNU's): 2^64 - 3 at most */
+        if (v > UINT64_MAX - 2u) {
+            return -1;
+        }
+        v++;
     }
+    p->cur++;   /* the '_' */
 
     if (present != NULL) {
         *present = 1;
     }
     if (value != NULL) {
-        *value = tmp;
+        *value = v;
     }
-
-    if ((p->options & DEMANGLE_NO_VERBOSE) == 0) {
-        if (rust_buf_append(&p->out, "{s", 2u) != 0) {
-            return -1;
-        }
-        if (rust_buf_append_base10(&p->out, tmp) != 0) {
-            return -1;
-        }
-        if (rust_buf_appendc(&p->out, '}') != 0) {
-            return -1;
-        }
-    }
-
     return 0;
 }
 
@@ -1312,7 +1327,7 @@ rust_parse_v0_path(rust_parser_t *p)
     } else if (p->cur[0] == 'N') {
         char ns;
         int has_dis;
-        size_t dis_val;
+        uint64_t dis_val;
 
         p->cur++;
         ns = p->cur[0];

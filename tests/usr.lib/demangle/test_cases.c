@@ -118,6 +118,14 @@ static const dm_case_t cases[] = {
     { "a legacy name", "_ZN3foo3bar17h0123456789abcdefE", R, "foo::bar" },
     { "a C++ name is no Rust one", "_ZN3foo3barEv", R, NULL },
 
+    /* a Rust v0 disambiguator is no part of the name, and 64 bits wide:
+     * a crate's is a hash (rustc 1.99's, for a crate lib) */
+    { "a crate's disambiguator", "_RCs91N3l2zy1RL_3lib", R, "lib" },
+    { "the smallest", "_RCs_3lib", R, "lib" },
+    { "the largest, 2^64 - 1", "_RCslYGhA16ahyd_3lib", R, "lib" },
+    { "one past it", "_RCslYGhA16ahye_3lib", R, NULL },
+    { "a malformed one", "_RCs.3lib", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
