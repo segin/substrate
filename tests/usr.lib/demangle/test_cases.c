@@ -315,6 +315,17 @@ static const dm_case_t cases[] = {
     { "std::bfloat16_t", "_ZTIDF16b", I, "typeinfo for std::bfloat16_t" },
     { "nullptr's type", "_Z1fDn", I, "f(decltype(nullptr))" },
 
+    /* the Itanium special names GNU knows */
+    { "a transaction clone (libstdc++'s)", "_ZGTtNSt11logic_errorD1Ev", I,
+      "transaction clone for std::logic_error::~logic_error()" },
+    { "a non-transaction clone", "_ZGTnNSt11logic_errorD1Ev", I, "non-transaction clone for std::logic_error::~logic_error()" },
+    { "a TLS init function", "_ZTHN1A1xE", I, "TLS init function for A::x" },
+    { "a TLS wrapper function", "_ZTW1x", I, "TLS wrapper function for x" },
+    { "a hidden alias", "_ZGA1f", I, "hidden alias for f" },
+    { "a construction vtable", "_ZTC1B8_1A", I, "construction vtable for A-in-B" },
+    { "a module's initializer (libstdc++'s)", "_ZGIW3stdW6compat", I, "initializer for module std.compat" },
+    { "a T that is none of them", "_ZTX1x", I, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

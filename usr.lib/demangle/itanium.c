@@ -2509,20 +2509,84 @@ static int parse_special_name(dm_itanium_parser_t *p) {
 		return 0;
 	}
 
-	if(p->cur[0] == 'T') {
-		p->cur++;
-		if(demangle_buf_append(&p->out, "transaction clone for ", 22u) != 0) {
-			return -1;
-		}
+	/*
+	 * GTt and GTn <encoding>, a transaction clone and its other; GA
+	 * <encoding>, a hidden alias.  This took any T it had not matched for
+	 * a transaction clone, of whatever followed: _ZGTt... came out
+	 * "transaction clone for t..." and refused, and TH, TW too.
+	 */
+	if((p->cur[0] == 'G' && p->cur[1] == 'T' && (p->cur[2] == 't' || p->cur[2] == 'n')) || (p->cur[0] == 'G' && p->cur[1] == 'A')) {
+		const char *what = p->cur[1] == 'A' ? "hidden alias for " : p->cur[2] == 't' ? "transaction clone for " : "non-transaction clone for ";
+		int rc;
 
-		if(parser_enter(p) != 0) {
+		p->cur += (p->cur[1] == 'A') ? 2 : 3;
+		if(demangle_buf_append(&p->out, what, strlen(what)) != 0 || parser_enter(p) != 0) {
 			return -1;
 		}
-		if(parse_encoding(p) != 0) {
-			parser_leave(p);
-			return -1;
-		}
+		rc = parse_encoding(p);
 		parser_leave(p);
+		return rc;
+	}
+
+	/* TH and TW <name>: a thread_local's init and wrapper functions */
+	if(p->cur[0] == 'T' && (p->cur[1] == 'H' || p->cur[1] == 'W')) {
+		const char *what = p->cur[1] == 'H' ? "TLS init function for " : "TLS wrapper function for ";
+
+		p->cur += 2;
+		if(demangle_buf_append(&p->out, what, strlen(what)) != 0) {
+			return -1;
+		}
+		return parse_name(p);
+	}
+
+	/* TC <derived type> <offset> _ <base type>: "A-in-B", the base first */
+	if(p->cur[0] == 'T' && p->cur[1] == 'C') {
+		size_t derived_off, derived_len, off;
+		char *derived;
+		int rc;
+
+		p->cur += 2;
+		if(demangle_buf_append(&p->out, "construction vtable for ", 24u) != 0) {
+			return -1;
+		}
+		derived_off = p->out.len;
+		if(parse_type(p) != 0 || parse_number(p, &off) != 0 || p->cur[0] != '_') {
+			return -1;
+		}
+		p->cur++;
+		derived_len = p->out.len - derived_off;
+		derived = (char *)malloc(derived_len + 1u);
+		if(derived == NULL) {
+			return -1;
+		}
+		memcpy(derived, p->out.data + derived_off, derived_len);
+		derived[derived_len] = '\0';
+		p->out.len = derived_off;
+		p->out.data[p->out.len] = '\0';
+		rc = (parse_type(p) != 0 || demangle_buf_append(&p->out, "-in-", 4u) != 0 || demangle_buf_append(&p->out, derived, derived_len) != 0) ? -1 : 0;
+		free(derived);
+		return rc;
+	}
+
+	/* GI <module name>: W <source-name> for each component, std.compat */
+	if(p->cur[0] == 'G' && p->cur[1] == 'I' && p->cur[2] == 'W') {
+		int first = 1;
+
+		p->cur += 2;
+		if(demangle_buf_append(&p->out, "initializer for module ", 23u) != 0) {
+			return -1;
+		}
+		while(p->cur[0] == 'W') {
+			size_t len;
+
+			p->cur++;
+			if(parse_number(p, &len) != 0 || len == 0u || !has_n_bytes(p->cur, len) || (!first && demangle_buf_appendc(&p->out, '.') != 0) ||
+			   demangle_buf_append(&p->out, p->cur, len) != 0) {
+				return -1;
+			}
+			p->cur += len;
+			first = 0;
+		}
 		return 0;
 	}
 
