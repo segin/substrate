@@ -54,7 +54,6 @@ static void rust_mark_restore(rust_parser_t *p, const rust_mark_t *m);
 static int rust_parse_decimal(rust_parser_t *p, size_t *out);
 static int rust_parse_base62(rust_parser_t *p, size_t *out);
 static int rust_parse_optional_disambiguator(rust_parser_t *p, int *present, uint64_t *value);
-static int rust_ident_contains(const char *s, size_t len, const char *needle);
 static int rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, size_t len);
 static int rust_parse_v0_identifier(rust_parser_t *p);
 static int rust_parse_v0_type(rust_parser_t *p);
@@ -430,30 +429,6 @@ rust_parse_optional_disambiguator(rust_parser_t *p, int *present, uint64_t *valu
     if (value != NULL) {
         *value = v;
     }
-    return 0;
-}
-
-static int
-rust_ident_contains(const char *s, size_t len, const char *needle)
-{
-    size_t i;
-    size_t nlen;
-
-    if (s == NULL || needle == NULL) {
-        return 0;
-    }
-
-    nlen = strlen(needle);
-    if (nlen == 0u || nlen > len) {
-        return 0;
-    }
-
-    for (i = 0u; i + nlen <= len; i++) {
-        if (memcmp(s + i, needle, nlen) == 0) {
-            return 1;
-        }
-    }
-
     return 0;
 }
 
@@ -1347,67 +1322,72 @@ rust_parse_v0_path(rust_parser_t *p)
             return -1;
         }
 
-        if (islower((unsigned char)ns)) {
-            size_t ident_off;
-            size_t ident_len;
+        /*
+         * The namespace says how the name prints.  A lower-case one -- t
+         * for types, v for values -- is the name as it is: foo::bar.  An
+         * upper-case one is something the compiler made, braced, with its
+         * number: {closure#0}, {shim:vtable#0}, {X:name#1}.  This braced
+         * every lower-case name, lib::{f}, and told closures and shims by
+         * the text "closure" or "shim" in the name, so a function named
+         * __rust_no_alloc_shim_is_unstable_v2 was {shim:vtable#0}.
+         */
+        if (rust_buf_append(&p->out, "::", 2u) != 0) {
+            rust_mark_restore(p, &m);
+            rust_parser_leave(p);
+            return -1;
+        }
+        if (isupper((unsigned char)ns)) {
+            size_t colon;
+            size_t name_off;
 
-            if (rust_buf_append(&p->out, "::", 2u) != 0) {
+            if (rust_buf_appendc(&p->out, '{') != 0 ||
+                (ns == 'C' ? rust_buf_append(&p->out, "closure", 7u) :
+                 ns == 'S' ? rust_buf_append(&p->out, "shim", 4u) :
+                 rust_buf_appendc(&p->out, ns)) != 0) {
                 rust_mark_restore(p, &m);
                 rust_parser_leave(p);
                 return -1;
             }
-
-            ident_off = p->out.len;
-            if (rust_parse_v0_identifier(p) != 0) {
+            colon = p->out.len;
+            if (rust_buf_appendc(&p->out, ':') != 0) {
                 rust_mark_restore(p, &m);
                 rust_parser_leave(p);
                 return -1;
             }
-            ident_len = p->out.len - ident_off;
-
-            if (rust_ident_contains(p->out.data + ident_off, ident_len, "closure")) {
-                p->out.len = ident_off;
+            name_off = p->out.len;
+            if (p->cur[0] == '0') {
+                p->cur++;               /* no name, as rustc gives a closure */
+            } else if (rust_parse_v0_identifier(p) != 0) {
+                rust_mark_restore(p, &m);
+                rust_parser_leave(p);
+                return -1;
+            }
+            if (p->out.len == name_off) {
+                p->out.len = colon;     /* no name: {closure#0} */
                 p->out.data[p->out.len] = '\0';
-                if (rust_buf_append(&p->out, "{closure#", 9u) != 0) {
-                    rust_mark_restore(p, &m);
-                    rust_parser_leave(p);
-                    return -1;
-                }
-                if (rust_buf_append_base10(&p->out, has_dis ? dis_val : 0u) != 0 ||
-                    rust_buf_appendc(&p->out, '}') != 0) {
-                    rust_mark_restore(p, &m);
-                    rust_parser_leave(p);
-                    return -1;
-                }
-            } else if (rust_ident_contains(p->out.data + ident_off, ident_len, "shim") ||
-                       rust_ident_contains(p->out.data + ident_off, ident_len, "vtable")) {
-                p->out.len = ident_off;
+            }
+            /* none is #0, s_ #1 (it printed s_ as #0 too) */
+            if (rust_buf_appendc(&p->out, '#') != 0 ||
+                rust_buf_append_base10(&p->out, has_dis ? dis_val + 1u : 0u) != 0 ||
+                rust_buf_appendc(&p->out, '}') != 0) {
+                rust_mark_restore(p, &m);
+                rust_parser_leave(p);
+                return -1;
+            }
+        } else if (islower((unsigned char)ns)) {
+            if (p->cur[0] == '0') {
+                p->cur++;               /* no name, no "::" */
+                p->out.len -= 2u;
                 p->out.data[p->out.len] = '\0';
-                if (rust_buf_append(&p->out, "{shim:vtable#", 13u) != 0) {
-                    rust_mark_restore(p, &m);
-                    rust_parser_leave(p);
-                    return -1;
-                }
-                if (rust_buf_append_base10(&p->out, has_dis ? dis_val : 0u) != 0 ||
-                    rust_buf_appendc(&p->out, '}') != 0) {
-                    rust_mark_restore(p, &m);
-                    rust_parser_leave(p);
-                    return -1;
-                }
-            } else {
-                if (rust_buf_insert(&p->out, ident_off, "{", 1u) != 0 ||
-                    rust_buf_appendc(&p->out, '}') != 0) {
-                    rust_mark_restore(p, &m);
-                    rust_parser_leave(p);
-                    return -1;
-                }
+            } else if (rust_parse_v0_identifier(p) != 0) {
+                rust_mark_restore(p, &m);
+                rust_parser_leave(p);
+                return -1;
             }
         } else {
-            if (rust_buf_append(&p->out, "::", 2u) != 0 || rust_parse_v0_identifier(p) != 0) {
-                rust_mark_restore(p, &m);
-                rust_parser_leave(p);
-                return -1;
-            }
+            rust_mark_restore(p, &m);
+            rust_parser_leave(p);
+            return -1;
         }
     } else if (p->cur[0] == 'M') {
         size_t before;

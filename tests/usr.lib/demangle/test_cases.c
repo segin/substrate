@@ -126,6 +126,20 @@ static const dm_case_t cases[] = {
     { "one past it", "_RCslYGhA16ahye_3lib", R, NULL },
     { "a malformed one", "_RCs.3lib", R, NULL },
 
+    /* a Rust v0 namespace says how a name prints: lower case as it is,
+     * upper case braced with its number (rustc 1.99's symbols, and GNU's) */
+    { "a value", "_RNvCs91N3l2zy1RL_3lib14takes_dyn_iter", R, "lib::takes_dyn_iter" },
+    { "a type's value", "_RNvNtCs_3lib3Bar3baz", R, "lib::Bar::baz" },
+    { "a value named like a shim", "_RNvCsaVUCjkH8HsD_7___rustc35___rust_no_alloc_shim_is_unstable_v2", R,
+      "__rustc::__rust_no_alloc_shim_is_unstable_v2" },
+    { "a value named closure", "_RNvCshgxSpmajvKg_7mycrate7closure", R, "mycrate::closure" },
+    { "a closure", "_RNCNvCs91N3l2zy1RL_3lib9instances0", R, "lib::instances::{closure#0}" },
+    { "the second closure", "_RNCCs_3libs_0", R, "lib::{closure#1}" },
+    { "a named closure", "_RNCCs_3libs0_3foo", R, "lib::{closure:foo#2}" },
+    { "a shim", "_RNSCs_3lib6vtable", R, "lib::{shim:vtable#0}" },
+    { "another namespace", "_RNXCs_3lib1x", R, "lib::{X:x#0}" },
+    { "no namespace", "_RN0Cs_3lib1x", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

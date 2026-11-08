@@ -240,16 +240,19 @@ test_9n(void)
 static void
 test_9o(void)
 {
-    expect_contains("9o-1", "_RNvCshgxSpmajvKg_7mycrate7closure", DEMANGLE_AUTO, "{closure#0}");
-    expect_contains("9o-2", "_RNvCshgxSpmajvKg_7mycrate4shim", DEMANGLE_AUTO, "{shim:vtable#0}");
-    expect_contains("9o-3", "_RNvCshgxSpmajvKg_7mycrates1_7closure", DEMANGLE_AUTO, "{closure#2}");
+    /* a closure or shim is told by its namespace (C, S), not its name:
+     * these are values named closure and shim, as GNU c++filt has them */
+    expect_contains("9o-1", "_RNvCshgxSpmajvKg_7mycrate7closure", DEMANGLE_AUTO, "mycrate::closure");
+    expect_contains("9o-2", "_RNvCshgxSpmajvKg_7mycrate4shim", DEMANGLE_AUTO, "mycrate::shim");
+    expect_contains("9o-3", "_RNvCshgxSpmajvKg_7mycrates1_7closure", DEMANGLE_AUTO, "mycrate::closure");
 }
 
 static void
 test_9p(void)
 {
-    expect_contains("9p-1", "_RNvCshgxSpmajvKg_7mycrateu3abc", DEMANGLE_AUTO, "{{");
-    expect_contains("9p-2", "_RNvCshgxSpmajvKg_7mycrate3abc", DEMANGLE_AUTO, "{abc}");
+    /* a value's name is not braced, Punycode or not */
+    expect_contains("9p-1", "_RNvCshgxSpmajvKg_7mycrateu3abc", DEMANGLE_AUTO, "mycrate::");
+    expect_contains("9p-2", "_RNvCshgxSpmajvKg_7mycrate3abc", DEMANGLE_AUTO, "mycrate::abc");
 }
 
 static void
