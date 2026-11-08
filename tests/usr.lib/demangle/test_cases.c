@@ -254,6 +254,13 @@ static const dm_case_t cases[] = {
     { "a type and its method", "_RNvMNtCs91N3l2zy1RL_3lib3uniNtB2_u9Gre_6ka8iu6ma_hia", R, "<lib::uni::Größe>::maß" },
     { "a delta past U+10FFFF", "_RNvCs_3libu6zzzzzz", R, NULL },
 
+    /* an Itanium bool literal is false or true (libstdc++'s, LLVM's) */
+    { "false", "_ZNSt10moneypunctIcLb0EED0Ev", I, "std::moneypunct<char, false>::~moneypunct()" },
+    { "true", "_ZGVN5boost4asio3ssl6detail12openssl_initILb1EE9instance_E", I,
+      "guard variable for boost::asio::ssl::detail::openssl_init<true>::instance_" },
+    { "several", "_Z1fILb1ELb0ELb1EEvv", I, "void f<true, false, true>()" },
+    { "any other value keeps its type", "_Z1fILb2EEvv", I, "void f<(bool)2>()" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

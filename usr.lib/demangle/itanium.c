@@ -1478,8 +1478,10 @@ static int parse_expr_primary(dm_itanium_parser_t *p) {
 
 	if(p->cur[0] == 'L') {
 		size_t num_len;
+		char tcode;
 
 		p->cur++;
+		tcode = p->cur[0];
 
 		if(p->cur[0] == 'D' && p->cur[1] == 'n' && p->cur[2] == 'E') {
 			p->cur += 3;
@@ -1520,6 +1522,25 @@ static int parse_expr_primary(dm_itanium_parser_t *p) {
 
 		if(num_len == 0u || p->cur[num_len] != 'E') {
 			return -1;
+		}
+
+		/*
+		 * A bool is false or true, as GNU c++filt prints it: Lb0E was 0,
+		 * and NodeOptions<false> read NodeOptions<0>.  Any other value
+		 * keeps its type, (bool)2.
+		 */
+		if(tcode == 'b') {
+			size_t neg = (p->out.len > m.out_len) ? 1u : 0u;   /* the '-' */
+
+			p->out.len = m.out_len;
+			p->out.data[p->out.len] = '\0';
+			if(!neg && num_len == 1u && (p->cur[0] == '0' || p->cur[0] == '1')) {
+				p->cur += 2u;
+				return p->cur[-2] == '1' ? demangle_buf_append(&p->out, "true", 4u) : demangle_buf_append(&p->out, "false", 5u);
+			}
+			if(demangle_buf_append(&p->out, neg ? "(bool)-" : "(bool)", neg ? 7u : 6u) != 0) {
+				return -1;
+			}
 		}
 
 		if(demangle_buf_append(&p->out, p->cur, num_len) != 0) {
