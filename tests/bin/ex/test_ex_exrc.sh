@@ -74,6 +74,16 @@ out=$(run 'set nu' -s)
 if numbered "$out"; then
 	fail "-s read EXINIT: [$out]"
 fi
+# nor ./.exrc, whatever would have set exrc: EXINIT, or ~/.exrc
+out=$(run 'set exrc' -s)
+if numbered "$out"; then
+	fail "-s read ./.exrc after EXINIT set exrc: [$out]"
+fi
+printf 'set exrc\n' >"$T/home/.exrc"
+out=$(run - -s)
+if numbered "$out"; then
+	fail "-s read ./.exrc after ~/.exrc set exrc: [$out]"
+fi
 
 out=$(printf 'set exrc?\nset ex\nset exrc?\nset noex\nset exrc?\nq!\n' \
 	| HOME="$T/home" "$EX_BIN" -s 2>&1)

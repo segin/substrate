@@ -83,6 +83,49 @@ for m in 4755 2755 600; do
 	[ "$(stat -c %a m$m)" = $m ] || fail ":w changed mode $m to $(stat -c %a m$m)"
 done
 
+# owner and group survive :w.  A file of one of the user's other groups
+# does it; as root, one of another user's.  Otherwise there is no such file
+# to make, and it is skipped.
+echo x >og
+other=
+for g in $(id -G); do
+	[ "$g" != "$(id -g)" ] && other=$g && break
+done
+if [ "$(id -u)" = 0 ]; then
+	chown 65534:65534 og
+elif [ -n "$other" ]; then
+	chgrp "$other" og
+else
+	og=
+fi
+if [ -n "${og-x}" ]; then
+	before=$(stat -c %u:%g og)
+	printf 's/x/y/\nw\nq\n' | "$EX_BIN" -s og >/dev/null 2>&1
+	[ "$(cat og)" = y ] || fail ":w did not write og: [$(cat og)]"
+	[ "$(stat -c %u:%g og)" = "$before" ] ||
+		fail ":w changed owner:group $before to $(stat -c %u:%g og)"
+else
+	echo "SKIP: owner and group (no other group, not root)"
+fi
+
+# the data is on stable storage before :w succeeds: fsync (or fdatasync)
+# of the file, before any rename over its name.  Seen by strace, where
+# there is one.
+if command -v strace >/dev/null 2>&1; then
+	echo x >fs
+	strace -f -o trace -e trace=fsync,fdatasync,rename,renameat,renameat2 \
+		"$EX_BIN" -s -c 's/x/y/' -c w -c q fs </dev/null >/dev/null 2>&1
+	sync_at=$(grep -n -m1 -E 'f(data)?sync\(' trace | cut -d: -f1)
+	rename_at=$(grep -n -m1 -E 'rename(at2?)?\(' trace | cut -d: -f1)
+	if [ "$(cat fs)" != y ] || [ -z "$sync_at" ]; then
+		fail ":w did not fsync: [$(cat trace)]"
+	elif [ -n "$rename_at" ] && [ "$rename_at" -lt "$sync_at" ]; then
+		fail ":w renamed before it fsynced: [$(cat trace)]"
+	fi
+else
+	echo "SKIP: fsync (no strace)"
+fi
+
 if [ "$fails" -ne 0 ]; then
 	exit 1
 fi

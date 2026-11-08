@@ -92,6 +92,39 @@ out=$(printf 'recover\n1p\nq!\n' | ex v 2>&1)
 if grep -qx planted <<<"$out"; then
 	fail ":recover followed a link in the recover directory"
 fi
+
+# :preserve onto a symbolic or hard link planted at its own image's name
+# writes neither one's file: the name is made afresh, a file of its own
+for kind in symbolic hard; do
+	rm -f "$R"/*
+	echo planted >planted
+	if [ "$kind" = symbolic ]; then
+		ln -s "$T/planted" "$R/$rec"
+	else
+		ln "$T/planted" "$R/$rec"
+	fi
+	printf 's/^/Y/\npreserve\nq!\n' | ex v >/dev/null 2>&1
+	if [ "$(cat planted)" != planted ]; then
+		fail ":preserve wrote through a $kind link at its image's name: [$(cat planted)]"
+	fi
+	if [ -L "$R/$rec" ] || [ ! -f "$R/$rec" ] || [ "$(stat -c %h "$R/$rec")" != 1 ]; then
+		fail ":preserve left a $kind link at its image's name"
+	fi
+done
+
+# a recover file another user owns is not recovered.  Making one needs
+# root (chown); others skip it.
+if [ "$(id -u)" = 0 ]; then
+	rm -f "$R"/*
+	printf 's/^/Z/\npreserve\nq!\n' | ex v >/dev/null 2>&1
+	chown 65534 "$R/$rec"
+	out=$(printf 'recover\n1p\nq!\n' | ex v 2>&1)
+	if grep -q '^Z' <<<"$out"; then
+		fail ":recover took a recover file another user owns: [$out]"
+	fi
+else
+	echo "SKIP: a recover file another user owns (needs root)"
+fi
 rm -f "$R"/*
 printf 's/vv/X/\npreserve\nq!\n' | ex v >/dev/null 2>&1
 chmod 750 "$R"
