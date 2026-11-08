@@ -156,7 +156,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Move `demangle_buf_insert()` into `buffer.c` / `demangle_internal.h` and call `demangle_buf_*` directly (or delegate `buf_printf` to `demangle_buf_printf`).
     - Verify: `make -C usr.lib/demangle clean all` and `make -C usr.lib/demangle NATIVE_BUILD=1 clean all` succeed with zero warnings.
 
-- [ ] **DMG-MAINT-02** (low) `usr.lib/demangle/Makefile` `clean` target leaves `.d` dependency files and `dist/` artifacts (REQ: REQ-DMGA-0020)
+- [x] **DMG-MAINT-02** (low) `usr.lib/demangle/Makefile` `clean` target leaves `.d` dependency files and `dist/` artifacts (REQ: REQ-DMGA-0020)
     - Site: `usr.lib/demangle/Makefile:72-73`
     - Evidence: `make -C usr.lib/demangle clean` removes `$(OBJS)`, `$(PIC_OBJS)`, `$(O)$(LIBNAME)`, `$(O)$(SHLIB)`, and `$(MODE_STAMP)`, but leaves `*.d`, `*.pic.d`, and `usr.lib/demangle/dist/` in the working tree.
     - Fix: Remove `$(OBJS:.o=.d)` and `$(PIC_OBJS:.pic.o=.pic.d)` in `clean`, and remove untracked build artifacts from the source directory.

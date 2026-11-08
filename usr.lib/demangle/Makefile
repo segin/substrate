@@ -69,8 +69,10 @@ $(O)%.pic.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(PIC_CFLAGS) -c $< -o $@
 
+# The .d files are the -MMD header dependencies of each object (Makefile.inc).
 clean:
 	rm -f $(OBJS) $(PIC_OBJS) $(O)$(LIBNAME) $(O)$(SHLIB) $(MODE_STAMP)
+	rm -f $(OBJS:.o=.d) $(PIC_OBJS:.o=.d)
 
 # The demangle(3) pages live in usr.man/man3 and are installed by
 # usr.man/Makefile.
