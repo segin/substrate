@@ -462,6 +462,10 @@ rust_utf8_append_codepoint(rust_buf_t *buf, uint32_t cp)
     char tmp[4];
     size_t n;
 
+    /* a UTF-16 surrogate is no character: as UTF-8 it is ill-formed */
+    if (cp >= 0xD800u && cp <= 0xDFFFu) {
+        return -1;
+    }
     if (cp <= 0x7Fu) {
         tmp[0] = (char)cp;
         n = 1u;
@@ -1622,10 +1626,12 @@ rust_legacy_decode_token(const char *tok, size_t tok_len, rust_buf_t *out)
             } else {
                 v = 10u + (unsigned)(tok[k] - 'A');
             }
-            if (cp > (ULONG_MAX - v) / 16ul) {
+            /* past U+10FFFF it is no character -- and on LP64 the
+             * uint32_t below cut $u100000041$ to U+0041, A */
+            cp = cp * 16ul + (unsigned long)v;
+            if (cp > 0x10FFFFul) {
                 return -1;
             }
-            cp = cp * 16ul + (unsigned long)v;
         }
         if (rust_utf8_append_codepoint(out, (uint32_t)cp) != 0) {
             return -1;

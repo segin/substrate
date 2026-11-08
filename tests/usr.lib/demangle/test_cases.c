@@ -65,6 +65,16 @@ static const dm_case_t cases[] = {
     { "a D number past SIZE_MAX", "_D3foo__T3barVi18446744073709551619_Z3bazFZv", D,
       "foo.bar!(int(18446744073709551619)).baz: void function()" },
     { "a Rust length past SIZE_MAX", "_ZN20496382304121724020foo17h0123456789abcdefE", R, NULL },
+
+    /* a legacy Rust $u escape is a character, or the name is left as it
+     * was mangled (as for one past U+10FFFF already, and as c++filt does) */
+    { "an escape of a character", "_ZN3foo5$u41$17h0123456789abcdefE", DEMANGLE_AUTO, "foo::A" },
+    { "an escape of the last character", "_ZN3foo9$u10ffff$17h0123456789abcdefE", DEMANGLE_AUTO,
+      "foo::\xf4\x8f\xbf\xbf" },
+    { "an escape of a UTF-16 surrogate", "_ZN3foo7$ud800$17h0123456789abcdefE", DEMANGLE_AUTO,
+      "foo::$ud800$::h0123456789abcdef" },
+    { "an escape past 32 bits", "_ZN3foo12$u100000041$17h0123456789abcdefE", DEMANGLE_AUTO,
+      "foo::$u100000041$::h0123456789abcdef" },
 };
 
 int

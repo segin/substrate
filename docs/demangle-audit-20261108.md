@@ -54,7 +54,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Use pre-multiply saturation (`v > ((size_t)-1 - d) / 10u`) in `dlang_parse_template_value()` and `rust_parse_decimal_span()`, and bound `mag <= (size_t)LLONG_MAX` in `parse_signed_number_token()`.
     - Verify: `tests/usr.lib/demangle/`: inputs with 20+ digit numbers in D template values, Rust legacy length spans, and Itanium thunk offsets fail cleanly (`NULL`).
 
-- [ ] **DMG-UTF8-01** (high) UTF-8 encoder accepts UTF-16 surrogates and 64-bit legacy `$u...$` escapes truncate `unsigned long` to `uint32_t` (REQ: REQ-DMGA-0006)
+- [x] **DMG-UTF8-01** (high) UTF-8 encoder accepts UTF-16 surrogates and 64-bit legacy `$u...$` escapes truncate `unsigned long` to `uint32_t` (REQ: REQ-DMGA-0006)
     - Site: `usr.lib/demangle/rust.c:508-536` (`rust_utf8_append_codepoint`), `usr.lib/demangle/rust.c:1651-1675` (`rust_legacy_decode_token`)
     - Evidence:
         1. `rust_utf8_append_codepoint()` accepts `0xD800 <= cp <= 0xDFFF`, emitting ill-formed UTF-8 (CESU-8 surrogates).
