@@ -55,6 +55,16 @@ static const dm_case_t cases[] = {
     { "inside a template argument", "_Z1fIN1AIL3Foo2EEEEvS1_", I, "void f<A<(Foo)2>>(Foo)" },
     { "the literal as a template parameter", "_Z1fIL3Foo1EEvT_", I, "void f<(Foo)1>((Foo)1)" },
     { "a builtin literal is its value", "_Z1fILi1EEvv", I, "void f<1>()" },
+
+    /* numbers too big for what they are refused, not wrapped */
+    { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
+      "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
+    { "a thunk offset past LLONG_MAX", "_ZThn9223372036854775808_N3Foo3barEv", I, NULL },
+    { "a virtual thunk's offset past it", "_ZTv0_n10000000000000000000_N3Foo3barEv", I, NULL },
+    { "a D length past SIZE_MAX", "_D3foo__T3barVi18446744073709551619abcZ3bazFZv", D, NULL },
+    { "a D number past SIZE_MAX", "_D3foo__T3barVi18446744073709551619_Z3bazFZv", D,
+      "foo.bar!(int(18446744073709551619)).baz: void function()" },
+    { "a Rust length past SIZE_MAX", "_ZN20496382304121724020foo17h0123456789abcdefE", R, NULL },
 };
 
 int

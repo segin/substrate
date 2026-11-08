@@ -393,8 +393,16 @@ dlang_parse_template_value(dlang_parser_t *p)
 
     if (isdigit((unsigned char)p->cur[0])) {
         size_t n = 0u;
+        int too_big = 0;    /* past SIZE_MAX: no length, only a number */
+
         while (isdigit((unsigned char)p->cur[0])) {
-            n = n * 10u + (size_t)(p->cur[0] - '0');
+            size_t d = (size_t)(p->cur[0] - '0');
+
+            if (n > (SIZE_MAX - d) / 10u) {
+                too_big = 1;
+            } else {
+                n = n * 10u + d;
+            }
             if (dlang_buf_appendc(&p->out, p->cur[0]) != 0) {
                 return -1;
             }
@@ -406,7 +414,7 @@ dlang_parse_template_value(dlang_parser_t *p)
             return 0;
         }
 
-        if (n > 0u && dlang_has_n_bytes(p->cur, n)) {
+        if (!too_big && n > 0u && dlang_has_n_bytes(p->cur, n)) {
             if (dlang_buf_appendc(&p->out, '"') != 0 ||
                 dlang_buf_append(&p->out, p->cur, n) != 0 ||
                 dlang_buf_appendc(&p->out, '"') != 0) {

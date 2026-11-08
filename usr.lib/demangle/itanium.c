@@ -614,7 +614,8 @@ parse_signed_number_token(dm_itanium_parser_t *p, long long *out)
         p->cur++;
     }
 
-    if (parse_number(p, &mag) != 0 || p->cur[0] != '_') {
+    /* past LLONG_MAX it is no long long: it came out wrapped */
+    if (parse_number(p, &mag) != 0 || p->cur[0] != '_' || mag > (size_t)LLONG_MAX) {
         return -1;
     }
 

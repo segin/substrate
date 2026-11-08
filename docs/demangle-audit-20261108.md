@@ -45,7 +45,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Include `has_return_type` and the active slice of `last_template_off` / `last_template_len` in `dm_parse_mark_t`, and restore them in `mark_restore()`.
     - Verify: `tests/usr.lib/demangle/`: backtracking over a failed template type parse does not cause a non-template outer function to consume its first parameter as a return type.
 
-- [ ] **DMG-NUM-01** (high) Integer overflow and signed conversion defects in number parsers (REQ: REQ-DMGA-0005)
+- [x] **DMG-NUM-01** (high) Integer overflow and signed conversion defects in number parsers (REQ: REQ-DMGA-0005)
     - Site: `usr.lib/demangle/dlang.c:430-437` (`dlang_parse_template_value`), `usr.lib/demangle/rust.c:1584-1591` (`rust_parse_decimal_span`), `usr.lib/demangle/itanium.c:586-613` (`parse_signed_number_token`)
     - Evidence:
         1. `dlang_parse_template_value()` computes `n = n * 10u + (size_t)(p->cur[0] - '0')` with no overflow check, allowing wraparound on long digit runs.

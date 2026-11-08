@@ -1537,11 +1537,14 @@ rust_parse_decimal_span(const char **cur, size_t *out)
     v = 0u;
     s = *cur;
     while (isdigit((unsigned char)*s)) {
-        size_t nv = v * 10u + (size_t)(*s - '0');
-        if (nv < v) {
+        size_t d = (size_t)(*s - '0');
+
+        /* before the multiply: after it, nv < v misses a wrap from
+         * [SIZE_MAX / 9, SIZE_MAX / 10 * 10] */
+        if (v > (SIZE_MAX - d) / 10u) {
             return -1;
         }
-        v = nv;
+        v = v * 10u + d;
         s++;
     }
 
