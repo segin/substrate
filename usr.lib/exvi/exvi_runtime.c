@@ -1337,10 +1337,10 @@ recover_signal_save(buffer_t *b)
     }
     for (l = b->head; l; l = l->next) {
         if (l->len > 0) {
-            write(fd, l->text, l->len);
+            (void)!write(fd, l->text, l->len);
         }
         if (l->next || b->trailing_newline) {
-            write(fd, "\n", 1);
+            (void)!write(fd, "\n", 1);
         }
     }
     close(fd);

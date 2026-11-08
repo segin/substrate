@@ -845,7 +845,7 @@ exvi_visual_shell_suspend(void)
     static const char suspend_seq[] = "\x1b[?1049l";
 
     if (active_visual && active_visual->raw_active) {
-        write(STDOUT_FILENO, suspend_seq, sizeof(suspend_seq) - 1);
+        (void)!write(STDOUT_FILENO, suspend_seq, sizeof(suspend_seq) - 1);
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &active_visual->saved_tio);
     }
 }
@@ -889,7 +889,7 @@ exvi_visual_shell_resume(void)
         raw.c_cc[VMIN] = 1;
         raw.c_cc[VTIME] = 0;
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-        write(STDOUT_FILENO, resume_seq, sizeof(resume_seq) - 1);
+        (void)!write(STDOUT_FILENO, resume_seq, sizeof(resume_seq) - 1);
         active_visual->raw_active = 1;
     }
 }
@@ -6447,7 +6447,7 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == '0') {
         if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
-            write(STDOUT_FILENO, "\a", 1);
+            (void)!write(STDOUT_FILENO, "\a", 1);
         }
     } else if (vis->pending_op == 'y' && key == '0') {
         if (vi_yank_span(vis, b->cur, 0, vis->cursor_col) != 0) {
@@ -6526,7 +6526,7 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == '|') {
         if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
-            write(STDOUT_FILENO, "\a", 1);
+            (void)!write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == '|') {
@@ -6876,7 +6876,7 @@ vi_do_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             (!b->cur->prev || vi_line_is_paragraph_break(b->cur->prev))) {
             if (vis->cursor_col > 0) {
                 if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
-                    write(STDOUT_FILENO, "\a", 1);
+                    (void)!write(STDOUT_FILENO, "\a", 1);
                 }
             }
             vis->pending_op = 0;
@@ -8265,7 +8265,7 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
     if (exvi_take_pending_status(vis->status_msg, sizeof(vis->status_msg))) {
         vis->status_once = 1;
         have_status = 1;
-        write(STDOUT_FILENO, "\a", 1);
+        (void)!write(STDOUT_FILENO, "\a", 1);
     }
     vi_clamp_cursor(b, vis);
     if (have_status) {
@@ -8981,7 +8981,7 @@ vi_search_current_word(buffer_t *b, vi_visual_t *vis, int forward, int count)
 
     if (vi_search_current_word_target(b, vis, forward, count,
         &target_line, &target_col) != 0) {
-        write(STDOUT_FILENO, "\a", 1);
+        (void)!write(STDOUT_FILENO, "\a", 1);
         return;
     }
     b->cur = target_line;
@@ -9474,7 +9474,7 @@ process_normal_key:
                 if (b->modified && !vis.zq_pending) {
                     vi_set_status(&vis,
                         "No write since last change (use ZQ again to discard)");
-                    write(STDOUT_FILENO, "\a", 1);
+                    (void)!write(STDOUT_FILENO, "\a", 1);
                     vis.zq_pending = 1;
                     break;
                 }
