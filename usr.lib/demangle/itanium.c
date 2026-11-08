@@ -68,6 +68,9 @@ typedef struct dm_itanium_parser {
     size_t func_tmpl_count;
 } dm_itanium_parser_t;
 
+/* All a speculative parse can change, so that backtracking undoes it --
+ * has_return_type and the last template's arguments too, which a failed
+ * template type left set for the parse that came after it. */
 typedef struct dm_parse_mark {
     const char *cur;
     size_t out_len;
@@ -75,6 +78,9 @@ typedef struct dm_parse_mark {
     size_t substitution_count;
     size_t template_depth;
     size_t last_template_count;
+    size_t last_template_off[DM_TEMPLATE_ARG_CAP];
+    size_t last_template_len[DM_TEMPLATE_ARG_CAP];
+    int has_return_type;
 } dm_parse_mark_t;
 
 static int buf_reserve(dm_buf_t *buf, size_t extra);
@@ -479,6 +485,11 @@ mark_save(dm_itanium_parser_t *p, dm_parse_mark_t *m)
     m->substitution_count = p->substitution_count;
     m->template_depth = p->template_depth;
     m->last_template_count = p->last_template_count;
+    memcpy(m->last_template_off, p->last_template_off,
+        p->last_template_count * sizeof(m->last_template_off[0]));
+    memcpy(m->last_template_len, p->last_template_len,
+        p->last_template_count * sizeof(m->last_template_len[0]));
+    m->has_return_type = p->has_return_type;
 }
 
 static void
@@ -489,6 +500,11 @@ mark_restore(dm_itanium_parser_t *p, const dm_parse_mark_t *m)
     p->substitution_count = m->substitution_count;
     p->template_depth = m->template_depth;
     p->last_template_count = m->last_template_count;
+    memcpy(p->last_template_off, m->last_template_off,
+        m->last_template_count * sizeof(p->last_template_off[0]));
+    memcpy(p->last_template_len, m->last_template_len,
+        m->last_template_count * sizeof(p->last_template_len[0]));
+    p->has_return_type = m->has_return_type;
 
     if (m->out_len <= p->out.len) {
         p->out.len = m->out_len;

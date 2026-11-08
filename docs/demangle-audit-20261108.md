@@ -39,7 +39,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Restore `mark_restore(p, &m)` on failure, and either suppress substitution registration while skipping the literal type or restore `p->substitution_count` when rewinding `p->out.len`.
     - Verify: `tests/usr.lib/demangle/`: a template literal argument with a compound/qualified type followed by `S_` / `S0_` resolves the substitution to the outer symbol component rather than bytes from the rewound literal type.
 
-- [ ] **DMG-ITAN-02** (high) `mark_save()` and `mark_restore()` do not preserve `has_return_type` or `last_template_*` entries (REQ: REQ-DMGA-0004)
+- [x] **DMG-ITAN-02** (high) `mark_save()` and `mark_restore()` do not preserve `has_return_type` or `last_template_*` entries (REQ: REQ-DMGA-0004)
     - Site: `usr.lib/demangle/itanium.c:71-78` (`dm_parse_mark_t`), `usr.lib/demangle/itanium.c:474-497` (`mark_save`, `mark_restore`)
     - Evidence: `dm_parse_mark_t` omits `p->has_return_type` and the elements of `p->last_template_off` / `p->last_template_len`. When speculative parses in `parse_template_arg()` or `parse_expression()` parse a template (`I...E`) and then fail and backtrack, `p->has_return_type` remains `1` and `p->last_template_*` remains overwritten.
     - Fix: Include `has_return_type` and the active slice of `last_template_off` / `last_template_len` in `dm_parse_mark_t`, and restore them in `mark_restore()`.
