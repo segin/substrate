@@ -111,7 +111,8 @@ jobs:
       # which.  Note it stops at the first failing command in the recipe
       # rather than reporting every failure in one pass.  It includes the
       # kernel's host tests (`make -C tests/sys check`, every one built and
-      # run, each failure's output shown).  The ex and vi suites, which
+      # run, each failure's output shown) and libdemangle's
+      # (`make -C tests/usr.lib/demangle run`).  The ex and vi suites, which
       # take hours, run in the ex-suite and vi-suite jobs instead
       # (SKIP_EXVI=1).
       - name: Build and run host tests

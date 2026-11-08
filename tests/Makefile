@@ -123,6 +123,10 @@ all: test_bc_num test_runner test_getuid test_minix test_ext2_perf test_ext2_rea
 	./test_getrusage
 	# the kernel's host tests (tests/sys), every one built and run
 	$(MAKE) -C sys check
+	# libdemangle: its unit tests, the audit regressions and the
+	# symbol-by-symbol cases against GNU c++filt's output (built
+	# NATIVE_BUILD=1 against the host libc)
+	$(MAKE) -C usr.lib/demangle run
 	# ex and vi, each plain and under ASan, and libexvi's unit tests
 	# (tests/bin/ex runs tests/usr.lib/exvi); nothing ran them before.
 	# SKIP_EXVI=1 leaves them out: CI runs them in jobs of their own,
