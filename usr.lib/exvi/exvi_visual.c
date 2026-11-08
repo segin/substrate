@@ -85,6 +85,8 @@ typedef struct {
     int pending_big_z;
     int pending_op;
     int pending_op_count;
+    /* ! pending: > with its motion's lines filtered, not shifted */
+    int filter_pending;
     int pending_count;
     int pending_reg;
     int last_search_forward;
@@ -112,6 +114,7 @@ typedef struct {
     int last_change_char;
     int last_change_aux;
     int last_change_op;                 /* VI_REPEAT_OPERATOR's operator */
+    int last_change_filter;             /* and whether it was ! */
     /* U: the current line as it was when it became the current line */
     unsigned long u_line_id;
     char *ai_restore;           /* after ^^D: the next line's autoindent */
@@ -1632,6 +1635,34 @@ vi_input_ctrl_d(buffer_t *b, vi_visual_t *vis)
     vi_reindent_line(b, vis, 0, 1);
 }
 
+/*
+ * ! (POSIX vi Filter): the lines the motion covers through a command read
+ * on the last line, as ex's !.  vi had no ! at all: !!cmd ran the keys of
+ * cmd as commands.  The keys read here are the operator's, so . replays
+ * them -- the same command, without asking.
+ */
+static int
+vi_filter_range(buffer_t *b, vi_visual_t *vis, int start_line_no, int end_line_no)
+{
+    char cmd[256];
+    char excmd[300];
+
+    cmd[0] = '\0';
+    if (vi_prompt_input(b, vis, '!', cmd, sizeof(cmd)) != 0 || cmd[0] == '\0') {
+        return -1;
+    }
+    snprintf(excmd, sizeof(excmd), "%d,%d!%s", start_line_no, end_line_no, cmd);
+    exvi_execute_command(b, excmd);
+    vis->screen_dirty = 1;
+    vis->status_dirty = 1;
+    if (exvi_take_pending_status(vis->status_msg, sizeof(vis->status_msg))) {
+        vis->status_once = 1;
+    }
+    vi_clamp_cursor(b, vis);
+    vis->cursor_col = vi_first_nonblank_col(b->cur);
+    return 0;
+}
+
 static int
 vi_shift_range(buffer_t *b, vi_visual_t *vis, int start_line_no, int end_line_no, int increase)
 {
@@ -1640,6 +1671,9 @@ vi_shift_range(buffer_t *b, vi_visual_t *vis, int start_line_no, int end_line_no
 
     if (start_line_no < 1 || end_line_no < start_line_no || b->line_count < 1) {
         return -1;
+    }
+    if (vis->filter_pending) {
+        return vi_filter_range(b, vis, start_line_no, end_line_no);
     }
     orig = buf_get_line(b, start_line_no);
     if (!orig) {
@@ -7312,17 +7346,24 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         vi_multiply_counts(vis->pending_op_count, vis->pending_count) : 0;
     unsigned long generation = exvi_buffer_generation;
     int record = (op == 'd' || op == '<' || op == '>');
+    int filter = vis->filter_pending;
 
+    /* !! is the current line, as >> is */
+    if (filter && key == '!') {
+        key = '>';
+    }
     if (record) {
         vi_op_nkeys = 0;
         vi_op_recording = 1;
     }
     vi_do_pending_operator(b, vis, key);
+    vis->filter_pending = 0;
     if (record) {
         vi_op_recording = 0;
         if (exvi_buffer_generation != generation) {
             vi_set_last_change(vis, VI_REPEAT_OPERATOR, total, key);
             vis->last_change_op = op;
+            vis->last_change_filter = filter;
             memcpy(vis->last_change_keys, vi_op_keys, sizeof(vi_op_keys[0]) * (size_t)vi_op_nkeys);
             vis->last_change_nkeys = vi_op_nkeys;
         }
@@ -8361,6 +8402,7 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         vi_replay_len = vis->last_change_nkeys;
         vi_replay_pos = 0;
         vis->pending_op = vis->last_change_op;
+        vis->filter_pending = vis->last_change_filter;
         vis->pending_op_count = 0;
         vis->pending_count = dot_count > 0 ? dot_count : vis->last_change_count;
         vis->pending_reg = 0;
@@ -9300,6 +9342,9 @@ exvi_visual_main(buffer_t *b)
         }
 process_normal_key:
         vis.want_kept = 0;
+        if (!vis.pending_op) {
+            vis.filter_pending = 0;     /* a ! given up (ESC, no motion) */
+        }
         switch (key) {
         case VI_KEY_UP:
             key = 'k';
@@ -10002,6 +10047,13 @@ process_normal_key:
         case '<':
             vis.pending_g = 0;
             vis.pending_op = '<';
+            vis.pending_op_count = vi_take_count(&vis);
+            break;
+        case '!':
+            /* > over the motion's lines, filtering them (vi_filter_range()) */
+            vis.pending_g = 0;
+            vis.pending_op = '>';
+            vis.filter_pending = 1;
             vis.pending_op_count = vi_take_count(&vis);
             break;
         case 'p':

@@ -118,8 +118,16 @@ The current visual frontend supports:
 line shifts with
 .Cm >>
 and
-.Cm <<
-and delete, change, and yank with the supported motion families
+.Cm << ,
+delete, change, and yank with the supported motion families, and
+.Cm \&! Ns Ar motion ,
+which reads a shell command on the last line and replaces the motion's
+lines with its output, as
+.Xr ex 1 Ns 's
+.Ic \&!
+does;
+.Cm \&!\&!
+filters the current line, and with a count that many lines
 .It put, undo, and redo
 .Cm p
 .Cm P ,
