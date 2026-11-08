@@ -150,7 +150,10 @@ rm -f t.o
 if ! timeout 60 "$AS" --64 -o t.o t.s 2> err; then
     echo "FAIL 9000 numbered labels: $(tail -1 err)"; fail=1
 else
-    got=$(objcopy -O binary -j .text t.o /dev/stdout | od -An -v -tx1 -w9 | sort | uniq -c | tr -s ' ' | tr '\n' ';')
+    # to a file: objcopy -O binary seeks as it writes, which a pipe
+    # cannot, and on CI's binutils the bytes came out shifted
+    objcopy -O binary -j .text t.o t.bin
+    got=$(od -An -v -tx1 -w9 t.bin | sort | uniq -c | tr -s ' ' | tr '\n' ';')
     [ "$got" = " 9000 00 00 00 00 04 00 00 00 00;" ] || { echo "FAIL 9000 numbered labels: $got"; fail=1; }
 fi
 
