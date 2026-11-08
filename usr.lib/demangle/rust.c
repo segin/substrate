@@ -82,7 +82,7 @@ static int rust_legacy_decode_token(const char *tok, size_t tok_len, rust_buf_t 
 static int rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out);
 static int rust_has_n_bytes(const char *s, size_t n);
 static int rust_utf8_append_codepoint(rust_buf_t *buf, uint32_t cp);
-static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii);
+static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out);
 
 static int starts_with(const char *s, const char *prefix) {
 	size_t n;
@@ -448,7 +448,7 @@ static unsigned rust_puny_adapt(unsigned delta, unsigned numpoints, int first_ti
 	return k + (36u * delta) / (delta + 38u);
 }
 
-static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii) {
+static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out) {
 	uint32_t *cps;
 	size_t cp_count;
 	size_t cp_cap;
@@ -458,28 +458,32 @@ static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int 
 	unsigned i;
 	unsigned bias;
 
-	if(in == NULL || out == NULL || non_ascii == NULL) {
+	if(in == NULL || out == NULL) {
 		return -1;
 	}
 
 	cps = NULL;
 	cp_count = 0u;
 	cp_cap = 0u;
-	*non_ascii = 0;
 
+	/*
+	 * v0's Punycode delimits with _, not RFC 3492's -: the last _ ends
+	 * the ASCII part, which may hold others (ñ_x_y is _x_y_fqa), and with
+	 * none it is all deltas (東京 is 1lqs71d).  This looked for -, never
+	 * there, and so decoded the ASCII part as deltas.
+	 */
 	basic_end = 0u;
-	for(idx = 0u; idx < in_len; idx++) {
-		if(in[idx] == '-') {
-			basic_end = idx + 1u;
+	idx = 0u;
+	for(size_t j = 0u; j < in_len; j++) {
+		if(in[j] == '_') {
+			basic_end = j;
+			idx = j + 1u;
 		}
 	}
 
-	for(idx = 0u; idx < basic_end; idx++) {
-		uint32_t cp;
-		if(in[idx] == '-') {
-			continue;
-		}
-		cp = (uint32_t)(unsigned char)in[idx];
+	for(size_t j = 0u; j < basic_end; j++) {
+		uint32_t cp = (uint32_t)(unsigned char)in[j];
+
 		if(rust_puny_insert(&cps, &cp_count, &cp_cap, cp_count, cp) != 0) {
 			free(cps);
 			return -1;
@@ -489,7 +493,6 @@ static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int 
 	n = 128u;
 	i = 0u;
 	bias = 72u;
-	idx = basic_end;
 
 	while(idx < in_len) {
 		unsigned oldi;
@@ -564,9 +567,6 @@ static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int 
 	}
 
 	for(idx = 0u; idx < cp_count; idx++) {
-		if(cps[idx] > 0x7Fu) {
-			*non_ascii = 1;
-		}
 		if(rust_utf8_append_codepoint(out, cps[idx]) != 0) {
 			free(cps);
 			return -1;
@@ -579,23 +579,15 @@ static int rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int 
 
 static int rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, size_t len) {
 	rust_buf_t decoded;
-	int non_ascii;
 
 	memset(&decoded, 0, sizeof(decoded));
-	if(rust_puny_decode(bytes, len, &decoded, &non_ascii) != 0) {
+	if(rust_puny_decode(bytes, len, &decoded) != 0) {
 		demangle_buf_destroy(&decoded);
 		return -1;
 	}
 
-	if(non_ascii && demangle_buf_appendc(&p->out, '{') != 0) {
-		demangle_buf_destroy(&decoded);
-		return -1;
-	}
+	/* the name as it is, gödel -- it was braced, {gödel} */
 	if(decoded.len > 0u && demangle_buf_append(&p->out, decoded.data, decoded.len) != 0) {
-		demangle_buf_destroy(&decoded);
-		return -1;
-	}
-	if(non_ascii && demangle_buf_appendc(&p->out, '}') != 0) {
 		demangle_buf_destroy(&decoded);
 		return -1;
 	}

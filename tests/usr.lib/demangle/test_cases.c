@@ -244,6 +244,16 @@ static const dm_case_t cases[] = {
     { "a K with no const", "_RINvCs_3lib1fKE", R, NULL },
     { "a lifetime", "_RINvCs_3lib1fL_E", R, "lib::f::<'_>" },
 
+    /* a Rust v0 identifier beyond ASCII is Punycode, _ its delimiter
+     * (rustc 1.99's symbols) */
+    { "an ASCII part and one character", "_RNvNtCs91N3l2zy1RL_3lib3uniu8gdel_5qa", R, "lib::uni::gödel" },
+    { "no ASCII part", "_RNvNtCs91N3l2zy1RL_3lib3uniu7_1lqs71d", R, "lib::uni::東京" },
+    { "a _ in the ASCII part", "_RNvNtCs91N3l2zy1RL_3lib3uniu8__x_y_fqa", R, "lib::uni::ñ_x_y" },
+    { "two characters", "_RNvNtCs91N3l2zy1RL_3lib3uniu13caf_crme_60ag", R, "lib::uni::café_crème" },
+    { "one alone", "_RNvNtCs91N3l2zy1RL_3lib3uniu3tda", R, "lib::uni::ü" },
+    { "a type and its method", "_RNvMNtCs91N3l2zy1RL_3lib3uniNtB2_u9Gre_6ka8iu6ma_hia", R, "<lib::uni::Größe>::maß" },
+    { "a delta past U+10FFFF", "_RNvCs_3libu6zzzzzz", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
