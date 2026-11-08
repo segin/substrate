@@ -261,6 +261,18 @@ static const dm_case_t cases[] = {
     { "several", "_Z1fILb1ELb0ELb1EEvv", I, "void f<true, false, true>()" },
     { "any other value keeps its type", "_Z1fILb2EEvv", I, "void f<(bool)2>()" },
 
+    /* any other Itanium literal is printed by its type, as GNU's */
+    { "unsigned", "_ZTIN4llvm12instrumentor13InstructionIOIJLj32EEEE", I, "typeinfo for llvm::instrumentor::InstructionIO<32u>" },
+    { "long", "_Z1fILl8EEvv", I, "void f<8l>()" },
+    { "unsigned long", "_Z1fILm8EEvv", I, "void f<8ul>()" },
+    { "long long, negative", "_Z1fILxn8EEvv", I, "void f<-8ll>()" },
+    { "unsigned long long", "_Z1fILy8EEvv", I, "void f<8ull>()" },
+    { "a short keeps its type", "_Z1fILt7EEvv", I, "void f<(unsigned short)7>()" },
+    { "a char", "_Z1fILc65EEvv", I, "void f<(char)65>()" },
+    { "a float its encoding", "_Z1fILf3f800000EEvv", I, "void f<(float)[3f800000]>()" },
+    { "a double", "_Z1fILd3ff0000000000000EEvv", I, "void f<(double)[3ff0000000000000]>()" },
+    { "an int its value alone", "_Z1fILin1EEvv", I, "void f<-1>()" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

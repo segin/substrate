@@ -1479,6 +1479,8 @@ static int parse_expr_primary(dm_itanium_parser_t *p) {
 	if(p->cur[0] == 'L') {
 		size_t num_len;
 		char tcode;
+		int builtin, is_float, is_bool;
+		const char *suffix;
 
 		p->cur++;
 		tcode = p->cur[0];
@@ -1489,23 +1491,45 @@ static int parse_expr_primary(dm_itanium_parser_t *p) {
 		}
 
 		/*
-		 * The literal's type: a builtin one is no substitution candidate,
-		 * and is dropped for the value alone (1, not (int)1).  One that is
-		 * a candidate stays, as (Foo)1 -- as c++filt writes it -- since
-		 * its substitution's offsets point at that text: the text was
-		 * dropped regardless, and an S_ after it read whatever came next.
-		 * A type that fails to parse undoes all it did.
+		 * The literal is printed as GNU c++filt prints it, by its type.
+		 * int is the value alone; unsigned, long, unsigned long, long
+		 * long and unsigned long long the value with its suffix, 8u, 4096ul;
+		 * a bool false or true.  Any other type -- a class or enum, a
+		 * char, a short -- keeps its type, (unsigned short)7, and a
+		 * floating one its encoding in hex too, (double)[3ff0000000000000].
+		 * Every builtin type but int and bool was printed bare, 8 for 8u.
+		 * The type's text stays where it has substitutions, whose offsets
+		 * point at it; a type that fails to parse undoes all it did.
 		 */
 		mark_save(p, &m);
 		if(demangle_buf_appendc(&p->out, '(') != 0 || parse_type(p) != 0) {
 			mark_restore(p, &m);
 			return -1;
 		}
-		if(p->substitution_count == m.substitution_count) {
-			p->out.len = m.out_len;
+		builtin = (p->substitution_count == m.substitution_count);
+		suffix = NULL;
+		if(builtin) {
+			switch(tcode) {
+			case 'i': suffix = ""; break;
+			case 'j': suffix = "u"; break;
+			case 'l': suffix = "l"; break;
+			case 'm': suffix = "ul"; break;
+			case 'x': suffix = "ll"; break;
+			case 'y': suffix = "ull"; break;
+			default: break;
+			}
+		}
+		is_float = builtin && (tcode == 'f' || tcode == 'd' || tcode == 'e' || tcode == 'g');
+		is_bool = builtin && tcode == 'b';
+		if(suffix != NULL || (is_bool && (p->cur[0] == '0' || p->cur[0] == '1') && p->cur[1] == 'E')) {
+			p->out.len = m.out_len;     /* the value alone */
 			p->out.data[p->out.len] = '\0';
 		} else if(demangle_buf_appendc(&p->out, ')') != 0) {
 			return -1;
+		}
+		if(is_bool && p->out.len == m.out_len) {
+			p->cur += 2u;
+			return p->cur[-2] == '1' ? demangle_buf_append(&p->out, "true", 4u) : demangle_buf_append(&p->out, "false", 5u);
 		}
 
 		if(p->cur[0] == 'n') {
@@ -1515,8 +1539,9 @@ static int parse_expr_primary(dm_itanium_parser_t *p) {
 			p->cur++;
 		}
 
+		/* a float's value is its encoding, in lower-case hex */
 		num_len = 0u;
-		while(p->cur[num_len] != '\0' && isdigit((unsigned char)p->cur[num_len])) {
+		while(isdigit((unsigned char)p->cur[num_len]) || (is_float && p->cur[num_len] >= 'a' && p->cur[num_len] <= 'f')) {
 			num_len++;
 		}
 
@@ -1524,26 +1549,8 @@ static int parse_expr_primary(dm_itanium_parser_t *p) {
 			return -1;
 		}
 
-		/*
-		 * A bool is false or true, as GNU c++filt prints it: Lb0E was 0,
-		 * and NodeOptions<false> read NodeOptions<0>.  Any other value
-		 * keeps its type, (bool)2.
-		 */
-		if(tcode == 'b') {
-			size_t neg = (p->out.len > m.out_len) ? 1u : 0u;   /* the '-' */
-
-			p->out.len = m.out_len;
-			p->out.data[p->out.len] = '\0';
-			if(!neg && num_len == 1u && (p->cur[0] == '0' || p->cur[0] == '1')) {
-				p->cur += 2u;
-				return p->cur[-2] == '1' ? demangle_buf_append(&p->out, "true", 4u) : demangle_buf_append(&p->out, "false", 5u);
-			}
-			if(demangle_buf_append(&p->out, neg ? "(bool)-" : "(bool)", neg ? 7u : 6u) != 0) {
-				return -1;
-			}
-		}
-
-		if(demangle_buf_append(&p->out, p->cur, num_len) != 0) {
+		if((is_float && demangle_buf_appendc(&p->out, '[') != 0) || demangle_buf_append(&p->out, p->cur, num_len) != 0 ||
+		   (is_float && demangle_buf_appendc(&p->out, ']') != 0) || (suffix != NULL && demangle_buf_append(&p->out, suffix, strlen(suffix)) != 0)) {
 			return -1;
 		}
 
