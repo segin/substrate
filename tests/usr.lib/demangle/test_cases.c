@@ -359,6 +359,17 @@ static const dm_case_t cases[] = {
     { "but the outer function's is", "_ZN1B1gIZN1A1fIiEEvvEUlvE_EEPiT_", I,
       "int* B::g<A::f<int>()::{lambda()#1}>(A::f<int>()::{lambda()#1})" },
 
+    /* an Itanium pointer to member: the class in the declarator */
+    { "to a member function (LLVM's)", "_ZN4llvm11logicalview18LVScopeCompileUnit28processRangeLocationCoverageEMNS0_10LVLocationEFbvE", I,
+      "llvm::logicalview::LVScopeCompileUnit::processRangeLocationCoverage(bool (llvm::logicalview::LVLocation::*)())" },
+    { "to a const one", "_Z1fM1AKFvvE", I, "f(void (A::*)() const)" },
+    { "to data", "_Z1fM1Ai", I, "f(int A::*)" },
+    { "to const data", "_Z1fM1AKi", I, "f(int const A::*)" },
+    { "to an array", "_Z1fM1AA4_i", I, "f(int (A::*)[4])" },
+    { "a reference to one by template parameter", "_ZN4llvm13map_to_vectorIRNS_11SmallVectorIPNS_5ValueELj4EEEMS2_KFPNS_4TypeEvEEEDaOT_OT0_", I,
+      "auto llvm::map_to_vector<llvm::SmallVector<llvm::Value*, 4u>&, llvm::Type* (llvm::Value::*)() const>"
+      "(llvm::SmallVector<llvm::Value*, 4u>&, llvm::Type* (llvm::Value::*&&)() const)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

@@ -530,10 +530,17 @@ static int find_array_declarator(const dm_buf_t *out, size_t off, size_t *dims, 
 		char c = out->data[i];
 
 		if(c == '<' || c == '(') {
-			/* a pointer's declarator: " (" then only * & and ")" */
+			/* a pointer's declarator: " (" then only * & -- or a member
+			 * pointer's, A::* first -- and ")" */
 			if(c == '(' && depth == 0u) {
 				size_t j = i + 1u;
+				size_t k;
 
+				for(k = i + 1u; k < out->len && out->data[k] != ')' && out->data[k] != '(' && out->data[k] != '<'; k++) {
+					if(k + 2u < out->len && out->data[k] == ':' && out->data[k + 1u] == ':' && out->data[k + 2u] == '*') {
+						j = k + 2u;
+					}
+				}
 				while(j < out->len && (out->data[j] == '*' || out->data[j] == '&')) {
 					j++;
 				}
@@ -2033,9 +2040,20 @@ static int parse_array_type(dm_itanium_parser_t *p) {
 	}
 }
 
+/*
+ * M <class type> <member type>: as GNU c++filt prints it, int A::* to a
+ * data member, void (A::*)(int) const to a member function -- the class
+ * in the declarator, before the parameters -- and int (A::*)[4] to an
+ * array.  This printed the class first, A::*void (int) const.  The class's
+ * text moves, so the substitutions entered in it keep their text.
+ */
 static int parse_pointer_to_member(dm_itanium_parser_t *p) {
 	size_t class_off;
 	size_t class_len;
+	size_t member_off;
+	const char *q;
+	char *decl;
+	int rc;
 
 	if(p->cur[0] != 'M') {
 		return -1;
@@ -2048,17 +2066,41 @@ static int parse_pointer_to_member(dm_itanium_parser_t *p) {
 		return -1;
 	}
 	class_len = p->out.len - class_off;
-
-	if(demangle_buf_append(&p->out, "::*", 3u) != 0) {
+	decl = (char *)malloc(class_len + 6u);
+	if(decl == NULL) {
 		return -1;
 	}
+	decl[0] = ' ';
+	decl[1] = '(';
+	memcpy(decl + 2, p->out.data + class_off, class_len);
+	memcpy(decl + 2 + class_len, "::*)", 4u);
+	if(parser_freeze_from(p, class_off) != 0) {
+		free(decl);
+		return -1;
+	}
+	p->out.len = class_off;
+	p->out.data[p->out.len] = '\0';
 
+	/* what the member is, past its cv-qualifiers */
+	for(q = p->cur; *q == 'K' || *q == 'V' || *q == 'r'; q++) {
+	}
+	member_off = p->out.len;
 	if(parse_type(p) != 0) {
+		free(decl);
 		return -1;
 	}
-
-	(void)class_len;
-	return 0;
+	if(*q == 'F') {
+		/* void (A::*)(int): no space before it, as for (*) */
+		rc = parser_insert_in_type(p, member_off, p->array_dims_off, decl + 1, class_len + 5u);
+	} else if(*q == 'A') {
+		rc = parser_insert_in_type(p, member_off, p->array_dims_off, decl, class_len + 6u);
+	} else {
+		decl[1] = ' ';
+		rc = demangle_buf_append(&p->out, decl + 1, class_len + 4u);    /* " A::*" */
+		p->decl_close = SIZE_MAX;
+	}
+	free(decl);
+	return rc;
 }
 
 static int parse_decltype_type(dm_itanium_parser_t *p) {
