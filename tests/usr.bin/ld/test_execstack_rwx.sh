@@ -56,9 +56,10 @@ for m in 64 32; do
     cp x$m.o y$m.o
 done
 
-# What a linker says of these things, its own name taken off the front.
+# What a linker says of these things, its own name taken off the front:
+# ld, or as Ubuntu's GNU ld calls itself, /usr/bin/x86_64-linux-gnu-ld.bfd.
 said() {
-    grep -E 'executable stack|RWX permissions' "$1" | sed 's/^.*ld: //'
+    grep -E 'executable stack|RWX permissions' "$1" | sed -E 's/^[^ ]*ld(\.[a-z]+)?: //'
 }
 
 # run LINKER RESULT ARGS...: the link over an output from before; RESULT
