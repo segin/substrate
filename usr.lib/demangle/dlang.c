@@ -80,7 +80,7 @@ static int dlang_is_attr_code(char ch);
 
 static char *dlang_take_segment(dlang_parser_t *p, size_t off);
 static char *dlang_wrap_type(const char *prefix, const char *inner, const char *suffix);
-static int dlang_append_attrs(dlang_buf_t *buf, unsigned attrs);
+static int dlang_append_attrs(dlang_parser_t *p, unsigned attrs);
 static int dlang_format_special_name(dlang_buf_t *buf, const char *s, size_t len, int *formatted);
 static char *dlang_delegate_from_function(const char *inner);
 
@@ -688,9 +688,16 @@ dlang_wrap_type(const char *prefix, const char *inner, const char *suffix)
     return ret;
 }
 
+/* A function type's attributes, pure, nothrow, @safe and the rest --
+ * which DEMANGLE_NO_VERBOSE leaves out, and they were printed anyway. */
 static int
-dlang_append_attrs(dlang_buf_t *buf, unsigned attrs)
+dlang_append_attrs(dlang_parser_t *p, unsigned attrs)
 {
+    dlang_buf_t *buf = &p->out;
+
+    if ((p->options & DEMANGLE_NO_VERBOSE) != 0) {
+        return 0;
+    }
     if ((attrs & DLANG_ATTR_PURE) != 0 && dlang_buf_append(buf, " pure", 5u) != 0) {
         return -1;
     }
@@ -929,7 +936,7 @@ dlang_parse_function_type(dlang_parser_t *p, char cconv)
         goto fail;
     }
 
-    if (dlang_append_attrs(&p->out, attrs) != 0) {
+    if (dlang_append_attrs(p, attrs) != 0) {
         goto fail;
     }
 
@@ -1317,7 +1324,7 @@ dlang_parse_type(dlang_parser_t *p)
     free(seg);
     seg = NULL;
 
-    rc = dlang_append_attrs(&p->out, attrs);
+    rc = dlang_append_attrs(p, attrs);
 
 out:
     free(seg);
@@ -1357,6 +1364,13 @@ dlang_parse_mangled_name(dlang_parser_t *p)
         return -1;
     }
 
+    /* the type, parameters and all, is read and left out: foo.bar */
+    if ((p->options & DEMANGLE_NO_PARAMS) != 0) {
+        free(type_text);
+        dlang_parser_leave(p);
+        return 0;
+    }
+
     if (dlang_buf_append(&p->out, ": ", 2u) != 0 ||
         dlang_buf_append(&p->out, type_text, strlen(type_text)) != 0) {
         free(type_text);
@@ -1374,8 +1388,6 @@ dlang_demangle_symbol(const char *mangled, int options)
 {
     dlang_parser_t p;
     char *ret;
-
-    (void)options;
 
     if (dlang_is_runtime_symbol(mangled)) {
         return dlang_strdup(mangled);

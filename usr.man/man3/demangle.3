@@ -43,9 +43,16 @@ or
 .TP
 .B DEMANGLE_NO_PARAMS
 Suppress parameter lists where supported.
+For a D symbol, leave out its type: the name alone,
+.BR foo.bar .
 .TP
 .B DEMANGLE_NO_VERBOSE
 Suppress verbose qualifiers where supported.
+For a D symbol, leave out function attributes such as
+.BR pure ,
+.B nothrow
+and
+.BR @safe .
 .TP
 .B DEMANGLE_NO_RECURSE_LIMIT
 Lift the bound on how deeply a name may nest.

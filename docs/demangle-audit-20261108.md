@@ -134,7 +134,7 @@ the end of this document, using the standard EARS patterns:
     - Fix: Implement base-26 relative backreference decoding for `Q` per the D ABI specification (while optionally retaining decimal fallback only if needed by existing synthetic tests).
     - Verify: `tests/usr.lib/demangle/`: standard DMD/LDC/GDC symbols containing `Qa`, `Qb`, `QBa` backreferences demangle to their referenced identifiers.
 
-- [ ] **DMG-DLANG-03** (medium) `demangle_dlang()` ignores `DEMANGLE_NO_PARAMS` and `DEMANGLE_NO_VERBOSE` (REQ: REQ-DMGA-0017)
+- [x] **DMG-DLANG-03** (medium) `demangle_dlang()` ignores `DEMANGLE_NO_PARAMS` and `DEMANGLE_NO_VERBOSE` (REQ: REQ-DMGA-0017)
     - Site: `usr.lib/demangle/dlang.c:1338-1410` (`dlang_parse_mangled_name`, `dlang_demangle_symbol`)
     - Evidence: `dlang_demangle_symbol()` casts `(void)options;`. Passing `DEMANGLE_NO_PARAMS` still appends `: <type>` and full function parameter lists; passing `DEMANGLE_NO_VERBOSE` still emits function attributes (`pure`, `nothrow`, `@safe`, `@nogc`, etc.).
     - Fix: When `DEMANGLE_NO_PARAMS` is set, omit the trailing `: <type>` signature in `dlang_parse_mangled_name()`; when `DEMANGLE_NO_VERBOSE` is set, suppress function attribute suffixes in `dlang_append_attrs()`.

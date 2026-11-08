@@ -210,6 +210,17 @@ static const dm_case_t cases[] = {
     { "a mutable one", "_RINvCs_3lib2idQL_hE", R, "lib::id::<&mut u8>" },
     { "one with a lifetime", "_RINvCs_3lib2idFG_QL0_hEuE", R, "lib::id::<for<'a> fn(&'a mut u8)>" },
 
+    /* D takes DEMANGLE_NO_PARAMS and DEMANGLE_NO_VERBOSE */
+    { "no parameters", "_D3foo3barFiZv", D | DEMANGLE_NO_PARAMS, "foo.bar" },
+    { "nor a variable's type", "_D3foo1xi", D | DEMANGLE_NO_PARAMS, "foo.x" },
+    { "a template's arguments stay", "_D3std5stdio__T7writelnTAyaZQnFNfQjZv", D | DEMANGLE_NO_PARAMS,
+      "std.stdio.writeln!(immutable(char)[]).writeln" },
+    { "no attributes", "_D3std5stdio__T7writelnTAyaZQnFNfQjZv", D | DEMANGLE_NO_VERBOSE,
+      "std.stdio.writeln!(immutable(char)[]).writeln: void function(immutable(char)[])" },
+    { "nor a delegate's", "_D3foo1xDFNaNbZv", D | DEMANGLE_NO_VERBOSE, "foo.x: void delegate()" },
+    { "and with them", "_D3foo1xDFNaNbZv", D, "foo.x: void delegate() pure nothrow" },
+    { "a malformed type is still refused", "_D3foo3barFiZ", D | DEMANGLE_NO_PARAMS, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
