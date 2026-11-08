@@ -21,7 +21,7 @@ the end of this document, using the standard EARS patterns:
 
 ## A. Security, Memory Safety & Denial-of-Service
 
-- [ ] **DMG-RUST-01** (high) Rust v0 backreferences allow self- and forward-references in paths, types, and constants (REQ: REQ-DMGA-0001)
+- [x] **DMG-RUST-01** (high) Rust v0 backreferences allow self- and forward-references in paths, types, and constants (REQ: REQ-DMGA-0001)
     - Site: `usr.lib/demangle/rust.c:1324-1339` (`rust_parse_v0_path`), `usr.lib/demangle/rust.c:860-888` (`rust_parse_v0_const`), `usr.lib/demangle/rust.c:1244-1274` (`rust_parse_v0_type_inner`)
     - Evidence: `rust_parse_v0_path` resolves `<backref> = "B" <base-62-number>` via `rust_parser_resolve_backref(p, off, &target)` and jumps to `p->cur = target` without verifying `target < start`. A self-referential or forward backref (e.g., `_RB_`) recurses until `recursion_limit` (128), or exhausts the call stack (`SIGSEGV`) when `DEMANGLE_NO_RECURSE_LIMIT` is set. In `rust_parse_v0_const` (line 871) and `rust_parse_v0_type_inner` (line 1256), the check is `target >= save_cur` (after the `'B' <base62>` token), which permits `target == backref_start` (pointing to the `'B'` token itself) and also causes infinite recursion.
     - Fix: Record `backref_start = p->cur` before consuming `'B'` in all three sites and reject any backref where `target >= backref_start`. Remove the unused `p->backrefs` array and `rust_parser_add_backref()` dead allocations.

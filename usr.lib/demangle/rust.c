@@ -13,11 +13,6 @@
 
 typedef demangle_buf_t rust_buf_t;
 
-typedef struct rust_backref {
-    const char *start;
-    const char *end;
-} rust_backref_t;
-
 typedef struct rust_parser {
     const char *input;
     const char *cur;
@@ -27,16 +22,11 @@ typedef struct rust_parser {
     int recursion_limit;
 
     rust_buf_t out;
-
-    rust_backref_t *backrefs;
-    size_t backref_count;
-    size_t backref_cap;
 } rust_parser_t;
 
 typedef struct rust_mark {
     const char *cur;
     size_t out_len;
-    size_t backref_count;
 } rust_mark_t;
 
 static int starts_with(const char *s, const char *prefix);
@@ -56,7 +46,6 @@ static int rust_parser_init(rust_parser_t *p, const char *mangled, int options);
 static void rust_parser_destroy(rust_parser_t *p);
 static int rust_parser_enter(rust_parser_t *p);
 static void rust_parser_leave(rust_parser_t *p);
-static int rust_parser_add_backref(rust_parser_t *p, const char *start, const char *end);
 static int rust_parser_resolve_backref(rust_parser_t *p, size_t off, const char **target);
 
 static void rust_mark_save(rust_parser_t *p, rust_mark_t *m);
@@ -243,10 +232,6 @@ rust_parser_destroy(rust_parser_t *p)
     }
 
     rust_buf_destroy(&p->out);
-    free(p->backrefs);
-    p->backrefs = NULL;
-    p->backref_count = 0u;
-    p->backref_cap = 0u;
 }
 
 static int
@@ -266,37 +251,6 @@ rust_parser_leave(rust_parser_t *p)
     if (p->recursion_depth > 0) {
         p->recursion_depth--;
     }
-}
-
-static int
-rust_parser_add_backref(rust_parser_t *p, const char *start, const char *end)
-{
-    rust_backref_t *next;
-    size_t cap;
-
-    if (p == NULL || start == NULL || end == NULL || end < start) {
-        return -1;
-    }
-
-    if (p->backref_count == p->backref_cap) {
-        cap = (p->backref_cap == 0u) ? 16u : p->backref_cap * 2u;
-        if (cap < p->backref_cap) {
-            return -1;
-        }
-
-        next = (rust_backref_t *)realloc(p->backrefs, cap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-
-        p->backrefs = next;
-        p->backref_cap = cap;
-    }
-
-    p->backrefs[p->backref_count].start = start;
-    p->backrefs[p->backref_count].end = end;
-    p->backref_count++;
-    return 0;
 }
 
 static int
@@ -328,14 +282,12 @@ rust_mark_save(rust_parser_t *p, rust_mark_t *m)
 {
     m->cur = p->cur;
     m->out_len = p->out.len;
-    m->backref_count = p->backref_count;
 }
 
 static void
 rust_mark_restore(rust_parser_t *p, const rust_mark_t *m)
 {
     p->cur = m->cur;
-    p->backref_count = m->backref_count;
     if (m->out_len <= p->out.len) {
         p->out.len = m->out_len;
         p->out.data[p->out.len] = '\0';
@@ -858,6 +810,7 @@ rust_parse_v0_const(rust_parser_t *p)
     }
 
     if (p->cur[0] == 'B') {
+        const char *backref_start = p->cur;
         const char *save_cur;
         const char *target;
         rust_mark_t mark;
@@ -868,7 +821,9 @@ rust_parse_v0_const(rust_parser_t *p)
         }
 
         save_cur = p->cur;
-        if (rust_parser_resolve_backref(p, idx, &target) != 0 || target >= save_cur) {
+        /* only to what came before this B: one at the B itself, or past
+         * it, would refer back to itself until the stack ran out */
+        if (rust_parser_resolve_backref(p, idx, &target) != 0 || target >= backref_start) {
             return -1;
         }
 
@@ -1242,6 +1197,7 @@ rust_parse_v0_type_inner(rust_parser_t *p)
     }
 
     if (p->cur[0] == 'B') {
+        const char *backref_start = p->cur;
         const char *save_cur;
         const char *target;
         size_t off;
@@ -1253,7 +1209,8 @@ rust_parse_v0_type_inner(rust_parser_t *p)
         }
 
         save_cur = p->cur;
-        if (rust_parser_resolve_backref(p, off, &target) != 0 || target >= save_cur) {
+        /* only to what came before this B (as for a const's) */
+        if (rust_parser_resolve_backref(p, off, &target) != 0 || target >= backref_start) {
             return -1;
         }
 
@@ -1323,7 +1280,11 @@ rust_parse_v0_path(rust_parser_t *p)
 
     if (p->cur[0] == 'B') {
         p->cur++;
-        if (rust_parse_base62(p, &off) != 0 || rust_parser_resolve_backref(p, off, &target) != 0) {
+        /* only to what came before this B: _RB_ referred to itself, which
+         * recursed until the limit, or with DEMANGLE_NO_RECURSE_LIMIT ran
+         * the stack out */
+        if (rust_parse_base62(p, &off) != 0 || rust_parser_resolve_backref(p, off, &target) != 0 ||
+            target >= start) {
             rust_mark_restore(p, &m);
             rust_parser_leave(p);
             return -1;
@@ -1523,12 +1484,6 @@ rust_parse_v0_path(rust_parser_t *p)
             return -1;
         }
     } else {
-        rust_mark_restore(p, &m);
-        rust_parser_leave(p);
-        return -1;
-    }
-
-    if (rust_parser_add_backref(p, start, p->cur) != 0) {
         rust_mark_restore(p, &m);
         rust_parser_leave(p);
         return -1;
