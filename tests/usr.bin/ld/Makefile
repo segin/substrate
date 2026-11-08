@@ -3,83 +3,47 @@
 all: run
 
 # The scripts build the linker for the host in directories of their own.
+TESTS = \
+	test_script.sh test_script_absolute.sh test_script_segments.sh \
+	test_archive.sh test_dynamic.sh test_output.sh test_tls.sh \
+	test_tls_tpoff_range.sh test_got.sh test_absolute_reloc.sh \
+	test_narrow_reloc.sh test_emit_relocs.sh test_kernel_reloc.sh \
+	test_page_size.sh test_nostdlib.sh test_response_file.sh \
+	test_library_script.sh test_pie_copy.sh test_copy_alias.sh \
+	test_copy_alias_versioned.sh test_execstack_rwx.sh test_link_order.sh \
+	test_local_symbols.sh test_merge_sections.sh test_merge_size.sh \
+	test_gnu_property.sh test_gnu_property_size.sh test_pie_exports.sh \
+	test_separate_code.sh test_linker_symbols.sh test_reloc_section_symbols.sh \
+	test_import_types.sh test_dynstr_hash.sh test_dynstr_index_freed.sh \
+	test_x32.sh test_version_script.sh test_build_id.sh test_code_padding.sh \
+	test_local_global_same_name.sh test_script_fill.sh test_script_dot_expr.sh \
+	test_script_body_values.sh test_script_provide_used.sh \
+	test_script_discard_dynamic.sh test_r_input_section_symbols.sh \
+	test_orphan_handling.sh test_orphan_handling_made.sh \
+	test_orphan_discard_made.sh test_orphan_place_made.sh \
+	test_no_dynamic_linker.sh test_no_ld_generated_unwind_info.sh \
+	test_script_mixed_types.sh test_script_link_order_gather.sh \
+	test_force_group_allocation.sh test_r_keep_groups.sh \
+	test_r_script_order.sh test_script_sort.sh test_writable_code_section.sh \
+	test_script_body_align.sh test_loaded_after_debug.sh \
+	test_script_assert_relayout.sh test_script_phdr_empty.sh \
+	test_code_fill_late.sh test_script_symbol_alias.sh \
+	test_script_symbol_home.sh test_icf_input_sections.sh \
+	test_icf_safe_address_taken.sh test_icf_exceptions.sh \
+	test_icf_eh_frame_hdr.sh test_icf_comdat_callers.sh \
+	test_eh_frame_length.sh test_eh_frame_cie_length.sh \
+	test_eh_frame_fde_short.sh test_search_state_reset.sh \
+	test_spec_status.sh test_architecture_files.sh test_script_man_unused.sh
+
+# Every script runs, a failure or not: the first failure stopped the rest,
+# so a red one hid what came after it (CI, on another host's binutils,
+# reached 21 of the 77).  The target fails if any did, and says which.
 run:
-	./test_script.sh
-	./test_script_absolute.sh
-	./test_script_segments.sh
-	./test_archive.sh
-	./test_dynamic.sh
-	./test_output.sh
-	./test_tls.sh
-	./test_tls_tpoff_range.sh
-	./test_got.sh
-	./test_absolute_reloc.sh
-	./test_narrow_reloc.sh
-	./test_emit_relocs.sh
-	./test_kernel_reloc.sh
-	./test_page_size.sh
-	./test_nostdlib.sh
-	./test_response_file.sh
-	./test_library_script.sh
-	./test_pie_copy.sh
-	./test_copy_alias.sh
-	./test_copy_alias_versioned.sh
-	./test_execstack_rwx.sh
-	./test_link_order.sh
-	./test_local_symbols.sh
-	./test_merge_sections.sh
-	./test_merge_size.sh
-	./test_gnu_property.sh
-	./test_gnu_property_size.sh
-	./test_pie_exports.sh
-	./test_separate_code.sh
-	./test_linker_symbols.sh
-	./test_reloc_section_symbols.sh
-	./test_import_types.sh
-	./test_dynstr_hash.sh
-	./test_dynstr_index_freed.sh
-	./test_x32.sh
-	./test_version_script.sh
-	./test_build_id.sh
-	./test_code_padding.sh
-	./test_local_global_same_name.sh
-	./test_script_fill.sh
-	./test_script_dot_expr.sh
-	./test_script_body_values.sh
-	./test_script_provide_used.sh
-	./test_script_discard_dynamic.sh
-	./test_r_input_section_symbols.sh
-	./test_orphan_handling.sh
-	./test_orphan_handling_made.sh
-	./test_orphan_discard_made.sh
-	./test_orphan_place_made.sh
-	./test_no_dynamic_linker.sh
-	./test_no_ld_generated_unwind_info.sh
-	./test_script_mixed_types.sh
-	./test_script_link_order_gather.sh
-	./test_force_group_allocation.sh
-	./test_r_keep_groups.sh
-	./test_r_script_order.sh
-	./test_script_sort.sh
-	./test_writable_code_section.sh
-	./test_script_body_align.sh
-	./test_loaded_after_debug.sh
-	./test_script_assert_relayout.sh
-	./test_script_phdr_empty.sh
-	./test_code_fill_late.sh
-	./test_script_symbol_alias.sh
-	./test_script_symbol_home.sh
-	./test_icf_input_sections.sh
-	./test_icf_safe_address_taken.sh
-	./test_icf_exceptions.sh
-	./test_icf_eh_frame_hdr.sh
-	./test_icf_comdat_callers.sh
-	./test_eh_frame_length.sh
-	./test_eh_frame_cie_length.sh
-	./test_eh_frame_fde_short.sh
-	./test_search_state_reset.sh
-	./test_spec_status.sh
-	./test_architecture_files.sh
-	./test_script_man_unused.sh
+	@failed=""; \
+	for t in $(TESTS); do \
+		echo "./$$t"; \
+		./$$t || failed="$$failed $$t"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "FAILED:$$failed"; exit 1; fi
 
 clean:
