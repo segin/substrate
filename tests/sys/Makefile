@@ -137,6 +137,7 @@ HOST_TESTS += host_test_vm86
 HOST_TESTS += host_test_ptrace
 HOST_TESTS += host_test_mqueue
 HOST_TESTS += host_test_netdev_recv
+HOST_TESTS += host_test_audit_invariants
 HOST_TESTS += host_test_x86_64_asm
 HOST_TESTS += host_test_x86_64_gdt
 HOST_TESTS += host_test_x86_64_idt
@@ -453,6 +454,11 @@ host_test_x86_64_syscall: host_test_x86_64_syscall.c
 # like every other entry in HOST_TESTS.
 host_test_x86_64_asm: host_test_x86_64_asm.sh
 	cp host_test_x86_64_asm.sh $@
+	chmod +x $@
+
+# Source invariants of the 2026-11-06 kernel audit's fixes; a script too.
+host_test_audit_invariants: host_test_audit_invariants.py
+	cp host_test_audit_invariants.py $@
 	chmod +x $@
 
 all: tests.o $(HOST_TESTS)
