@@ -58,6 +58,16 @@ def main():
         if got != "one\ntwo\nthree\n":
             print("FAIL: 999999999d%% changed the file: %r" % got)
             fails += 1
+        if b"\a" not in out:
+            print("FAIL: 999999999d% reported no error")
+            fails += 1
+        # a count over 100 on % is an error (POSIX vi Move to Line)
+        out, status = run(path, [b"101%", b"x", b":wq\r"])
+        with open(path) as f:
+            got = f.read()
+        if b"\a" not in out or got != "ne\ntwo\nthree\n":
+            print("FAIL: 101%% moved, or reported no error: %r" % got)
+            fails += 1
 
         out, status = run(path, [b"ifoo\x1b", b"Q", b"q!\n"])
         at = out.find(b"LeakSanitizer")

@@ -4,7 +4,8 @@
 dw, d$ and D on an empty line deleted nothing, yet emptied the unnamed
 buffer and marked the file modified.  For each case: after the command,
 :q must quit (the buffer is not modified); and after yy, the command, and
-Gp, the line yanked must be what p puts.  Expected results are Vim's
+Gp, the line yanked must be what p puts -- and the same with a named
+buffer, "ayy, the command given "a, and G"ap.  Expected results are Vim's
 (vim -u NONE -N).
 
 Usage: test_vi_empty_ops.py path/to/vi
@@ -44,6 +45,14 @@ def main():
         _, _, saved = run_vi_session(VI, text, [b"yy"] + keys + [b"Gp"])
         if saved != want:
             print(f"FAIL: {name}: the unnamed buffer changed: {saved!r}, want {want!r}")
+            fails += 1
+        # and a named buffer given to it: "ayy, the command with "a, G"ap
+        k = keys[0]
+        at = min(k.index(c) for c in b"dDx" if c in k)
+        named = [b"\"ayy", k[:at] + b"\"a" + k[at:], b"G\"ap"]
+        _, _, saved = run_vi_session(VI, text, named)
+        if saved != want:
+            print(f"FAIL: {name}: buffer a changed: {saved!r}, want {want!r}")
             fails += 1
     if fails:
         return 1

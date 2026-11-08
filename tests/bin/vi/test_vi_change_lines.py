@@ -34,12 +34,25 @@ CASES = [
 ]
 
 
+# the error is reported: the terminal alerted (and not for one in reach)
+BELLS = [
+    ("5cc on two lines alerts", "a\nb\n", [b"5cc"], True),
+    ("3cc with one line after alerts", "a\nb\nc\n", [b"j3cc"], True),
+    ("2cc in reach does not", "a\nb\n", [b"2ccX\x1b"], False),
+]
+
+
 def main():
     fails = 0
     for name, text, keys, want in CASES:
         status, _, saved = run_vi_session(VI, text, keys)
         if status != 0 or saved != want:
             print(f"FAIL: {name}: status {status}, {saved!r}, want {want!r}")
+            fails += 1
+    for name, text, keys, bell in BELLS:
+        status, out, _ = run_vi_session(VI, text, keys)
+        if status != 0 or ("\a" in out) != bell:
+            print(f"FAIL: {name}: status {status}, alerted {'\a' in out}")
             fails += 1
     if fails:
         return 1
