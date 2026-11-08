@@ -9,6 +9,7 @@
 .Op Fl RrsSv
 .Op Fl c Ar command
 .Op Fl t Ar tag
+.Op Fl w Ar size
 .Op Ar +command
 .Op Ar file
 .Op Ar file ...
@@ -351,9 +352,18 @@ or
 Commands given with
 .Fl c
 still run.
+.It Fl
+The same as
+.Fl s
+(obsolescent).
 .It Fl S
 Start in secure mode.
 Shell escapes and shell-capable commands are disabled.
+.It Fl w Ar size
+Set the
+.Ic window
+option to
+.Ar size .
 .It Fl v
 Accepted for shared parser compatibility.
 When invoking
@@ -608,8 +618,9 @@ Readonly and restricted entry points such as
 .Cm view
 and
 .Cm rvi
-are implemented through the shared frontend parser even though they are not
-separate binaries today.
+are the same program under another name: it reads the name it was run by.
+They are installed as copies of
+.Nm .
 .Pp
 The current renderer still uses a repaint-heavy refresh strategy rather than a
 dirty-region diff engine.

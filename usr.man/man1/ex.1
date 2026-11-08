@@ -149,7 +149,7 @@ The current supported command contract includes:
 writes a window of
 .Ar count
 lines
-.Pq the Ic window No option, set by it; by default twice Ic scroll :
+.Pq the Ic window No option, set by it; by default twice Ic scroll , No or with Cm \&! the Ic window No option itself :
 from the line
 .Pq Cm + No or no type ,
 ending at it
@@ -474,8 +474,10 @@ The same as
 .Fl s
 (obsolescent).
 .It Fl s
-Batch mode: no prompts, file messages or other interactive output; the
-first command read that fails ends the session with a failing status (see
+Batch mode: no prompts, file messages or other interactive output (when
+standard input is not a terminal, with or without
+.Fl s ,
+the first command read that fails ends the session: see
 .Sx EXIT STATUS ) ;
 and no startup commands are read from
 .Ev EXINIT ,
@@ -534,7 +536,7 @@ the value of one.
 Every option POSIX lists is accepted under its name and abbreviation, and
 reported:
 autoindent (ai), autoprint (ap), autowrite (aw), beautify (bf), directory
-(dir), edcompatible (ed), errorbells (eb), exrc (ex), ignorecase (ic), lisp,
+(dir), edcompatible (ed), errorbells (eb), exrc (ex), ignorecase (ic),
 list, magic, mesg, number (nu), paragraphs (para), prompt, readonly (ro),
 redraw, remap, report, scroll (scr), sections (sect), shell (sh), shiftwidth
 (sw), showmatch (sm), showmode (smd), slowopen (slow), tabstop (ts),
@@ -573,6 +575,8 @@ terse has no effect (POSIX: messages
 .Dq may
 be shorter), nor redraw, which applies only to terminals that cannot do
 visual mode.
+lisp, a historical option POSIX does not list, is accepted, so old
+startup files that set it still load, and does nothing.
 Some in more detail:
 .Bl -tag -width indent
 .It Ic number , nu
@@ -788,8 +792,11 @@ Readonly entry points such as
 view
 and restricted entry points such as
 .Ql rex
-are implemented through the shared frontend parser even though they are not
-separate binaries today.
+are the same program under another name: it reads the name it was run by.
+They are installed as copies of
+.Nm
+and
+.Xr vi 1 .
 .Pp
 A file whose last line has no newline is edited as if it had one, and is
 written back with it.
