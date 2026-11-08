@@ -224,8 +224,13 @@ static void
 test_9m(void)
 {
     expect_contains("9m-1", "_RINvCshgxSpmajvKg_7mycrate3fooL_E", DEMANGLE_AUTO, "'_>");
-    expect_contains("9m-2a", "_RINvCshgxSpmajvKg_7mycrate3fooL0_E", DEMANGLE_AUTO, "'a>");
-    expect_contains("9m-2b", "_RINvCshgxSpmajvKg_7mycrate3fooL1_E", DEMANGLE_AUTO, "'b>");
+    /* a lifetime is named for the binder that binds it; one bound by
+     * none is no lifetime */
+    expect_contains("9m-2a", "_RINvCshgxSpmajvKg_7mycrate3fooFG_RL0_hEuE", DEMANGLE_AUTO,
+                    "for<'a> fn(&'a u8)>");
+    expect_contains("9m-2b", "_RINvCshgxSpmajvKg_7mycrate3fooFG0_RL0_hRL1_hEuE", DEMANGLE_AUTO,
+                    "for<'a, 'b> fn(&'b u8, &'a u8)>");
+    expect_null("9m-2c", "_RINvCshgxSpmajvKg_7mycrate3fooL0_E", DEMANGLE_AUTO);
     expect_contains("9m-3", "_RINvCshgxSpmajvKg_7mycrate3fooFG_UKClElE", DEMANGLE_AUTO, "fn(i32) -> i32");
 }
 

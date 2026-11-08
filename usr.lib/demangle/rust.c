@@ -29,6 +29,9 @@ typedef struct rust_parser {
      * dyn trait's associated-type bindings join: Foo<u8, Item = i32> */
     int path_generic;
 
+    /* lifetimes bound by the binders, for<'a>, of the types around */
+    size_t bound_lifetimes;
+
     rust_buf_t out;
 } rust_parser_t;
 
@@ -69,6 +72,8 @@ static int rust_parse_v0_type_path(rust_parser_t *p);
 static int rust_parse_v0_const(rust_parser_t *p);
 static int rust_parse_v0_const_int(rust_parser_t *p, char type_tag);
 static int rust_parse_v0_lifetime(rust_parser_t *p, int display);
+static int rust_append_lifetime(rust_parser_t *p, size_t idx);
+static int rust_parse_v0_binder(rust_parser_t *p);
 static int rust_parse_v0_dyn_trait(rust_parser_t *p);
 static int rust_parse_v0_generic_arg(rust_parser_t *p);
 static int rust_parse_v0_path(rust_parser_t *p);
@@ -755,7 +760,6 @@ static int
 rust_parse_v0_lifetime(rust_parser_t *p, int display)
 {
     size_t idx;
-    char letter;
 
     if (p->cur[0] != 'L') {
         return -1;
@@ -766,37 +770,78 @@ rust_parse_v0_lifetime(rust_parser_t *p, int display)
         return -1;
     }
 
+    /* a lifetime bound by no binder is no lifetime (rustc-demangle;
+     * GNU c++filt prints '_18446744073709551615) */
+    if (idx > p->bound_lifetimes) {
+        return -1;
+    }
     if (!display) {
         return 0;
     }
+    return rust_append_lifetime(p, idx);
+}
+
+/*
+ * The lifetime @p idx, a de Bruijn index: 0 is the erased '_, 1 the one
+ * the innermost binder bound last, and so on outwards.  They are named by
+ * depth, from the outermost binder's first, 'a, as rustc-demangle and GNU
+ * name them; past 'z, '_26.  This named index 1 'a wherever it was --
+ * fn(&'a u8, &'a u8) for for<'a, 'b> fn(&'b u8, &'a u8).
+ */
+static int
+rust_append_lifetime(rust_parser_t *p, size_t idx)
+{
+    size_t depth;
 
     if (rust_buf_appendc(&p->out, '\'') != 0) {
         return -1;
     }
-
     if (idx == 0u) {
         return rust_buf_appendc(&p->out, '_');
     }
+    depth = p->bound_lifetimes - idx;
+    if (depth < 26u) {
+        return rust_buf_appendc(&p->out, (char)('a' + depth));
+    }
+    return rust_buf_appendc(&p->out, '_') != 0 ? -1 : rust_buf_append_base10(&p->out, depth);
+}
 
-    /* For idx in 1..=26, render as 'a..'z.  For idx > 26, modular
-     * remapping made every 26th lifetime alias to the same letter
-     * with "..." appended, losing distinguishability between e.g.
-     * the 27th and 53rd lifetimes.  Append the bucket index instead
-     * so distinct lifetimes get distinct names. */
-    letter = (char)('a' + (idx - 1u) % 26u);
-    if (rust_buf_appendc(&p->out, letter) != 0) {
+/*
+ * [<binder>] = "G" <base-62-number>: for<'a, 'b> before a function or dyn
+ * type, binding one lifetime more than its number.  They are counted in
+ * bound_lifetimes, which rust_parse_v0_type() puts back when the type
+ * ends.  The binder was read and dropped.
+ */
+static int
+rust_parse_v0_binder(rust_parser_t *p)
+{
+    size_t n;
+    size_t i;
+
+    if (p->cur[0] != 'G') {
+        return 0;
+    }
+    p->cur++;
+    /* no more than the symbol is long: a short one must not print
+     * for<'a, ... '_4294967295> */
+    if (rust_parse_base62(p, &n) != 0 || n >= strlen(p->input) ||
+        p->bound_lifetimes > strlen(p->input)) {
         return -1;
     }
-    if (idx > 26u) {
-        char buf[24];
-        int n = snprintf(buf, sizeof(buf), "%zu", (size_t)((idx - 1u) / 26u));
-        if (n < 0 || (size_t)n >= sizeof(buf)) {
+    n++;
+    if (rust_buf_append(&p->out, "for<", 4u) != 0) {
+        return -1;
+    }
+    for (i = 0u; i < n; i++) {
+        if (i > 0u && rust_buf_append(&p->out, ", ", 2u) != 0) {
             return -1;
         }
-        return rust_buf_append(&p->out, buf, (size_t)n);
+        p->bound_lifetimes++;
+        if (rust_append_lifetime(p, 1u) != 0) {
+            return -1;
+        }
     }
-
-    return 0;
+    return rust_buf_append(&p->out, "> ", 2u);
 }
 
 static int
@@ -986,6 +1031,7 @@ rust_parse_v0_type(rust_parser_t *p)
      * via rust_parse_v0_generic_arg → rust_parse_v0_type.  Bound the
      * descent so deeply-nested generic args can't blow the stack. */
     int saved_in_value = p->in_value;
+    size_t saved_bound = p->bound_lifetimes;
 
     if (rust_parser_enter(p) != 0) {
         return -1;
@@ -993,6 +1039,7 @@ rust_parse_v0_type(rust_parser_t *p)
     p->in_value = 0;
     rc = rust_parse_v0_type_inner(p);
     p->in_value = saved_in_value;
+    p->bound_lifetimes = saved_bound;   /* a binder binds in its type */
     rust_parser_leave(p);
     return rc;
 }
@@ -1119,13 +1166,8 @@ rust_parse_v0_type_inner(rust_parser_t *p)
 
         p->cur++;
 
-        if (p->cur[0] == 'G') {
-            size_t binder;
-            p->cur++;
-            if (rust_parse_base62(p, &binder) != 0) {
-                return -1;
-            }
-            (void)binder;
+        if (rust_parse_v0_binder(p) != 0) {
+            return -1;
         }
 
         if (p->cur[0] == 'U') {
@@ -1213,19 +1255,12 @@ rust_parse_v0_type_inner(rust_parser_t *p)
 
     if (p->cur[0] == 'D') {
         int first = 1;
+        size_t outer_bound = p->bound_lifetimes;
 
         p->cur++;
-        if (rust_buf_append(&p->out, "dyn ", 4u) != 0) {
+        /* dyn for<'a> Trait<'a> + Other: the binder binds in the traits */
+        if (rust_buf_append(&p->out, "dyn ", 4u) != 0 || rust_parse_v0_binder(p) != 0) {
             return -1;
-        }
-
-        if (p->cur[0] == 'G') {
-            size_t binder;
-            p->cur++;
-            if (rust_parse_base62(p, &binder) != 0) {
-                return -1;
-            }
-            (void)binder;
         }
 
         while (p->cur[0] != '\0' && p->cur[0] != 'E') {
@@ -1242,6 +1277,7 @@ rust_parse_v0_type_inner(rust_parser_t *p)
             return -1;
         }
         p->cur++;
+        p->bound_lifetimes = outer_bound;   /* and not in the bound */
 
         /* the object's lifetime bound -- but not the erased one, L_, which
          * rustc gives nearly every dyn type and nothing prints: it came

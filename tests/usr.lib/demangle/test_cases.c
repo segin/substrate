@@ -192,6 +192,19 @@ static const dm_case_t cases[] = {
     { "no ABI", "_RINvCs_3lib2idFmEmE", R, "lib::id::<fn(u32) -> u32>" },
     { "an ABI that is no identifier", "_RINvCs_3lib2idFK.EuE", R, NULL },
 
+    /* a Rust v0 binder, for<'a>, is printed, and names its lifetimes */
+    { "rustc's", "_RINvCs91N3l2zy1RL_3lib2idFG_RL0_hERL0_hEB2_", R,
+      "lib::id::<for<'a> fn(&'a u8) -> &'a u8>" },
+    { "two lifetimes, innermost first", "_RINvCs_3lib2idFG0_RL0_hRL1_hEuE", R,
+      "lib::id::<for<'a, 'b> fn(&'b u8, &'a u8)>" },
+    { "a binder inside another", "_RINvCs_3lib2idFG_FG_RL0_hRL1_hEuEuE", R,
+      "lib::id::<for<'a> fn(for<'b> fn(&'b u8, &'a u8))>" },
+    { "a dyn type's", "_RINvCs_3lib2idODG_INtB2_5TraitL0_EEL_E", R,
+      "lib::id::<*mut dyn for<'a> lib::Trait<'a>>" },
+    { "a lifetime bound by none", "_RINvCs_3lib2idRL0_hE", R, NULL },
+    { "one past the binder's", "_RINvCs_3lib2idFG_RL1_hEuE", R, NULL },
+    { "a binder of too many", "_RINvCs_3lib2idFGzzzzzz_EuE", R, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
