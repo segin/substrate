@@ -1463,6 +1463,11 @@ static int parse_template_args(dm_itanium_parser_t *p) {
 	}
 	pushed = 1;
 
+	/* after operator< or operator<<, a space: operator<< <char>, as GNU
+	 * c++filt writes it, not operator<<<char> */
+	if(p->out.len > 0u && p->out.data[p->out.len - 1u] == '<' && demangle_buf_appendc(&p->out, ' ') != 0) {
+		goto fail;
+	}
 	if(demangle_buf_appendc(&p->out, '<') != 0) {
 		goto fail;
 	}

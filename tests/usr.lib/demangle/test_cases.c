@@ -370,6 +370,12 @@ static const dm_case_t cases[] = {
       "auto llvm::map_to_vector<llvm::SmallVector<llvm::Value*, 4u>&, llvm::Type* (llvm::Value::*)() const>"
       "(llvm::SmallVector<llvm::Value*, 4u>&, llvm::Type* (llvm::Value::*&&)() const)" },
 
+    /* a template operator< or operator<< has a space before its arguments */
+    { "operator<< (LLVM's)", "_ZN4llvm4PBQPlsINS_11raw_ostreamEEERT_S4_RKNS0_6VectorE", I,
+      "llvm::raw_ostream& llvm::PBQP::operator<< <llvm::raw_ostream>(llvm::raw_ostream&, llvm::PBQP::Vector const&)" },
+    { "operator<", "_ZltIiEbRK1AIT_ES4_", I, "bool operator< <int>(A<int> const&, A<int> const&)" },
+    { "operator> needs none", "_ZgtIiEbRK1AIT_ES4_", I, "bool operator><int>(A<int> const&, A<int> const&)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
