@@ -1089,7 +1089,11 @@ rust_parse_v0_type_inner(rust_parser_t *p)
         if (rust_buf_appendc(&p->out, '&') != 0) {
             return -1;
         }
-        if (p->cur[0] == 'L') {
+        /* &'a T, but &T for the erased lifetime, L_, as rustc-demangle and
+         * GNU print it: it was &'_ T */
+        if (p->cur[0] == 'L' && p->cur[1] == '_') {
+            p->cur += 2;
+        } else if (p->cur[0] == 'L') {
             if (rust_parse_v0_lifetime(p, 1) != 0 || rust_buf_appendc(&p->out, ' ') != 0) {
                 return -1;
             }

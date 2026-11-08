@@ -205,6 +205,11 @@ static const dm_case_t cases[] = {
     { "one past the binder's", "_RINvCs_3lib2idFG_RL1_hEuE", R, NULL },
     { "a binder of too many", "_RINvCs_3lib2idFGzzzzzz_EuE", R, NULL },
 
+    /* a Rust v0 reference's erased lifetime is not printed */
+    { "a reference", "_RINvCs_3lib2idRL_hE", R, "lib::id::<&u8>" },
+    { "a mutable one", "_RINvCs_3lib2idQL_hE", R, "lib::id::<&mut u8>" },
+    { "one with a lifetime", "_RINvCs_3lib2idFG_QL0_hEuE", R, "lib::id::<for<'a> fn(&'a mut u8)>" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
