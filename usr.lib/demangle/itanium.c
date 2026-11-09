@@ -2117,7 +2117,7 @@ static int parse_pointer_to_member(dm_itanium_parser_t *p) {
 		free(decl);
 		return -1;
 	}
-	if(*q == 'F') {
+	if(*q == 'F' || (q[0] == 'D' && q[1] == 'o' && q[2] == 'F')) {
 		/* void (A::*)(int): no space before it, as for (*) */
 		rc = parser_insert_in_type(p, member_off, p->array_dims_off, decl + 1, class_len + 5u);
 	} else if(*q == 'A') {
@@ -2193,6 +2193,9 @@ static int parse_type(dm_itanium_parser_t *p) {
 
 	type_off = p->out.len;
 	ch = p->cur[0];
+	if(ch == 'D' && p->cur[1] == 'o' && p->cur[2] == 'F') {
+		ch = 'F'; /* a noexcept function type is one, as any is */
+	}
 
 	saved_type_ctx = p->in_type_context;
 	p->in_type_context = 1;
@@ -2345,6 +2348,9 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 
 		p->cur++;
 		pointee = p->cur[0];
+		if(pointee == 'D' && p->cur[1] == 'o' && p->cur[2] == 'F') {
+			pointee = 'F'; /* a noexcept function's */
+		}
 		/* past qualifiers, to a const array or function under them */
 		if(pointee == 'K' || pointee == 'V' || pointee == 'r') {
 			const char *q = p->cur;
@@ -2515,6 +2521,23 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 
 	if(parse_function_type(p) == 0 || parse_array_type(p) == 0 || parse_pointer_to_member(p) == 0 || parse_template_param(p) == 0 ||
 	   parse_decltype_type(p) == 0 || parse_vendor_type(p) == 0) {
+		return 0;
+	}
+
+	/* Do F...E, a noexcept function type: void (int) noexcept, refused
+	 * before; a pointer's declarator still goes before its parameters */
+	if(p->cur[0] == 'D' && p->cur[1] == 'o' && p->cur[2] == 'F') {
+		size_t params;
+
+		p->cur += 2;
+		if(parse_function_type(p) != 0) {
+			return -1;
+		}
+		params = p->array_dims_off;
+		if(demangle_buf_append(&p->out, " noexcept", 9u) != 0) {
+			return -1;
+		}
+		p->array_dims_off = params;
 		return 0;
 	}
 

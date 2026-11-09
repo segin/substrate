@@ -401,6 +401,16 @@ static const dm_case_t cases[] = {
     { "a template function", "_Z1fIL_Z1gIiEvT_EEvv", I, "void f<void g<int>(int)>()" },
     { "with no E", "_Z1fIL_Z1x", I, NULL },
 
+    /* an Itanium noexcept function type, Do F...E */
+    { "a pointer to one", "_Z1fPDoFviE", I, "f(void (*)(int) noexcept)" },
+    { "a reference", "_Z1fRDoFviE", I, "f(void (&)(int) noexcept)" },
+    { "by substitution, one entry", "_Z1fPDoFviES_", I, "f(void (*)(int) noexcept, void (int) noexcept)" },
+    { "a member function's", "_Z1fM1ADoFvvE", I, "f(void (A::*)() noexcept)" },
+    { "as a template argument (LLVM's)",
+      "_ZN4llvm8erase_ifINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPDoFiiEEEvRT_T0_", I,
+      "void llvm::erase_if<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, int (*)(int) noexcept>"
+      "(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&, int (*)(int) noexcept)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
