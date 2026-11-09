@@ -1049,6 +1049,15 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 		size_t name_only_off, name_only_len;
 		dm_parse_mark_t comp_mark;
 
+		/* <data-member-prefix> ends in M: the closure of a data member's
+		 * initializer is named in its scope, A::B::{lambda()#1}, and the
+		 * M is not printed (it was refused) */
+		if(!first && p->cur[0] == 'M') {
+			p->cur++;
+			if(p->cur[0] == 'E' || p->cur[0] == '\0') {
+				goto out;
+			}
+		}
 		if(!first && demangle_buf_append(&p->out, "::", 2u) != 0) {
 			goto out;
 		}

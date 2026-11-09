@@ -411,6 +411,13 @@ static const dm_case_t cases[] = {
       "void llvm::erase_if<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, int (*)(int) noexcept>"
       "(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&, int (*)(int) noexcept)" },
 
+    /* an Itanium data-member prefix, M: a lambda in a member's initializer */
+    { "the lambda", "_ZN1A1BMUlvE_E", I, "A::B::{lambda()#1}" },
+    { "its call operator", "_ZNK1A1BMUlvE_clEv", I, "A::B::{lambda()#1}::operator()() const" },
+    { "its typeinfo (LLVM's)", "_ZTIN4llvm12dwarf_linker8parallel15DWARFLinkerImpl11LinkContext16getUnitForOffsetMUlmE_E", I,
+      "typeinfo for llvm::dwarf_linker::parallel::DWARFLinkerImpl::LinkContext::getUnitForOffset::{lambda(unsigned long)#1}" },
+    { "an M with nothing after it", "_ZN1AME", I, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
