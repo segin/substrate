@@ -495,6 +495,18 @@ static const dm_case_t cases[] = {
       "void k<g<f()::{lambda(auto:1&&)#1}>(f()::{lambda(auto:1&&)#1}&&)::{lambda()#1}>"
       "(f()::{lambda(auto:1&&)#1}&&)" },
 
+    /* an entry that is a template parameter alone is the argument of the
+     * template where it is used; under a reference, of the one where it
+     * was first printed under a reference, as GNU c++filt has it */
+    { "the parameter, where it is used", "_Z1fIiZ1gIcEvT_E1AEvS1_", I,
+      "void f<int, g<char>(char)::A>(int)" },
+    { "after one under a reference", "_Z1fIiZ1gIcEvOT_E1AEvS1_", I,
+      "void f<int, g<char>(char&&)::A>(int)" },
+    { "under a reference the first time", "_Z1fIiZ1gIcEvT_E1AEvRS1_", I,
+      "void f<int, g<char>(char)::A>(int&)" },
+    { "under one again", "_Z1fIiZ1gIcEvOT_E1AEvRS1_", I,
+      "void f<int, g<char>(char&&)::A>(char&)" },
+
     /* Itanium operator expressions, as GNU c++filt prints them */
     { "a binary operator", "_Z1fIiEDTplfp_Li1EET_", I, "decltype ({parm#1}+(1)) f<int>(int)" },
     { "two literals", "_Z1fIiEDTmlLi2ELi3EET_", I, "decltype ((2)*(3)) f<int>(int)" },

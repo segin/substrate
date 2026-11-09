@@ -108,6 +108,10 @@ typedef struct dm_itanium_parser {
 	int expr_name;
 	/* a lambda's parameters are being parsed: T_ is its auto, auto:1 */
 	int in_lambda_sig;
+	/* the type parsed next is a reference's, R or O, outside a lambda's
+	 * signature; and the substitution looked up next is that type */
+	int ref_operand;
+	int lookup_under_ref;
 	/* the expression parsed last needs no parentheses as an operand */
 	int expr_simple;
 	int has_return_type;
@@ -542,9 +546,53 @@ static int parser_print_lambda_ref(dm_itanium_parser_t *p, size_t idx) {
 	return 0;
 }
 
+/*
+ * Keep the text from @p start to the end of the output as what entry
+ * @p idx, a template parameter, is under a reference.
+ */
+static int parser_keep_ref_text(dm_itanium_parser_t *p, size_t idx, size_t start) {
+	char *copy = (char *)malloc(p->out.len - start + 1u);
+
+	if(copy == NULL) {
+		return -1;
+	}
+	memcpy(copy, p->out.data + start, p->out.len - start);
+	copy[p->out.len - start] = '\0';
+	free(p->substitutions[idx].resolved);
+	p->substitutions[idx].resolved = copy;
+	p->substitutions[idx].resolved_len = p->out.len - start;
+	return 0;
+}
+
 static int parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx) {
+	int under_ref = p->lookup_under_ref;
+
+	p->lookup_under_ref = 0;
 	if(idx >= p->substitution_count) {
 		return -1;
+	}
+
+	/*
+	 * A template parameter alone is resolved where it is used -- but
+	 * under a reference, as it was the first time it was printed under
+	 * one: GNU c++filt keeps the templates in scope then, and resolves
+	 * it against those wherever it is reached through a reference again.
+	 * (Not in a pack's expansion, whose element changes.)
+	 */
+	if(under_ref && p->substitutions[idx].tparam != 0u && !p->pack_expanding) {
+		size_t start = p->out.len;
+		size_t t = p->substitutions[idx].tparam - 1u;
+		int rc;
+
+		if(p->substitutions[idx].resolved != NULL) {
+			return demangle_buf_append(&p->out, p->substitutions[idx].resolved, p->substitutions[idx].resolved_len);
+		}
+		if(p->func_map.count > 0) {
+			rc = append_template_arg(p, &p->func_map, p->func_tmpl_off, p->func_tmpl_len, p->func_tmpl_count, t);
+		} else {
+			rc = append_template_arg(p, &p->last_map, p->last_template_off, p->last_template_len, p->last_template_count, t);
+		}
+		return rc != 0 ? rc : parser_keep_ref_text(p, idx, start);
 	}
 
 	/* auto:1&& in a lambda's signature, the argument&& outside it */
@@ -558,13 +606,13 @@ static int parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx) {
 		return parser_reprint_type(p, s, p->substitutions[idx].src_len);
 	}
 
-	if(p->substitutions[idx].tparam != 0u && (p->in_lambda_sig || p->substitutions[idx].in_lambda)) {
+	if(p->substitutions[idx].tparam != 0u) {
 		size_t t = p->substitutions[idx].tparam - 1u;
 
 		if(p->in_lambda_sig) {
 			return demangle_buf_printf(&p->out, "auto:%zu", t + 1u);
 		}
-		/* made as auto:1 in a lambda's signature, the argument outside it */
+		/* the argument of the template in scope here */
 		if(p->func_map.count > 0) {
 			return append_template_arg(p, &p->func_map, p->func_tmpl_off, p->func_tmpl_len, p->func_tmpl_count, t);
 		}
@@ -2671,6 +2719,7 @@ static int parse_type(dm_itanium_parser_t *p) {
 	int rc;
 	char ch;
 	int needs_sub;
+	int under_ref;
 	int saved_type_ctx;
 
 	/* Type production recurses through parse_type_inner into
@@ -2697,11 +2746,17 @@ static int parse_type(dm_itanium_parser_t *p) {
 		ch = 'T'; /* so is a pack expansion, after its pattern's */
 	}
 
+	under_ref = p->ref_operand;
+	p->ref_operand = 0;
+	/* an entry, S_ or S<n>_, alone: the lookup is this type's */
+	p->lookup_under_ref = under_ref && ch == 'S' && (p->cur[1] == '_' || isdigit((unsigned char)p->cur[1]) || (p->cur[1] >= 'A' && p->cur[1] <= 'Z'));
+
 	saved_type_ctx = p->in_type_context;
 	p->in_type_context = 1;
 
 	rc = parse_type_inner(p);
 	p->in_type_context = saved_type_ctx;
+	p->lookup_under_ref = 0;
 	if(rc != 0) {
 		parser_leave(p);
 		return rc;
@@ -2755,6 +2810,12 @@ static int parse_type(dm_itanium_parser_t *p) {
 			}
 			if(idx != SIZE_MAX && q + 1 == p->cur) {
 				p->substitutions[p->substitution_count - 1u].tparam = (tstart[1] == '_') ? 1u : idx + 2u;
+				/* printed under a reference: what it is under one */
+				if(under_ref && !p->pack_expanding &&
+				   parser_keep_ref_text(p, p->substitution_count - 1u, type_off) != 0) {
+					parser_leave(p);
+					return -1;
+				}
 			}
 		}
 	}
@@ -2890,6 +2951,7 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 			}
 		}
 		before = p->out.len;
+		p->ref_operand = kind != 'P' && !p->in_lambda_sig;
 		if(parse_type(p) != 0) {
 			return -1;
 		}
