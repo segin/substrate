@@ -97,6 +97,8 @@ typedef struct dm_itanium_parser {
 	int expr_name;
 	/* a lambda's parameters are being parsed: T_ is its auto, auto:1 */
 	int in_lambda_sig;
+	/* the expression parsed last needs no parentheses as an operand */
+	int expr_simple;
 	int has_return_type;
 	/* where the encoding being parsed began in the output: a template
 	 * function's return type goes there, after any thunk's words or the
@@ -189,6 +191,7 @@ static int parse_decltype_type(dm_itanium_parser_t *p);
 static int parse_vendor_type(dm_itanium_parser_t *p);
 static int parse_expression(dm_itanium_parser_t *p);
 static int parse_expression_operator(dm_itanium_parser_t *p);
+static int parse_subexpr(dm_itanium_parser_t *p);
 static int parse_cast_expression(dm_itanium_parser_t *p);
 static int parse_fold_expression(dm_itanium_parser_t *p);
 static int parse_pack_expansion(dm_itanium_parser_t *p);
@@ -1827,7 +1830,12 @@ static int parse_cast_expression(dm_itanium_parser_t *p) {
 	if(demangle_buf_appendc(&p->out, ')') != 0) {
 		return -1;
 	}
-	return parse_expression(p);
+	/* (int){parm#1}, (int)(1): the operand as a subexpression */
+	if(parse_subexpr(p) != 0) {
+		return -1;
+	}
+	p->expr_simple = 0;
+	return 0;
 }
 
 static int parse_fold_expression(dm_itanium_parser_t *p) {
@@ -1871,38 +1879,182 @@ static int parse_pack_expansion(dm_itanium_parser_t *p) {
 	return demangle_buf_appendc(&p->out, ')');
 }
 
+/*
+ * An operand: the expression, parenthesized unless it is simple -- a
+ * name, a qualified name, a function parameter -- as libiberty's
+ * d_print_subexpr has it: {parm#1}+(1), (g<int>)(), !std::is_same<...>::value.
+ */
+static int parse_subexpr(dm_itanium_parser_t *p) {
+	size_t off = p->out.len;
+
+	if(parse_expression(p) != 0) {
+		return -1;
+	}
+	if(p->expr_simple) {
+		return 0;
+	}
+	if(parser_insert_in_type(p, off, off, "(", 1u) != 0) {
+		return -1;
+	}
+	return demangle_buf_appendc(&p->out, ')');
+}
+
+/*
+ * The ABI's operator expressions, printed as GNU c++filt prints them:
+ * unary ones before their operand, -x, !x, ++x, and x++ for the postfix
+ * forms; binary ones between theirs, without spaces, (1)<(2), the whole
+ * parenthesized again for >, which would end template arguments;
+ * a?b : c; f(args); a[i]; sizeof (T), sizeof x, alignof the same;
+ * noexcept(x); a.b and a->b.  This printed a few of them as calls --
+ * call(f, x), index(a, i), sizeof(T) -- took cl's argument list for one
+ * argument, and refused the rest.
+ */
 static int parse_expression_operator(dm_itanium_parser_t *p) {
 	static const struct {
 		const char code[3];
-		const char *name;
-		int arity;
-	} ops[] = {{"cl", "call", 2},      {"ix", "index", 2},   {"qu", "cond", 3},      {"st", "sizeof", 1},
-	           {"sz", "sizeof...", 1}, {"at", "alignof", 1}, {"az", "alignof...", 1}};
+		const char *op;
+		int kind; /* 1 unary, 2 binary */
+	} ops[] = {
+	    {"ps", "+", 1},   {"ng", "-", 1},   {"ad", "&", 1},   {"de", "*", 1},   {"co", "~", 1},   {"nt", "!", 1},   {"pl", "+", 2},
+	    {"mi", "-", 2},   {"ml", "*", 2},   {"dv", "/", 2},   {"rm", "%", 2},   {"an", "&", 2},   {"or", "|", 2},   {"eo", "^", 2},
+	    {"aS", "=", 2},   {"pL", "+=", 2},  {"mI", "-=", 2},  {"mL", "*=", 2},  {"dV", "/=", 2},  {"rM", "%=", 2},  {"aN", "&=", 2},
+	    {"oR", "|=", 2},  {"eO", "^=", 2},  {"ls", "<<", 2},  {"rs", ">>", 2},  {"lS", "<<=", 2}, {"rS", ">>=", 2}, {"eq", "==", 2},
+	    {"ne", "!=", 2},  {"lt", "<", 2},   {"gt", ">", 2},   {"le", "<=", 2},  {"ge", ">=", 2},  {"ss", "<=>", 2}, {"aa", "&&", 2},
+	    {"oo", "||", 2},  {"cm", ",", 2},   {"pm", "->*", 2}, {"ds", ".*", 2},
+	};
 	size_t i;
-	int argi;
+	char c0 = p->cur[0], c1 = p->cur[1];
 
-	/*
-	 * Expression opcodes are a fixed two-byte token stream from the ABI.
-	 * Keep this table flat and exhaustive so transition behavior is explicit.
-	 */
-	for(i = 0u; i < sizeof(ops) / sizeof(ops[0]); i++) {
-		if(p->cur[0] == ops[i].code[0] && p->cur[1] == ops[i].code[1]) {
-			p->cur += 2;
-			if(demangle_buf_append(&p->out, ops[i].name, strlen(ops[i].name)) != 0 || demangle_buf_appendc(&p->out, '(') != 0) {
+	/* ++ and --: pp_ x is ++x, pp x is x++ */
+	if((c0 == 'p' && c1 == 'p') || (c0 == 'm' && c1 == 'm')) {
+		const char *op = (c0 == 'p') ? "++" : "--";
+
+		p->cur += 2;
+		if(p->cur[0] == '_') {
+			p->cur++;
+			if(demangle_buf_append(&p->out, op, 2u) != 0 || parse_subexpr(p) != 0) {
 				return -1;
 			}
-
-			for(argi = 0; argi < ops[i].arity; argi++) {
-				if(argi > 0 && demangle_buf_append(&p->out, ", ", 2u) != 0) {
-					return -1;
-				}
-				if(parse_expression(p) != 0) {
-					return -1;
-				}
-			}
-
-			return demangle_buf_appendc(&p->out, ')');
+		} else if(parse_subexpr(p) != 0 || demangle_buf_append(&p->out, op, 2u) != 0) {
+			return -1;
 		}
+		p->expr_simple = 0;
+		return 0;
+	}
+
+	for(i = 0u; i < sizeof(ops) / sizeof(ops[0]); i++) {
+		if(c0 == ops[i].code[0] && c1 == ops[i].code[1]) {
+			int gt = (c0 == 'g' && c1 == 't');
+
+			p->cur += 2;
+			if(ops[i].kind == 1) {
+				if(demangle_buf_append(&p->out, ops[i].op, strlen(ops[i].op)) != 0 || parse_subexpr(p) != 0) {
+					return -1;
+				}
+			} else if((gt && demangle_buf_appendc(&p->out, '(') != 0) || parse_subexpr(p) != 0 ||
+			          demangle_buf_append(&p->out, ops[i].op, strlen(ops[i].op)) != 0 || parse_subexpr(p) != 0 ||
+			          (gt && demangle_buf_appendc(&p->out, ')') != 0)) {
+				return -1;
+			}
+			p->expr_simple = 0;
+			return 0;
+		}
+	}
+
+	if(c0 == 'c' && c1 == 'l') { /* f(args...) */
+		int first = 1;
+
+		p->cur += 2;
+		if(p->cur[0] == 'L' && p->cur[1] == '_' && p->cur[2] == 'Z') {
+			/* a function named outright, L _Z g v E: its name alone,
+			 * g(), as libiberty prints a call of one -- not g()() */
+			int rc;
+
+			p->cur += 3;
+			if(parser_enter(p) != 0) {
+				return -1;
+			}
+			p->local_depth++;
+			rc = parse_encoding(p);
+			p->local_depth--;
+			parser_leave(p);
+			if(rc != 0 || p->cur[0] != 'E' || parser_freeze_from(p, p->encoding_name_end) != 0) {
+				return -1;
+			}
+			p->cur++;
+			p->out.len = p->encoding_name_end;
+			p->out.data[p->out.len] = '\0';
+			if(demangle_buf_appendc(&p->out, '(') != 0) {
+				return -1;
+			}
+		} else if(parse_subexpr(p) != 0 || demangle_buf_appendc(&p->out, '(') != 0) {
+			return -1;
+		}
+		while(p->cur[0] != 'E') {
+			if(p->cur[0] == '\0' || (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) || parse_expression(p) != 0) {
+				return -1;
+			}
+			first = 0;
+		}
+		p->cur++;
+		p->expr_simple = 0;
+		return demangle_buf_appendc(&p->out, ')');
+	}
+
+	if(c0 == 'i' && c1 == 'x') { /* a[i] */
+		p->cur += 2;
+		if(parse_subexpr(p) != 0 || demangle_buf_appendc(&p->out, '[') != 0 || parse_expression(p) != 0) {
+			return -1;
+		}
+		p->expr_simple = 0;
+		return demangle_buf_appendc(&p->out, ']');
+	}
+
+	if(c0 == 'q' && c1 == 'u') { /* a?b : c */
+		p->cur += 2;
+		if(parse_subexpr(p) != 0 || demangle_buf_appendc(&p->out, '?') != 0 || parse_subexpr(p) != 0 ||
+		   demangle_buf_append(&p->out, " : ", 3u) != 0 || parse_subexpr(p) != 0) {
+			return -1;
+		}
+		p->expr_simple = 0;
+		return 0;
+	}
+
+	if((c0 == 's' || c0 == 'a') && (c1 == 't' || c1 == 'z')) { /* sizeof (T), sizeof x */
+		const char *op = (c0 == 's') ? "sizeof " : "alignof ";
+
+		p->cur += 2;
+		if(demangle_buf_append(&p->out, op, strlen(op)) != 0) {
+			return -1;
+		}
+		if(c1 == 't') {
+			if(demangle_buf_appendc(&p->out, '(') != 0 || parse_type(p) != 0 || demangle_buf_appendc(&p->out, ')') != 0) {
+				return -1;
+			}
+		} else if(parse_subexpr(p) != 0) {
+			return -1;
+		}
+		p->expr_simple = 0;
+		return 0;
+	}
+
+	if(c0 == 'n' && c1 == 'x') { /* noexcept(x) */
+		p->cur += 2;
+		if(demangle_buf_append(&p->out, "noexcept(", 9u) != 0 || parse_expression(p) != 0) {
+			return -1;
+		}
+		p->expr_simple = 0;
+		return demangle_buf_appendc(&p->out, ')');
+	}
+
+	if((c0 == 'd' || c0 == 'p') && c1 == 't') { /* a.b, a->b */
+		p->cur += 2;
+		if(parse_subexpr(p) != 0 || demangle_buf_append(&p->out, c0 == 'd' ? "." : "->", c0 == 'd' ? 1u : 2u) != 0 ||
+		   parse_source_name(p) != 0 || (p->cur[0] == 'I' && parse_template_args(p) != 0)) {
+			return -1;
+		}
+		p->expr_simple = 0;
+		return 0;
 	}
 
 	return -1;
@@ -1992,14 +2144,18 @@ static int parse_expression(dm_itanium_parser_t *p) {
 	dm_parse_mark_t m;
 	int ok;
 
+	char c0 = p->cur[0], c1 = c0 != '\0' ? p->cur[1] : '\0';
+
 	if(parser_enter(p) != 0) {
 		return -1;
 	}
 
 	/* the forms GNU c++filt prints, which were refused: a template
-	 * parameter, a function parameter, T::x, &A::f */
+	 * parameter, a function parameter, T::x, &A::f.  Of them a function
+	 * parameter and a qualified name are simple (see parse_subexpr). */
 	ok = parse_simple_expression(p);
 	if(ok != -2) {
+		p->expr_simple = (c0 == 'f' && c1 == 'p') || (c0 == 's' && c1 == 'r');
 		parser_leave(p);
 		return ok;
 	}
@@ -2007,6 +2163,9 @@ static int parse_expression(dm_itanium_parser_t *p) {
 	mark_save(p, &m);
 	ok = parse_expr_primary(p);
 	if(ok == 0) {
+		/* a literal is not simple; an entity's name with no parameters,
+		 * L _Z 1x E, is */
+		p->expr_simple = (c0 == 'L' && c1 == '_' && p->encoding_name_end == p->out.len);
 		parser_leave(p);
 		return 0;
 	}
@@ -2021,6 +2180,7 @@ static int parse_expression(dm_itanium_parser_t *p) {
 	mark_restore(p, &m);
 	ok = parse_fold_expression(p);
 	if(ok == 0) {
+		p->expr_simple = 0;
 		parser_leave(p);
 		return 0;
 	}
@@ -2028,6 +2188,7 @@ static int parse_expression(dm_itanium_parser_t *p) {
 	mark_restore(p, &m);
 	ok = parse_pack_expansion(p);
 	if(ok == 0) {
+		p->expr_simple = 0;
 		parser_leave(p);
 		return 0;
 	}
@@ -2046,6 +2207,8 @@ static int parse_expression(dm_itanium_parser_t *p) {
 	p->expr_name = (p->cur[0] != 'N' && p->cur[0] != 'Z');
 	ok = parse_name(p);
 	p->expr_name = 0;
+	/* a name is simple, but not with template arguments: (g<int>)() */
+	p->expr_simple = !p->has_return_type;
 	parser_leave(p);
 	return ok;
 }
@@ -2364,7 +2527,8 @@ static int parse_decltype_type(dm_itanium_parser_t *p) {
 
 	p->cur += 2;
 
-	if(demangle_buf_append(&p->out, "decltype(", 9u) != 0) {
+	/* decltype (x), with GNU c++filt's space */
+	if(demangle_buf_append(&p->out, "decltype (", 10u) != 0) {
 		return -1;
 	}
 

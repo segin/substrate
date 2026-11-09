@@ -484,6 +484,29 @@ static const dm_case_t cases[] = {
     { "an entry of the enclosing template's", "_Z1gIPiZ1fIcEvT_EUlS2_E_EvS0_S3_", I,
       "void g<int*, f<char>(char)::{lambda(auto:1)#1}>(int*, f<char>(char)::{lambda(auto:1)#1})" },
 
+    /* Itanium operator expressions, as GNU c++filt prints them */
+    { "a binary operator", "_Z1fIiEDTplfp_Li1EET_", I, "decltype ({parm#1}+(1)) f<int>(int)" },
+    { "two literals", "_Z1fIiEDTmlLi2ELi3EET_", I, "decltype ((2)*(3)) f<int>(int)" },
+    { "> parenthesized once more", "_Z1fIiEDTgtfp_Li0EET_", I, "decltype (({parm#1}>(0))) f<int>(int)" },
+    { "a unary one", "_Z1fIiEDTntfp_ET_", I, "decltype (!{parm#1}) f<int>(int)" },
+    { "prefix ++", "_Z1fIiEDTpp_fp_ET_", I, "decltype (++{parm#1}) f<int>(int)" },
+    { "postfix ++", "_Z1fIiEDTppfp_ET_", I, "decltype ({parm#1}++) f<int>(int)" },
+    { "a call", "_Z1fIiEDTcl1gfp_EET_", I, "decltype (g({parm#1})) f<int>(int)" },
+    { "a call of a template", "_Z1fIiEDTcl1gIT_EEET_", I, "decltype ((g<int>)()) f<int>(int)" },
+    { "a call of a function named outright", "_Z1fIiEDTclL_Z1gvEEET_", I, "decltype (g()) f<int>(int)" },
+    { "an index", "_Z1fIiEDTixfp_Li0EET_", I, "decltype ({parm#1}[0]) f<int>(int)" },
+    { "a conditional", "_Z1fIiEDTquLb1ELi1ELi2EET_", I, "decltype ((true)?(1) : (2)) f<int>(int)" },
+    { "sizeof a type", "_Z1fIiEDTstT_ET_", I, "decltype (sizeof (int)) f<int>(int)" },
+    { "sizeof an expression", "_Z1fIiEDTszfp_ET_", I, "decltype (sizeof {parm#1}) f<int>(int)" },
+    { "a cast", "_Z1fIiEDTcvT_fp_ET_", I, "decltype ((int){parm#1}) f<int>(int)" },
+    { "member access", "_Z1fIiEDTptfp_1xET_", I, "decltype ({parm#1}->x) f<int>(int)" },
+    { "noexcept", "_Z1fIiEDTnxfp_ET_", I, "decltype (noexcept({parm#1})) f<int>(int)" },
+    { "! of a qualified name (Boost's)",
+      "_ZZN5boost4asio9execution6detail17any_executor_base16target_fns_tableINS0_10io_context19basic_executor_typeISaIvELm0EEEEEPKNS3_10target_fnsEbPNSt9enable_ifIXntsrSt7is_sameIT_vE5valueEvE4typeEE16fns_with_execute", I,
+      "boost::asio::execution::detail::any_executor_base::target_fns_table<boost::asio::io_context::basic_executor_type<std::allocator<void>, 0ul>>"
+      "(bool, std::enable_if<!std::is_same<boost::asio::io_context::basic_executor_type<std::allocator<void>, 0ul>, void>::value, void>::type*)"
+      "::fns_with_execute" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
