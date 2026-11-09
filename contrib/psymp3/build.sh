@@ -42,7 +42,8 @@ set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PKG="psymp3"
-TREE="${HERE}/build/psymp3"
+VERSION="2.4.1-RELEASE"
+TREE="${HERE}/build/psymp3-${VERSION}"
 
 if [ -z "${SUBSTRATE_TOP:-}" ]; then
     p="${HERE}"
@@ -58,7 +59,7 @@ SR="${STAGE1_PREFIX}/i386-unknown-substrate"
 
 export PATH="${STAGE1_PREFIX}/bin:${PATH}"
 
-[ -d "${TREE}/.git" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
+[ -f "${TREE}/configure.ac" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 
 cd "${TREE}"
 

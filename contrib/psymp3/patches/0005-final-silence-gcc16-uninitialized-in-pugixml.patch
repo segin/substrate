@@ -14,10 +14,10 @@ placement new that replaces the object.  Add -Wuninitialized to the pragma.
 The standalone compile of pugixml.cpp (regular builds) is unaffected.
 
 diff --git a/src/psymp3.final.cpp b/src/psymp3.final.cpp
-index 4aac1a48..e8c881ce 100644
+index 1ea7a3d..7cb89f5 100644
 --- a/src/psymp3.final.cpp
 +++ b/src/psymp3.final.cpp
-@@ -47,9 +47,13 @@
+@@ -48,9 +48,13 @@
  // code when the unity TU gives it extra inlining context; the standalone
  // compile of the same file is clean. Clang has no such warning group and
  // would fail the pragma itself under -Werror=unknown-warning-option.

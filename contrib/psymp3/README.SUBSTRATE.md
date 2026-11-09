@@ -5,20 +5,33 @@ FFT spectrum visualizer, by Kirn Gill II (segin).  This port cross-builds it
 for substrate (i386, ELFOSABI_SUBSTRATE).
 
 * Upstream: <https://github.com/segin/psymp3>
-* Pinned tag: `2.3-RELEASE` (commit `3b5c5ff4cf3a7cc4d0ba0f63538f13770febef20`)
+* Version: `2.4.1-RELEASE` (tag commit `6fec6a428d92f697760d04b77766c543af177f27`)
+* Source: <https://github.com/segin/psymp3/archive/refs/tags/2.4.1-RELEASE.tar.gz>
+  (GitHub's archive of the tag; upstream publishes no source tarball of its
+  own), SHA-256 `9728ebb2444305f5ff29984fd57014ee09eb6aee5e32b51196d711ebe20a4be0`
 * License: ISC
 
 ## Build
 
 ```sh
-./fetch.sh     # clone + checkout the pinned tag, apply patches/series
+./fetch.sh     # download + SHA-verify the tag archive, extract, apply patches/series
 ./build.sh     # autogen, configure, make, install + OSABI-stamp
 ```
 
+Until 2.3-RELEASE `fetch.sh` cloned the repository and checked out the tag;
+since 2.4.1-RELEASE it fetches the tag's archive through `substrate_fetch`
+and verifies its checksum like every other port.  The archive carries no
+generated `configure`, as the clone did not; `build.sh` runs `autogen.sh`.
+
+The x86_64 build is `contrib/port64.sh psymp3`, which runs these same
+scripts retargeted (tree in `build64/`, staged into
+`dist-overlay64/dist-psymp3`, interpreter `/sbin/ld64.so`).
+
 `build.sh` stages the binary into
 `dist-overlay/dist-psymp3/usr/bin/psymp3` and OSABI-stamps it (byte 7 = 0x40).
-The UI font and window icon go alongside it as
-`usr/share/psymp3/data/{vera.ttf,psymp3.rgba}` — `PSYMP3_DATADIR` is compiled
+The UI fonts and window icon go alongside it as
+`usr/share/psymp3/data/{vera.ttf,extra.ttf,psymp3.rgba}` (`extra.ttf`, a
+CJK/Kana/Hangul fallback font, is new in 2.4) — `PSYMP3_DATADIR` is compiled
 in as `/usr/share/psymp3/data` (both `src/Makefile.am` and `res/Makefile.am`
 override `datadir`), so the player will not find its font if only the binary
 is deployed.
@@ -93,6 +106,13 @@ installed that answer is the host's `/usr/include/qt6`.  `build.sh` sets
 skips the search -- so configure moves on and takes the file-dialog toolkit
 from the cross sysroot (GTK 2 today).
 
+## macOS integration
+
+2.4 adds Objective-C++ sources (Now Playing, the menu bar) built on macOS
+only, and `configure` now calls `AC_PROG_OBJCXX` everywhere.  On the cross
+build it settles on the build host's `g++` as `OBJCXX`, which is harmless:
+nothing outside macOS compiles with it.
+
 ## Unity build
 
 `build.sh` configures `--enable-final`, PsyMP3's KDE3-style single
@@ -113,7 +133,9 @@ GCC 16 reports the same diagnostic as `-Wuninitialized`, and the project's
 ## Substrate-specific source patches
 
 See `series` / `patches/`.  Each patch is a focused, upstream-shaped change kept
-git-apply-able against the pinned tree.  Rationale is in the patch headers.
+`patch -p1`-able against the release tree.  Rationale is in the patch headers.
+At 2.4.1-RELEASE upstream has absorbed neither: `0004` applies unchanged and
+`0005` was refreshed for a one-line offset.
 
 Patch `0003` (MemoryTracker) went away with the move to 2.1.1-RELEASE.  It
 did two things.  Upstream now does one itself: the memory-pressure figure is
