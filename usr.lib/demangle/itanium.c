@@ -2893,6 +2893,15 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 			return -1;
 		}
 		/*
+		 * A qualified function type, K F...E, is one type and one
+		 * substitution candidate, void () const: the F...E inside was
+		 * entered too, and every later entry was one off.  It is the
+		 * last entry made (its parameters' come before it).
+		 */
+		if((*q == 'F' || (q[0] == 'D' && q[1] == 'o' && q[2] == 'F')) && p->substitution_count > 0u) {
+			p->substitution_count--;
+		}
+		/*
 		 * An array's qualifier is its elements', and goes before its
 		 * bounds, char const[22] -- as GNU c++filt prints it, and so a
 		 * reference to it char const (&)[22], where this had

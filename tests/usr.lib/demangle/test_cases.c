@@ -507,6 +507,17 @@ static const dm_case_t cases[] = {
       "(bool, std::enable_if<!std::is_same<boost::asio::io_context::basic_executor_type<std::allocator<void>, 0ul>, void>::value, void>::type*)"
       "::fns_with_execute" },
 
+    /* an Itanium qualified function type is one substitution entry */
+    { "a const member function's", "_Z1fIM1AKFvvEEvS0_S1_S2_", I,
+      "void f<void (A::*)() const>(A, void () const, void (A::*)() const)" },
+    { "volatile const", "_Z1fIM1AKVFvvEEvS1_S2_", I,
+      "void f<void (A::*)() volatile const>(void () volatile const, void (A::*)() volatile const)" },
+    { "a pointer to one", "_Z1fPKFviES_S0_", I, "f(void (*)(int) const, void (int) const, void (*)(int) const)" },
+    { "LLVM's", "_ZN4llvm6detail9checkedOpIiMNS_5APIntEKFS2_RKS2_RbEEENSt9enable_ifIXaa13is_integral_vIT_ElemlstS9_Li8ELi64EESt8optionalIS9_EE4typeES9_S9_T0_b", I,
+      "std::enable_if<(is_integral_v<int>)&&(((sizeof (int))*(8))<=(64)), std::optional<int>>::type "
+      "llvm::detail::checkedOp<int, llvm::APInt (llvm::APInt::*)(llvm::APInt const&, bool&) const>"
+      "(int, int, llvm::APInt (llvm::APInt::*)(llvm::APInt const&, bool&) const, bool)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
