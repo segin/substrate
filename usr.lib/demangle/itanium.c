@@ -874,11 +874,13 @@ static int parse_ctor_dtor_name(dm_itanium_parser_t *p, size_t prev_off, size_t 
 
 	is_dtor = 0;
 
-	if(p->cur[0] == 'C' && (p->cur[1] == '1' || p->cur[1] == '2' || p->cur[1] == '3')) {
+	/* C4 and D4 are GCC's unified constructor and destructor, C5 and D5 its
+	 * comdat ones: named as the others are, and refused before */
+	if(p->cur[0] == 'C' && p->cur[1] >= '1' && p->cur[1] <= '5') {
 		p->cur += 2;
 	} else if(p->cur[0] == 'C' && p->cur[1] == 'I' && (p->cur[2] == '1' || p->cur[2] == '2')) {
 		p->cur += 3;
-	} else if(p->cur[0] == 'D' && (p->cur[1] == '0' || p->cur[1] == '1' || p->cur[1] == '2')) {
+	} else if(p->cur[0] == 'D' && p->cur[1] >= '0' && p->cur[1] <= '5' && p->cur[1] != '3') {
 		p->cur += 2;
 		is_dtor = 1;
 	} else {

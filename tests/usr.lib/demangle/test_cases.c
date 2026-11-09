@@ -384,6 +384,15 @@ static const dm_case_t cases[] = {
     { "by substitution", "_Z1fA4_iRKS_", I, "f(int[4], int const (&)[4])" },
     { "a const function's pointer", "_Z1fPKFviE", I, "f(void (*)(int) const)" },
 
+    /* GCC's unified and comdat constructors and destructors */
+    { "C4", "_ZN1AC4Ev", I, "A::A()" },
+    { "D4", "_ZN1AD4Ev", I, "A::~A()" },
+    { "C5", "_ZN1AC5Ev", I, "A::A()" },
+    { "D5", "_ZN1AD5Ev", I, "A::~A()" },
+    { "a local static in one (LLVM's)", "_ZGVZN4llvm3cas6ondisk19InternalRefArrayRefC4ESt9nullopt_tE11PlaceHolder", I,
+      "guard variable for llvm::cas::ondisk::InternalRefArrayRef::InternalRefArrayRef(std::nullopt_t)::PlaceHolder" },
+    { "no D3", "_ZN1AD3Ev", I, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
