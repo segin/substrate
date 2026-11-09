@@ -2486,6 +2486,11 @@ static int parse_function_type(dm_itanium_parser_t *p) {
 	int first;
 	int extern_c;
 	size_t params_off;
+	size_t ret_off;
+	size_t nest;
+	size_t dims;
+	size_t decl;
+	int is_func;
 
 	if(p->cur[0] != 'F') {
 		return -1;
@@ -2503,8 +2508,35 @@ static int parse_function_type(dm_itanium_parser_t *p) {
 		return -1;
 	}
 
+	ret_off = p->out.len;
+	p->decl_close = SIZE_MAX;
 	if(parse_type(p) != 0) {
 		return -1;
+	}
+	/*
+	 * A return type with a declarator of its own -- a pointer to a
+	 * function or an array, a reference to one, a member function
+	 * pointer -- takes the parameters inside it, after its *, as GNU
+	 * c++filt prints it: void (*(int))() for a function of int returning
+	 * a void (*)(), where this printed void (*)() (int).  Inside the
+	 * innermost one, which the last pointer made says, if it is this
+	 * return type's: void (*(*(char))(int))().
+	 */
+	nest = SIZE_MAX;
+	if(p->decl_close != SIZE_MAX && p->decl_close >= ret_off && p->decl_close < p->out.len && p->out.data[p->decl_close] == ')') {
+		size_t i;
+		int depth = 0;
+
+		/* not one inside a template argument list of the return type's */
+		for(i = ret_off; i < p->decl_close; i++) {
+			depth += p->out.data[i] == '<' ? 1 : p->out.data[i] == '>' ? -1 : 0;
+		}
+		if(depth == 0) {
+			nest = p->decl_close;
+		}
+	}
+	if(nest == SIZE_MAX && find_array_declarator(&p->out, ret_off, &dims, &decl, &is_func) == 0 && decl != SIZE_MAX) {
+		nest = decl;
 	}
 
 	if(demangle_buf_append(&p->out, " (", 2u) != 0) {
@@ -2547,12 +2579,39 @@ static int parse_function_type(dm_itanium_parser_t *p) {
 	}
 
 	p->cur++;
+	if(demangle_buf_appendc(&p->out, ')') != 0) {
+		return -1;
+	}
+
+	if(nest != SIZE_MAX) {
+		size_t n = p->out.len - params_off;
+		char *params = (char *)malloc(n);
+		int rc;
+
+		if(params == NULL) {
+			return -1;
+		}
+		memcpy(params, p->out.data + params_off, n);
+		/* the parameters' entries keep their text; " (...)" goes */
+		if(parser_freeze_from(p, params_off - 1u) != 0) {
+			free(params);
+			return -1;
+		}
+		p->out.len = params_off - 1u;
+		p->out.data[p->out.len] = '\0';
+		rc = parser_insert_in_type(p, ret_off, nest, params, n);
+		free(params);
+		if(rc != 0) {
+			return -1;
+		}
+		params_off = nest;
+	}
 
 	/* where a pointer's or reference's declarator goes, (*): before the
 	 * parameters, as for an array before its bounds */
 	p->array_dims_off = params_off;
 	p->decl_close = SIZE_MAX;
-	return demangle_buf_appendc(&p->out, ')');
+	return 0;
 }
 
 static int parse_array_type(dm_itanium_parser_t *p) {
@@ -2709,8 +2768,10 @@ static int parse_pointer_to_member(dm_itanium_parser_t *p) {
 	if(*q == 'F' || (q[0] == 'D' && q[1] == 'o' && q[2] == 'F')) {
 		/* void (A::*)(int): no space before it, as for (*) */
 		rc = parser_insert_in_type(p, member_off, p->array_dims_off, decl + 1, class_len + 5u);
+		p->decl_close = p->array_dims_off + class_len + 4u; /* its ) */
 	} else if(*q == 'A') {
 		rc = parser_insert_in_type(p, member_off, p->array_dims_off, decl, class_len + 6u);
+		p->decl_close = p->array_dims_off + class_len + 5u;
 	} else {
 		decl[1] = ' ';
 		rc = demangle_buf_append(&p->out, decl + 1, class_len + 4u);    /* " A::*" */

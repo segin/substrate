@@ -530,6 +530,17 @@ static const dm_case_t cases[] = {
       "(bool, std::enable_if<!std::is_same<boost::asio::io_context::basic_executor_type<std::allocator<void>, 0ul>, void>::value, void>::type*)"
       "::fns_with_execute" },
 
+    /* a function whose return type has a declarator takes its parameters
+     * inside it, after the * */
+    { "returning a function pointer", "_Z1fIFPFvvEiEEvv", I, "void f<void (*(int))()>()" },
+    { "returning a member function pointer", "_Z1fIFM1AKFvvEiEEvv", I, "void f<void (A::*(int))() const>()" },
+    { "returning a function reference", "_Z1fIFRFicEvEEvv", I, "void f<int (&())(char)>()" },
+    { "returning an array pointer", "_Z1fIFPA3_iiEEvv", I, "void f<int (*(int))[3]>()" },
+    { "two deep", "_Z1fIFPFPFvvEiEcEEvv", I, "void f<void (*(*(char))(int))()>()" },
+    { "a pointer to one", "_Z1fPFPFivEcE", I, "f(int (*(*)(char))())" },
+    { "a pointer in a template argument", "_Z1fIFP1BIPFvvEEvEEvv", I, "void f<B<void (*)()>* ()>()" },
+    { "std::_Bind's", "_ZTSSt5_BindIFM1AFPivEPS0_EE", I, "typeinfo name for std::_Bind<int* (A::*(A*))()>" },
+
     /* an unnamed type is an entry of its own, before any it is part of */
     { "an unnamed type's entries", "_Z1fIN1AUt_EEvS1_S2_", I,
       "void f<A::{unnamed type#1}>({unnamed type#1}, A::{unnamed type#1})" },
