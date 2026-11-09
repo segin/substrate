@@ -447,6 +447,12 @@ static const dm_case_t cases[] = {
     { "of arrays", "_Z1fILm2ELm3EEvRAT__AT0__c", I, "void f<2ul, 3ul>(char (&)[2ul][3ul])" },
     { "no bound", "_Z1fA_i", I, "f(int[])" },
 
+    /* an Itanium constructor template has no return type */
+    { "std::string's (libstdc++'s)", "_ZNSsC1IPcEET_S1_RKSaIcE", I,
+      "std::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string<char*>(char*, char*, std::allocator<char> const&)" },
+    { "a class's", "_ZN1AC1IiEET_", I, "A::A<int>(int)" },
+    { "a function template's still has", "_ZN1A1fIiEEvT_", I, "void A::f<int>(int)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

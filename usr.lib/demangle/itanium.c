@@ -1049,6 +1049,7 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 	while(p->cur[0] != '\0' && p->cur[0] != 'E') {
 		int from_sub;
 		int had_args;
+		int is_cdtor;
 		size_t comp_off, comp_len;
 		size_t name_only_off, name_only_len;
 		dm_parse_mark_t comp_mark;
@@ -1068,6 +1069,11 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 
 		from_sub = 0;
 		had_args = 0;
+		/* a constructor, destructor or conversion operator has no return
+		 * type, template or not: basic_string<char*>(char*, ...) took
+		 * its first parameter for one */
+		is_cdtor = (p->cur[0] == 'C' && (isdigit((unsigned char)p->cur[1]) || p->cur[1] == 'I')) ||
+		           (p->cur[0] == 'D' && isdigit((unsigned char)p->cur[1])) || (p->cur[0] == 'c' && p->cur[1] == 'v');
 		if(parse_unqualified_name(p, last_off, last_len, &comp_off, &comp_len) != 0) {
 			int sub_rc;
 
@@ -1117,7 +1123,7 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 			}
 			comp_len = p->out.len - comp_off;
 			had_args = 1;
-			p->has_return_type = 1;
+			p->has_return_type = !is_cdtor;
 		} else {
 			p->has_return_type = 0;
 		}
