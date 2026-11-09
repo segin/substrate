@@ -393,6 +393,14 @@ static const dm_case_t cases[] = {
       "guard variable for llvm::cas::ondisk::InternalRefArrayRef::InternalRefArrayRef(std::nullopt_t)::PlaceHolder" },
     { "no D3", "_ZN1AD3Ev", I, NULL },
 
+    /* an Itanium entity as a template argument, L _Z <encoding> E */
+    { "a variable", "_Z1fIL_Z1xEEvv", I, "void f<x>()" },
+    { "a member (LLVM's)", "_ZN4llvm6detail9IEEEFloat17initFromIEEEAPIntIL_ZNS_11APFloatBase9semBFloatEEEEvRKNS_5APIntE", I,
+      "void llvm::detail::IEEEFloat::initFromIEEEAPInt<llvm::APFloatBase::semBFloat>(llvm::APInt const&)" },
+    { "a function", "_Z1fIL_Z1gvEEvv", I, "void f<g()>()" },
+    { "a template function", "_Z1fIL_Z1gIiEvT_EEvv", I, "void f<void g<int>(int)>()" },
+    { "with no E", "_Z1fIL_Z1x", I, NULL },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

@@ -1632,6 +1632,27 @@ static int parse_expr_primary(dm_itanium_parser_t *p) {
 			return demangle_buf_append(&p->out, "nullptr", 7u);
 		}
 
+		/* L _Z <encoding> E, an entity's address or reference as a
+		 * template argument: f<llvm::APFloatBase::semBFloat>; refused
+		 * before.  Its encoding ends at the E, as a local name's does. */
+		if(p->cur[0] == '_' && p->cur[1] == 'Z') {
+			int rc;
+
+			p->cur += 2;
+			if(parser_enter(p) != 0) {
+				return -1;
+			}
+			p->local_depth++;
+			rc = parse_encoding(p);
+			p->local_depth--;
+			parser_leave(p);
+			if(rc != 0 || p->cur[0] != 'E') {
+				return -1;
+			}
+			p->cur++;
+			return 0;
+		}
+
 		/*
 		 * The literal is printed as GNU c++filt prints it, by its type.
 		 * int is the value alone; unsigned, long, unsigned long, long
