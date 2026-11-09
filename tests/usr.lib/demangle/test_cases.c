@@ -563,6 +563,15 @@ static const dm_case_t cases[] = {
     { "a pointer in a template argument", "_Z1fIFP1BIPFvvEEvEEvv", I, "void f<B<void (*)()>* ()>()" },
     { "std::_Bind's", "_ZTSSt5_BindIFM1AFPivEPS0_EE", I, "typeinfo name for std::_Bind<int* (A::*(A*))()>" },
 
+    /* a conversion operator, and a template one, whose T_ is its own
+     * argument */
+    { "a conversion operator", "_ZN1AcvPKcEv", I, "A::operator char const*()" },
+    { "a template one", "_ZN1AcvT_IiEEv", I, "A::operator int<int>()" },
+    { "its second argument", "_ZNK1AcvT0_IicEEv", I, "A::operator char<int, char>() const" },
+    { "in a class template", "_ZN1AIcEcvPT_IiEEv", I, "A<char>::operator int*<int>()" },
+    { "its entries", "_ZN1AcvPT_IiEES0_S1_S2_", I,
+      "A::operator int*<int>(int, int*, A::operator int*)" },
+
     /* an unnamed type is an entry of its own, before any it is part of */
     { "an unnamed type's entries", "_Z1fIN1AUt_EEvS1_S2_", I,
       "void f<A::{unnamed type#1}>({unnamed type#1}, A::{unnamed type#1})" },

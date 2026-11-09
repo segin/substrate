@@ -112,6 +112,17 @@ typedef struct dm_itanium_parser {
 	 * signature; and the substitution looked up next is that type */
 	int ref_operand;
 	int lookup_under_ref;
+	/* a conversion operator's type is being parsed: a T_ in it may name
+	 * the operator's own template arguments, which come after it; and
+	 * the type parsed last that was one, followed by those (cv_end NULL
+	 * when none): its mangled text and where its text is */
+	int in_cv_type;
+	const char *cv_src;
+	const char *cv_end;
+	size_t cv_off;
+	size_t cv_len;
+	size_t cv_sub_first; /* the entries made in it, [first, end) */
+	size_t cv_sub_end;
 	/* the expression parsed last needs no parentheses as an operand */
 	int expr_simple;
 	int has_return_type;
@@ -668,6 +679,49 @@ static int parser_insert_in_type(dm_itanium_parser_t *p, size_t type_off, size_t
 	return demangle_buf_insert(&p->out, pos, s, n);
 }
 
+/*
+ * Take the @p n bytes at @p pos out of the output, keeping the tables
+ * right: an entry that holds them all shrinks, one after them moves
+ * back, and one with any of them in it otherwise keeps its text, a copy.
+ */
+static int parser_delete_text(dm_itanium_parser_t *p, size_t pos, size_t n) {
+	size_t i;
+
+	for(i = 0u; i < p->substitution_count; i++) {
+		dm_subst_t *e = &p->substitutions[i];
+
+		if(e->text != NULL || e->off + e->len <= pos) {
+			continue;
+		}
+		if(e->off >= pos + n) {
+			e->off -= n;
+		} else if(e->off < pos && e->off + e->len >= pos + n) {
+			e->len -= n;
+		} else {
+			e->text = (char *)malloc(e->len + 1u);
+			if(e->text == NULL) {
+				return -1;
+			}
+			memcpy(e->text, p->out.data + e->off, e->len);
+			e->text[e->len] = '\0';
+		}
+	}
+	for(i = 0u; i < p->last_template_count; i++) {
+		if(p->last_template_off[i] >= pos + n) {
+			p->last_template_off[i] -= n;
+		}
+	}
+	for(i = 0u; i < p->func_tmpl_count; i++) {
+		if(p->func_tmpl_off[i] >= pos + n) {
+			p->func_tmpl_off[i] -= n;
+		}
+	}
+	memmove(p->out.data + pos, p->out.data + pos + n, p->out.len - pos - n);
+	p->out.len -= n;
+	p->out.data[p->out.len] = '\0';
+	return 0;
+}
+
 /* Before the output is cut back to @p pos: make the entries that reach
  * past it copies of their text, which the cut would leave them without. */
 static int parser_freeze_from(dm_itanium_parser_t *p, size_t pos) {
@@ -1068,11 +1122,35 @@ static int parse_operator_name(dm_itanium_parser_t *p) {
 	const char *name;
 
 	if(p->cur[0] == 'c' && p->cur[1] == 'v') {
+		const char *src;
+		size_t off;
+		size_t first_sub;
+		int saved = p->in_cv_type;
+		int rc;
+
 		p->cur += 2;
 		if(demangle_buf_append(&p->out, "operator ", 9u) != 0) {
 			return -1;
 		}
-		return parse_type(p);
+		/* a template conversion operator's T_ is its own argument,
+		 * operator int<int> (cv T_ I i E), as GNU c++filt prints it: the
+		 * type is printed again once they are known (parse_template_args),
+		 * and was refused */
+		src = p->cur;
+		off = p->out.len;
+		first_sub = p->substitution_count;
+		p->in_cv_type = 1;
+		rc = parse_type(p);
+		p->in_cv_type = saved;
+		if(rc == 0 && p->cur[0] == 'I') {
+			p->cv_src = src;
+			p->cv_end = p->cur;
+			p->cv_off = off;
+			p->cv_len = p->out.len - off;
+			p->cv_sub_first = first_sub;
+			p->cv_sub_end = p->substitution_count;
+		}
+		return rc;
 	}
 
 	if(p->cur[0] == 'v' && isdigit((unsigned char)p->cur[1])) {
@@ -1740,9 +1818,79 @@ static int parse_bare_function_type(dm_itanium_parser_t *p) {
 	return append_member_qualifiers(p);
 }
 
+/*
+ * A conversion operator's type, after its template arguments: print it
+ * again with its T_ theirs (the ones just parsed, not an enclosing
+ * function's), in place of the text it had.
+ */
+static int parser_reprint_cv(dm_itanium_parser_t *p) {
+	const char *end = p->cv_end;
+	const char *saved_cur = p->cur;
+	size_t off = p->cv_off;
+	size_t len = p->cv_len;
+	size_t end0 = p->out.len;
+	size_t saved_count = p->func_map.count;
+	size_t count = p->substitution_count;
+	size_t made = p->cv_sub_end - p->cv_sub_first;
+	size_t i;
+	size_t n;
+	char *text;
+	int rc;
+
+	p->cv_end = NULL;
+	p->func_map.count = 0u;
+	p->cur = p->cv_src;
+	rc = parse_type(p);
+	p->func_map.count = saved_count;
+	if(rc == 0 && (p->cur != end || p->substitution_count - count != made)) {
+		rc = -1;
+	}
+	p->cur = saved_cur;
+	/* the entries made in the type the first time take the text the
+	 * same ones have now: int* for P T_, which was T_* */
+	for(i = 0u; rc == 0 && i < made; i++) {
+		dm_subst_t *to = &p->substitutions[p->cv_sub_first + i];
+		const dm_subst_t *from = &p->substitutions[count + i];
+		const char *s = from->text != NULL ? from->text : p->out.data + from->off;
+		char *copy = (char *)malloc(from->len + 1u);
+
+		if(copy == NULL) {
+			rc = -1;
+			break;
+		}
+		memcpy(copy, s, from->len);
+		copy[from->len] = '\0';
+		free(to->text);
+		to->text = copy;
+		to->len = from->len;
+	}
+	for(i = count; i < p->substitution_count; i++) {
+		free(p->substitutions[i].text);
+		p->substitutions[i].text = NULL;
+		free(p->substitutions[i].resolved);
+		p->substitutions[i].resolved = NULL;
+	}
+	p->substitution_count = count;
+	if(rc != 0) {
+		return -1;
+	}
+	n = p->out.len - end0;
+	text = (char *)malloc(n + 1u);
+	if(text == NULL) {
+		return -1;
+	}
+	memcpy(text, p->out.data + end0, n);
+	p->out.len = end0;
+	p->out.data[p->out.len] = '\0';
+	rc = (parser_insert_in_type(p, off, off, text, n) == 0 && parser_delete_text(p, off + n, len) == 0) ? 0 : -1;
+	free(text);
+	return rc;
+}
+
 static int parse_template_args(dm_itanium_parser_t *p) {
 	int first;
 	int pushed;
+	const char *open = p->cur;
 
 	if(p->cur[0] != 'I') {
 		return -1;
@@ -1822,6 +1970,9 @@ static int parse_template_args(dm_itanium_parser_t *p) {
 		goto fail;
 	}
 
+	if(p->cv_end != NULL && p->cv_end == open) {
+		return parser_reprint_cv(p);
+	}
 	return 0;
 
 fail:
@@ -2648,6 +2799,12 @@ static int parse_template_param(dm_itanium_parser_t *p) {
 
 	if(p->in_lambda_sig) {
 		return idx == SIZE_MAX ? -1 : demangle_buf_printf(&p->out, "auto:%zu", idx + 1u);
+	}
+
+	/* in a conversion operator's type, one that names none yet stands
+	 * as T_ until its own arguments are known */
+	if(p->in_cv_type && (p->func_map.count > 0 ? p->func_map.count : p->last_map.count) <= idx) {
+		return demangle_buf_append(&p->out, "T_", 2u);
 	}
 
 	/* Prefer function-level template args when available */
