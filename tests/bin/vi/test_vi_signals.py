@@ -155,8 +155,14 @@ def test_suspend(d):
     os.write(fd, b"x")
     drain(fd, 0.4)
     os.write(fd, b":wq\r")
-    read_for(fd, 3)
-    done, status = os.waitpid(pid, os.WNOHANG)
+    # wait for the exit, not a fixed 3 s: an ASan build on a CI runner
+    # (its leak check at exit) took longer, and this reported a vi that
+    # was still writing as one that had not taken :wq
+    done = 0
+    deadline = time.time() + 30
+    while done == 0 and time.time() < deadline:
+        read_for(fd, 0.5)
+        done, status = os.waitpid(pid, os.WNOHANG)
     if done == 0:
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
