@@ -2966,7 +2966,12 @@ static int parse_encoding(dm_itanium_parser_t *p) {
 	int rc = -1;
 	/* this encoding, not one nested in its name, is a local name's */
 	int is_local = p->next_encoding_is_local;
+	/* an encoding is no type, even inside one (typeinfo for f()::{lambda}):
+	 * its function's own name is no substitution candidate, and was
+	 * entered as one there, every later index one off */
+	int saved_type_ctx = p->in_type_context;
 
+	p->in_type_context = 0;
 	p->next_encoding_is_local = 0;
 	p->encoding_off = p->out.len;
 	mark_save(p, &m);
@@ -3002,6 +3007,7 @@ static int parse_encoding(dm_itanium_parser_t *p) {
 
 out:
 	p->encoding_off = outer_off;
+	p->in_type_context = saved_type_ctx;
 	return rc;
 }
 

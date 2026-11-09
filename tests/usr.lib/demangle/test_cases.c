@@ -460,6 +460,12 @@ static const dm_case_t cases[] = {
     { "two tags", "_Z1fB3fooB3bari", I, "f[abi:foo][abi:bar](int)" },
     { "a constructor of a twice-tagged class", "_ZN1AB3fooB3barC1Ev", I, "A[abi:foo][abi:bar]::A()" },
 
+    /* an Itanium encoding inside a type enters no name of its function */
+    { "a lambda's typeinfo (LLVM's)", "_ZTIZN4llvm6cgdata15StreamCacheDataC4EjRKNS_9FileCacheERKNS_5TwineEEUlmS7_E_", I,
+      "typeinfo for llvm::cgdata::StreamCacheData::StreamCacheData(unsigned int, llvm::FileCache const&, llvm::Twine const&)"
+      "::{lambda(unsigned long, llvm::Twine const&)#1}" },
+    { "a lambda's parameters", "_ZTIZN1A1fERKNS_1BEEUlS2_E_", I, "typeinfo for A::f(A::B const&)::{lambda(A::B const&)#1}" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
