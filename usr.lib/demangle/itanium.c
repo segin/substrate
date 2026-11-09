@@ -1302,8 +1302,18 @@ static int parse_local_name(dm_itanium_parser_t *p) {
 				return -1;
 			}
 		}
-		if(parse_name(p) != 0) {
-			return -1;
+		/* the entity is not a type of its own: as a type the local name
+		 * is entered whole, g()::A, by parse_type, and A was entered */
+		{
+			int saved_type_ctx = p->in_type_context;
+			int rc2;
+
+			p->in_type_context = 0;
+			rc2 = parse_name(p);
+			p->in_type_context = saved_type_ctx;
+			if(rc2 != 0) {
+				return -1;
+			}
 		}
 	}
 
@@ -2399,6 +2409,7 @@ static int parse_type(dm_itanium_parser_t *p) {
 	case 'C':
 	case 'G':
 	case 'T': /* a template parameter used as a type (ABI 5.1.9) */
+	case 'Z': /* a local name used as a type: f<int>(int)::{lambda()#1} */
 		needs_sub = 1;
 		break;
 	default:

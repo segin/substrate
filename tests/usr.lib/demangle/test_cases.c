@@ -472,6 +472,10 @@ static const dm_case_t cases[] = {
       "llvm::SaturatingMultiply<unsigned long>(unsigned long, unsigned long, bool*)" },
     { "after it, the entry before", "_Z1fIiEv1AIX1vIT_EES0_E", I, "void f<int>(A<v<int>, A>)" },
 
+    /* an Itanium local name used as a type is one entry, whole */
+    { "a local class", "_Z1fZ1gvE1AS_", I, "f(g()::A, g()::A)" },
+    { "a local class's member class", "_Z1fZ1gvEN1A1BES_S0_", I, "f(g()::A::B, A, g()::A::B)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
