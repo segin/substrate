@@ -2038,45 +2038,136 @@ static int parse_cast_expression(dm_itanium_parser_t *p) {
 	return 0;
 }
 
+/*
+ * A fold expression, f[lrLR] <operator> <expression> [<expression>], as
+ * GNU c++filt prints it: (...+x) for fl, (x+...) for fr, and (x+...+y)
+ * for fL and fR, the operands as subexpressions.  This printed
+ * fold[fl](operator+, x).
+ */
 static int parse_fold_expression(dm_itanium_parser_t *p) {
+	char kind;
+	const char *name;
+	const char *op;
+
 	if(p->cur[0] != 'f' || (p->cur[1] != 'L' && p->cur[1] != 'R' && p->cur[1] != 'l' && p->cur[1] != 'r')) {
 		return -1;
 	}
-
-	if(demangle_buf_printf(&p->out, "fold[%c%c](", p->cur[0], p->cur[1]) != 0) {
+	kind = p->cur[1];
+	p->cur += 2;
+	if(p->cur[0] == '\0' || p->cur[1] == '\0') {
 		return -1;
 	}
+	name = lookup_operator_name(p->cur);
+	if(name == NULL || strncmp(name, "operator", 8u) != 0) {
+		return -1;
+	}
+	op = name + 8;
 	p->cur += 2;
 
-	if(parse_expression(p) != 0) {
+	if(kind == 'l') {
+		return (demangle_buf_append(&p->out, "(...", 4u) != 0 || demangle_buf_append(&p->out, op, strlen(op)) != 0 ||
+		        parse_subexpr(p) != 0)
+		           ? -1
+		           : demangle_buf_appendc(&p->out, ')');
+	}
+	if(demangle_buf_appendc(&p->out, '(') != 0 || parse_subexpr(p) != 0 || demangle_buf_append(&p->out, op, strlen(op)) != 0 ||
+	   demangle_buf_append(&p->out, "...", 3u) != 0) {
 		return -1;
 	}
-
-	if(p->cur[0] != 'E') {
-		if(demangle_buf_append(&p->out, ", ", 2u) != 0) {
-			return -1;
-		}
-		if(parse_expression(p) != 0) {
-			return -1;
-		}
+	if(kind != 'r' && (demangle_buf_append(&p->out, op, strlen(op)) != 0 || parse_subexpr(p) != 0)) {
+		return -1;
 	}
-
 	return demangle_buf_appendc(&p->out, ')');
 }
 
+/*
+ * sp <expression>, a pack expansion, as GNU c++filt prints it: the
+ * pattern once for each element of the template parameter pack it
+ * names, joined by ", " -- g(int, char) for g(sp T_) -- or, naming only
+ * function parameters, whose elements are unknown, the pattern and ...,
+ * g({parm#1}...).  This printed pack_expand(x).  The entries are the
+ * last element's, as for a type's expansion.
+ */
 static int parse_pack_expansion(dm_itanium_parser_t *p) {
+	const char *pattern;
+	const char *end;
+	size_t start;
+	size_t first_sub;
+	size_t subs;
+	size_t n;
+	size_t i;
+	size_t j;
+	int saved_expanding = p->pack_expanding;
+	size_t saved_index = p->pack_index;
+	size_t saved_seen = p->pack_seen;
+	int rc = -1;
+
 	if(!(p->cur[0] == 's' && p->cur[1] == 'p')) {
 		return -1;
 	}
-
 	p->cur += 2;
-	if(demangle_buf_append(&p->out, "pack_expand(", 12u) != 0) {
-		return -1;
+	pattern = p->cur;
+	start = p->out.len;
+	first_sub = p->substitution_count;
+
+	p->pack_expanding = 1;
+	p->pack_index = 0u;
+	p->pack_seen = SIZE_MAX;
+	if(parse_subexpr(p) != 0) {
+		goto out;
 	}
-	if(parse_expression(p) != 0) {
-		return -1;
+	end = p->cur;
+	subs = p->substitution_count;
+	n = p->pack_seen;
+
+	if(n == SIZE_MAX) {
+		rc = demangle_buf_append(&p->out, "...", 3u);
+		goto out;
 	}
-	return demangle_buf_appendc(&p->out, ')');
+	/* the elements whole, not as subexpressions */
+	if(parser_freeze_from(p, start) != 0) {
+		goto out;
+	}
+	p->out.len = start;
+	p->out.data[p->out.len] = '\0';
+	/* none: the entries made keep the text they had */
+	if(n > 0u) {
+		p->substitution_count = first_sub;
+	}
+	for(i = 0u; i < n; i++) {
+		if(i > 0u && demangle_buf_append(&p->out, ", ", 2u) != 0) {
+			goto out;
+		}
+		p->pack_index = i;
+		p->cur = pattern;
+		if(parse_expression(p) != 0 || p->cur != end) {
+			goto out;
+		}
+		if(i > 0u) {
+			if(p->substitution_count - subs != subs - first_sub) {
+				goto out;
+			}
+			for(j = 0u; j < subs - first_sub; j++) {
+				dm_subst_t *to = &p->substitutions[first_sub + j];
+				dm_subst_t *from = &p->substitutions[subs + j];
+
+				free(to->text);
+				free(to->resolved);
+				*to = *from;
+				from->text = NULL;
+				from->resolved = NULL;
+			}
+			p->substitution_count = subs;
+		}
+	}
+	p->cur = end;
+	rc = 0;
+
+out:
+	p->pack_expanding = saved_expanding;
+	p->pack_index = saved_index;
+	p->pack_seen = saved_seen;
+	return rc;
 }
 
 /*
