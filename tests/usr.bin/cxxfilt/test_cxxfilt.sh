@@ -66,7 +66,7 @@ expect_eq "8d-2d" "$("$BIN" --no-strip-underscore __Z3fooi)" "__Z3fooi"
 expect_eq "8d-2e" "$("$BIN" -_ _Z3foov)" "_Z3foov"
 expect_eq "8d-2f" "$(printf '_Z3foov __Z3foov\n' | "$BIN" -_)" "_Z3foov foo()"
 expect_eq "8d-3" "$("$BIN" -s none _Z3fooi)" "_Z3fooi"
-expect_eq "8d-4" "$("$BIN" -s rust _RNvCshgxSpmajvKg_7mycrate3foo)" "{s14492079435488262969}mycrate::{foo}"
+expect_eq "8d-4" "$("$BIN" -s rust _RNvCshgxSpmajvKg_7mycrate3foo)" "mycrate::foo"
 expect_eq "8d-5" "$("$BIN" -s dlang _D3foo3barFiZi)" "foo.bar: int function(int)"
 expect_eq "8d-6" "$("$BIN" -t i)" "int"
 # -t demangles bare type words read from stdin too, not only operands;
