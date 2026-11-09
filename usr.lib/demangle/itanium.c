@@ -2591,6 +2591,9 @@ static int parse_type(dm_itanium_parser_t *p) {
 	if(ch == 'D' && (p->cur[1] == 't' || p->cur[1] == 'T')) {
 		ch = 'T'; /* a decltype is a candidate (ABI 5.1.9), and was none */
 	}
+	if(ch == 'D' && p->cur[1] == 'p') {
+		ch = 'T'; /* so is a pack expansion, after its pattern's */
+	}
 
 	saved_type_ctx = p->in_type_context;
 	p->in_type_context = 1;

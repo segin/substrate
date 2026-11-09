@@ -113,6 +113,8 @@ static const dm_case_t cases[] = {
     { "an empty pack before an argument", "_Z1fIJEiEvDpT_T0_", I, "void f<int>(int)" },
     { "the pattern's entry is its last element", "_Z1fIJicEEvDpPT_S1_", I,
       "void f<int, char>(int*, char*, char*)" },
+    { "the expansion is an entry after it", "_Z1fIJicEEvDpPT_S2_", I,
+      "void f<int, char>(int*, char*, int*, char*)" },
 
     /* DEMANGLE_RUST takes both of Rust's schemes */
     { "a legacy name", "_ZN3foo3bar17h0123456789abcdefE", R, "foo::bar" },
