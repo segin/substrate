@@ -28,6 +28,17 @@ typedef struct dm_subst {
 	 * 0 for any other entry */
 	size_t tparam;
 	int in_lambda;
+	/* made in a lambda's signature: the mangled text it was made from,
+	 * src_len bytes, so that one naming a template parameter -- OT_,
+	 * RKT_ -- can be printed again with it resolved; NULL otherwise */
+	const char *src;
+	size_t src_len;
+	/* one of those that is a reference to the parameter, OT_ or RT_:
+	 * what it was first resolved to outside the signature, which GNU
+	 * c++filt keeps for it, as it keeps the templates then in scope;
+	 * NULL until then */
+	char *resolved;
+	size_t resolved_len;
 } dm_subst_t;
 
 /*
@@ -242,6 +253,7 @@ static void parser_destroy(dm_itanium_parser_t *p) {
 
 		for(i = 0u; i < p->substitution_cap; i++) {
 			free(p->substitutions[i].text);
+			free(p->substitutions[i].resolved);
 		}
 	}
 	free(p->substitutions);
@@ -427,8 +439,12 @@ static int parser_add_substitution(dm_itanium_parser_t *p, size_t off, size_t le
 	/* a slot backtracking gave up may still hold a copy */
 	free(p->substitutions[p->substitution_count].text);
 	p->substitutions[p->substitution_count].text = NULL;
+	free(p->substitutions[p->substitution_count].resolved);
+	p->substitutions[p->substitution_count].resolved = NULL;
 	p->substitutions[p->substitution_count].tparam = 0u;
 	p->substitutions[p->substitution_count].in_lambda = p->in_lambda_sig;
+	p->substitutions[p->substitution_count].src = NULL;
+	p->substitutions[p->substitution_count].src_len = 0u;
 	p->substitutions[p->substitution_count].off = off;
 	p->substitutions[p->substitution_count].len = len;
 
@@ -451,9 +467,95 @@ static int parser_append_output_slice(dm_itanium_parser_t *p, size_t off, size_t
 	return 0;
 }
 
+/*
+ * Whether the @p n bytes at @p s are a template parameter with only
+ * qualifiers, pointers and references on it: T_, OT_, RKT0_.
+ */
+static int is_qualified_tparam(const char *s, size_t n) {
+	size_t i = 0u;
+
+	while(i < n && strchr("PROKVr", s[i]) != NULL) {
+		i++;
+	}
+	if(i >= n || s[i] != 'T') {
+		return 0;
+	}
+	for(i++; i < n && (isdigit((unsigned char)s[i]) || (s[i] >= 'A' && s[i] <= 'Z')); i++) {
+	}
+	return i + 1u == n && s[i] == '_';
+}
+
+/*
+ * Print the type mangled as the @p n bytes at @p src again, where it is
+ * used: the template parameters in it are resolved as they are here.
+ * The entries the parse makes are dropped -- it is a reference, not a
+ * type of the name's.
+ */
+static int parser_reprint_type(dm_itanium_parser_t *p, const char *src, size_t n) {
+	const char *saved_cur = p->cur;
+	size_t count = p->substitution_count;
+	size_t i;
+	int rc;
+
+	p->cur = src;
+	rc = parse_type(p);
+	if(rc == 0 && p->cur != src + n) {
+		rc = -1;
+	}
+	for(i = count; i < p->substitution_count; i++) {
+		free(p->substitutions[i].text);
+		p->substitutions[i].text = NULL;
+		free(p->substitutions[i].resolved);
+		p->substitutions[i].resolved = NULL;
+	}
+	p->substitution_count = count;
+	p->cur = saved_cur;
+	return rc;
+}
+
+/*
+ * Print entry @p idx, a reference to a template parameter made in a
+ * lambda's signature, outside one: as it was resolved the first time,
+ * resolving it now if this is that time.
+ */
+static int parser_print_lambda_ref(dm_itanium_parser_t *p, size_t idx) {
+	size_t start = p->out.len;
+	dm_subst_t *e = &p->substitutions[idx];
+	char *copy;
+
+	if(e->resolved != NULL) {
+		return demangle_buf_append(&p->out, e->resolved, e->resolved_len);
+	}
+	if(parser_reprint_type(p, e->src, e->src_len) != 0) {
+		return -1;
+	}
+	copy = (char *)malloc(p->out.len - start + 1u);
+	if(copy == NULL) {
+		return -1;
+	}
+	memcpy(copy, p->out.data + start, p->out.len - start);
+	copy[p->out.len - start] = '\0';
+	/* the table may have moved while it was printed */
+	e = &p->substitutions[idx];
+	e->resolved = copy;
+	e->resolved_len = p->out.len - start;
+	return 0;
+}
+
 static int parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx) {
 	if(idx >= p->substitution_count) {
 		return -1;
+	}
+
+	/* auto:1&& in a lambda's signature, the argument&& outside it */
+	if(!p->in_lambda_sig && p->substitutions[idx].in_lambda && p->substitutions[idx].tparam == 0u && p->substitutions[idx].src != NULL &&
+	   is_qualified_tparam(p->substitutions[idx].src, p->substitutions[idx].src_len)) {
+		const char *s = p->substitutions[idx].src;
+
+		if((s[0] == 'R' || s[0] == 'O') && s[1] == 'T') {
+			return parser_print_lambda_ref(p, idx);
+		}
+		return parser_reprint_type(p, s, p->substitutions[idx].src_len);
 	}
 
 	if(p->substitutions[idx].tparam != 0u && (p->in_lambda_sig || p->substitutions[idx].in_lambda)) {
@@ -2631,6 +2733,10 @@ static int parse_type(dm_itanium_parser_t *p) {
 			parser_leave(p);
 			return -1;
 		}
+		if(p->in_lambda_sig) {
+			p->substitutions[p->substitution_count - 1u].src = tstart;
+			p->substitutions[p->substitution_count - 1u].src_len = (size_t)(p->cur - tstart);
+		}
 		/* a template parameter alone, T_ or T<n>_, is resolved where it
 		 * is used, as GNU c++filt resolves it: auto:1 in a lambda's
 		 * signature, the argument elsewhere -- not the text it had */
@@ -2724,8 +2830,10 @@ static int parse_pack_expansion_type(dm_itanium_parser_t *p) {
 			dm_subst_t *from = &p->substitutions[subs + j];
 
 			free(to->text);
+			free(to->resolved);
 			*to = *from;
 			from->text = NULL;
+			from->resolved = NULL;
 		}
 		p->substitution_count = subs;
 	}

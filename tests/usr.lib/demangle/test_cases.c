@@ -485,6 +485,15 @@ static const dm_case_t cases[] = {
       "auto f()::{lambda(auto:1, auto:2)#1}::operator()<int, char>(int, char) const" },
     { "an entry of the enclosing template's", "_Z1gIPiZ1fIcEvT_EUlS2_E_EvS0_S3_", I,
       "void g<int*, f<char>(char)::{lambda(auto:1)#1}>(int*, f<char>(char)::{lambda(auto:1)#1})" },
+    /* an entry with one in it is the argument outside the signature: a
+     * reference to it, as resolved the first time it was printed so */
+    { "a reference to one, outside", "_Z1gIZ1fvEUlOT_E_EvS1_", I,
+      "void g<f()::{lambda(auto:1&&)#1}>(f()::{lambda(auto:1&&)#1}&&)" },
+    { "a qualified one", "_Z1gIZ1fvEUlRKT_E_EvS2_", I,
+      "void g<f()::{lambda(auto:1 const&)#1}>(f()::{lambda(auto:1 const&)#1} const&)" },
+    { "a reference, as first resolved", "_Z1kIZ1gIZ1fvEUlOT_E_EvS2_EUlvE_EvS2_", I,
+      "void k<g<f()::{lambda(auto:1&&)#1}>(f()::{lambda(auto:1&&)#1}&&)::{lambda()#1}>"
+      "(f()::{lambda(auto:1&&)#1}&&)" },
 
     /* Itanium operator expressions, as GNU c++filt prints them */
     { "a binary operator", "_Z1fIiEDTplfp_Li1EET_", I, "decltype ({parm#1}+(1)) f<int>(int)" },
