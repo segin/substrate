@@ -86,6 +86,8 @@ typedef struct dm_itanium_parser {
 	 * was a template function's (with a return type) */
 	size_t encoding_name_end;
 	int encoding_templated;
+	/* the source name parsed last, without its abi tags */
+	size_t last_ident_len;
 	int has_return_type;
 	/* where the encoding being parsed began in the output: a template
 	 * function's return type goes there, after any thunk's words or the
@@ -735,8 +737,11 @@ static int parse_source_name(dm_itanium_parser_t *p) {
 	}
 
 	p->cur += len;
+	/* the identifier without its abi tags: a constructor repeats only it,
+	 * failure[abi:cxx11]::failure(), where it took the tags too */
+	p->last_ident_len = len;
 
-	if(p->cur[0] == 'B') {
+	while(p->cur[0] == 'B') {
 		size_t tag_len;
 		p->cur++;
 		if(parse_number(p, &tag_len) != 0 || tag_len == 0u || !has_n_bytes(p->cur, tag_len)) {
@@ -1049,7 +1054,7 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 	while(p->cur[0] != '\0' && p->cur[0] != 'E') {
 		int from_sub;
 		int had_args;
-		int is_cdtor;
+		int is_cdtor, is_source;
 		size_t comp_off, comp_len;
 		size_t name_only_off, name_only_len;
 		dm_parse_mark_t comp_mark;
@@ -1074,6 +1079,7 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 		 * its first parameter for one */
 		is_cdtor = (p->cur[0] == 'C' && (isdigit((unsigned char)p->cur[1]) || p->cur[1] == 'I')) ||
 		           (p->cur[0] == 'D' && isdigit((unsigned char)p->cur[1])) || (p->cur[0] == 'c' && p->cur[1] == 'v');
+		is_source = isdigit((unsigned char)p->cur[0]);
 		if(parse_unqualified_name(p, last_off, last_len, &comp_off, &comp_len) != 0) {
 			int sub_rc;
 
@@ -1102,6 +1108,9 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 
 		name_only_off = comp_off;
 		name_only_len = comp_len;
+		if(is_source && !from_sub && p->last_ident_len <= comp_len) {
+			name_only_len = p->last_ident_len; /* without its abi tags */
+		}
 		/* a constructor of std::basic_string<...> is basic_string(): the
 		 * name after "std::" (a short std::string is never one's) */
 		if(from_sub && p->std_last_len != 0u && comp_len >= 5u + p->std_last_len) {

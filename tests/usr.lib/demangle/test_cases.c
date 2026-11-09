@@ -453,6 +453,13 @@ static const dm_case_t cases[] = {
     { "a class's", "_ZN1AC1IiEET_", I, "A::A<int>(int)" },
     { "a function template's still has", "_ZN1A1fIiEEvT_", I, "void A::f<int>(int)" },
 
+    /* an Itanium abi tag: a constructor repeats the name without it */
+    { "a destructor (libstdc++'s)", "_ZNSt8ios_base7failureB5cxx11D0Ev", I, "std::ios_base::failure[abi:cxx11]::~failure()" },
+    { "a constructor", "_ZNSt8ios_base7failureB5cxx11C1EPKcRKSt10error_code", I,
+      "std::ios_base::failure[abi:cxx11]::failure(char const*, std::error_code const&)" },
+    { "two tags", "_Z1fB3fooB3bari", I, "f[abi:foo][abi:bar](int)" },
+    { "a constructor of a twice-tagged class", "_ZN1AB3fooB3barC1Ev", I, "A[abi:foo][abi:bar]::A()" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
