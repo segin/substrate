@@ -82,6 +82,10 @@ typedef struct dm_itanium_parser {
 	 * function type that follows its name) */
 	int next_encoding_is_local;
 	int drop_return_type;
+	/* the encoding parsed last: where its name ended, and whether it
+	 * was a template function's (with a return type) */
+	size_t encoding_name_end;
+	int encoding_templated;
 	int has_return_type;
 	/* where the encoding being parsed began in the output: a template
 	 * function's return type goes there, after any thunk's words or the
@@ -1839,12 +1843,100 @@ static int parse_expression_operator(dm_itanium_parser_t *p) {
 	return -1;
 }
 
+/*
+ * The expressions GNU c++filt prints that this refused: a template
+ * parameter, the argument it names (X T0_ E is 4u); a function parameter,
+ * {parm#1}; T::x, sr <type> <name>; and &, ad, of an entity, L _Z ... E --
+ * &x, &A::x, and &A::f for a member function, whose parameters GNU leaves
+ * out, but &(g()) and &(A::f() const) for any other function.  Returns -2
+ * for an expression of none of these forms, untouched.
+ */
+static int parse_simple_expression(dm_itanium_parser_t *p) {
+	if(p->cur[0] == 'T') {
+		return parse_template_param(p);
+	}
+
+	if(p->cur[0] == 'f' && p->cur[1] == 'p') {
+		size_t n = 0u;
+		int numbered = 0;
+
+		p->cur += 2;
+		while(p->cur[0] == 'K' || p->cur[0] == 'V' || p->cur[0] == 'r') {
+			p->cur++;
+		}
+		if(isdigit((unsigned char)p->cur[0])) {
+			if(parse_number(p, &n) != 0 || n > SIZE_MAX - 2u) {
+				return -1;
+			}
+			numbered = 1;
+		}
+		if(p->cur[0] != '_') {
+			return -1;
+		}
+		p->cur++;
+		return demangle_buf_printf(&p->out, "{parm#%zu}", numbered ? n + 2u : 1u);
+	}
+
+	if(p->cur[0] == 's' && p->cur[1] == 'r') {
+		p->cur += 2;
+		if(parse_type(p) != 0 || demangle_buf_append(&p->out, "::", 2u) != 0 || parse_source_name(p) != 0) {
+			return -1;
+		}
+		return p->cur[0] == 'I' ? parse_template_args(p) : 0;
+	}
+
+	if(p->cur[0] == 'a' && p->cur[1] == 'd' && p->cur[2] == 'L' && p->cur[3] == '_' && p->cur[4] == 'Z') {
+		int plain_member;
+		size_t off;
+		int rc;
+
+		p->cur += 5;
+		/* a nested name with no cv- or ref-qualifier, as A::f is */
+		plain_member = (p->cur[0] == 'N' && strchr("KVrRO", p->cur[1]) == NULL);
+		if(demangle_buf_appendc(&p->out, '&') != 0 || parser_enter(p) != 0) {
+			return -1;
+		}
+		off = p->out.len;
+		p->local_depth++;
+		rc = parse_encoding(p);
+		p->local_depth--;
+		parser_leave(p);
+		if(rc != 0 || p->cur[0] != 'E') {
+			return -1;
+		}
+		p->cur++;
+		if(p->encoding_name_end != p->out.len) {
+			/* a function: only its name if a member, else parenthesized */
+			if(plain_member && !p->encoding_templated) {
+				if(parser_freeze_from(p, p->encoding_name_end) != 0) {
+					return -1;
+				}
+				p->out.len = p->encoding_name_end;
+				p->out.data[p->out.len] = '\0';
+			} else if(parser_insert_in_type(p, off, off, "(", 1u) != 0 || demangle_buf_appendc(&p->out, ')') != 0) {
+				return -1;
+			}
+		}
+		return 0;
+	}
+
+	return -2;
+}
+
 static int parse_expression(dm_itanium_parser_t *p) {
 	dm_parse_mark_t m;
 	int ok;
 
 	if(parser_enter(p) != 0) {
 		return -1;
+	}
+
+	/* the forms GNU c++filt prints, which were refused: a template
+	 * parameter, a function parameter, T::x, &A::f */
+	ok = parse_simple_expression(p);
+	if(ok != -2) {
+		parser_leave(p);
+		return ok;
 	}
 
 	mark_save(p, &m);
@@ -2831,6 +2923,9 @@ static int parse_encoding(dm_itanium_parser_t *p) {
 	if(parse_name(p) != 0) {
 		goto out;
 	}
+	/* where the name ends and whether it was a template's, for &A::f */
+	p->encoding_name_end = p->out.len;
+	p->encoding_templated = p->has_return_type;
 
 	if(!at_encoding_end(p)) {
 		/* Save function's template args for T_ references in the signature */

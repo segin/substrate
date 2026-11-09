@@ -425,6 +425,21 @@ static const dm_case_t cases[] = {
     { "a return type (LLVM's)", "_ZN4llvm17JumpThreadingPass19runExternalAnalysisINS_22BlockFrequencyAnalysisEEEPNT_6ResultEv", I,
       "llvm::BlockFrequencyAnalysis::Result* llvm::JumpThreadingPass::runExternalAnalysis<llvm::BlockFrequencyAnalysis>()" },
 
+    /* Itanium expressions as template arguments, X <expression> E */
+    { "a template parameter (LLVM's)", "_ZN4llvmeqIjLj4ELj4ESt4lessIjEEEbRKNS_8SmallSetIT_XT0_ET2_EERKNS3_IS4_XT1_ES5_EE", I,
+      "bool llvm::operator==<unsigned int, 4u, 4u, std::less<unsigned int>>(llvm::SmallSet<unsigned int, 4u, "
+      "std::less<unsigned int>> const&, llvm::SmallSet<unsigned int, 4u, std::less<unsigned int>> const&)" },
+    { "a member's address", "_Z1fIXadL_ZN1A1gEvEEEvv", I, "void f<&A::g>()" },
+    { "a const member's, parenthesized", "_ZTIN4llvm9sandboxir13GenericSetterIXadL_ZNKS0_10CondBrInst12getConditionEvEEXadL_ZNS2_12setConditionEPNS0_5ValueEEEEE", I,
+      "typeinfo for llvm::sandboxir::GenericSetter<&(llvm::sandboxir::CondBrInst::getCondition() const), "
+      "&llvm::sandboxir::CondBrInst::setCondition>" },
+    { "a variable's", "_Z1fIXadL_ZN1A1xEEEEvv", I, "void f<&A::x>()" },
+    { "a free function's", "_Z1fIXadL_Z1gvEEEvv", I, "void f<&(g())>()" },
+    { "a scoped name", "_ZN4llvm14DomTreeBuilder12ApplyUpdatesINS_17DominatorTreeBaseINS_10BasicBlockELb0EEEEEvRT_RNS_9GraphDiffINS5_7NodePtrEXsrS5_15IsPostDominatorEEEPS9_", I,
+      "void llvm::DomTreeBuilder::ApplyUpdates<llvm::DominatorTreeBase<llvm::BasicBlock, false>>(llvm::DominatorTreeBase<llvm::BasicBlock, false>&, "
+      "llvm::GraphDiff<llvm::DominatorTreeBase<llvm::BasicBlock, false>::NodePtr, llvm::DominatorTreeBase<llvm::BasicBlock, false>::IsPostDominator>&, "
+      "llvm::GraphDiff<llvm::DominatorTreeBase<llvm::BasicBlock, false>::NodePtr, llvm::DominatorTreeBase<llvm::BasicBlock, false>::IsPostDominator>*)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
