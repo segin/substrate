@@ -530,6 +530,14 @@ static const dm_case_t cases[] = {
       "(bool, std::enable_if<!std::is_same<boost::asio::io_context::basic_executor_type<std::allocator<void>, 0ul>, void>::value, void>::type*)"
       "::fns_with_execute" },
 
+    /* an unnamed type is an entry of its own, before any it is part of */
+    { "an unnamed type's entries", "_Z1fIN1AUt_EEvS1_S2_", I,
+      "void f<A::{unnamed type#1}>({unnamed type#1}, A::{unnamed type#1})" },
+    { "in a nested name", "_ZN1AUt0_3fooES0_S1_", I,
+      "A::{unnamed type#2}::foo({unnamed type#2}, A::{unnamed type#2})" },
+    { "a local one", "_Z1fIZ1gvEUt_EvS0_S1_", I,
+      "void f<g()::{unnamed type#1}>({unnamed type#1}, g()::{unnamed type#1})" },
+
     /* a qualifier a template argument or an entry has already is printed
      * once, after its others, as GNU c++filt prints it */
     { "const on a const argument", "_Z1fIKiEvKT_", I, "void f<int const>(int const)" },

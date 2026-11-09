@@ -1123,6 +1123,7 @@ static int parse_ctor_dtor_name(dm_itanium_parser_t *p, size_t prev_off, size_t 
 
 static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 	size_t id;
+	size_t start;
 
 	if(p->cur[0] == 'U' && p->cur[1] == 'l') {
 		int first;
@@ -1201,6 +1202,7 @@ static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 	}
 
 	p->cur += 2;
+	start = p->out.len;
 
 	/* numbered as lambdas are: _ the first, #1, and N_ #N+2 */
 	if(isdigit((unsigned char)p->cur[0])) {
@@ -1211,15 +1213,22 @@ static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 			return -1;
 		}
 		p->cur++;
-		return demangle_buf_printf(&p->out, "{unnamed type#%zu}", id + 2u);
+		if(demangle_buf_printf(&p->out, "{unnamed type#%zu}", id + 2u) != 0) {
+			return -1;
+		}
+	} else {
+		if(p->cur[0] != '_') {
+			return -1;
+		}
+		p->cur++;
+		if(demangle_buf_append(&p->out, "{unnamed type#1}", 16u) != 0) {
+			return -1;
+		}
 	}
-
-	if(p->cur[0] != '_') {
-		return -1;
-	}
-
-	p->cur++;
-	return demangle_buf_append(&p->out, "{unnamed type#1}", 16u);
+	/* an entry of its own, before any it is part of, as GNU c++filt has
+	 * it: f<A::{unnamed type#1}>(S1_, S2_) is ({unnamed type#1},
+	 * A::{unnamed type#1}), and S2_ was none */
+	return parser_add_substitution(p, start, p->out.len - start);
 }
 
 static int parse_unqualified_name(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len, size_t *comp_off, size_t *comp_len) {
