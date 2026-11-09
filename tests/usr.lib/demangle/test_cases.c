@@ -534,6 +534,7 @@ static const dm_case_t cases[] = {
     { "sizeof... a function parameter pack", "_Z1fIiEDTsZfp_ES0_", I, "decltype (0) f<int>(decltype (0))" },
     { "a cast", "_Z1fIiEDTcvT_fp_ET_", I, "decltype ((int){parm#1}) f<int>(int)" },
     { "member access", "_Z1fIiEDTptfp_1xET_", I, "decltype ({parm#1}->x) f<int>(int)" },
+    { "alignof a type, no entry", "_Z1fIiEDTatT_ES0_", I, "decltype (alignof (int)) f<int>(decltype (alignof (int)))" },
     { "noexcept", "_Z1fIiEDTnxfp_ET_", I, "decltype (noexcept({parm#1})) f<int>(int)" },
     { "! of a qualified name (Boost's)",
       "_ZZN5boost4asio9execution6detail17any_executor_base16target_fns_tableINS0_10io_context19basic_executor_typeISaIvELm0EEEEEPKNS3_10target_fnsEbPNSt9enable_ifIXntsrSt7is_sameIT_vE5valueEvE4typeEE16fns_with_execute", I,

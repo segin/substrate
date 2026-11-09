@@ -2346,7 +2346,13 @@ static int parse_expression_operator(dm_itanium_parser_t *p) {
 		if(demangle_buf_append(&p->out, op, strlen(op)) != 0) {
 			return -1;
 		}
-		if(c1 == 't') {
+		/* alignof's operand is an expression, as GNU c++filt reads it:
+		 * T_ in it is no entry, and is parenthesized, alignof (int) */
+		if(c0 == 'a' && c1 == 't') {
+			if(parse_subexpr(p) != 0) {
+				return -1;
+			}
+		} else if(c1 == 't') {
 			if(demangle_buf_appendc(&p->out, '(') != 0 || parse_type(p) != 0 || demangle_buf_appendc(&p->out, ')') != 0) {
 				return -1;
 			}
