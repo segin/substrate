@@ -2311,6 +2311,34 @@ static int parse_expression_operator(dm_itanium_parser_t *p) {
 		return 0;
 	}
 
+	/* sizeof...(pack): the pack's length, as GNU c++filt prints it --
+	 * 2 for a pack of int and char, 0 for a function parameter pack */
+	if(c0 == 's' && c1 == 'Z') {
+		size_t start = p->out.len;
+		int saved_expanding = p->pack_expanding;
+		size_t saved_index = p->pack_index;
+		size_t saved_seen = p->pack_seen;
+		size_t n;
+		int rc;
+
+		p->cur += 2;
+		p->pack_expanding = 1;
+		p->pack_index = SIZE_MAX; /* no element printed */
+		p->pack_seen = SIZE_MAX;
+		rc = parse_expression(p);
+		n = p->pack_seen == SIZE_MAX ? 0u : p->pack_seen;
+		p->pack_expanding = saved_expanding;
+		p->pack_index = saved_index;
+		p->pack_seen = saved_seen;
+		if(rc != 0 || parser_freeze_from(p, start) != 0) {
+			return -1;
+		}
+		p->out.len = start;
+		p->out.data[p->out.len] = '\0';
+		p->expr_simple = 0;
+		return demangle_buf_printf(&p->out, "%zu", n);
+	}
+
 	if((c0 == 's' || c0 == 'a') && (c1 == 't' || c1 == 'z')) { /* sizeof (T), sizeof x */
 		const char *op = (c0 == 's') ? "sizeof " : "alignof ";
 
