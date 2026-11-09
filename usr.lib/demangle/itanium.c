@@ -2588,6 +2588,9 @@ static int parse_type(dm_itanium_parser_t *p) {
 	if(ch == 'D' && p->cur[1] == 'o' && p->cur[2] == 'F') {
 		ch = 'F'; /* a noexcept function type is one, as any is */
 	}
+	if(ch == 'D' && (p->cur[1] == 't' || p->cur[1] == 'T')) {
+		ch = 'T'; /* a decltype is a candidate (ABI 5.1.9), and was none */
+	}
 
 	saved_type_ctx = p->in_type_context;
 	p->in_type_context = 1;
@@ -2628,7 +2631,7 @@ static int parse_type(dm_itanium_parser_t *p) {
 		/* a template parameter alone, T_ or T<n>_, is resolved where it
 		 * is used, as GNU c++filt resolves it: auto:1 in a lambda's
 		 * signature, the argument elsewhere -- not the text it had */
-		if(ch == 'T' && p->cur[-1] == '_' && (tstart[1] == '_' || p->cur - tstart > 2)) {
+		if(tstart[0] == 'T' && p->cur[-1] == '_' && (tstart[1] == '_' || p->cur - tstart > 2)) {
 			size_t idx = 0u;
 			const char *q;
 

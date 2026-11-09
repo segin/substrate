@@ -518,6 +518,13 @@ static const dm_case_t cases[] = {
       "llvm::detail::checkedOp<int, llvm::APInt (llvm::APInt::*)(llvm::APInt const&, bool&) const>"
       "(int, int, llvm::APInt (llvm::APInt::*)(llvm::APInt const&, bool&) const, bool)" },
 
+    /* an Itanium decltype is a substitution candidate */
+    { "a later parameter's", "_Z1fIiEvDTfp_ES0_", I, "void f<int>(decltype ({parm#1}), decltype ({parm#1}))" },
+    { "libstdc++'s", "_ZSt14__copy_move_a1ILb1EPjjEN9__gnu_cxx11__enable_ifIXsrSt27__is_any_random_access_iterIT0_DTcl26__iter_concept_or_categoryIS4_EEEE7__valueESt15_Deque_iteratorIT1_RS8_PS8_EE6__typeES4_S4_SB_", I,
+      "__gnu_cxx::__enable_if<std::__is_any_random_access_iter<unsigned int*, decltype ((__iter_concept_or_category<unsigned int*>)())>::__value, "
+      "std::_Deque_iterator<unsigned int, unsigned int&, unsigned int*>>::__type std::__copy_move_a1<true, unsigned int*, unsigned int>"
+      "(unsigned int*, unsigned int*, std::_Deque_iterator<unsigned int, unsigned int&, unsigned int*>)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
