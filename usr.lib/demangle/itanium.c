@@ -23,6 +23,11 @@ typedef struct dm_subst {
 	size_t off;
 	size_t len;
 	char *text; /* the copy, or NULL: the slice */
+	/* a template parameter alone: its index + 1, resolved again where a
+	 * lambda's signature makes it auto:1 (in_lambda: it was made in one);
+	 * 0 for any other entry */
+	size_t tparam;
+	int in_lambda;
 } dm_subst_t;
 
 /*
@@ -90,6 +95,8 @@ typedef struct dm_itanium_parser {
 	size_t last_ident_len;
 	/* the unscoped name parsed next is an expression's (see there) */
 	int expr_name;
+	/* a lambda's parameters are being parsed: T_ is its auto, auto:1 */
+	int in_lambda_sig;
 	int has_return_type;
 	/* where the encoding being parsed began in the output: a template
 	 * function's return type goes there, after any thunk's words or the
@@ -417,6 +424,8 @@ static int parser_add_substitution(dm_itanium_parser_t *p, size_t off, size_t le
 	/* a slot backtracking gave up may still hold a copy */
 	free(p->substitutions[p->substitution_count].text);
 	p->substitutions[p->substitution_count].text = NULL;
+	p->substitutions[p->substitution_count].tparam = 0u;
+	p->substitutions[p->substitution_count].in_lambda = p->in_lambda_sig;
 	p->substitutions[p->substitution_count].off = off;
 	p->substitutions[p->substitution_count].len = len;
 
@@ -442,6 +451,19 @@ static int parser_append_output_slice(dm_itanium_parser_t *p, size_t off, size_t
 static int parser_lookup_substitution(dm_itanium_parser_t *p, size_t idx) {
 	if(idx >= p->substitution_count) {
 		return -1;
+	}
+
+	if(p->substitutions[idx].tparam != 0u && (p->in_lambda_sig || p->substitutions[idx].in_lambda)) {
+		size_t t = p->substitutions[idx].tparam - 1u;
+
+		if(p->in_lambda_sig) {
+			return demangle_buf_printf(&p->out, "auto:%zu", t + 1u);
+		}
+		/* made as auto:1 in a lambda's signature, the argument outside it */
+		if(p->func_map.count > 0) {
+			return append_template_arg(p, &p->func_map, p->func_tmpl_off, p->func_tmpl_len, p->func_tmpl_count, t);
+		}
+		return append_template_arg(p, &p->last_map, p->last_template_off, p->last_template_len, p->last_template_count, t);
 	}
 
 	if(p->substitutions[idx].text != NULL) {
@@ -912,6 +934,7 @@ static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 		int first;
 		int has_id;
 		size_t lambda_id;
+		int saved_lambda;
 
 		p->cur += 2;
 		has_id = 0;
@@ -925,23 +948,34 @@ static int parse_unnamed_type_name(dm_itanium_parser_t *p) {
 		if(p->cur[0] == 'v' && p->cur[1] == 'E') {
 			p->cur++;
 		}
+		/* a template parameter in a lambda's signature is its own, a generic
+		 * lambda's auto, auto:1, as GNU c++filt prints it (the enclosing
+		 * template's argument was printed) */
+		saved_lambda = p->in_lambda_sig;
+		p->in_lambda_sig = 1;
 		first = 1;
 		while(p->cur[0] != '\0' && p->cur[0] != 'E') {
+			int rc;
+
 			/* the separator before the parameter, not inserted after it,
 			 * which left its substitutions' offsets behind */
 			if(!first && demangle_buf_append(&p->out, ", ", 2u) != 0) {
+				p->in_lambda_sig = saved_lambda;
 				return -1;
 			}
 			if(parser_enter(p) != 0) {
+				p->in_lambda_sig = saved_lambda;
 				return -1;
 			}
-			if(parse_type(p) != 0) {
-				parser_leave(p);
-				return -1;
-			}
+			rc = parse_type(p);
 			parser_leave(p);
+			if(rc != 0) {
+				p->in_lambda_sig = saved_lambda;
+				return -1;
+			}
 			first = 0;
 		}
+		p->in_lambda_sig = saved_lambda;
 
 		if(p->cur[0] != 'E') {
 			return -1;
@@ -2038,6 +2072,10 @@ static int parse_template_param(dm_itanium_parser_t *p) {
 		idx = seq + 1u;
 	}
 
+	if(p->in_lambda_sig) {
+		return idx == SIZE_MAX ? -1 : demangle_buf_printf(&p->out, "auto:%zu", idx + 1u);
+	}
+
 	/* Prefer function-level template args when available */
 	if(p->func_map.count > 0) {
 		return append_template_arg(p, &p->func_map, p->func_tmpl_off, p->func_tmpl_len, p->func_tmpl_count, idx);
@@ -2363,6 +2401,7 @@ static int parse_type_inner(dm_itanium_parser_t *p);
 
 static int parse_type(dm_itanium_parser_t *p) {
 	size_t type_off;
+	const char *tstart;
 	int rc;
 	char ch;
 	int needs_sub;
@@ -2380,6 +2419,7 @@ static int parse_type(dm_itanium_parser_t *p) {
 	}
 
 	type_off = p->out.len;
+	tstart = p->cur;
 	ch = p->cur[0];
 	if(ch == 'D' && p->cur[1] == 'o' && p->cur[2] == 'F') {
 		ch = 'F'; /* a noexcept function type is one, as any is */
@@ -2420,6 +2460,26 @@ static int parse_type(dm_itanium_parser_t *p) {
 		if(parser_add_substitution(p, type_off, p->out.len - type_off) != 0) {
 			parser_leave(p);
 			return -1;
+		}
+		/* a template parameter alone, T_ or T<n>_, is resolved where it
+		 * is used, as GNU c++filt resolves it: auto:1 in a lambda's
+		 * signature, the argument elsewhere -- not the text it had */
+		if(ch == 'T' && p->cur[-1] == '_' && (tstart[1] == '_' || p->cur - tstart > 2)) {
+			size_t idx = 0u;
+			const char *q;
+
+			for(q = tstart + 1; *q != '_'; q++) {
+				unsigned d = isdigit((unsigned char)*q) ? (unsigned)(*q - '0') : (unsigned)(*q - 'A') + 10u;
+
+				if(!(isdigit((unsigned char)*q) || (*q >= 'A' && *q <= 'Z')) || idx > (SIZE_MAX - d) / 36u) {
+					idx = SIZE_MAX;
+					break;
+				}
+				idx = idx * 36u + d;
+			}
+			if(idx != SIZE_MAX && q + 1 == p->cur) {
+				p->substitutions[p->substitution_count - 1u].tparam = (tstart[1] == '_') ? 1u : idx + 2u;
+			}
 		}
 	}
 

@@ -476,6 +476,14 @@ static const dm_case_t cases[] = {
     { "a local class", "_Z1fZ1gvE1AS_", I, "f(g()::A, g()::A)" },
     { "a local class's member class", "_Z1fZ1gvEN1A1BES_S0_", I, "f(g()::A::B, A, g()::A::B)" },
 
+    /* a template parameter in an Itanium lambda's signature is its auto */
+    { "a generic lambda's call operator", "_ZZ1fvENKUlT_E_clIiEEDaS_", I,
+      "auto f()::{lambda(auto:1)#1}::operator()<int>(int) const" },
+    { "two of them", "_ZZ1fvENKUlT_T0_E_clIicEEDaS_S0_", I,
+      "auto f()::{lambda(auto:1, auto:2)#1}::operator()<int, char>(int, char) const" },
+    { "an entry of the enclosing template's", "_Z1gIPiZ1fIcEvT_EUlS2_E_EvS0_S3_", I,
+      "void g<int*, f<char>(char)::{lambda(auto:1)#1}>(int*, f<char>(char)::{lambda(auto:1)#1})" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
