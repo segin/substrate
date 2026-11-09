@@ -2339,6 +2339,92 @@ static int parse_expression_operator(dm_itanium_parser_t *p) {
 		return demangle_buf_printf(&p->out, "%zu", n);
 	}
 
+	/* [gs] nw|na <expression>* _ <type> [pi <expression>* E | il ... E | E]:
+	 * new (placement) T(args), new T{args}, ::new T -- new for na too,
+	 * as GNU c++filt prints it */
+	if((c0 == 'n' && (c1 == 'w' || c1 == 'a')) || (c0 == 'g' && c1 == 's' && p->cur[2] == 'n' && (p->cur[3] == 'w' || p->cur[3] == 'a'))) {
+		int first = 1;
+
+		if(c0 == 'g') {
+			p->cur += 2;
+			if(demangle_buf_append(&p->out, "::", 2u) != 0) {
+				return -1;
+			}
+		}
+		p->cur += 2;
+		if(demangle_buf_append(&p->out, "new ", 4u) != 0) {
+			return -1;
+		}
+		if(p->cur[0] != '_') {
+			if(demangle_buf_appendc(&p->out, '(') != 0) {
+				return -1;
+			}
+			while(p->cur[0] != '_') {
+				if(p->cur[0] == '\0' || (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) || parse_expression(p) != 0) {
+					return -1;
+				}
+				first = 0;
+			}
+			if(demangle_buf_append(&p->out, ") ", 2u) != 0) {
+				return -1;
+			}
+		}
+		p->cur++;
+		if(parse_type(p) != 0) {
+			return -1;
+		}
+		if((p->cur[0] == 'p' && p->cur[1] == 'i') || (p->cur[0] == 'i' && p->cur[1] == 'l')) {
+			int brace = p->cur[0] == 'i';
+
+			p->cur += 2;
+			if(demangle_buf_appendc(&p->out, brace ? '{' : '(') != 0) {
+				return -1;
+			}
+			for(first = 1; p->cur[0] != 'E'; first = 0) {
+				if(p->cur[0] == '\0' || (!first && demangle_buf_append(&p->out, ", ", 2u) != 0) || parse_expression(p) != 0) {
+					return -1;
+				}
+			}
+			if(demangle_buf_appendc(&p->out, brace ? '}' : ')') != 0) {
+				return -1;
+			}
+		}
+		if(p->cur[0] != 'E') {
+			return -1;
+		}
+		p->cur++;
+		p->expr_simple = 0;
+		return 0;
+	}
+
+	/* [gs] dl|da x: delete x, delete[] x, ::delete x; tw x: throw x; tr:
+	 * throw */
+	if((c0 == 'd' && (c1 == 'l' || c1 == 'a')) || (c0 == 'g' && c1 == 's' && p->cur[2] == 'd' && (p->cur[3] == 'l' || p->cur[3] == 'a')) ||
+	   (c0 == 't' && (c1 == 'w' || c1 == 'r'))) {
+		const char *op;
+
+		if(c0 == 'g') {
+			p->cur += 2;
+			if(demangle_buf_append(&p->out, "::", 2u) != 0) {
+				return -1;
+			}
+		}
+		op = p->cur[0] == 't' ? (p->cur[1] == 'w' ? "throw " : "throw") : (p->cur[1] == 'l' ? "delete " : "delete[] ");
+		p->cur += 2;
+		p->expr_simple = 0;
+		if(demangle_buf_append(&p->out, op, strlen(op)) != 0) {
+			return -1;
+		}
+		if(c0 == 't' && c1 == 'r') {
+			return 0;
+		}
+		if(parse_subexpr(p) != 0) {
+			return -1;
+		}
+		p->expr_simple = 0;
+		return 0;
+	}
+
 	if((c0 == 's' || c0 == 'a') && (c1 == 't' || c1 == 'z')) { /* sizeof (T), sizeof x */
 		const char *op = (c0 == 's') ? "sizeof " : "alignof ";
 
