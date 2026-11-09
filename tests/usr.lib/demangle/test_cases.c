@@ -418,6 +418,13 @@ static const dm_case_t cases[] = {
       "typeinfo for llvm::dwarf_linker::parallel::DWARFLinkerImpl::LinkContext::getUnitForOffset::{lambda(unsigned long)#1}" },
     { "an M with nothing after it", "_ZN1AME", I, NULL },
 
+    /* an Itanium template parameter as a nested name's prefix, T::B */
+    { "a member type of one", "_Z1fI1AEvNT_1BE", I, "void f<A>(A::B)" },
+    { "the parameter is an entry", "_Z1fI1AEvNT_1BES1_", I, "void f<A>(A::B, A)" },
+    { "and the prefix after it", "_Z1fI1AEvNT_1B1CES2_", I, "void f<A>(A::B::C, A::B)" },
+    { "a return type (LLVM's)", "_ZN4llvm17JumpThreadingPass19runExternalAnalysisINS_22BlockFrequencyAnalysisEEEPNT_6ResultEv", I,
+      "llvm::BlockFrequencyAnalysis::Result* llvm::JumpThreadingPass::runExternalAnalysis<llvm::BlockFrequencyAnalysis>()" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },

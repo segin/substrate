@@ -1069,15 +1069,25 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 
 			mark_save(p, &comp_mark);
 			comp_off = p->out.len;
-			p->sub_is_prefix = 1;
-			sub_rc = parse_substitution(p);
-			p->sub_is_prefix = 0;
-			if(sub_rc != 0) {
-				mark_restore(p, &comp_mark);
-				goto out;
+			if(first && p->cur[0] == 'T') {
+				/* a template parameter as the prefix, T::iterator for
+				 * NT_8iteratorE -- refused before; it is a candidate */
+				if(parse_template_param(p) != 0) {
+					mark_restore(p, &comp_mark);
+					goto out;
+				}
+				comp_len = p->out.len - comp_off;
+			} else {
+				p->sub_is_prefix = 1;
+				sub_rc = parse_substitution(p);
+				p->sub_is_prefix = 0;
+				if(sub_rc != 0) {
+					mark_restore(p, &comp_mark);
+					goto out;
+				}
+				comp_len = p->out.len - comp_off;
+				from_sub = 1;
 			}
-			comp_len = p->out.len - comp_off;
-			from_sub = 1;
 		}
 
 		name_only_off = comp_off;
