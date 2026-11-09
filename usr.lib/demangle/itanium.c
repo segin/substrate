@@ -2120,7 +2120,9 @@ static int parse_function_type(dm_itanium_parser_t *p) {
 
 static int parse_array_type(dm_itanium_parser_t *p) {
 	size_t dim;
-	int has_dim;
+	char *dims;
+	size_t n;
+	int rc = -1;
 
 	if(p->cur[0] != 'A') {
 		return -1;
@@ -2128,16 +2130,58 @@ static int parse_array_type(dm_itanium_parser_t *p) {
 
 	p->cur++;
 
-	has_dim = 0;
-	dim = 0u;
+	/*
+	 * The bound: a number, nothing, or an expression -- a template
+	 * parameter, char const (&)[6ul] for A T_ _ c, as GNU c++filt prints
+	 * it; that was refused.  An expression is parsed where it stands and
+	 * its text moved after the element type, its entries keeping theirs.
+	 */
 	if(isdigit((unsigned char)p->cur[0])) {
-		has_dim = 1;
+		char num[32];
+		int k;
+
 		if(parse_number(p, &dim) != 0) {
 			return -1;
 		}
+		k = snprintf(num, sizeof(num), "[%zu]", dim);
+		if(k < 0 || (size_t)k >= sizeof(num)) {
+			return -1;
+		}
+		n = (size_t)k;
+		dims = (char *)malloc(n + 1u);
+		if(dims == NULL) {
+			return -1;
+		}
+		memcpy(dims, num, n + 1u);
+	} else if(p->cur[0] != '_') {
+		size_t expr_off = p->out.len;
+
+		if(parse_expression(p) != 0) {
+			return -1;
+		}
+		n = p->out.len - expr_off + 2u;
+		dims = (char *)malloc(n + 1u);
+		if(dims == NULL || parser_freeze_from(p, expr_off) != 0) {
+			free(dims);
+			return -1;
+		}
+		dims[0] = '[';
+		memcpy(dims + 1, p->out.data + expr_off, n - 2u);
+		dims[n - 1u] = ']';
+		dims[n] = '\0';
+		p->out.len = expr_off;
+		p->out.data[p->out.len] = '\0';
+	} else {
+		n = 2u;
+		dims = (char *)malloc(3u);
+		if(dims == NULL) {
+			return -1;
+		}
+		memcpy(dims, "[]", 3u);
 	}
 
 	if(p->cur[0] != '_') {
+		free(dims);
 		return -1;
 	}
 
@@ -2146,15 +2190,9 @@ static int parse_array_type(dm_itanium_parser_t *p) {
 	{
 		size_t elem_off = p->out.len;
 		int elem_is_array = (p->cur[0] == 'A');
-		char dims[32];
-		int n;
 
 		if(parse_type(p) != 0) {
-			return -1;
-		}
-		n = has_dim ? snprintf(dims, sizeof(dims), "[%zu]", dim) : snprintf(dims, sizeof(dims), "[]");
-		if(n < 0 || (size_t)n >= sizeof(dims)) {
-			return -1;
+			goto out;
 		}
 		/*
 		 * An array of arrays: this bound is the outer one, and goes before
@@ -2164,19 +2202,22 @@ static int parse_array_type(dm_itanium_parser_t *p) {
 		if(elem_is_array) {
 			size_t at = p->array_dims_off;
 
-			if(parser_insert_in_type(p, elem_off, at, dims, (size_t)n) != 0) {
-				return -1;
+			if(parser_insert_in_type(p, elem_off, at, dims, n) != 0) {
+				goto out;
 			}
 			p->array_dims_off = at;
 		} else {
 			p->array_dims_off = p->out.len;
-			if(demangle_buf_append(&p->out, dims, (size_t)n) != 0) {
-				return -1;
+			if(demangle_buf_append(&p->out, dims, n) != 0) {
+				goto out;
 			}
 		}
 		p->decl_close = SIZE_MAX;
-		return 0;
+		rc = 0;
 	}
+out:
+	free(dims);
+	return rc;
 }
 
 /*

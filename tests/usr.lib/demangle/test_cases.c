@@ -440,6 +440,13 @@ static const dm_case_t cases[] = {
       "llvm::GraphDiff<llvm::DominatorTreeBase<llvm::BasicBlock, false>::NodePtr, llvm::DominatorTreeBase<llvm::BasicBlock, false>::IsPostDominator>&, "
       "llvm::GraphDiff<llvm::DominatorTreeBase<llvm::BasicBlock, false>::NodePtr, llvm::DominatorTreeBase<llvm::BasicBlock, false>::IsPostDominator>*)" },
 
+    /* an Itanium array bound that is a template parameter */
+    { "a reference to one (LLVM's)", "_Z18ebcdicFieldToASCIIILm6EENSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERAT__Kc", I,
+      "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> ebcdicFieldToASCII<6ul>(char const (&)[6ul])" },
+    { "an array", "_Z1fILm6EEvAT__c", I, "void f<6ul>(char[6ul])" },
+    { "of arrays", "_Z1fILm2ELm3EEvRAT__AT0__c", I, "void f<2ul, 3ul>(char (&)[2ul][3ul])" },
+    { "no bound", "_Z1fA_i", I, "f(int[])" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
