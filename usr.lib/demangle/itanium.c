@@ -690,6 +690,47 @@ static int parser_freeze_from(dm_itanium_parser_t *p, size_t pos) {
 }
 
 /*
+ * A qualifier, @p word (" const", " volatile" or " restrict"), is put on
+ * the type printed from @p from to the end of the output -- a template
+ * argument or an entry: if that already ends in qualifiers and @p word
+ * is one of them, take it out, to go on again after the rest.  GNU
+ * c++filt prints a qualifier the type has already once, its others
+ * first: K T_ for int const volatile is int volatile const, and was
+ * int const volatile const.
+ */
+static int parser_drop_qualifier(dm_itanium_parser_t *p, size_t from, const char *word) {
+	static const char *const quals[] = {" const", " volatile", " restrict"};
+	size_t n = strlen(word);
+	size_t end = p->out.len;
+
+	for(;;) {
+		size_t k;
+		size_t len = 0u;
+
+		for(k = 0u; k < sizeof(quals) / sizeof(quals[0]); k++) {
+			len = strlen(quals[k]);
+			if(end >= from + len && memcmp(p->out.data + end - len, quals[k], len) == 0) {
+				break;
+			}
+		}
+		if(k == sizeof(quals) / sizeof(quals[0])) {
+			return 0;
+		}
+		end -= len;
+		if(len == n && memcmp(quals[k], word, n) == 0) {
+			break;
+		}
+	}
+	if(parser_freeze_from(p, end) != 0) {
+		return -1;
+	}
+	memmove(p->out.data + end, p->out.data + end + n, p->out.len - end - n);
+	p->out.len -= n;
+	p->out.data[p->out.len] = '\0';
+	return 0;
+}
+
+/*
  * Find, in the type text from @p off to the end of @p out, the array bounds
  * outside any template argument list or parenthesis: int[4], int (*)[4].
  * *@p dims gets where they begin.  *@p decl gets the position of the ) of
@@ -3093,6 +3134,9 @@ static int parse_type_inner(dm_itanium_parser_t *p) {
 			}
 			p->array_dims_off = at + strlen(text);
 			return 0;
+		}
+		if((*q == 'S' || *q == 'T') && parser_drop_qualifier(p, before, text) != 0) {
+			return -1;
 		}
 		return demangle_buf_append(&p->out, text, strlen(text));
 	}

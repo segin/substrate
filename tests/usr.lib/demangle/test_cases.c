@@ -530,6 +530,15 @@ static const dm_case_t cases[] = {
       "(bool, std::enable_if<!std::is_same<boost::asio::io_context::basic_executor_type<std::allocator<void>, 0ul>, void>::value, void>::type*)"
       "::fns_with_execute" },
 
+    /* a qualifier a template argument or an entry has already is printed
+     * once, after its others, as GNU c++filt prints it */
+    { "const on a const argument", "_Z1fIKiEvKT_", I, "void f<int const>(int const)" },
+    { "under a reference", "_Z1fIKiEvRKT_", I, "void f<int const>(int const&)" },
+    { "the others go first", "_Z1fIVKiEvKT_", I, "void f<int const volatile>(int volatile const)" },
+    { "both", "_Z1fIVKiEvRVKT_", I, "void f<int const volatile>(int const volatile&)" },
+    { "on an entry", "_Z1gIKiEvKS0_", I, "void g<int const>(int const)" },
+    { "a pointer's own", "_Z1fIPKiEvKT_", I, "void f<int const*>(int const* const)" },
+
     /* an Itanium qualified function type is one substitution entry */
     { "a const member function's", "_Z1fIM1AKFvvEEvS0_S1_S2_", I,
       "void f<void (A::*)() const>(A, void () const, void (A::*)() const)" },
