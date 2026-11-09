@@ -150,11 +150,18 @@ rm -f t.o
 if ! timeout 60 "$AS" --64 -o t.o t.s 2> err; then
     echo "FAIL 9000 numbered labels: $(tail -1 err)"; fail=1
 else
-    # to a file: objcopy -O binary seeks as it writes, which a pipe
-    # cannot, and on CI's binutils the bytes came out shifted
+    # byte for byte against the 9000 records it must be -- each .long
+    # 1b - . is 0 and 2f - . is 4, then the .byte 0 -- by cmp: od -w9 on
+    # CI (uutils coreutils) broke its rows at odd places, so counting
+    # the rows failed though the bytes were right
     objcopy -O binary -j .text t.o t.bin
-    got=$(od -An -v -tx1 -w9 t.bin | sort | uniq -c | tr -s ' ' | tr '\n' ';')
-    [ "$got" = " 9000 00 00 00 00 04 00 00 00 00;" ] || { echo "FAIL 9000 numbered labels: $got"; fail=1; }
+    i=0
+    while [ $i -lt 9000 ]; do
+        printf '\000\000\000\000\004\000\000\000\000'
+        i=$((i + 1))
+    done > want.bin
+    cmp -s t.bin want.bin || {
+        echo "FAIL 9000 numbered labels: $(cmp t.bin want.bin 2>&1 | head -1)"; fail=1; }
 fi
 
 [ "$fail" = 0 ] && echo "ok ($cases cases)"
