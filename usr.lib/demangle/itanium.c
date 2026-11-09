@@ -88,6 +88,8 @@ typedef struct dm_itanium_parser {
 	int encoding_templated;
 	/* the source name parsed last, without its abi tags */
 	size_t last_ident_len;
+	/* the unscoped name parsed next is an expression's (see there) */
+	int expr_name;
 	int has_return_type;
 	/* where the encoding being parsed began in the output: a template
 	 * function's return type goes there, after any thunk's words or the
@@ -1176,8 +1178,12 @@ static int parse_unscoped_name(dm_itanium_parser_t *p) {
 	int has_std_prefix;
 	int from_sub;
 	int had_args;
+	/* an expression's name, which enters no substitution: read here and
+	 * cleared, so that types in its template arguments still do */
+	int in_expr = p->expr_name;
 	dm_parse_mark_t m;
 
+	p->expr_name = 0;
 	name_off = p->out.len;
 	has_std_prefix = 0;
 	from_sub = 0;
@@ -1208,7 +1214,7 @@ static int parse_unscoped_name(dm_itanium_parser_t *p) {
 	}
 
 	if(p->cur[0] == 'I') {
-		if(!from_sub) {
+		if(!from_sub && !in_expr) {
 			if(parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
 				return -1;
 			}
@@ -1230,7 +1236,7 @@ static int parse_unscoped_name(dm_itanium_parser_t *p) {
 	 * above), nor a substitution that came as it was.  _Z1fSaIcES_ read
 	 * S_ as f.
 	 */
-	if(p->in_type_context && (had_args || !from_sub) && parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
+	if(p->in_type_context && !in_expr && (had_args || !from_sub) && parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
 		return -1;
 	}
 
@@ -1990,7 +1996,12 @@ static int parse_expression(dm_itanium_parser_t *p) {
 	}
 
 	mark_restore(p, &m);
+	/* a name in an expression enters no substitution, neither itself nor
+	 * its template's name (std::enable_if<is_unsigned_v<T>, T>: S_ read
+	 * is_unsigned_v) */
+	p->expr_name = (p->cur[0] != 'N' && p->cur[0] != 'Z');
 	ok = parse_name(p);
+	p->expr_name = 0;
 	parser_leave(p);
 	return ok;
 }

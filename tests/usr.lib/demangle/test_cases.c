@@ -466,6 +466,12 @@ static const dm_case_t cases[] = {
       "::{lambda(unsigned long, llvm::Twine const&)#1}" },
     { "a lambda's parameters", "_ZTIZN1A1fERKNS_1BEEUlS2_E_", I, "typeinfo for A::f(A::B const&)::{lambda(A::B const&)#1}" },
 
+    /* an Itanium name in an expression enters no substitution */
+    { "enable_if's condition (LLVM's)", "_ZN4llvm18SaturatingMultiplyImEENSt9enable_ifIX13is_unsigned_vIT_EES2_E4typeES2_S2_Pb", I,
+      "std::enable_if<is_unsigned_v<unsigned long>, unsigned long>::type "
+      "llvm::SaturatingMultiply<unsigned long>(unsigned long, unsigned long, bool*)" },
+    { "after it, the entry before", "_Z1fIiEv1AIX1vIT_EES0_E", I, "void f<int>(A<v<int>, A>)" },
+
     /* numbers too big for what they are refused, not wrapped */
     { "a thunk offset at LLONG_MAX", "_ZThn9223372036854775807_N3Foo3barEv", I,
       "non-virtual thunk to Foo::bar() [offset -9223372036854775807]" },
