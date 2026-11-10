@@ -298,6 +298,15 @@ static const dm_case_t cases[] = {
       "void A::g<A::f()::{lambda()#1}>(A::f()::{lambda()#1})" },
     { "an unnamed type", "_ZN1AUt_E", I, "A::{unnamed type#1}" },
     { "the second", "_ZN1AUt0_E", I, "A::{unnamed type#2}" },
+    /* a constructor or destructor of one is named for the last source
+     * name, as GNU c++filt has it */
+    { "its constructor", "_ZN1AUt_C2Ev", I, "A::{unnamed type#1}::A()" },
+    { "its destructor", "_ZN1AUt_D2Ev", I, "A::{unnamed type#1}::~A()" },
+    { "the second's", "_ZN1AUt0_C1Ei", I, "A::{unnamed type#2}::A(int)" },
+    { "of a template", "_ZN1AIiEUt_C2Ev", I, "A<int>::{unnamed type#1}::A()" },
+    { "two deep", "_ZN1AUt_Ut0_C2Ev", I, "A::{unnamed type#1}::{unnamed type#2}::A()" },
+    { "a class in one", "_ZN1AUt_1BC2Ev", I, "A::{unnamed type#1}::B::B()" },
+    { "copied", "_ZN1AUt_C2ERKS1_", I, "A::{unnamed type#1}::A(A::{unnamed type#1} const&)" },
 
     /* the Itanium assignment and logical operator names */
     { "operator= (Qt's)", "_ZN4QUrlaSERKS_", I, "QUrl::operator=(QUrl const&)" },

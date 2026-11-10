@@ -1371,7 +1371,7 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 	while(p->cur[0] != '\0' && p->cur[0] != 'E') {
 		int from_sub;
 		int had_args;
-		int is_cdtor, is_source;
+		int is_cdtor, is_source, is_unnamed;
 		size_t comp_off, comp_len;
 		size_t name_only_off, name_only_len;
 		dm_parse_mark_t comp_mark;
@@ -1397,6 +1397,7 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 		is_cdtor = (p->cur[0] == 'C' && (isdigit((unsigned char)p->cur[1]) || p->cur[1] == 'I')) ||
 		           (p->cur[0] == 'D' && isdigit((unsigned char)p->cur[1])) || (p->cur[0] == 'c' && p->cur[1] == 'v');
 		is_source = isdigit((unsigned char)p->cur[0]);
+		is_unnamed = p->cur[0] == 'U' && p->cur[1] == 't';
 		if(parse_unqualified_name(p, last_off, last_len, &comp_off, &comp_len) != 0) {
 			int sub_rc;
 
@@ -1454,8 +1455,13 @@ static int parse_nested_name(dm_itanium_parser_t *p) {
 			p->has_return_type = 0;
 		}
 
-		last_off = name_only_off;
-		last_len = name_only_len;
+		/* a constructor or destructor is named for the last source name,
+		 * which an unnamed type does not replace, as GNU c++filt has it:
+		 * A::{unnamed type#1}::A(), not ::{unnamed type#1}() */
+		if(!is_unnamed) {
+			last_off = name_only_off;
+			last_len = name_only_len;
+		}
 
 		/*
 		 * The prefix so far is a candidate (Itanium ABI 5.1.9) -- but not a
