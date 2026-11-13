@@ -34,6 +34,14 @@
 #define LLONG_MAX 9223372036854775807LL
 #define ULLONG_MAX 18446744073709551615ULL
 
+/* MB_LEN_MAX -- the most bytes in one multibyte character, in any locale.
+ * libc's encoding is UTF-8 (lib/c/src/wchar.c), whose longest character is
+ * 4 bytes, so MB_CUR_MAX in <stdlib.h> never exceeds it.  It is 16, as in
+ * glibc, rather than 4: a host build that reaches this header through
+ * gcc's #include_next meets glibc's fortified <stdlib.h>, which rejects any
+ * other value. */
+#define MB_LEN_MAX 16
+
 #define PATH_MAX 4096
 #define NAME_MAX 255
 /* POSIX message-queue priority ceiling: valid msg_prio is 0 .. MQ_PRIO_MAX-1.

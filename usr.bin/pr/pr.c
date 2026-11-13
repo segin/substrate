@@ -32,7 +32,6 @@
 #define DEFAULT_NUMBER_WIDTH 5
 #define DEFAULT_GAP 8
 #define CELL_BYTES_PER_COLUMN 32    /* bytes a cell holds per column of width */
-#define PR_MB_MAX 16                /* bytes of the longest character */
 
 /** The options, as parsed from the command line. */
 typedef struct {
@@ -60,7 +59,7 @@ typedef struct {
     bool width_set;
     long offset;        /**< -o */
     bool sep_set;       /**< -s */
-    char sep[PR_MB_MAX + 1];
+    char sep[MB_LEN_MAX + 1];
     size_t sep_len;
     long sep_w;         /**< display width of the -s character */
     const char *header; /**< -h */
@@ -234,7 +233,7 @@ static void str_addc(str_t *s, char c)
 /** Decodes a byte stream into characters, one byte at a time. */
 typedef struct {
     mbstate_t st;
-    char b[PR_MB_MAX];
+    char b[MB_LEN_MAX];
     size_t n;
 } dec_t;
 
