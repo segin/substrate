@@ -1,4 +1,4 @@
-.Dd February 11, 2026
+.Dd November 13, 2026
 .Dt PR 1
 .Os Substrate
 .Sh NAME
@@ -6,99 +6,236 @@
 .Nd paginate or columnate files for printing
 .Sh SYNOPSIS
 .Nm
-.Op Fl a
+.Op Cm + Ns Ar page
+.Op Fl Ar column
+.Op Fl adFfmprt
+.Op Fl e Ns Oo Ar char Oc Ns Op Ar gap
 .Op Fl h Ar header
+.Op Fl i Ns Oo Ar char Oc Ns Op Ar gap
 .Op Fl l Ar lines
-.Op Fl m
-.Op Fl n Op Ar sep Ns Op Ar digits
-.Op Fl s Op Ar char
-.Op Fl t
+.Op Fl n Ns Oo Ar char Oc Ns Op Ar width
+.Op Fl o Ar offset
+.Op Fl s Ns Op Ar char
 .Op Fl w Ar width
-.Op Fl Ar columns
 .Op Ar file ...
 .Sh DESCRIPTION
 The
 .Nm
-utility formats text files into pages suitable for printing.
-By default,
-.Nm
-prints 66-line pages with a date and page header.
-.Pp
-If no
+utility writes each
 .Ar file
-operands are given,
-or if a
+to standard output in pages.
+With no
 .Ar file
-operand is
+operands, or for an operand of
 .Sq - ,
-.Nm
-reads standard input.
+it reads standard input.
+.Pp
+A page is 66 lines: a header of 5 lines, the text, blank lines to fill
+the page, and a trailer of 5 blank lines.
+The header's third line is
+.Pp
+.Dl Ar date file Li Page Ar n
+.Pp
+where
+.Ar date
+is the file's modification time
+(the current time for standard input and with
+.Fl m ) ,
+written as
+.Ql %b %e %H:%M %Y
+in
+.Xr strftime 3 ,
+and
+.Ar file
+is the operand, or empty for standard input and with
+.Fl m .
+The last page of a file is padded to the full length.
+An empty file writes nothing.
+.Pp
+A form feed in the input ends the page; a newline right after it is part
+of it.
+With
+.Fl t
+the form feed is written instead.
+.Pp
+The input is written a page at a time as it is read; it is not held
+whole.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
-.It Fl a
-In multi-column mode, print columns across the page (row-major order)
-instead of down the page.
-.It Fl h Ar header
-Use
-.Ar header
-instead of the file name in the page header.
-.It Fl l Ar lines
-Set page length to
-.Ar lines .
-Default is 66.
-.It Fl m
-Merge all input files side-by-side in parallel columns.
-.It Fl n Op Ar sep Ns Op Ar digits
-Enable line numbering.
-The optional
-.Ar sep
-character separates the number from text
-(default tab), and
-.Ar digits
-sets number field width (default 5).
-.It Fl s Op Ar char
-Use
-.Ar char
-as the inter-column separator.
-If omitted, a tab is used.
-.It Fl t
-Suppress page headers and trailers.
-.It Fl w Ar width
-Set page width to
+.It Cm + Ns Ar page
+Begin output at page
+.Ar page
+of each file.
+.It Fl Ar column
+Write
+.Ar column
+text columns, the input written down each in turn.
+The columns are of equal width,
 .Ar width
-columns.
-.It Fl Ar columns
-Set number of output columns using legacy
-.Fl 3 ,
-.Fl 4 ,
-and similar forms.
+less the separators, divided by
+.Ar column ;
+each line is cut to its column's width.
+A page's columns are balanced: as short as its lines allow, and never
+longer than the page.
+.Fl e
+and
+.Fl i
+are assumed.
+It cannot be used with
+.Fl m .
+.It Fl a
+With
+.Fl Ar column ,
+fill the columns across the page: the first line heads the first
+column, the second the second, and so on.
+.It Fl d
+Double-space the output: a blank line after each line.
+A line and its blank line are written on one page.
+.It Fl e Ns Oo Ar char Oc Ns Op Ar gap
+Expand each input tab to the next column that is a multiple of
+.Ar gap ,
+8 if it is 0 or not given.
+If
+.Ar char ,
+a non-digit, is given, it is the input tab.
+The argument must be attached to the option.
+.It Fl F
+End each page with a form feed rather than the blank lines and the
+trailer.
+.It Fl f
+As
+.Fl F ,
+and if standard output is a terminal, pause before the first page as
+.Fl p
+does.
+.It Fl h Ar header
+Write
+.Ar header
+in the page header in place of the file name.
+.It Fl i Ns Oo Ar char Oc Ns Op Ar gap
+In the output, replace spaces with tabs wherever one or more of them
+reach a column that is a multiple of
+.Ar gap ,
+8 if it is 0 or not given.
+If
+.Ar char ,
+a non-digit, is given, it is written in place of a tab.
+The page header is left alone.
+The argument must be attached to the option.
+.It Fl l Ar lines
+Pages of
+.Ar lines
+lines.
+At 10 or fewer, there is no header or trailer, as with
+.Fl t .
+.It Fl m
+Merge the files: one line of each, side by side, in text columns of
+equal width, until every file has ended.
+.Fl e
+and
+.Fl i
+are assumed.
+.It Fl n Ns Oo Ar char Oc Ns Op Ar width
+Number the lines: a number of
+.Ar width
+digits (5 if not given; its last
+.Ar width
+digits if longer), then
+.Ar char ,
+a non-digit (a tab if not given).
+In columns, each column's lines are numbered; with
+.Fl m ,
+each output line.
+The argument must be attached to the option, the
+.Ar char
+before the
+.Ar width :
+.Fl n Ns Li 3
+is a width of 3,
+.Fl n Ns Li :3
+a colon and a width of 3.
+.It Fl o Ar offset
+Write
+.Ar offset
+spaces before each line that is not empty, in addition to the width.
+.It Fl p
+If standard output is a terminal, before each page write an alert to
+standard error and wait for a newline from
+.Pa /dev/tty .
+.It Fl r
+Write no diagnostic for a file that cannot be opened.
+The exit status still reports it.
+.It Fl s Ns Op Ar char
+Separate text columns with the one character
+.Ar char
+(a tab if not given) instead of padding them with spaces.
+The default
+.Ar width
+becomes 512.
+The character must be attached to the option.
+.It Fl t
+Write no header or trailer, and do not fill the last page.
+.It Fl w Ar width
+Lines of
+.Ar width
+columns for multi-column output, 72 by default.
+Single-column lines are never cut.
 .El
-.Sh COMPATIBILITY
-This implementation follows POSIX
-.Nm
-behavior for core pagination and columns,
-with UTF-8 display width handling using
+.Pp
+Options may be grouped, as in
+.Fl at ,
+and an option-argument attached, as in
+.Fl l Ns Li 50 .
+The options come before the operands.
+.Pp
+Widths are display widths: a character is as wide as
 .Xr wcwidth 3
-for better multibyte alignment.
-.Pp
-To avoid conflicts with POSIX
-.Fl n
-line numbering,
-column count is selected with the legacy
-.Fl Ar columns
-form.
+says in the locale of
+.Ev LC_CTYPE ,
+a byte that is no character one column, a control character none.
+.Sh ENVIRONMENT
+.Bl -tag -width LC_CTYPE
+.It Ev LC_CTYPE
+The characters of the input, and their widths.
+.It Ev LC_TIME
+The date in the page header.
+.It Ev TZ
+The time zone of that date.
+.El
+.Sh EXIT STATUS
+.Ex -std
+A file that cannot be read is diagnosed, and the other files are still
+written.
 .Sh EXAMPLES
-Format a report with custom page length:
+Pages of 50 lines headed
+.Dq Report :
 .Bd -literal -offset indent
-$ pr -l 50 -h "Report" file1 file2
+$ pr -l 50 -h Report file1 file2
 .Ed
 .Pp
-Read from standard input:
+Three columns, numbered, with no headers:
 .Bd -literal -offset indent
-$ cat input.txt | pr -w 100 -2
+$ pr -t -3 -n file
 .Ed
+.Pp
+Two files side by side, separated by a colon:
+.Bd -literal -offset indent
+$ pr -t -m -s: left right
+.Ed
+.Sh DIAGNOSTICS
+Each diagnostic begins
+.Ql pr: .
+While standard output is a terminal they are held until the end, so
+that they do not land among the pages.
+A failure to write standard output is diagnosed, and
+.Nm
+exits.
 .Sh SEE ALSO
-.Xr nl 1 ,
 .Xr paste 1 ,
 .Xr wcwidth 3
+.Sh STANDARDS
+The
+.Nm
+utility conforms to IEEE Std 1003.1-2024
+.Pq Dq POSIX.1-2024 .
