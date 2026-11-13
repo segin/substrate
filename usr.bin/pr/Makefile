@@ -7,7 +7,7 @@ include ../../Makefile.bin.inc
 
 .PHONY: test
 
+# the tests are tests/usr.bin/pr's, run on a host build
 test:
 	$(MAKE) clean
-	$(MAKE) NATIVE_BUILD=1
-	$(MAKE) -C tests test PR=../pr
+	$(MAKE) -C ../../tests/usr.bin/pr run

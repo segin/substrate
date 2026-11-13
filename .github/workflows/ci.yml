@@ -147,6 +147,10 @@ jobs:
       - name: c++filt tests
         run: make -C tests/usr.bin/cxxfilt run
 
+      # pr, built for the host, through tests/usr.bin/pr/test_pr.sh.
+      - name: pr tests
+        run: make -C tests/usr.bin/pr run
+
       - name: Toolchain manual page install
         run: make -C tests/usr.man run
 

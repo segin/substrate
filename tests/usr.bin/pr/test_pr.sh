@@ -1,7 +1,16 @@
 #!/bin/sh
 set -eu
 
-PR=${1:-../pr}
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+PR=${1:-"$ROOT/usr.bin/pr/pr"}
+case $PR in
+/*) ;;
+*) PR=$(pwd)/$PR ;;
+esac
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+cd "$WORK"
 
 fail() {
     echo "FAIL: $1" >&2
