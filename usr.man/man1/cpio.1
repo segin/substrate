@@ -44,6 +44,13 @@ Pathnames for
 and
 .Fl p
 are read from standard input, one per line.
+.Pp
+Copy-in restores hard links: the names an archive gives one file (the
+same device and inode number, with a link count above one) are
+extracted as links to one file.
+The data may come with the first name, with every name, or, as newc
+archives have it, with the last; names still waiting for it at the end
+of the archive become an empty file and links to it.
 .Sh OPTIONS
 .Bl -tag -width Ds
 .It Fl o

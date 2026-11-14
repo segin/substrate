@@ -669,6 +669,121 @@ static int list_entry(const entry_t *e, const options_t *opt) {
     return 0;
 }
 
+/* A name as given to the user: the member name, not "./name". */
+static const char *shown(const char *full) {
+    return strncmp(full, "./", 2) == 0 ? full + 2 : full;
+}
+
+/* Copy-in's hard links: one record for each archived (dev, ino) of a
+ * regular member with more than one link.  The first name extracted with
+ * data becomes the file; every other name is linked to it.  newc puts the
+ * data on the last name, so earlier names (size 0) wait in PENDING. */
+typedef struct in_link {
+    dev_t dev;
+    uint64_t ino;
+    char *path;             /* the file, once extracted */
+    char **pending;         /* names waiting for it */
+    size_t npending;
+    entry_t meta;           /* attributes, if no name ever brings data */
+    struct in_link *next;
+} in_link_t;
+
+#define LINK_BUCKETS 4096
+static in_link_t *g_in_links[LINK_BUCKETS];
+
+static size_t link_hash(dev_t dev, uint64_t ino) {
+    return (size_t)((ino * 0x9e3779b97f4a7c15ULL) ^ (uint64_t)dev) % LINK_BUCKETS;
+}
+
+static in_link_t *in_link_get(const entry_t *e) {
+    size_t h = link_hash(e->dev, e->ino);
+    in_link_t *l;
+    for (l = g_in_links[h]; l; l = l->next)
+        if (l->dev == e->dev && l->ino == e->ino) return l;
+    l = calloc(1, sizeof(*l));
+    if (!l) return NULL;
+    l->dev = e->dev;
+    l->ino = e->ino;
+    l->meta = *e;
+    l->meta.name = NULL;
+    l->next = g_in_links[h];
+    g_in_links[h] = l;
+    return l;
+}
+
+/* Make NEWPATH another name for OLDPATH, replacing what is there. */
+static void make_link(const char *oldpath, const char *newpath) {
+    if (unlink(newpath) < 0 && errno != ENOENT && errno != ENOTDIR) {
+        warn_errno(shown(newpath));
+        set_minor_error();
+        return;
+    }
+    if (link(oldpath, newpath) < 0) {
+        warn_errno(shown(newpath));
+        set_minor_error();
+    }
+}
+
+/* The file has been extracted at PATH: link the waiting names to it. */
+static void in_link_extracted(in_link_t *l, const char *path) {
+    l->path = strdup(path);
+    if (!l->path) { warn_errno(shown(path)); set_minor_error(); return; }
+    for (size_t i = 0; i < l->npending; i++) {
+        make_link(l->path, l->pending[i]);
+        free(l->pending[i]);
+    }
+    free(l->pending);
+    l->pending = NULL;
+    l->npending = 0;
+}
+
+static void apply_attrs(const char *full, const entry_t *e, const options_t *opt);
+
+/* At the end of the archive: names whose data never came (an empty file,
+ * or links whose other names were not archived) become an empty file and
+ * links to it, as GNU cpio makes them. */
+static void in_links_finish(const options_t *opt) {
+    for (size_t h = 0; h < LINK_BUCKETS; h++) {
+        in_link_t *l = g_in_links[h];
+        while (l) {
+            in_link_t *next = l->next;
+            if (l->npending > 0) {
+                const char *first = l->pending[0];
+                int fd;
+                unlink(first);
+                fd = open(first, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, l->meta.mode & 07777);
+                if (fd < 0) {
+                    warn_errno(shown(first));
+                    set_minor_error();
+                } else {
+                    close(fd);
+                    apply_attrs(first, &l->meta, opt);
+                    for (size_t i = 1; i < l->npending; i++) make_link(first, l->pending[i]);
+                }
+                for (size_t i = 0; i < l->npending; i++) free(l->pending[i]);
+                free(l->pending);
+            }
+            free(l->path);
+            free(l);
+            l = next;
+        }
+        g_in_links[h] = NULL;
+    }
+}
+
+/* Owner and times for an extracted file. */
+static void apply_attrs(const char *full, const entry_t *e, const options_t *opt) {
+    if (opt->numeric_owner && geteuid() == 0) {
+        if (lchown(full, e->uid, e->gid) < 0) set_minor_error();
+    }
+    if (opt->preserve_mtime && !S_ISLNK(e->mode)) {
+        struct timespec ts[2];
+        ts[0].tv_sec = e->mtime; ts[0].tv_nsec = 0;
+        ts[1].tv_sec = e->mtime; ts[1].tv_nsec = 0;
+        if (utimensat(AT_FDCWD, full, ts, AT_SYMLINK_NOFOLLOW) < 0) set_minor_error();
+    }
+}
+
 static int extract_entry(const entry_t *e, const options_t *opt, const char *base) {
     char full[PATH_MAX];
     int fd = -1;
@@ -731,6 +846,32 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         set_minor_error();
     } else {
         off_t outoff = 0;
+        in_link_t *l = NULL;
+        if (e->nlink > 1) {
+            l = in_link_get(e);
+            if (l && l->path) {
+                /* another name for a file already extracted */
+                make_link(l->path, full);
+                if (opt->verbose) fprintf(stderr, "%s\n", e->name);
+                return skip_data_and_pad(opt->fmt, e->filesize);
+            }
+            if (l && e->filesize == 0 && opt->fmt == FMT_NEWC) {
+                /* newc: the data comes with a later name */
+                char **p = realloc(l->pending, (l->npending + 1) * sizeof(*p));
+                if (p) {
+                    l->pending = p;
+                    p[l->npending] = strdup(full);
+                    if (p[l->npending]) {
+                        l->npending++;
+                        if (opt->verbose) fprintf(stderr, "%s\n", e->name);
+                        return 0;
+                    }
+                }
+                warn_errno(e->name);
+                set_minor_error();
+                return 0;
+            }
+        }
         /* Remove any pre-planted symlink at the destination so the write
          * is not redirected outside the extraction tree (archive symlink
          * traversal); O_NOFOLLOW guards hosts whose open(2) honours it. */
@@ -757,22 +898,13 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
             set_minor_error();
         }
         close(fd);
+        if (l) in_link_extracted(l, full);
     }
 
     if (in_skip(left + data_pad(opt->fmt, e->filesize)) < 0) return -1;
 
-    if (!opt->toc) {
-        if (opt->numeric_owner && geteuid() == 0) {
-            if (lchown(full, e->uid, e->gid) < 0) set_minor_error();
-        }
-        if (opt->preserve_mtime && !S_ISLNK(e->mode)) {
-            struct timespec ts[2];
-            ts[0].tv_sec = e->mtime; ts[0].tv_nsec = 0;
-            ts[1].tv_sec = e->mtime; ts[1].tv_nsec = 0;
-            if (utimensat(AT_FDCWD, full, ts, AT_SYMLINK_NOFOLLOW) < 0) set_minor_error();
-        }
-        if (opt->verbose) fprintf(stderr, "%s\n", e->name);
-    }
+    apply_attrs(full, e, opt);
+    if (opt->verbose) fprintf(stderr, "%s\n", e->name);
     return 0;
 }
 
@@ -883,6 +1015,7 @@ static int mode_in(options_t *opt) {
         }
     }
 
+    in_links_finish(opt);
     if (afd != STDIN_FILENO) close(afd);
     return g_status;
 }
