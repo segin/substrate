@@ -1586,7 +1586,9 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
-    if (opt->no_overwrite && access(full, F_OK) == 0) {
+    /* lstat, not access: a dangling symlink is there too */
+    struct stat there;
+    if (opt->no_overwrite && lstat(full, &there) == 0) {
         warnx_("%s: exists, not overwritten", e->name);
         return skip_data_and_pad(opt->fmt, e->filesize);
     }

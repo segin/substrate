@@ -654,6 +654,14 @@ printf 'lk2/a1\nlk2/a2\nlk2/b1\nlk2/b2\n' | "$CPIO" -o -H bin --quiet > lk2.cpio
 same "bin: linked files numbered 1, 2" "1 1 2 2" \
     "$(for o in 4 42 80 118; do od -An -tu2 -j $o -N2 lk2.cpio; done | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')"
 
+# ---- --no-overwrite keeps whatever is there, a dangling symlink too
+fresh xn
+ln -s nowhere xn/f
+printf 'f\n' | (cd src && "$CPIO" -o --quiet) > nf.cpio
+run sh -c "cd xn && \"$CPIO\" -iu --no-overwrite < ../nf.cpio"
+same "--no-overwrite: dangling symlink kept" "nowhere" "$(readlink xn/f)"
+same "--no-overwrite: message" "cpio: f: exists, not overwritten" "$err"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
