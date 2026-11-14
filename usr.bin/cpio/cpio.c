@@ -812,10 +812,16 @@ static void in_links_finish(const options_t *opt) {
     }
 }
 
-/* Owner and times for an extracted file. */
+/* Owner, permissions and times for an extracted file.  The mode is set
+ * outright, not through the umask, and after the owner, since chown()
+ * clears the set-ID bits. */
 static void apply_attrs(const char *full, const entry_t *e, const options_t *opt) {
     if (opt->numeric_owner && geteuid() == 0) {
         if (lchown(full, e->uid, e->gid) < 0) set_minor_error();
+    }
+    if (!S_ISLNK(e->mode) && chmod(full, e->mode & 07777) < 0) {
+        warn_errno(shown(full));
+        set_minor_error();
     }
     if (opt->preserve_mtime && !S_ISLNK(e->mode)) {
         struct timespec ts[2];
@@ -910,6 +916,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     int fd = -1;
     uint64_t left = e->filesize;
     char buf[IO_BUFSZ];
+    bool made = true;   /* the member is on disk, to be given its attributes */
 
     if (strcmp(e->name, "TRAILER!!!") == 0) return 1;
     if (opt->toc) return list_entry(e, opt);
@@ -939,6 +946,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     if (S_ISDIR(e->mode)) {
         if (mkdir(full, e->mode & 07777) < 0 && errno != EEXIST) {
             warn_errno(e->name); set_minor_error();
+            made = false;
         }
     } else if (S_ISLNK(e->mode)) {
         char *target;
@@ -956,26 +964,35 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         if (in_read(target, (size_t)e->filesize) < 0) { free(target); return -1; }
         target[e->filesize] = '\0';
         unlink(full);
-        if (opt->safe_extract && symlink_escapes(target))
-            defer_symlink(full, target, e);
-        else if (symlink(target, full) < 0) {
+        if (opt->safe_extract && symlink_escapes(target)) {
+            defer_symlink(full, target, e);   /* its owner is set then */
+            made = false;
+        } else if (symlink(target, full) < 0) {
             warn_errno(e->name);
             set_minor_error();
+            made = false;
         }
         free(target);
         left = 0;
     } else if (S_ISFIFO(e->mode)) {
-        if (mkfifo(full, e->mode & 07777) < 0 && errno != EEXIST) { warn_errno(e->name); set_minor_error(); }
+        if (mkfifo(full, e->mode & 07777) < 0 && errno != EEXIST) {
+            warn_errno(e->name); set_minor_error();
+            made = false;
+        }
     } else if (S_ISCHR(e->mode) || S_ISBLK(e->mode)) {
+        made = false;
         if (geteuid() != 0) {
             warnx_("%s: device not created: only root may", e->name);
             set_minor_error();
         } else if (mknod(full, e->mode, e->rdev) < 0 && errno != EEXIST) {
             warn_errno(e->name); set_minor_error();
+        } else {
+            made = true;
         }
     } else if (S_ISSOCK(e->mode)) {
         warnx_("%s: socket not created", e->name);
         set_minor_error();
+        made = false;
     } else {
         off_t outoff = 0;
         in_link_t *l = NULL;
@@ -1035,7 +1052,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
 
     if (in_skip(left + data_pad(opt->fmt, e->filesize)) < 0) return -1;
 
-    apply_attrs(full, e, opt);
+    if (made) apply_attrs(full, e, opt);
     if (opt->verbose) fprintf(stderr, "%s\n", e->name);
     return 0;
 }
@@ -1166,6 +1183,7 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
 
     if (S_ISDIR(st.st_mode)) {
         if (mkdir(target, st.st_mode & 07777) < 0 && errno != EEXIST) { warn_errno(target); set_minor_error(); }
+        else if (chmod(target, st.st_mode & 07777) < 0) { warn_errno(target); set_minor_error(); }
         return 0;
     }
     if (S_ISLNK(st.st_mode)) {
@@ -1205,6 +1223,8 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
         if (r == 0) break;
         if (write_all(out, buf, (size_t)r) < 0) { warn_errno(target); set_minor_error(); break; }
     }
+    /* the source's permissions outright, not through the umask */
+    if (fchmod(out, st.st_mode & 07777) < 0) { warn_errno(target); set_minor_error(); }
     if (opt->preserve_mtime) {
         struct timespec ts[2];
         ts[0].tv_sec = st.st_atime; ts[0].tv_nsec = 0;

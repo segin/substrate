@@ -45,6 +45,10 @@ and
 .Fl p
 are read from standard input, one per line.
 .Pp
+Copy-in and pass-through give each file the archived (or source)
+permissions exactly, set-user-ID, set-group-ID and sticky bits
+included; the umask does not apply.
+.Pp
 Copy-out writes a file with more than one link in each format's way:
 newc names it with every name but the last at size zero and puts the
 data with the last, holding the names back until all of them (or the

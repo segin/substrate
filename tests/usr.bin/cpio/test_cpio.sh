@@ -297,6 +297,23 @@ run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -p .)"
 same "-p onto itself: refused" "cpio: f: is the same file as its copy" "$err"
 same "-p onto itself: source kept" "hello" "$(cat src/f 2>&1)"
 
+# ---- modes are the archive's, not cut down by the umask (022 here)
+mkdir md md/sticky
+printf 'm\n' > md/sg; chmod 2775 md/sg
+chmod 1777 md/sticky
+mkfifo -m 0620 md/fifo
+(cd md && printf 'sg\nsticky\nfifo\n' | "$CPIO" -o) > md.cpio
+fresh xm
+run sh -c "cd xm && \"$CPIO\" -id < ../md.cpio"
+same "mode: setgid file" 2775 "$(stat -c %a xm/sg)"
+same "mode: sticky directory" 1777 "$(stat -c %a xm/sticky)"
+same "mode: fifo" 620 "$(stat -c %a xm/fifo)"
+same "mode: status" 0 "$rc"
+printf 'g\n' > md/gw; chmod 664 md/gw
+fresh pm
+(cd md && printf 'gw\n' | "$CPIO" -p ../pm)
+same "-p mode" 664 "$(stat -c %a pm/gw)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
