@@ -216,19 +216,34 @@ static int cpio_write_header_bin(int fd, const char *name, const struct stat *st
     return 0;
 }
 
-static int copy_out_file_data(int afd, int ffd, off_t size) {
+/* Copy SIZE bytes of the file PATH (open on FFD) into the archive.  The
+ * header already promises SIZE, so a file that comes up short -- it
+ * shrank, or a read failed -- is padded with zeros to keep the archive
+ * in step, and diagnosed.  -1 only if writing the archive fails. */
+static int copy_out_file_data(int afd, int ffd, uint64_t size, const char *path) {
     char buf[IO_BUFSZ];
-    off_t left = size;
+    uint64_t left = size;
     while (left > 0) {
-        size_t chunk = (left > (off_t)sizeof(buf)) ? sizeof(buf) : (size_t)left;
+        size_t chunk = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
         ssize_t r = read(ffd, buf, chunk);
         if (r < 0) {
             if (errno == EINTR) continue;
-            return -1;
+            warn_errno(path);
+        } else if (r == 0) {
+            warnx_("%s: shrank by %ju bytes; padding with zeros", path, (uintmax_t)left);
         }
-        if (r == 0) return -1;
+        if (r <= 0) {
+            set_minor_error();
+            memset(buf, 0, sizeof(buf));
+            while (left > 0) {
+                chunk = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
+                if (write_all(afd, buf, chunk) < 0) return -1;
+                left -= chunk;
+            }
+            return 0;
+        }
         if (write_all(afd, buf, (size_t)r) < 0) return -1;
-        left -= r;
+        left -= (uint64_t)r;
     }
     return 0;
 }
@@ -328,7 +343,7 @@ static int write_entry(options_t *opt, int afd, const char *path) {
     if (S_ISLNK(st.st_mode)) {
         if (write_all(afd, lnk, (size_t)lsz) < 0) goto ioerr;
     } else if (S_ISREG(st.st_mode) && data_size > 0) {
-        if (copy_out_file_data(afd, ffd, (off_t)data_size) < 0) goto ioerr;
+        if (copy_out_file_data(afd, ffd, data_size, path) < 0) goto ioerr;
     }
 
     if (opt->fmt == FMT_NEWC) {
@@ -345,10 +360,11 @@ static int write_entry(options_t *opt, int afd, const char *path) {
     return 0;
 
 ioerr:
+    /* the archive is now broken mid-member: nothing after it can help */
     warn_errno("write error");
-    set_minor_error();
+    set_fatal_error();
     if (ffd >= 0) close(ffd);
-    return -1;
+    return -2;
 }
 
 static int write_trailer(options_t *opt, int afd) {
@@ -803,14 +819,17 @@ static int mode_out(options_t *opt) {
         size_t len = strlen(line);
         if (len && line[len - 1] == '\n') line[len - 1] = '\0';
         if (line[0] == '\0') continue;
-        write_entry(opt, afd, line);
+        if (write_entry(opt, afd, line) == -2) break;
     }
-    if (write_trailer(opt, afd) < 0) {
+    if (g_status < 2 && write_trailer(opt, afd) < 0) {
         warn_errno("write error");
-        set_minor_error();
+        set_fatal_error();
     }
     hl_free();
-    if (afd != STDOUT_FILENO) close(afd);
+    if (afd != STDOUT_FILENO && close(afd) < 0 && g_status < 2) {
+        warn_errno("write error");
+        set_fatal_error();
+    }
     return g_status;
 }
 

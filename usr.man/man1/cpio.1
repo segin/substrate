@@ -117,6 +117,11 @@ An archive that ends before its trailer is a fatal error:
 if no header was found at all,
 .Dq premature end of file
 otherwise.
+.Pp
+On copy-out, a file that yields fewer bytes than its size when it was
+examined is padded with zeros to that size, with a warning, so that
+the archive stays readable.
+A failure to write the archive is fatal.
 .Sh SEE ALSO
 .Xr pax 1
 .Sh STANDARDS

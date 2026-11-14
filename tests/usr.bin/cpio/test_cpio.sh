@@ -199,6 +199,33 @@ for fmt in newc bin; do
 done
 rm -f big
 
+# ---- a file that yields less than its size: padded with zeros, so the
+# archive stays in step.  sysfs files report 4096 bytes and read fewer.
+short=
+for s in /sys/kernel/*; do
+    if [ -f "$s" ] && [ -r "$s" ] && [ "$(stat -c %s "$s")" -gt 0 ] &&
+       [ "$(wc -c < "$s" 2>/dev/null)" -lt "$(stat -c %s "$s")" ]; then
+        short=$s; break
+    fi
+done
+if [ -n "$short" ]; then
+    size=$(stat -c %s "$short"); got=$(wc -c < "$short")
+    run sh -c "printf '%s\nsrc/f\n' \"$short\" | \"$CPIO\" -o > short.cpio"
+    same "shrank: warning" "cpio: $short: shrank by $((size - got)) bytes; padding with zeros" "$err"
+    same "shrank: status" 1 "$rc"
+    run "$CPIO" -it -F short.cpio
+    same "shrank: archive in step" "$(printf '%s\nsrc/f' "$short")" "$out"
+else
+    echo "no short-reading sysfs file: shrink case skipped"
+fi
+
+# ---- a failure to write the archive is fatal
+if [ -w /dev/full ]; then
+    run sh -c "printf 'src/f\n' | \"$CPIO\" -o > /dev/full"
+    same "write error" "cpio: write error: No space left on device" "$err"
+    same "write error: status" 2 "$rc"
+fi
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
