@@ -54,6 +54,7 @@ typedef struct {
     bool rename;        /* -r: ask for each member's name */
     bool swap_bytes;    /* -s (-b): swap the bytes of each halfword */
     bool swap_halfwords;    /* -S (-b): swap the halfwords of each word */
+    bool hp;            /* hpodc, hpbin: HP-UX's way with device numbers */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -479,13 +480,21 @@ static int write_member(options_t *opt, const char *path, struct stat *stp, bool
     if (opt->owner_uid_set) st.st_uid = opt->owner_uid;
     if (opt->owner_gid_set) st.st_gid = opt->owner_gid;
 
+    /* hpodc, hpbin: as HP-UX cpio writes a device, its number in the size
+     * field and 0,1 in the device field (GNU cpio's reading of it) */
+    uint64_t hdr_size = data_size;
+    if (opt->hp && (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode))) {
+        hdr_size = (uint32_t)st.st_rdev;
+        st.st_rdev = makedev(0, 1);
+    }
+
     if (newc_like(opt->fmt)) {
         if (cpio_write_header_newc(path, &st, (uint32_t)data_size, nlink_hdr,
                                    opt->fmt == FMT_CRC, check) < 0) goto ioerr;
     } else if (opt->fmt == FMT_ODC) {
-        if (cpio_write_header_odc(path, &st, data_size, nlink_hdr) < 0) goto ioerr;
+        if (cpio_write_header_odc(path, &st, hdr_size, nlink_hdr) < 0) goto ioerr;
     } else {
-        if (cpio_write_header_bin(path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
+        if (cpio_write_header_bin(path, &st, (uint32_t)hdr_size, nlink_hdr) < 0) goto ioerr;
     }
 
     if (S_ISLNK(st.st_mode)) {
@@ -1507,6 +1516,11 @@ static int mode_in(options_t *opt) {
             break;
         }
         any = true;
+        /* hpodc, hpbin: a device's number is in its size field */
+        if (opt->hp && (S_ISCHR(e.mode) || S_ISBLK(e.mode)) && e.rdev == makedev(0, 1)) {
+            e.rdev = (dev_t)e.filesize;
+            e.filesize = 0;
+        }
         r = extract_entry(&e, opt, ".");
         free(e.name);
         if (r == 1) break;
@@ -1845,6 +1859,8 @@ static bool set_format(options_t *opt, const char *f) {
     else if (strcmp(f, "crc") == 0) opt->fmt = FMT_CRC;
     else if (strcmp(f, "odc") == 0) opt->fmt = FMT_ODC;
     else if (strcmp(f, "bin") == 0) opt->fmt = FMT_BIN;
+    else if (strcmp(f, "hpodc") == 0) { opt->fmt = FMT_ODC; opt->hp = true; }
+    else if (strcmp(f, "hpbin") == 0) { opt->fmt = FMT_BIN; opt->hp = true; }
     else {
         warnx_("unknown archive format: %s", f);
         return false;

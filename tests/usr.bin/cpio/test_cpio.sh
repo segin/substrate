@@ -571,6 +571,26 @@ if [ -n "$GNU" ]; then
     same "GNU crc, ours reading: no error" "" "$err"
 fi
 
+# ---- hpodc and hpbin: a device's number goes in the size field, 0,1 in
+# the device field; read back with -H to undo it
+if [ -c /dev/null ]; then
+    nmaj=$((16#$(stat -c %t /dev/null))); nmin=$((16#$(stat -c %T /dev/null)))
+    for fmt in hpodc hpbin; do
+        printf '/dev/null\n' | "$CPIO" -o -H "$fmt" --quiet > "hp-$fmt.cpio"
+        same "$fmt: device back" "$nmaj, $nmin" \
+            "$("$CPIO" -itvn -H "$fmt" -F "hp-$fmt.cpio" | awk '{ print $5, $6 }')"
+        same "$fmt, read as plain: 0,1 and a size" "0, 1" \
+            "$("$CPIO" -itvn -F "hp-$fmt.cpio" | awk '{ print $5, $6 }')"
+        if [ -n "$GNU" ]; then
+            same "$fmt: GNU reads ours" "$nmaj, $nmin" \
+                "$("$GNU" -itvn -H "$fmt" -F "hp-$fmt.cpio" 2>/dev/null | awk '{ print $5, $6 }')"
+            printf '/dev/null\n' | "$GNU" -o -H "$fmt" 2>/dev/null > "ghp-$fmt.cpio"
+            same "$fmt: ours reads GNU's" "$nmaj, $nmin" \
+                "$("$CPIO" -itvn -H "$fmt" -F "ghp-$fmt.cpio" | awk '{ print $5, $6 }')"
+        fi
+    done
+fi
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

@@ -100,7 +100,11 @@ Pass-through copy to directory.
 Read/write archive file instead of stdin/stdout.
 .It Fl H Ar format
 Archive format: bin, odc, newc, crc (newc with a checksum of each
-file's data, checked on copy-in).
+file's data, checked on copy-in), hpodc or hpbin (odc or bin with
+device numbers as HP-UX writes them; they cannot be told from odc and
+bin, so copy-in needs
+.Fl H
+to read them).
 A file larger than the format can record is left out with a
 diagnostic: 4\~GiB less one byte for newc and bin, 8\~GiB less one for
 odc.

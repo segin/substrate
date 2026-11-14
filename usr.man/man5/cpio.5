@@ -12,6 +12,9 @@ This document describes cpio formats supported by
 .It
 newc (SVR4 ASCII header, magic 070701)
 .It
+hpodc and hpbin (odc and bin as HP-UX writes them: a device file's
+number goes in the file size field, and its device field holds 0,1)
+.It
 crc (newc with magic 070702; its last header field, zero in newc, is the
 sum of the bytes of a regular file's data, modulo 2^32)
 .It
