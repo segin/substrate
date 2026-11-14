@@ -320,16 +320,21 @@ static int cpio_write_header_newc(const char *name, const struct stat *st, uint3
 static int cpio_write_header_odc(const char *name, const struct stat *st, uint64_t filesize, uint32_t nlink) {
     char hdr[128];
     uint32_t namesz = (uint32_t)strlen(name) + 1;
+    /* every field kept to its width, so the header is always 76 bytes: a
+     * time outside 1970 to 2242 is clamped (it printed 12 or more digits) */
+    uint64_t mtime = st->st_mtime < 0 ? 0 :
+                     (uint64_t)st->st_mtime > 077777777777ULL ? 077777777777ULL :
+                     (uint64_t)st->st_mtime;
     snprintf(hdr, sizeof(hdr),
-        "070707%06lo%06lo%06lo%06lo%06lo%06lo%06lo%011lo%06lo%011llo",
+        "070707%06lo%06lo%06lo%06lo%06lo%06lo%06lo%011llo%06lo%011llo",
         (unsigned long)(st->st_dev & 0777777),
         (unsigned long)(st->st_ino & 0777777),
         (unsigned long)(st->st_mode & 0777777),
         (unsigned long)(st->st_uid & 0777777),
         (unsigned long)(st->st_gid & 0777777),
-        (unsigned long)nlink,
+        (unsigned long)(nlink & 0777777),
         (unsigned long)(st->st_rdev & 0777777),
-        (unsigned long)st->st_mtime,
+        (unsigned long long)mtime,
         (unsigned long)namesz,
         (unsigned long long)filesize);
     if (ar_write(hdr, 76) < 0) return -1;
@@ -630,6 +635,33 @@ static int write_member_tar(options_t *opt, const char *path, struct stat *st) {
     return r;
 }
 
+/* The inode number copy-out writes for a linked file: 1, 2, ... in the
+ * order the files are met, the same for every name of one file. */
+typedef struct link_num {
+    dev_t dev;
+    ino_t ino;
+    uint32_t num;
+    struct link_num *next;
+} link_num_t;
+
+static link_num_t *g_link_nums[LINK_BUCKETS];
+
+static uint32_t link_number(const struct stat *st) {
+    static uint32_t next = 1;
+    size_t h = link_hash(st->st_dev, st->st_ino);
+    link_num_t *l;
+    for (l = g_link_nums[h]; l; l = l->next)
+        if (l->dev == st->st_dev && l->ino == st->st_ino) return l->num;
+    l = calloc(1, sizeof(*l));
+    if (!l) return (uint32_t)st->st_ino;    /* the real one, then */
+    l->dev = st->st_dev;
+    l->ino = st->st_ino;
+    l->num = next++;
+    l->next = g_link_nums[h];
+    g_link_nums[h] = l;
+    return l->num;
+}
+
 /* Write one member: PATH's header, as ST describes it, and for a regular
  * file its data if WITH_DATA (else a size of 0, the newc way of naming
  * one more link).  0, -1 if PATH could not be archived, -2 if writing the
@@ -640,7 +672,7 @@ static int write_member(options_t *opt, const char *path, struct stat *stp, bool
     char lnk[PATH_MAX];
     ssize_t lsz = 0;
     uint64_t data_size = 0;
-    uint32_t nlink_hdr = 1;
+    uint32_t nlink_hdr = (uint32_t)st.st_nlink;
     uint32_t check = 0;
     int ffd = -1;
 
@@ -651,7 +683,10 @@ static int write_member(options_t *opt, const char *path, struct stat *stp, bool
         data_size = (uint64_t)lsz;
     }
     if (S_ISREG(st.st_mode)) {
-        nlink_hdr = st.st_nlink;
+        /* A linked file's inode number is how copy-in finds its other
+         * names.  bin keeps 16 bits of it and newc 32, so two files could
+         * come out the same: each linked file gets a number of its own. */
+        if (st.st_nlink > 1) st.st_ino = (ino_t)link_number(&st);
         data_size = with_data ? (uint64_t)st.st_size : 0;
         if (data_size > 0) {
             ffd = open(path, O_RDONLY);
@@ -666,6 +701,13 @@ static int write_member(options_t *opt, const char *path, struct stat *stp, bool
 
     if (opt->owner_uid_set) st.st_uid = opt->owner_uid;
     if (opt->owner_gid_set) st.st_gid = opt->owner_gid;
+    {
+        /* an owner the header cannot hold is written cut down: say so */
+        uint64_t max = opt->fmt == FMT_BIN ? 0xffff : opt->fmt == FMT_ODC ? 0777777 : 0xffffffff;
+        if ((uint64_t)st.st_uid > max || (uint64_t)st.st_gid > max)
+            warnx_("%s: owner %u:%u does not fit the %s header", path,
+                   (unsigned)st.st_uid, (unsigned)st.st_gid, fmt_name(opt->fmt));
+    }
 
     /* hpodc, hpbin: as HP-UX cpio writes a device, its number in the size
      * field and 0,1 in the device field (GNU cpio's reading of it) */

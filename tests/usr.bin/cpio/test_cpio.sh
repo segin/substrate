@@ -159,7 +159,7 @@ run "$CPIO" -itvn -F lt.cpio
 want=$(printf '%s %3s %-8s %-8s %8s %s %s\n' \
     -rw-r--r-- 1 "$uid" "$gid" 6 'Jan  2  2020' f \
     lrwxrwxrwx 1 "$uid" "$gid" 1 'Jan  2  2020' 'l -> f' \
-    drwxr-xr-x 1 "$uid" "$gid" 0 'Jan  2  2020' d)
+    drwxr-xr-x 2 "$uid" "$gid" 0 'Jan  2  2020' d)
 same "-tvn" "$want" "$out"
 if [ -n "$GNU" ]; then
     run "$CPIO" -itv -F lt.cpio
@@ -637,6 +637,22 @@ if [ -n "$GNU" ]; then
     printf 'tt/f\ntt/s\n' | "$GNU" -o -H ustar 2>/dev/null > gc.ustar
     same "ustar: ours lists GNU cpio's" "$(printf 'tt/f\ntt/s')" "$("$CPIO" -it -F gc.ustar)"
 fi
+
+# ---- header fields that overflow: an odc time before 1970 is clamped,
+# not printed wide (which shifted every field after it); an owner too
+# big for the field is reported; linked files get inode numbers of
+# their own, so bin's 16 bits cannot make two files one
+printf 'old\n' > pre70; touch -d '1960-01-01' pre70
+printf 'pre70\nsrc/f\n' | "$CPIO" -o -H odc --quiet > pre70.cpio
+same "odc: time before 1970" "$(printf 'pre70\nsrc/f')" "$("$CPIO" -it -F pre70.cpio)"
+run sh -c "printf 'src/f\n' | \"$CPIO\" -o -H bin -R 70000:70000 > /dev/null"
+same "bin: owner too big" "cpio: src/f: owner 70000:70000 does not fit the bin header" "$err"
+mkdir -p lk2
+printf one > lk2/a1; ln lk2/a1 lk2/a2
+printf two > lk2/b1; ln lk2/b1 lk2/b2
+printf 'lk2/a1\nlk2/a2\nlk2/b1\nlk2/b2\n' | "$CPIO" -o -H bin --quiet > lk2.cpio
+same "bin: linked files numbered 1, 2" "1 1 2 2" \
+    "$(for o in 4 42 80 118; do od -An -tu2 -j $o -N2 lk2.cpio; done | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')"
 
 if [ "$fail" -ne 0 ]; then
     exit 1
