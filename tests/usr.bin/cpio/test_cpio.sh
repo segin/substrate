@@ -527,6 +527,24 @@ fi
 run "$CPIO" -o -r </dev/null
 same "-r with -o" "cpio: -r renames members as they are extracted: it goes with -i" "$err"
 
+# ---- -s, -S, -b swap extracted data, as much as divides evenly
+mkdir sw && printf abc > sw/odd && printf abcdefgh > sw/eight && printf abcdef > sw/six
+(cd sw && printf 'odd\neight\nsix\n' | "$CPIO" -o) > sw.cpio
+for o in s S b; do
+    fresh "xs$o"
+    run sh -c "cd xs$o && \"$CPIO\" -i$o < ../sw.cpio"
+    case $o in
+    s) want="badcfehg badcfe abc" ;;
+    S) want="cdabghef abcdef abc" ;;
+    b) want="dcbahgfe badcfe abc" ;;
+    esac
+    same "-$o" "$want" "$(cat "xs$o/eight") $(cat "xs$o/six") $(cat "xs$o/odd")"
+done
+same "-b: warnings" "$(printf '%s\n' \
+    'cpio: cannot swap halfwords of odd: odd number of halfwords' \
+    'cpio: cannot swap bytes of odd: odd number of bytes' \
+    'cpio: cannot swap halfwords of six: odd number of halfwords')" "$err"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

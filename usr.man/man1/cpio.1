@@ -209,6 +209,24 @@ first
 With
 .Fl i ,
 take the members that match none of the patterns instead.
+.It Fl s
+With
+.Fl i ,
+swap the bytes of each 16-bit halfword of each regular file's data
+.Pf ( Fl -swap-bytes ) .
+.It Fl S
+With
+.Fl i ,
+swap the halfwords of each 32-bit word
+.Pf ( Fl -swap-halfwords ) .
+.It Fl b
+Both
+.Fl s
+and
+.Fl S
+.Pf ( Fl -swap ) .
+A file whose size is not a whole number of halfwords (or words) is
+extracted unswapped in that respect, with a warning.
 .It Fl r
 With
 .Fl i ,

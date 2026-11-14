@@ -48,6 +48,8 @@ typedef struct {
     bool quiet;         /* --quiet: no "N blocks" */
     bool dot;           /* -V: a dot for each file */
     bool rename;        /* -r: ask for each member's name */
+    bool swap_bytes;    /* -s (-b): swap the bytes of each halfword */
+    bool swap_halfwords;    /* -S (-b): swap the halfwords of each word */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -1276,10 +1278,35 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
             set_minor_error();
             return skip_data_and_pad(opt->fmt, e->filesize);
         }
+        /* -s, -S: swap only what divides evenly, as GNU cpio does */
+        bool swap_bytes = opt->swap_bytes, swap_halves = opt->swap_halfwords;
+        if (swap_halves && e->filesize % 4 != 0) {
+            warnx_("cannot swap halfwords of %s: odd number of halfwords", e->name);
+            swap_halves = false;
+        }
+        if (swap_bytes && e->filesize % 2 != 0) {
+            warnx_("cannot swap bytes of %s: odd number of bytes", e->name);
+            swap_bytes = false;
+        }
         while (left > 0) {
             size_t chunk = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
             if (in_read(buf, chunk) < 0) { close(fd); return -1; }
             left -= chunk;
+            /* a chunk is whole words: IO_BUFSZ, or the rest of the file */
+            if (swap_halves) {
+                for (size_t i = 0; i + 4 <= chunk; i += 4) {
+                    char t0 = buf[i], t1 = buf[i + 1];
+                    buf[i] = buf[i + 2]; buf[i + 1] = buf[i + 3];
+                    buf[i + 2] = t0; buf[i + 3] = t1;
+                }
+            }
+            if (swap_bytes) {
+                for (size_t i = 0; i + 2 <= chunk; i += 2) {
+                    char t = buf[i];
+                    buf[i] = buf[i + 1];
+                    buf[i + 1] = t;
+                }
+            }
             if (write_sparse_aware(fd, buf, chunk, &outoff) < 0) {
                 warn_errno(e->name);
                 set_minor_error();
@@ -1736,6 +1763,9 @@ static const struct option long_opts[] = {
     { "quiet", no_argument, NULL, OPT_QUIET },
     { "dot", no_argument, NULL, 'V' },
     { "rename", no_argument, NULL, 'r' },
+    { "swap", no_argument, NULL, 'b' },
+    { "swap-bytes", no_argument, NULL, 's' },
+    { "swap-halfwords", no_argument, NULL, 'S' },
     { "safe-extract", no_argument, NULL, OPT_SAFE },
     { "no-absolute-paths", no_argument, NULL, OPT_NO_ABS },
     { "no-absolute-filenames", no_argument, NULL, OPT_NO_ABS },
@@ -1780,7 +1810,7 @@ int main(int argc, char **argv) {
     opt.fmt = (fmt_t)-1;
 
     opterr = 0;
-    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0LaBVr", long_opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0LaBVrbsS", long_opts, NULL)) != -1) {
         switch (c) {
         case 'o': if (!set_mode(&opt, MODE_OUT)) return 2; break;
         case 'i': if (!set_mode(&opt, MODE_IN)) return 2; break;
@@ -1818,6 +1848,9 @@ int main(int argc, char **argv) {
         case OPT_QUIET: opt.quiet = true; break;
         case 'V': opt.dot = true; break;
         case 'r': opt.rename = true; break;
+        case 'b': opt.swap_bytes = opt.swap_halfwords = true; break;
+        case 's': opt.swap_bytes = true; break;
+        case 'S': opt.swap_halfwords = true; break;
         case OPT_SAFE: opt.safe_extract = true; break;
         case OPT_NO_ABS: opt.no_absolute_paths = true; break;
         case OPT_ABS: opt.no_absolute_paths = false; break;
@@ -1849,6 +1882,10 @@ int main(int argc, char **argv) {
     }
     if (opt.toc && opt.mode != MODE_IN) {
         warnx_("-t lists an archive: it goes with -i");
+        return 2;
+    }
+    if ((opt.swap_bytes || opt.swap_halfwords) && opt.mode != MODE_IN) {
+        warnx_("-b, -s and -S swap extracted data: they go with -i");
         return 2;
     }
     if (opt.rename && opt.mode != MODE_IN) {
