@@ -90,6 +90,15 @@ Fatal error.
 Each diagnostic is written to standard error and begins
 .Ql cpio: ,
 then the name of the file or member concerned.
+.Pp
+On copy-in, bytes that are not a header where one is due are skipped to
+the next header, with a warning of how many; a malformed header is
+reported and passed over.
+An archive that ends before its trailer is a fatal error:
+.Dq premature end of archive
+if no header was found at all,
+.Dq premature end of file
+otherwise.
 .Sh SEE ALSO
 .Xr pax 1
 .Sh STANDARDS

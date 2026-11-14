@@ -92,6 +92,47 @@ fresh xs
 run sh -c "cd xs && \"$CPIO\" -id < ../skip.cpio"
 same "member after a skipped one" "hello" "$(cat xs/src/f 2>&1)"
 
+# ---- damaged archives are diagnosed, as GNU cpio does
+printf 'src/f\n' | "$CPIO" -o -H newc > good.cpio
+# xin ARCHIVE: copy it in, in a fresh directory
+xin() { fresh xd; run sh -c "cd xd && \"$CPIO\" -id < \"$TMP/$1\""; }
+: > empty.cpio
+xin empty.cpio
+same "empty: message" "cpio: premature end of archive" "$err"
+same "empty: status" 2 "$rc"
+printf 'garbage garbage\n' > text.cpio
+xin text.cpio
+same "text: message" "cpio: premature end of archive" "$(tail -1 .err)"
+same "text: status" 2 "$rc"
+head -c 100 good.cpio > hdr.cpio
+xin hdr.cpio
+same "cut in a header" "cpio: premature end of file" "$err"
+same "cut in a header: status" 2 "$rc"
+# newc: header and "src/f" are 116 bytes, the data 116-121, padding to
+# 124, then the trailer
+head -c 119 good.cpio > data.cpio
+xin data.cpio
+same "cut in data" "cpio: premature end of file" "$err"
+same "cut in data: status" 2 "$rc"
+head -c 127 good.cpio > cuttrailer.cpio
+xin cuttrailer.cpio
+same "cut in the trailer" "cpio: premature end of file" "$err"
+head -c 124 good.cpio > notrailer.cpio
+xin notrailer.cpio
+same "no trailer" "cpio: premature end of file" "$err"
+same "no trailer: data kept" "hello" "$(cat xd/src/f 2>&1)"
+(printf 'JUNKJUNK'; cat good.cpio) > junk.cpio
+xin junk.cpio
+same "junk: warning" "cpio: warning: skipped 8 bytes of junk" "$err"
+same "junk: status" 0 "$rc"
+same "junk: data" "hello" "$(cat xd/src/f 2>&1)"
+# a header whose numbers are not hex: diagnosed, skipped, and the next
+# member still extracts
+(head -c 6 good.cpio; printf 'zzzzzzzz'; head -c 124 good.cpio | tail -c +15; cat good.cpio) > badnum.cpio
+xin badnum.cpio
+same "bad number" "cpio: malformed header: bad number zzzzzzzz" "$(head -1 .err)"
+same "bad number: next member" "hello" "$(cat xd/src/f 2>&1)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

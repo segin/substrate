@@ -337,6 +337,8 @@ static int write_trailer(options_t *opt, int afd) {
 
 typedef struct {
     char *name;
+    dev_t dev;
+    uint64_t ino;
     mode_t mode;
     uid_t uid;
     gid_t gid;
@@ -406,85 +408,105 @@ static int in_skip(uint64_t n) {
     return 0;
 }
 
-static int parse_newc_header(entry_t *e) {
-    char hdr[110 + 1];
-    char *name;
-    unsigned ino, mode, uid, gid, nlink, mtime, filesize, rmaj, rmin, namesz;
-    size_t padded;
+/* Header parsers return 0, HDR_EOF if the archive ends inside the header,
+ * or HDR_BAD if the header is malformed (its bytes are then consumed). */
+#define HDR_EOF (-1)
+#define HDR_BAD (-2)
 
-    if (in_read(hdr, 110) < 0) return -1;
-    hdr[110] = '\0';
-    if (strncmp(hdr, "070701", 6) != 0 && strncmp(hdr, "070702", 6) != 0) return -1;
-    if (sscanf(hdr + 6,
-        "%8x%8x%8x%8x%8x%8x%8x%*8x%*8x%8x%8x%8x%*8x",
-        &ino, &mode, &uid, &gid, &nlink, &mtime, &filesize, &rmaj, &rmin, &namesz) != 10) {
-        return -1;
+/* A field of exactly N digits in BASE (8 or 16); false if any is not one. */
+static bool num_field(const char *p, int n, int base, uint64_t *out) {
+    uint64_t v = 0;
+    for (int i = 0; i < n; i++) {
+        int d;
+        char c = p[i];
+        if (c >= '0' && c <= '7') d = c - '0';
+        else if (base == 16 && c >= '8' && c <= '9') d = c - '0';
+        else if (base == 16 && c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (base == 16 && c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else return false;
+        v = v * (uint64_t)base + (uint64_t)d;
     }
+    *out = v;
+    return true;
+}
 
-    if (namesz > PATH_MAX) return -1;
-
-    name = malloc(namesz + 1);
-    if (!name) return -1;
-    if (in_read(name, namesz) < 0) { free(name); return -1; }
-    name[namesz] = '\0';
-    padded = 110 + namesz;
-    if (in_skip((4 - padded % 4) % 4) < 0) { free(name); return -1; }
-
-    e->name = name;
-    e->mode = (mode_t)mode;
-    e->uid = (uid_t)uid;
-    e->gid = (gid_t)gid;
-    e->nlink = (nlink_t)nlink;
-    e->mtime = (time_t)mtime;
-    e->filesize = filesize;
-    e->rdev = makedev(rmaj, rmin);
+/* The member name: NAMESZ bytes, the last a NUL, then PAD bytes. */
+static int read_name(entry_t *e, uint64_t namesz, uint64_t pad) {
+    if (namesz < 2 || namesz > PATH_MAX) {
+        warnx_("malformed header: name length %ju", (uintmax_t)namesz);
+        return HDR_BAD;
+    }
+    e->name = malloc((size_t)namesz);
+    if (!e->name) { warn_errno("out of memory"); return HDR_BAD; }
+    if (in_read(e->name, (size_t)namesz) < 0 || in_skip(pad) < 0) {
+        free(e->name);
+        e->name = NULL;
+        return HDR_EOF;
+    }
+    if (e->name[namesz - 1] != '\0' || memchr(e->name, '\0', (size_t)namesz - 1)) {
+        warnx_("malformed header: name not NUL-terminated");
+        free(e->name);
+        e->name = NULL;
+        return HDR_BAD;
+    }
     return 0;
 }
 
-static int parse_odc_header(entry_t *e) {
-    char hdr[76 + 1];
-    unsigned long mode, uid, gid, nlink, rdev, namesz, mtime;
-    unsigned long long filesize;
-    if (in_read(hdr, 76) < 0) return -1;
-    hdr[76] = '\0';
-    if (strncmp(hdr, "070707", 6) != 0) return -1;
-    {
-        unsigned long dev_ignored, ino_ignored;
-        if (sscanf(hdr + 6, "%6lo%6lo%6lo%6lo%6lo%6lo%6lo%11lo%6lo%11llo",
-                   &dev_ignored, &ino_ignored, &mode, &uid, &gid, &nlink, &rdev, &mtime, &namesz, &filesize) != 10)
-            return -1;
+static int parse_newc_header(entry_t *e) {
+    char hdr[110];
+    uint64_t f[13];
+
+    if (in_read(hdr, sizeof(hdr)) < 0) return HDR_EOF;
+    for (int i = 0; i < 13; i++) {
+        if (!num_field(hdr + 6 + 8 * i, 8, 16, &f[i])) {
+            warnx_("malformed header: bad number %.8s", hdr + 6 + 8 * i);
+            return HDR_BAD;
+        }
     }
+    e->ino = (uint64_t)f[0];
+    e->mode = (mode_t)f[1];
+    e->uid = (uid_t)f[2];
+    e->gid = (gid_t)f[3];
+    e->nlink = (nlink_t)f[4];
+    e->mtime = (time_t)f[5];
+    e->filesize = f[6];
+    e->dev = makedev(f[7], f[8]);
+    e->rdev = makedev(f[9], f[10]);
+    return read_name(e, f[11], (4 - (110 + f[11]) % 4) % 4);
+}
 
-    if (namesz > PATH_MAX) return -1;
+static int parse_odc_header(entry_t *e) {
+    static const int width[10] = { 6, 6, 6, 6, 6, 6, 6, 11, 6, 11 };
+    char hdr[76];
+    uint64_t f[10];
+    const char *p = hdr + 6;
 
-    e->name = malloc(namesz + 1);
-    if (!e->name) return -1;
-    if (in_read(e->name, namesz) < 0) { free(e->name); return -1; }
-    e->name[namesz] = '\0';
-    e->mode = (mode_t)mode;
-    e->uid = (uid_t)uid;
-    e->gid = (gid_t)gid;
-    e->nlink = (nlink_t)nlink;
-    e->mtime = (time_t)mtime;
-    e->filesize = filesize;
-    e->rdev = (dev_t)rdev;
-    return 0;
+    if (in_read(hdr, sizeof(hdr)) < 0) return HDR_EOF;
+    for (int i = 0; i < 10; p += width[i], i++) {
+        if (!num_field(p, width[i], 8, &f[i])) {
+            warnx_("malformed header: bad number %.*s", width[i], p);
+            return HDR_BAD;
+        }
+    }
+    e->dev = (dev_t)f[0];
+    e->ino = f[1];
+    e->mode = (mode_t)f[2];
+    e->uid = (uid_t)f[3];
+    e->gid = (gid_t)f[4];
+    e->nlink = (nlink_t)f[5];
+    e->rdev = (dev_t)f[6];
+    e->mtime = (time_t)f[7];
+    e->filesize = f[9];
+    return read_name(e, f[8], 0);
 }
 
 static int parse_bin_header(entry_t *e) {
     uint8_t hdr[26];
     uint16_t namesz;
-    if (in_read(hdr, 26) < 0) return -1;
-    if (be16(hdr) != 070707) return -1;
+    if (in_read(hdr, 26) < 0) return HDR_EOF;
     namesz = be16(hdr + 20);
-
-    if (namesz > PATH_MAX) return -1;
-
-    e->name = malloc((size_t)namesz + 1);
-    if (!e->name) return -1;
-    if (in_read(e->name, namesz) < 0) { free(e->name); return -1; }
-    e->name[namesz] = '\0';
-    if (in_skip((26 + namesz) & 1) < 0) { free(e->name); return -1; }
+    e->dev = be16(hdr + 2);
+    e->ino = be16(hdr + 4);
     e->mode = be16(hdr + 6);
     e->uid = be16(hdr + 8);
     e->gid = be16(hdr + 10);
@@ -492,7 +514,7 @@ static int parse_bin_header(entry_t *e) {
     e->rdev = be16(hdr + 14);
     e->mtime = (time_t)(((uint32_t)be16(hdr + 16) << 16) | be16(hdr + 18));
     e->filesize = ((uint32_t)be16(hdr + 22) << 16) | be16(hdr + 24);
-    return 0;
+    return read_name(e, namesz, (26 + namesz) & 1);
 }
 
 /* The padding after SIZE bytes of member data. */
@@ -574,7 +596,11 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         }
     } else if (S_ISLNK(e->mode)) {
         char *target = malloc((size_t)e->filesize + 1);
-        if (!target) { set_minor_error(); return -1; }
+        if (!target) {
+            warn_errno(e->name);
+            set_minor_error();
+            return skip_data_and_pad(opt->fmt, e->filesize);
+        }
         if (in_read(target, (size_t)e->filesize) < 0) { free(target); return -1; }
         target[e->filesize] = '\0';
         unlink(full);
@@ -608,8 +634,13 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         while (left > 0) {
             size_t chunk = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
             if (in_read(buf, chunk) < 0) { close(fd); return -1; }
-            if (write_sparse_aware(fd, buf, chunk, &outoff) < 0) { close(fd); return -1; }
             left -= chunk;
+            if (write_sparse_aware(fd, buf, chunk, &outoff) < 0) {
+                warn_errno(e->name);
+                set_minor_error();
+                close(fd);
+                return in_skip(left + data_pad(opt->fmt, e->filesize));
+            }
         }
         if (ftruncate(fd, (off_t)e->filesize) < 0) {
             warn_errno(e->name);
@@ -635,14 +666,36 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     return 0;
 }
 
+/* Whether a header of FMT starts at the read position. */
+static bool magic_here(fmt_t fmt) {
+    size_t n = fmt == FMT_BIN ? 2 : 6;
+    const unsigned char *b;
+    if (in_fill(n) < n) return false;
+    b = g_in.buf + g_in.pos;
+    if (fmt == FMT_BIN) return be16(b) == 070707;
+    if (fmt == FMT_ODC) return memcmp(b, "070707", 6) == 0;
+    return memcmp(b, "070701", 6) == 0 || memcmp(b, "070702", 6) == 0;
+}
+
 /* The format of the archive, from its first bytes, which stay unread. */
 static fmt_t detect_fmt(void) {
-    const char *b;
-    if (in_fill(6) < 6) return FMT_NEWC;
-    b = (const char *)g_in.buf + g_in.pos;
-    if (memcmp(b, "070701", 6) == 0 || memcmp(b, "070702", 6) == 0) return FMT_NEWC;
-    if (memcmp(b, "070707", 6) == 0) return FMT_ODC;
-    return FMT_BIN;
+    size_t avail;
+    in_fill(6);
+    if (magic_here(FMT_NEWC)) return FMT_NEWC;
+    if (magic_here(FMT_ODC)) return FMT_ODC;
+    if (magic_here(FMT_BIN)) return FMT_BIN;
+    /* Junk first: the first header in the buffer, wherever it is,
+     * names the format; the junk is skipped and reported later. */
+    avail = in_fill(sizeof(g_in.buf));
+    for (size_t i = 0; i + 1 < avail; i++) {
+        const unsigned char *b = g_in.buf + g_in.pos + i;
+        if (i + 6 <= avail && memcmp(b, "0707", 4) == 0 && b[4] == '0') {
+            if (b[5] == '1' || b[5] == '2') return FMT_NEWC;
+            if (b[5] == '7') return FMT_ODC;
+        }
+        if (be16(b) == 070707) return FMT_BIN;
+    }
+    return FMT_NEWC;
 }
 
 static int mode_out(options_t *opt) {
@@ -676,18 +729,44 @@ static int mode_in(options_t *opt) {
     if (opt->fmt == (fmt_t)-1)
         opt->fmt = detect_fmt();
 
+    /* Until the trailer: anything that is not a header is junk, skipped
+     * to the next one and reported; the archive ending first is fatal. */
+    bool any = false;
     for (;;) {
         entry_t e;
         int r;
+        uint64_t junk = 0;
+        while (!magic_here(opt->fmt) && in_fill(1) > 0) {
+            g_in.pos++;
+            junk++;
+        }
+        /* junk with no header after it is only the archive ending early */
+        if (junk > 0 && in_fill(1) > 0)
+            warnx_("warning: skipped %ju bytes of junk", (uintmax_t)junk);
+        if (in_fill(1) == 0) {
+            warnx_(any ? "premature end of file" : "premature end of archive");
+            set_fatal_error();
+            break;
+        }
         memset(&e, 0, sizeof(e));
         if (opt->fmt == FMT_NEWC) r = parse_newc_header(&e);
         else if (opt->fmt == FMT_ODC) r = parse_odc_header(&e);
         else r = parse_bin_header(&e);
-        if (r < 0) break;
+        if (r == HDR_BAD) { set_minor_error(); continue; }
+        if (r == HDR_EOF) {
+            warnx_("premature end of file");
+            set_fatal_error();
+            break;
+        }
+        any = true;
         r = extract_entry(&e, opt, ".");
         free(e.name);
         if (r == 1) break;
-        if (r < 0) { set_fatal_error(); break; }
+        if (r < 0) {
+            warnx_("premature end of file");
+            set_fatal_error();
+            break;
+        }
     }
 
     if (afd != STDIN_FILENO) close(afd);
