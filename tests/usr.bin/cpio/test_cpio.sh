@@ -163,6 +163,30 @@ same "-t of an absolute name" "/rc/f" "$out"
 same "-t of an absolute name: status" 0 "$rc"
 same "-t of an absolute name: quiet" "" "$err"
 
+# ---- bin: written in this machine's (little-endian) order, read in either
+printf 'src/f\n' | "$CPIO" -o -H bin > ourbin.cpio
+same "bin magic, little-endian" "c771" "$(head -c 2 ourbin.cpio | od -An -tx1 | tr -d ' \n')"
+# a big-endian member: one of ours with every 16-bit word swapped (the
+# name "xx" and data "zz" read the same swapped), then a little-endian
+# trailer
+mkdir -p be && printf 'zz' > be/xx
+(cd be && printf 'xx\n' | "$CPIO" -o -H bin) > be1.cpio
+head -c 32 be1.cpio | dd conv=swab status=none > be.cpio
+tail -c +33 be1.cpio >> be.cpio
+fresh xb
+run sh -c "cd xb && \"$CPIO\" -i < ../be.cpio"
+same "big-endian bin" "zz" "$(cat xb/xx 2>&1)"
+same "big-endian bin: status" 0 "$rc"
+if [ -n "$GNU" ]; then
+    printf 'src/f\n' | "$GNU" -o -H bin 2>/dev/null > gnubin.cpio
+    fresh xb
+    run sh -c "cd xb && \"$CPIO\" -id < ../gnubin.cpio"
+    same "GNU bin, ours reading" "hello" "$(cat xb/src/f 2>&1)"
+    run "$GNU" -it -F ourbin.cpio
+    same "our bin, GNU reading" "src/f" "$out"
+    same "our bin, GNU reading: no byte-order warning" "1 block" "$err"
+fi
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

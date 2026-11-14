@@ -131,8 +131,19 @@ static bool path_is_safe(const char *path, const options_t *opt) {
     return true;
 }
 
-static uint16_t be16(const uint8_t *b) { return (uint16_t)(b[0] << 8 | b[1]); }
-static void to_be16(uint8_t *b, uint16_t v) { b[0] = (uint8_t)(v >> 8); b[1] = (uint8_t)(v & 0xff); }
+/* The old binary format's 16-bit words are in the writing machine's byte
+ * order: written here in this one's, read in whichever order the magic
+ * number shows.  Its 32-bit numbers are two words, the high one first. */
+static void put16(uint8_t *b, uint16_t v) { memcpy(b, &v, sizeof(v)); }
+static uint16_t get16(bool le, const uint8_t *b) {
+    return le ? (uint16_t)(b[1] << 8 | b[0]) : (uint16_t)(b[0] << 8 | b[1]);
+}
+/* Whether B holds the bin magic, and in which order (*LE). */
+static bool bin_magic(const uint8_t *b, bool *le) {
+    if (get16(true, b) == 070707) { *le = true; return true; }
+    if (get16(false, b) == 070707) { *le = false; return true; }
+    return false;
+}
 
 static int cpio_write_header_newc(int fd, const char *name, const struct stat *st, uint32_t filesize, uint32_t nlink) {
     char hdr[110 + 1];
@@ -184,19 +195,19 @@ static int cpio_write_header_bin(int fd, const char *name, const struct stat *st
     uint8_t hdr[26];
     uint16_t namesz = (uint16_t)(strlen(name) + 1);
     memset(hdr, 0, sizeof(hdr));
-    to_be16(hdr + 0, 070707);
-    to_be16(hdr + 2, (uint16_t)st->st_dev);
-    to_be16(hdr + 4, (uint16_t)st->st_ino);
-    to_be16(hdr + 6, (uint16_t)st->st_mode);
-    to_be16(hdr + 8, (uint16_t)st->st_uid);
-    to_be16(hdr + 10, (uint16_t)st->st_gid);
-    to_be16(hdr + 12, (uint16_t)nlink);
-    to_be16(hdr + 14, (uint16_t)st->st_rdev);
-    to_be16(hdr + 16, (uint16_t)((uint32_t)st->st_mtime >> 16));
-    to_be16(hdr + 18, (uint16_t)((uint32_t)st->st_mtime & 0xffff));
-    to_be16(hdr + 20, namesz);
-    to_be16(hdr + 22, (uint16_t)(filesize >> 16));
-    to_be16(hdr + 24, (uint16_t)(filesize & 0xffff));
+    put16(hdr + 0, 070707);
+    put16(hdr + 2, (uint16_t)st->st_dev);
+    put16(hdr + 4, (uint16_t)st->st_ino);
+    put16(hdr + 6, (uint16_t)st->st_mode);
+    put16(hdr + 8, (uint16_t)st->st_uid);
+    put16(hdr + 10, (uint16_t)st->st_gid);
+    put16(hdr + 12, (uint16_t)nlink);
+    put16(hdr + 14, (uint16_t)st->st_rdev);
+    put16(hdr + 16, (uint16_t)((uint32_t)st->st_mtime >> 16));
+    put16(hdr + 18, (uint16_t)((uint32_t)st->st_mtime & 0xffff));
+    put16(hdr + 20, namesz);
+    put16(hdr + 22, (uint16_t)(filesize >> 16));
+    put16(hdr + 24, (uint16_t)(filesize & 0xffff));
     if (write_all(fd, hdr, sizeof(hdr)) < 0) return -1;
     if (write_all(fd, name, namesz) < 0) return -1;
     if ((26 + namesz) & 1) {
@@ -507,17 +518,19 @@ static int parse_odc_header(entry_t *e) {
 static int parse_bin_header(entry_t *e) {
     uint8_t hdr[26];
     uint16_t namesz;
+    bool le;
     if (in_read(hdr, 26) < 0) return HDR_EOF;
-    namesz = be16(hdr + 20);
-    e->dev = be16(hdr + 2);
-    e->ino = be16(hdr + 4);
-    e->mode = be16(hdr + 6);
-    e->uid = be16(hdr + 8);
-    e->gid = be16(hdr + 10);
-    e->nlink = be16(hdr + 12);
-    e->rdev = be16(hdr + 14);
-    e->mtime = (time_t)(((uint32_t)be16(hdr + 16) << 16) | be16(hdr + 18));
-    e->filesize = ((uint32_t)be16(hdr + 22) << 16) | be16(hdr + 24);
+    if (!bin_magic(hdr, &le)) return HDR_BAD;
+    namesz = get16(le, hdr + 20);
+    e->dev = get16(le, hdr + 2);
+    e->ino = get16(le, hdr + 4);
+    e->mode = get16(le, hdr + 6);
+    e->uid = get16(le, hdr + 8);
+    e->gid = get16(le, hdr + 10);
+    e->nlink = get16(le, hdr + 12);
+    e->rdev = get16(le, hdr + 14);
+    e->mtime = (time_t)(((uint32_t)get16(le, hdr + 16) << 16) | get16(le, hdr + 18));
+    e->filesize = ((uint32_t)get16(le, hdr + 22) << 16) | get16(le, hdr + 24);
     return read_name(e, namesz, (26 + namesz) & 1);
 }
 
@@ -739,7 +752,7 @@ static bool magic_here(fmt_t fmt) {
     const unsigned char *b;
     if (in_fill(n) < n) return false;
     b = g_in.buf + g_in.pos;
-    if (fmt == FMT_BIN) return be16(b) == 070707;
+    if (fmt == FMT_BIN) { bool le; return bin_magic(b, &le); }
     if (fmt == FMT_ODC) return memcmp(b, "070707", 6) == 0;
     return memcmp(b, "070701", 6) == 0 || memcmp(b, "070702", 6) == 0;
 }
@@ -760,7 +773,8 @@ static fmt_t detect_fmt(void) {
             if (b[5] == '1' || b[5] == '2') return FMT_NEWC;
             if (b[5] == '7') return FMT_ODC;
         }
-        if (be16(b) == 070707) return FMT_BIN;
+        bool le;
+        if (bin_magic(b, &le)) return FMT_BIN;
     }
     return FMT_NEWC;
 }

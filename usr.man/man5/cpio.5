@@ -14,7 +14,10 @@ newc (SVR4 ASCII header, magic 070701)
 .It
 odc (portable old character format, magic 070707)
 .It
-bin (old binary format, magic 070707 in 16-bit binary)
+bin (old binary format, magic 070707 in a 16-bit word).
+Its words are in the byte order of the machine that wrote it;
+.Xr cpio 1
+writes its own (little-endian on x86) and reads either.
 .El
 .Pp
 Each archive entry contains a header, pathname, file payload (if any), and
