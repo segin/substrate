@@ -15,9 +15,9 @@ echo "pwned" > "$TMP/attacker/target"
 mkdir -p "$TMP/victim/subdir"
 echo "original" > "$TMP/victim/target"
 
-# Extract with --insecure
+# Extract with --insecure (and -u: the victim file is the newer one)
 # Should overwrite
-(cd "$TMP/victim/subdir" && "$CPIO" -i --insecure < "$TMP/exploit.cpio" >/dev/null 2>&1 || true)
+(cd "$TMP/victim/subdir" && "$CPIO" -iu --insecure < "$TMP/exploit.cpio" >/dev/null 2>&1 || true)
 
 # Check
 if grep -q "pwned" "$TMP/victim/target"; then

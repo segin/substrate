@@ -937,6 +937,15 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
+    /* Without -u, a file on disk no older than the member stays. */
+    if (!opt->force_overwrite && !S_ISDIR(e->mode)) {
+        struct stat cur;
+        if (lstat(full, &cur) == 0 && !S_ISDIR(cur.st_mode) && cur.st_mtime >= e->mtime) {
+            warnx_("%s not created: newer or same age version exists", e->name);
+            return skip_data_and_pad(opt->fmt, e->filesize);
+        }
+    }
+
     if (opt->make_dirs && make_parent_dirs(full) < 0) {
         warn_errno(e->name);
         set_minor_error();
@@ -1190,6 +1199,14 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
         ssize_t n = readlink(src, buf, sizeof(buf) - 1);
         if (n < 0) { warn_errno(src); set_minor_error(); return -1; }
         buf[n] = '\0';
+        {
+            struct stat dst_st;
+            if (!opt->force_overwrite && lstat(target, &dst_st) == 0 &&
+                !S_ISDIR(dst_st.st_mode) && dst_st.st_mtime >= st.st_mtime) {
+                warnx_("%s not created: newer or same age version exists", target);
+                return 0;
+            }
+        }
         unlink(target);
         if (symlink(buf, target) < 0) { warn_errno(target); set_minor_error(); }
         return 0;
@@ -1202,6 +1219,12 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
     {
         struct stat dst_st;
         if (lstat(target, &dst_st) == 0) {
+            /* without -u, a file there no older than the source stays */
+            if (!opt->force_overwrite && !S_ISDIR(dst_st.st_mode) &&
+                dst_st.st_mtime >= st.st_mtime) {
+                warnx_("%s not created: newer or same age version exists", target);
+                return 0;
+            }
             if (dst_st.st_dev == st.st_dev && dst_st.st_ino == st.st_ino) {
                 warnx_("%s: is the same file as its copy", src);
                 set_minor_error();

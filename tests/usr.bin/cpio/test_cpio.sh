@@ -288,12 +288,12 @@ ok "long symlink target: not made" test ! -L xl/lk
 # ---- pass mode replaces a symlink at the destination, not writes through it
 mkdir -p pd outside
 ln -s ../outside/target pd/f
-run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -p ../pd)"
+run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -pu ../pd)"
 ok "-p: nothing written through the link" test ! -e outside/target
 same "-p: copy in place of the link" "hello" "$(cat pd/f 2>&1)"
 ok "-p: no link left" test ! -L pd/f
 # ... nor deletes the source when it is its own destination
-run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -p .)"
+run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -pu .)"
 same "-p onto itself: refused" "cpio: f: is the same file as its copy" "$err"
 same "-p onto itself: source kept" "hello" "$(cat src/f 2>&1)"
 
@@ -313,6 +313,26 @@ printf 'g\n' > md/gw; chmod 664 md/gw
 fresh pm
 (cd md && printf 'gw\n' | "$CPIO" -p ../pm)
 same "-p mode" 664 "$(stat -c %a pm/gw)"
+
+# ---- a file on disk no older than the member stays, unless -u
+fresh xu
+printf 'NEWER\n' > xu/f; touch -d '+1 day' xu/f
+printf 'f\n' | (cd src && "$CPIO" -o) > u.cpio
+run sh -c "cd xu && \"$CPIO\" -i < ../u.cpio"
+same "newer kept" "NEWER" "$(cat xu/f)"
+same "newer kept: message" "cpio: f not created: newer or same age version exists" "$err"
+same "newer kept: status" 0 "$rc"
+run sh -c "cd xu && \"$CPIO\" -iu < ../u.cpio"
+same "-u replaces" "hello" "$(cat xu/f)"
+fresh pu
+printf 'NEWER\n' > pu/f; touch -d '+1 day' pu/f
+run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -p ../pu)"
+same "-p: newer kept" "NEWER" "$(cat pu/f)"
+same "-p: newer kept: message" "cpio: ../pu/f not created: newer or same age version exists" "$err"
+# an older file is replaced without -u
+touch -d '2001-01-01' pu/f
+run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -p ../pu)"
+same "-p: older replaced" "hello" "$(cat pu/f)"
 
 if [ "$fail" -ne 0 ]; then
     exit 1

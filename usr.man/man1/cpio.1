@@ -98,7 +98,11 @@ Create leading directories.
 .It Fl m
 Preserve modification time on extraction/copy.
 .It Fl u
-Allow overwrite behavior (accepted for compatibility).
+Replace files unconditionally.
+Without it, a file already on disk that is no older than the one
+replacing it is kept, with the diagnostic
+.Dq not created: newer or same age version exists
+(which does not change the exit status).
 .It Fl R Ar uid:gid
 Set owner fields while writing archive.
 .It Fl -safe-extract
