@@ -1178,8 +1178,26 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
     }
     if (!S_ISREG(st.st_mode)) return 0;
 
+    /* Replace what is at the destination rather than write into it: a
+     * symlink there would take the data elsewhere, and an existing file
+     * would keep its old mode.  But never the source itself. */
+    {
+        struct stat dst_st;
+        if (lstat(target, &dst_st) == 0) {
+            if (dst_st.st_dev == st.st_dev && dst_st.st_ino == st.st_ino) {
+                warnx_("%s: is the same file as its copy", src);
+                set_minor_error();
+                return -1;
+            }
+            if (!S_ISDIR(dst_st.st_mode) && unlink(target) < 0) {
+                warn_errno(target);
+                set_minor_error();
+                return -1;
+            }
+        }
+    }
     in = open(src, O_RDONLY);
-    out = open(target, O_WRONLY | O_CREAT | O_TRUNC, st.st_mode & 07777);
+    out = open(target, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, st.st_mode & 07777);
     if (in < 0 || out < 0) { warn_errno(in < 0 ? src : target); set_minor_error(); goto done; }
     for (;;) {
         ssize_t r = read(in, buf, sizeof(buf));

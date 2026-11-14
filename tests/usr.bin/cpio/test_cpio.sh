@@ -285,6 +285,18 @@ run sh -c "cd xl && \"$CPIO\" -id < ../lkbig.cpio"
 same "long symlink target" "cpio: lk: symbolic link target too long" "$(head -1 .err)"
 ok "long symlink target: not made" test ! -L xl/lk
 
+# ---- pass mode replaces a symlink at the destination, not writes through it
+mkdir -p pd outside
+ln -s ../outside/target pd/f
+run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -p ../pd)"
+ok "-p: nothing written through the link" test ! -e outside/target
+same "-p: copy in place of the link" "hello" "$(cat pd/f 2>&1)"
+ok "-p: no link left" test ! -L pd/f
+# ... nor deletes the source when it is its own destination
+run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -p .)"
+same "-p onto itself: refused" "cpio: f: is the same file as its copy" "$err"
+same "-p onto itself: source kept" "hello" "$(cat src/f 2>&1)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
