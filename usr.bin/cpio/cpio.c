@@ -23,10 +23,12 @@
 
 typedef enum { MODE_NONE, MODE_OUT, MODE_IN, MODE_PASS } mode_tn;
 /* FMT_CRC is newc with a checksum: written by -H crc; read as newc, the
- * sum checked wherever a member's magic says crc. */
-typedef enum { FMT_NEWC, FMT_ODC, FMT_BIN, FMT_CRC } fmt_t;
+ * sum checked wherever a member's magic says crc.  FMT_USTAR and FMT_TAR
+ * are POSIX ustar and the old (v7) tar format. */
+typedef enum { FMT_NEWC, FMT_ODC, FMT_BIN, FMT_CRC, FMT_USTAR, FMT_TAR } fmt_t;
 
 static bool newc_like(fmt_t f) { return f == FMT_NEWC || f == FMT_CRC; }
+static bool tar_like(fmt_t f) { return f == FMT_USTAR || f == FMT_TAR; }
 
 typedef struct {
     mode_tn mode;
@@ -437,11 +439,195 @@ static int data_sum(int fd, uint64_t size, uint32_t *sum, const char *path) {
 
 /* The largest member each format's size field holds. */
 static uint64_t fmt_max_size(fmt_t fmt) {
-    return fmt == FMT_ODC ? 077777777777ULL : 0xffffffffULL;
+    return fmt == FMT_ODC || tar_like(fmt) ? 077777777777ULL : 0xffffffffULL;
 }
 
 static const char *fmt_name(fmt_t fmt) {
-    return fmt == FMT_NEWC ? "newc" : fmt == FMT_CRC ? "crc" : fmt == FMT_ODC ? "odc" : "bin";
+    return fmt == FMT_NEWC ? "newc" : fmt == FMT_CRC ? "crc" : fmt == FMT_ODC ? "odc" :
+           fmt == FMT_USTAR ? "ustar" : fmt == FMT_TAR ? "tar" : "bin";
+}
+
+/* The first name met for each (dev, ino) with more than one link: pass
+ * mode links the others to its copy, and tar's copy-out writes them as
+ * links to it. */
+typedef struct seen_link {
+    dev_t dev;
+    ino_t ino;
+    char *target;
+    struct seen_link *next;
+} seen_link_t;
+
+static seen_link_t *g_seen_links[LINK_BUCKETS];
+
+static const char *seen_link_find(const struct stat *st) {
+    seen_link_t *l;
+    for (l = g_seen_links[link_hash(st->st_dev, st->st_ino)]; l; l = l->next)
+        if (l->dev == st->st_dev && l->ino == st->st_ino) return l->target;
+    return NULL;
+}
+
+static void seen_link_add(const struct stat *st, const char *target) {
+    size_t h = link_hash(st->st_dev, st->st_ino);
+    seen_link_t *l = calloc(1, sizeof(*l));
+    if (!l || !(l->target = strdup(target))) { free(l); return; }   /* copies, then */
+    l->dev = st->st_dev;
+    l->ino = st->st_ino;
+    l->next = g_seen_links[h];
+    g_seen_links[h] = l;
+}
+
+static void seen_links_free(void) {
+    for (size_t h = 0; h < LINK_BUCKETS; h++) {
+        while (g_seen_links[h]) {
+            seen_link_t *l = g_seen_links[h];
+            g_seen_links[h] = l->next;
+            free(l->target);
+            free(l);
+        }
+    }
+}
+
+static uint64_t data_pad(fmt_t fmt, uint64_t size);
+
+/* tar: an octal number in a field of WIDTH bytes, the last a NUL. */
+static void tar_octal(unsigned char *field, size_t width, uint64_t v) {
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%0*llo", (int)(width - 1), (unsigned long long)v);
+    memcpy(field, tmp + strlen(tmp) - (width - 1), width - 1);
+    field[width - 1] = '\0';
+}
+
+/* tar: the header checksum, its own field counted as spaces. */
+static unsigned tar_sum(const unsigned char *h) {
+    unsigned s = 0;
+    for (int i = 0; i < 512; i++) s += (i >= 148 && i < 156) ? ' ' : h[i];
+    return s;
+}
+
+/* Write a tar or ustar header for PATH: TYPE is tar's type flag, SIZE the
+ * data that follows, LINK a link's target (hard or symbolic).  0, -1 if
+ * the format cannot hold PATH, -2 if writing the archive failed. */
+static int write_tar_header(const options_t *opt, const char *path, const struct stat *st,
+                            char type, uint64_t size, const char *link) {
+    unsigned char h[512];
+    char name[PATH_MAX + 2];
+    size_t len;
+    bool ustar = opt->fmt == FMT_USTAR;
+    uint32_t uid = opt->owner_uid_set ? opt->owner_uid : st->st_uid;
+    uint32_t gid = opt->owner_gid_set ? opt->owner_gid : st->st_gid;
+
+    memset(h, 0, sizeof(h));
+    snprintf(name, sizeof(name), "%s%s", path,
+             type == '5' && path[strlen(path) - 1] != '/' ? "/" : "");
+    len = strlen(name);
+    if (len <= 100) {
+        memcpy(h, name, len);
+    } else {
+        /* ustar: a prefix of up to 155 bytes, a '/', a name of up to 100 */
+        size_t split = 0;
+        for (size_t i = len > 101 ? len - 101 : 1; ustar && i <= 155 && i < len; i++)
+            if (name[i] == '/') { split = i; break; }
+        if (split == 0) {
+            warnx_("%s: name too long for the %s format", path, fmt_name(opt->fmt));
+            set_minor_error();
+            return -1;
+        }
+        memcpy(h + 345, name, split);
+        memcpy(h, name + split + 1, len - split - 1);
+    }
+    if (link) {
+        if (strlen(link) > 100) {
+            warnx_("%s: link target too long for the %s format", path, fmt_name(opt->fmt));
+            set_minor_error();
+            return -1;
+        }
+        memcpy(h + 157, link, strlen(link));
+    }
+    tar_octal(h + 100, 8, st->st_mode & 07777);
+    tar_octal(h + 108, 8, uid & 07777777);
+    tar_octal(h + 116, 8, gid & 07777777);
+    tar_octal(h + 124, 12, size);
+    tar_octal(h + 136, 12, st->st_mtime > 0 ? (uint64_t)st->st_mtime : 0);
+    h[156] = (unsigned char)type;
+    if (ustar) {
+        struct passwd *pw = getpwuid(uid);
+        struct group *gr = getgrgid(gid);
+        memcpy(h + 257, "ustar", 6);
+        memcpy(h + 263, "00", 2);
+        if (pw) snprintf((char *)h + 265, 32, "%s", pw->pw_name);
+        if (gr) snprintf((char *)h + 297, 32, "%s", gr->gr_name);
+        if (type == '3' || type == '4') {
+            tar_octal(h + 329, 8, major(st->st_rdev));
+            tar_octal(h + 337, 8, minor(st->st_rdev));
+        }
+    }
+    {
+        char sum[8];
+        snprintf(sum, sizeof(sum), "%06o", tar_sum(h));
+        memcpy(h + 148, sum, 6);
+        h[154] = '\0';
+        h[155] = ' ';
+    }
+    return ar_write(h, sizeof(h)) < 0 ? -2 : 0;
+}
+
+/* One member in tar or ustar: the type from the file's, the data of a
+ * regular file, a hard link to the first name of one met before.  Old
+ * tar has no type for devices and fifos.  As write_member returns. */
+static int write_member_tar(options_t *opt, const char *path, struct stat *st) {
+    char lnk[PATH_MAX];
+    const char *link = NULL;
+    uint64_t size = 0;
+    int ffd = -1, r;
+    char type;
+
+    if (S_ISREG(st->st_mode)) {
+        type = '0';
+        if (st->st_nlink > 1 && (link = seen_link_find(st)) != NULL) {
+            type = '1';
+        } else {
+            if (st->st_nlink > 1) seen_link_add(st, path);
+            size = (uint64_t)st->st_size;
+        }
+    } else if (S_ISDIR(st->st_mode)) {
+        type = '5';
+    } else if (S_ISLNK(st->st_mode)) {
+        ssize_t n = readlink(path, lnk, sizeof(lnk) - 1);
+        if (n < 0) { warn_errno(path); set_minor_error(); return -1; }
+        lnk[n] = '\0';
+        link = lnk;
+        type = '2';
+    } else if (opt->fmt == FMT_USTAR && !S_ISSOCK(st->st_mode)) {
+        type = S_ISCHR(st->st_mode) ? '3' : S_ISBLK(st->st_mode) ? '4' : '6';
+    } else {
+        warnx_("%s: not a file the %s format can hold", path, fmt_name(opt->fmt));
+        set_minor_error();
+        return -1;
+    }
+
+    if (size > 0) {
+        ffd = open(path, O_RDONLY);
+        if (ffd < 0) { warn_errno(path); set_minor_error(); return -1; }
+    }
+    r = write_tar_header(opt, path, st, type, size, link);
+    if (r == 0 && size > 0) {
+        if (copy_out_file_data(ffd, size, path) < 0) r = -2;
+        else {
+            static const char zeros[512];
+            if (ar_write(zeros, (size_t)data_pad(opt->fmt, size)) < 0) r = -2;
+        }
+    }
+    if (ffd >= 0) {
+        if (r == 0 && opt->reset_atime) reset_atime(ffd, st, path);
+        close(ffd);
+    }
+    if (r == -2) {
+        warn_errno("write error");
+        set_fatal_error();
+    } else if (r == 0) {
+        note_file(opt, path);
+    }
+    return r;
 }
 
 /* Write one member: PATH's header, as ST describes it, and for a regular
@@ -449,6 +635,7 @@ static const char *fmt_name(fmt_t fmt) {
  * one more link).  0, -1 if PATH could not be archived, -2 if writing the
  * archive failed. */
 static int write_member(options_t *opt, const char *path, struct stat *stp, bool with_data) {
+    if (tar_like(opt->fmt)) return write_member_tar(opt, path, stp);
     struct stat st = *stp;
     char lnk[PATH_MAX];
     ssize_t lsz = 0;
@@ -623,6 +810,11 @@ static int write_trailer(options_t *opt) {
     struct stat st;
     memset(&st, 0, sizeof(st));
     st.st_mode = S_IFREG;
+    if (tar_like(opt->fmt)) {
+        /* tar ends with two blocks of zeros */
+        static const char zeros[1024];
+        return ar_write(zeros, sizeof(zeros));
+    }
     if (newc_like(opt->fmt)) {
         return cpio_write_header_newc("TRAILER!!!", &st, 0, 1, opt->fmt == FMT_CRC, 0);
     }
@@ -645,6 +837,8 @@ typedef struct {
     dev_t rdev;
     bool crc;           /* a crc-format member: CHECK is its data's sum */
     uint32_t check;
+    char *linkname;     /* tar: a symlink's target, or a hard link's */
+    bool tar_link;      /* tar: a hard link to LINKNAME */
 } entry_t;
 
 /* The archive being read, through a buffer.  The format is found by
@@ -823,9 +1017,131 @@ static int parse_bin_header(entry_t *e) {
     return read_name(e, namesz, (26 + namesz) & 1);
 }
 
+/* tar's end: the header is a block of zeros (two, by the standard). */
+#define HDR_END (-3)
+
+/* A tar number: octal digits in a field of WIDTH bytes, with leading
+ * spaces and a space or NUL after; false if anything else is there. */
+static bool tar_number(const unsigned char *p, size_t width, uint64_t *out) {
+    size_t i = 0;
+    uint64_t v = 0;
+    while (i < width && p[i] == ' ') i++;
+    for (; i < width && p[i] >= '0' && p[i] <= '7'; i++) v = v * 8 + (uint64_t)(p[i] - '0');
+    for (; i < width; i++)
+        if (p[i] != ' ' && p[i] != '\0') return false;
+    *out = v;
+    return true;
+}
+
+/* Whether the 512 bytes at H are a tar header: their checksum agrees. */
+static bool tar_header_ok(const unsigned char *h) {
+    uint64_t sum;
+    return tar_number(h + 148, 8, &sum) && sum == tar_sum(h);
+}
+
+/* A NUL-terminated copy of a field of at most WIDTH bytes. */
+static char *tar_string(const unsigned char *p, size_t width) {
+    size_t n = 0;
+    char *s;
+    while (n < width && p[n]) n++;
+    s = malloc(n + 1);
+    if (s) { memcpy(s, p, n); s[n] = '\0'; }
+    return s;
+}
+
+static int parse_tar_header(entry_t *e) {
+    unsigned char h[512];
+    uint64_t mode, uid, gid, size, mtime, dmaj = 0, dmin = 0;
+    bool ustar;
+    char *name, *prefix = NULL;
+    size_t len;
+    int i;
+
+    if (in_read(h, sizeof(h)) < 0) return HDR_EOF;
+    for (i = 0; i < 512 && h[i] == 0; i++) ;
+    if (i == 512) return HDR_END;
+    if (!tar_header_ok(h)) {
+        warnx_("malformed header: bad tar checksum");
+        return HDR_BAD;
+    }
+    if (!tar_number(h + 100, 8, &mode) || !tar_number(h + 108, 8, &uid) ||
+        !tar_number(h + 116, 8, &gid) || !tar_number(h + 124, 12, &size) ||
+        !tar_number(h + 136, 12, &mtime)) {
+        warnx_("malformed header: bad number in a tar header");
+        return HDR_BAD;
+    }
+    ustar = memcmp(h + 257, "ustar", 5) == 0;
+    if (ustar) {
+        if (h[156] == '3' || h[156] == '4') {
+            if (!tar_number(h + 329, 8, &dmaj) || !tar_number(h + 337, 8, &dmin)) {
+                warnx_("malformed header: bad device number in a tar header");
+                return HDR_BAD;
+            }
+        }
+        /* the owner by name where this system knows it, as GNU cpio */
+        if (h[265]) {
+            char *u = tar_string(h + 265, 32);
+            struct passwd *pw = u ? getpwnam(u) : NULL;
+            if (pw) uid = pw->pw_uid;
+            free(u);
+        }
+        if (h[297]) {
+            char *g = tar_string(h + 297, 32);
+            struct group *gr = g ? getgrnam(g) : NULL;
+            if (gr) gid = gr->gr_gid;
+            free(g);
+        }
+        if (h[345]) prefix = tar_string(h + 345, 155);
+    }
+    name = tar_string(h, 100);
+    if (!name || (ustar && h[345] && !prefix)) { free(name); free(prefix); warn_errno("out of memory"); return HDR_BAD; }
+    if (prefix) {
+        size_t pl = strlen(prefix), nl = strlen(name);
+        char *full = malloc(pl + 1 + nl + 1);
+        if (!full) { free(name); free(prefix); warn_errno("out of memory"); return HDR_BAD; }
+        memcpy(full, prefix, pl);
+        full[pl] = '/';
+        memcpy(full + pl + 1, name, nl + 1);
+        free(name);
+        free(prefix);
+        name = full;
+    }
+    len = strlen(name);
+    if (len == 0) { free(name); warnx_("malformed header: name of zero length"); return HDR_BAD; }
+
+    e->mode = (mode_t)(mode & 07777);
+    switch (h[156]) {
+    case '1': e->mode |= S_IFREG; e->tar_link = true; break;
+    case '2': e->mode |= S_IFLNK; break;
+    case '3': e->mode |= S_IFCHR; break;
+    case '4': e->mode |= S_IFBLK; break;
+    case '5': e->mode |= S_IFDIR; break;
+    case '6': e->mode |= S_IFIFO; break;
+    default:
+        /* old tar marks a directory by a trailing '/' alone */
+        e->mode |= name[len - 1] == '/' ? S_IFDIR : S_IFREG;
+        break;
+    }
+    while (len > 1 && name[len - 1] == '/') name[--len] = '\0';
+    if (h[156] == '1' || h[156] == '2') {
+        e->linkname = tar_string(h + 157, 100);
+        if (!e->linkname) { free(name); warn_errno("out of memory"); return HDR_BAD; }
+    }
+    e->name = name;
+    e->uid = (uid_t)uid;
+    e->gid = (gid_t)gid;
+    e->mtime = (time_t)mtime;
+    e->nlink = S_ISDIR(e->mode) ? 2 : 1;
+    /* only a regular file's data follows its header */
+    e->filesize = S_ISREG(e->mode) && !e->tar_link ? size : 0;
+    e->rdev = makedev(dmaj, dmin);
+    return 0;
+}
+
 /* The padding after SIZE bytes of member data. */
 static uint64_t data_pad(fmt_t fmt, uint64_t size) {
     if (newc_like(fmt)) return (4 - size % 4) % 4;
+    if (tar_like(fmt)) return (512 - size % 512) % 512;
     if (fmt == FMT_BIN) return size & 1;
     return 0;
 }
@@ -890,7 +1206,10 @@ static int list_entry(const entry_t *e, const options_t *opt) {
         return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
-    if (S_ISLNK(e->mode)) {
+    if (S_ISLNK(e->mode) && e->linkname) {
+        /* tar: the target is in the header */
+        snprintf(target, sizeof(target), "%s", e->linkname);
+    } else if (S_ISLNK(e->mode)) {
         tlen = e->filesize < sizeof(target) ? (size_t)e->filesize : sizeof(target) - 1;
         if (in_read(target, tlen) < 0) return -1;
         target[tlen] = '\0';
@@ -924,6 +1243,7 @@ static int list_entry(const entry_t *e, const options_t *opt) {
         printf("%8ju ", (uintmax_t)e->filesize);
     printf("%s %s", tbuf, e->name);
     if (S_ISLNK(e->mode)) printf(" -> %s", target);
+    if (e->tar_link) printf(" link to %s", e->linkname);
     putchar('\n');
     return 0;
 }
@@ -1201,7 +1521,8 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     bool made = true;   /* the member is on disk, to be given its attributes */
     entry_t renamed;    /* -r: the member under its new name */
 
-    if (strcmp(e->name, "TRAILER!!!") == 0) return 1;
+    /* the cpio formats end with a member of this name (tar with zeros) */
+    if (!tar_like(opt->fmt) && strcmp(e->name, "TRAILER!!!") == 0) return 1;
     if (!selected(e->name, opt)) return skip_data_and_pad(opt->fmt, e->filesize);
     if (opt->toc) return list_entry(e, opt);
     if (opt->rename) {
@@ -1257,14 +1578,17 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
             set_minor_error();
             return skip_data_and_pad(opt->fmt, e->filesize);
         }
-        target = malloc((size_t)e->filesize + 1);
+        /* tar: the target is in the header, not the data */
+        target = e->linkname ? strdup(e->linkname) : malloc((size_t)e->filesize + 1);
         if (!target) {
             warn_errno(e->name);
             set_minor_error();
             return skip_data_and_pad(opt->fmt, e->filesize);
         }
-        if (in_read(target, (size_t)e->filesize) < 0) { free(target); return -1; }
-        target[e->filesize] = '\0';
+        if (!e->linkname) {
+            if (in_read(target, (size_t)e->filesize) < 0) { free(target); return -1; }
+            target[e->filesize] = '\0';
+        }
         unlink(full);
         if (opt->safe_extract && symlink_escapes(target)) {
             defer_symlink(full, target, e);   /* its owner is set then */
@@ -1295,6 +1619,19 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         warnx_("%s: socket not created", e->name);
         set_minor_error();
         made = false;
+    } else if (e->tar_link) {
+        /* tar: another name for a member extracted before, which must
+         * itself pass the safety checks */
+        char old[PATH_MAX];
+        if (!path_is_safe(e->linkname, opt) ||
+            snprintf(old, sizeof(old), "%s/%s", base ? base : ".", e->linkname) >= (int)sizeof(old)) {
+            warnx_("%s: unsafe link target %s, not extracted", e->name, e->linkname);
+            set_minor_error();
+            return 0;
+        }
+        make_link(old, full);
+        note_file(opt, e->name);
+        return 0;
     } else {
         off_t outoff = 0;
         in_link_t *l = NULL;
@@ -1393,10 +1730,16 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
 
 /* Whether a header of FMT starts at the read position. */
 static bool magic_here(fmt_t fmt) {
-    size_t n = fmt == FMT_BIN ? 2 : 6;
+    size_t n = fmt == FMT_BIN ? 2 : tar_like(fmt) ? 512 : 6;
     const unsigned char *b;
     if (in_fill(n) < n) return false;
     b = g_in.buf + g_in.pos;
+    if (tar_like(fmt)) {
+        /* a header whose sum agrees, or the zeros that end the archive */
+        int i;
+        for (i = 0; i < 512 && b[i] == 0; i++) ;
+        return i == 512 || tar_header_ok(b);
+    }
     if (fmt == FMT_BIN) { bool le; return bin_magic(b, &le); }
     if (fmt == FMT_ODC) return memcmp(b, "070707", 6) == 0;
     return memcmp(b, "070701", 6) == 0 || memcmp(b, "070702", 6) == 0;
@@ -1408,6 +1751,9 @@ static fmt_t detect_fmt(void) {
     in_fill(6);
     if (magic_here(FMT_NEWC)) return FMT_NEWC;
     if (magic_here(FMT_ODC)) return FMT_ODC;
+    /* tar: a whole header whose sum agrees; ustar has its magic at 257 */
+    if (in_fill(512) >= 512 && tar_header_ok(g_in.buf + g_in.pos))
+        return memcmp(g_in.buf + g_in.pos + 257, "ustar", 5) == 0 ? FMT_USTAR : FMT_TAR;
     if (magic_here(FMT_BIN)) return FMT_BIN;
     /* Junk first: the first header in the buffer, wherever it is,
      * names the format; the junk is skipped and reported later. */
@@ -1507,8 +1853,10 @@ static int mode_in(options_t *opt) {
         }
         memset(&e, 0, sizeof(e));
         if (newc_like(opt->fmt)) r = parse_newc_header(&e);
+        else if (tar_like(opt->fmt)) r = parse_tar_header(&e);
         else if (opt->fmt == FMT_ODC) r = parse_odc_header(&e);
         else r = parse_bin_header(&e);
+        if (r == HDR_END) break;
         if (r == HDR_BAD) { set_minor_error(); continue; }
         if (r == HDR_EOF) {
             warnx_("premature end of file");
@@ -1523,6 +1871,7 @@ static int mode_in(options_t *opt) {
         }
         r = extract_entry(&e, opt, ".");
         free(e.name);
+        free(e.linkname);
         if (r == 1) break;
         if (r < 0) {
             warnx_("premature end of file");
@@ -1539,45 +1888,7 @@ static int mode_in(options_t *opt) {
     return g_status;
 }
 
-/* Pass mode's hard links: the copy made of each (dev, ino) with more than
- * one link, so that its other names are linked to the copy. */
-typedef struct pass_link {
-    dev_t dev;
-    ino_t ino;
-    char *target;
-    struct pass_link *next;
-} pass_link_t;
-
-static pass_link_t *g_pass_links[LINK_BUCKETS];
 static uint64_t g_pass_bytes;   /* data copied, for the block count */
-
-static const char *pass_link_find(const struct stat *st) {
-    pass_link_t *l;
-    for (l = g_pass_links[link_hash(st->st_dev, st->st_ino)]; l; l = l->next)
-        if (l->dev == st->st_dev && l->ino == st->st_ino) return l->target;
-    return NULL;
-}
-
-static void pass_link_add(const struct stat *st, const char *target) {
-    size_t h = link_hash(st->st_dev, st->st_ino);
-    pass_link_t *l = calloc(1, sizeof(*l));
-    if (!l || !(l->target = strdup(target))) { free(l); return; }   /* copies, then */
-    l->dev = st->st_dev;
-    l->ino = st->st_ino;
-    l->next = g_pass_links[h];
-    g_pass_links[h] = l;
-}
-
-static void pass_links_free(void) {
-    for (size_t h = 0; h < LINK_BUCKETS; h++) {
-        while (g_pass_links[h]) {
-            pass_link_t *l = g_pass_links[h];
-            g_pass_links[h] = l->next;
-            free(l->target);
-            free(l);
-        }
-    }
-}
 
 /* Clear the way for a copy of SRC (described by ST) at TARGET.  What is
  * there is removed rather than written into -- a symlink there would take
@@ -1718,14 +2029,14 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
     /* A regular file.  Another name for one copied already is linked to
      * that copy; with -l, the copy is a link to the source itself. */
     if (st.st_nlink > 1) {
-        const char *first = pass_link_find(&st);
+        const char *first = seen_link_find(&st);
         if (first) {
             if (link(first, target) < 0) { warn_errno(target); set_minor_error(); return -1; }
             return 0;
         }
     }
     if (opt->link_files && link(src, target) == 0) {
-        if (st.st_nlink > 1) pass_link_add(&st, target);
+        if (st.st_nlink > 1) seen_link_add(&st, target);
         return 0;
     }
 
@@ -1753,7 +2064,7 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
     }
     if (opt->reset_atime) reset_atime(in, &st, src);
     close(in);
-    if (st.st_nlink > 1) pass_link_add(&st, target);
+    if (st.st_nlink > 1) seen_link_add(&st, target);
     finish_copy(target, &st, opt, out);
     close(out);
     return ok ? 0 : -1;
@@ -1766,7 +2077,7 @@ static int mode_pass(options_t *opt) {
             note_file(opt, name);
     }
     dir_fixes_finish(opt);
-    pass_links_free();
+    seen_links_free();
     report_blocks(opt, g_pass_bytes);
     return g_status;
 }
@@ -1859,6 +2170,8 @@ static bool set_format(options_t *opt, const char *f) {
     else if (strcmp(f, "crc") == 0) opt->fmt = FMT_CRC;
     else if (strcmp(f, "odc") == 0) opt->fmt = FMT_ODC;
     else if (strcmp(f, "bin") == 0) opt->fmt = FMT_BIN;
+    else if (strcmp(f, "ustar") == 0) opt->fmt = FMT_USTAR;
+    else if (strcmp(f, "tar") == 0) opt->fmt = FMT_TAR;
     else if (strcmp(f, "hpodc") == 0) { opt->fmt = FMT_ODC; opt->hp = true; }
     else if (strcmp(f, "hpbin") == 0) { opt->fmt = FMT_BIN; opt->hp = true; }
     else {

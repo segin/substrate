@@ -12,6 +12,11 @@ This document describes cpio formats supported by
 .It
 newc (SVR4 ASCII header, magic 070701)
 .It
+ustar (POSIX tar: 512-byte headers with octal fields and a checksum,
+names split between a 155-byte prefix and a 100-byte name, data padded
+to 512 bytes, two zero blocks at the end) and tar (the old format:
+the same without the magic, owner names, device numbers or prefix)
+.It
 hpodc and hpbin (odc and bin as HP-UX writes them: a device file's
 number goes in the file size field, and its device field holds 0,1)
 .It

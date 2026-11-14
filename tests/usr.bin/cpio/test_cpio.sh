@@ -591,6 +591,53 @@ if [ -c /dev/null ]; then
     done
 fi
 
+# ---- ustar and tar, written and read (found without -H), and with GNU
+# tar and GNU cpio at the other end
+mkdir -p tt/d
+printf 'tar data\n' > tt/f
+ln -s f tt/s
+ln tt/f tt/h
+mkfifo tt/p
+deep=tt/$(printf 'a%.0s' $(seq 60))/$(printf 'b%.0s' $(seq 60))
+mkdir -p "$deep" && printf 'deep\n' > "$deep/z"
+TLIST="tt\ntt/d\ntt/f\ntt/s\ntt/h\ntt/p\n${deep%/*}\n$deep\n$deep/z\n"
+printf "$TLIST" | "$CPIO" -o -H ustar --quiet > t.ustar
+same "ustar: 512-byte blocks" 0 "$(( $(stat -c %s t.ustar) % 512 ))"
+same "ustar: found and listed" "$(printf "$TLIST")" "$("$CPIO" -it -F t.ustar)"
+# as the GNU tools list it: directories with their trailing /
+DLIST="tt/\ntt/d/\ntt/f\ntt/s\ntt/h\ntt/p\n${deep%/*}/\n$deep/\n$deep/z\n"
+fresh xt
+run sh -c "mv tt tt.src && \"$CPIO\" -id < t.ustar; mv tt xt/; mv tt.src tt"
+same "ustar: file" "tar data" "$(cat xt/tt/f 2>&1)"
+same "ustar: symlink" "f" "$(readlink xt/tt/s)"
+same "ustar: hard link" "$(stat -c %i xt/tt/f)" "$(stat -c %i xt/tt/h 2>&1)"
+ok "ustar: fifo" test -p xt/tt/p
+same "ustar: long name" "deep" "$(cat "xt/$deep/z" 2>&1)"
+same "ustar: status" 0 "$rc"
+run sh -c "printf 'tt/f\ntt/p\n' | \"$CPIO\" -o -H tar > t.tar"
+same "tar: no fifo" "cpio: tt/p: not a file the tar format can hold" "$err"
+same "tar: found and listed" "tt/f" "$("$CPIO" -it -F t.tar)"
+if tar --version 2>/dev/null | grep -q 'GNU tar'; then
+    same "ustar: GNU tar lists ours" "$(printf "$DLIST")" "$(tar -tf t.ustar)"
+    tar --format=ustar -cf g.ustar tt/f tt/s tt/d
+    tar --format=v7 -cf g.v7 tt/f tt/s tt/d
+    for a in g.ustar g.v7; do
+        same "$a: ours lists GNU tar's" "$(printf 'tt/f\ntt/s\ntt/d')" "$("$CPIO" -it -F "$a")"
+        fresh "x$a"
+        run sh -c "cd x$a && \"$CPIO\" -id < ../$a"
+        same "$a: ours extracts GNU tar's" "tar data f" "$(cat "x$a/tt/f") $(readlink "x$a/tt/s")"
+    done
+fi
+if [ -n "$GNU" ]; then
+    same "ustar: GNU cpio lists ours" "$(printf "$DLIST")" "$("$GNU" -it -H ustar -F t.ustar 2>/dev/null)"
+    fresh gx
+    (cd gx && "$GNU" -id -H ustar < ../t.ustar 2>/dev/null)
+    same "ustar: GNU cpio extracts ours" "tar data f $(stat -c %i gx/tt/f)" \
+        "$(cat gx/tt/f) $(readlink gx/tt/s) $(stat -c %i gx/tt/h)"
+    printf 'tt/f\ntt/s\n' | "$GNU" -o -H ustar 2>/dev/null > gc.ustar
+    same "ustar: ours lists GNU cpio's" "$(printf 'tt/f\ntt/s')" "$("$CPIO" -it -F gc.ustar)"
+fi
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
