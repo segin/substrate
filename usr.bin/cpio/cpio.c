@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <getopt.h>
 #include <grp.h>
 #include <limits.h>
 #include <locale.h>
@@ -69,9 +70,10 @@ static void warn_errno(const char *what) {
 
 static void usage(FILE *out) {
     fprintf(out,
-        "usage: cpio -o [-v] [-H format] [-F archive] [-R user:group]\n"
-        "       cpio -i [-t] [-v] [-dmu] [-H format] [-F archive] [--safe-extract] [--absolute-paths] [--insecure]\n"
-        "       cpio -p [-v] [-dmu] directory\n");
+        "usage: cpio -o [-v] [-H format] [-F archive] [-R owner] < name-list\n"
+        "       cpio -i [-dfmntuv] [-E file] [-H format] [-F archive] [-R owner]\n"
+        "               [--absolute-paths] [--insecure] [--no-overwrite] [pattern ...]\n"
+        "       cpio -p [-dlmuv] [-R owner] directory < name-list\n");
 }
 
 /* A decimal id: all digits, in range. */
@@ -1554,13 +1556,64 @@ static int read_patterns(const char *file, options_t *opt) {
     return 0;
 }
 
+/* Long options: GNU cpio's names for the options above, and the safety
+ * options, which are this cpio's own. */
+enum {
+    OPT_SAFE = 256, OPT_NO_ABS, OPT_ABS, OPT_INSECURE, OPT_NO_OVERWRITE,
+    OPT_NUMERIC_OWNER, OPT_NO_PRESERVE_OWNER,
+};
+
+static const struct option long_opts[] = {
+    { "create", no_argument, NULL, 'o' },
+    { "extract", no_argument, NULL, 'i' },
+    { "pass-through", no_argument, NULL, 'p' },
+    { "list", no_argument, NULL, 't' },
+    { "verbose", no_argument, NULL, 'v' },
+    { "file", required_argument, NULL, 'F' },
+    { "format", required_argument, NULL, 'H' },
+    { "make-directories", no_argument, NULL, 'd' },
+    { "preserve-modification-time", no_argument, NULL, 'm' },
+    { "unconditional", no_argument, NULL, 'u' },
+    { "link", no_argument, NULL, 'l' },
+    { "nonmatching", no_argument, NULL, 'f' },
+    { "pattern-file", required_argument, NULL, 'E' },
+    { "owner", required_argument, NULL, 'R' },
+    { "numeric-uid-gid", no_argument, NULL, 'n' },
+    { "safe-extract", no_argument, NULL, OPT_SAFE },
+    { "no-absolute-paths", no_argument, NULL, OPT_NO_ABS },
+    { "no-absolute-filenames", no_argument, NULL, OPT_NO_ABS },
+    { "absolute-paths", no_argument, NULL, OPT_ABS },
+    { "absolute-filenames", no_argument, NULL, OPT_ABS },
+    { "insecure", no_argument, NULL, OPT_INSECURE },
+    { "no-overwrite", no_argument, NULL, OPT_NO_OVERWRITE },
+    { "numeric-owner", no_argument, NULL, OPT_NUMERIC_OWNER },
+    { "no-preserve-owner", no_argument, NULL, OPT_NO_PRESERVE_OWNER },
+    { NULL, 0, NULL, 0 },
+};
+
+static bool set_mode(options_t *opt, mode_tn m) {
+    if (opt->mode != MODE_NONE && opt->mode != m) {
+        warnx_("only one of -o, -i and -p may be given");
+        return false;
+    }
+    opt->mode = m;
+    return true;
+}
+
+static bool set_format(options_t *opt, const char *f) {
+    if (strcmp(f, "newc") == 0) opt->fmt = FMT_NEWC;
+    else if (strcmp(f, "odc") == 0) opt->fmt = FMT_ODC;
+    else if (strcmp(f, "bin") == 0) opt->fmt = FMT_BIN;
+    else {
+        warnx_("unknown archive format: %s", f);
+        return false;
+    }
+    return true;
+}
+
 int main(int argc, char **argv) {
     options_t opt;
     int c;
-    char **new_argv = malloc((argc + 1) * sizeof(char *));
-    int new_argc = 0;
-
-    if (!new_argv) return 2;
 
     setlocale(LC_ALL, "");
     memset(&opt, 0, sizeof(opt));
@@ -1568,104 +1621,85 @@ int main(int argc, char **argv) {
     opt.safe_extract = true;
     opt.fmt = (fmt_t)-1;
 
-    new_argv[new_argc++] = argv[0];
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--safe-extract") == 0) opt.safe_extract = true;
-        else if (strcmp(argv[i], "--no-absolute-paths") == 0) opt.no_absolute_paths = true;
-        else if (strcmp(argv[i], "--absolute-paths") == 0) opt.no_absolute_paths = false;
-        else if (strcmp(argv[i], "--insecure") == 0) {
-            opt.safe_extract = false;
-            opt.no_absolute_paths = false;
-        } else if (strcmp(argv[i], "--no-overwrite") == 0) opt.no_overwrite = true;
-        /* the owner is restored by number, the only way cpio archives
-         * record it: as root that is now the default, so this is it */
-        else if (strcmp(argv[i], "--numeric-owner") == 0) opt.no_preserve_owner = false;
-        else if (strcmp(argv[i], "--no-preserve-owner") == 0) opt.no_preserve_owner = true;
-        else if (strncmp(argv[i], "--format=", 9) == 0) {
-            const char *f = argv[i] + 9;
-            if (strcmp(f, "newc") == 0) opt.fmt = FMT_NEWC;
-            else if (strcmp(f, "odc") == 0) opt.fmt = FMT_ODC;
-            else if (strcmp(f, "bin") == 0) opt.fmt = FMT_BIN;
-            else { warnx_("unknown archive format: %s", f); free(new_argv); return 2; }
-        } else {
-            new_argv[new_argc++] = argv[i];
-        }
-    }
-    new_argv[new_argc] = NULL;
-
     opterr = 0;
-    while ((c = getopt(new_argc, new_argv, ":oipF:tvnH:C:R:dmulfE:")) != -1) {
+    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:", long_opts, NULL)) != -1) {
         switch (c) {
-        case 'o': opt.mode = MODE_OUT; break;
-        case 'i': opt.mode = MODE_IN; break;
-        case 'p': opt.mode = MODE_PASS; break;
+        case 'o': if (!set_mode(&opt, MODE_OUT)) return 2; break;
+        case 'i': if (!set_mode(&opt, MODE_IN)) return 2; break;
+        case 'p': if (!set_mode(&opt, MODE_PASS)) return 2; break;
         case 'F': opt.archive_file = optarg; break;
         case 't': opt.toc = true; break;
         case 'v': opt.verbose = true; break;
         case 'n': opt.numeric_ids = true; break;
-        case 'H':
-            if (strcmp(optarg, "newc") == 0) opt.fmt = FMT_NEWC;
-            else if (strcmp(optarg, "odc") == 0) opt.fmt = FMT_ODC;
-            else if (strcmp(optarg, "bin") == 0) opt.fmt = FMT_BIN;
-            else { warnx_("unknown archive format: %s", optarg); free(new_argv); return 2; }
-            break;
-        case 'R':
-            if (parse_owner(optarg, &opt) < 0) { free(new_argv); return 2; }
-            break;
+        case 'H': if (!set_format(&opt, optarg)) return 2; break;
+        case 'R': if (parse_owner(optarg, &opt) < 0) return 2; break;
         case 'd': opt.make_dirs = true; break;
         case 'm': opt.preserve_mtime = true; break;
         case 'l': opt.link_files = true; break;
         case 'f': opt.invert = true; break;
-        case 'E':
-            if (read_patterns(optarg, &opt) < 0) { free(new_argv); return 2; }
-            break;
+        case 'E': if (read_patterns(optarg, &opt) < 0) return 2; break;
         case 'u': opt.force_overwrite = true; break;
         case 'C': break;
+        case OPT_SAFE: opt.safe_extract = true; break;
+        case OPT_NO_ABS: opt.no_absolute_paths = true; break;
+        case OPT_ABS: opt.no_absolute_paths = false; break;
+        case OPT_INSECURE: opt.safe_extract = false; opt.no_absolute_paths = false; break;
+        case OPT_NO_OVERWRITE: opt.no_overwrite = true; break;
+        /* the owner is restored by number, the only way cpio archives
+         * record it: as root that is the default, so this is it */
+        case OPT_NUMERIC_OWNER: opt.no_preserve_owner = false; break;
+        case OPT_NO_PRESERVE_OWNER: opt.no_preserve_owner = true; break;
         case ':':
-            warnx_("option -%c needs an argument", optopt);
+            if (optopt > 0 && optopt < 256) warnx_("option -%c needs an argument", optopt);
+            else warnx_("option %s needs an argument", argv[optind - 1]);
             usage(stderr);
-            free(new_argv);
             return 2;
         default:
-            warnx_("unknown option -%c", optopt);
+            if (optopt > 0 && optopt < 256) warnx_("unknown option -%c", optopt);
+            else warnx_("unknown option %s", argv[optind - 1]);
             usage(stderr);
-            free(new_argv);
             return 2;
         }
     }
 
+    /* -t alone lists, as GNU cpio's does */
+    if (opt.toc && opt.mode == MODE_NONE) opt.mode = MODE_IN;
     if (opt.mode == MODE_NONE) {
+        warnx_("one of -o, -i and -p is needed");
         usage(stderr);
-        free(new_argv);
         return 2;
     }
-    if (opt.mode == MODE_PASS) {
-        if (optind >= new_argc) {
-            warnx_("-p needs a destination directory");
-            free(new_argv);
+    if (opt.toc && opt.mode != MODE_IN) {
+        warnx_("-t lists an archive: it goes with -i");
+        return 2;
+    }
+
+    switch (opt.mode) {
+    case MODE_OUT:
+        if (optind < argc) {
+            warnx_("too many arguments: %s (copy-out reads its names from standard input)", argv[optind]);
             return 2;
         }
-        opt.pass_dir = new_argv[optind];
-    }
-    if (opt.mode == MODE_IN) {
-        for (int i = optind; i < new_argc; i++) {
-            if (add_pattern(&opt, new_argv[i]) < 0) { free(new_argv); return 2; }
+        if (opt.fmt == (fmt_t)-1) opt.fmt = FMT_NEWC;
+        return mode_out(&opt);
+    case MODE_IN:
+        for (int i = optind; i < argc; i++)
+            if (add_pattern(&opt, argv[i]) < 0) return 2;
+        return mode_in(&opt);
+    default:
+        if (optind >= argc) {
+            warnx_("-p needs a destination directory");
+            return 2;
         }
+        if (optind + 1 < argc) {
+            warnx_("too many arguments: %s", argv[optind + 1]);
+            return 2;
+        }
+        if (opt.archive_file) {
+            warnx_("-F names an archive: -p has none");
+            return 2;
+        }
+        opt.pass_dir = argv[optind];
+        return mode_pass(&opt);
     }
-
-    if (opt.fmt == (fmt_t)-1 && opt.mode == MODE_OUT) opt.fmt = FMT_NEWC;
-
-    if (opt.mode == MODE_OUT) {
-        int ret = mode_out(&opt);
-        free(new_argv);
-        return ret;
-    }
-    if (opt.mode == MODE_IN) {
-        int ret = mode_in(&opt);
-        free(new_argv);
-        return ret;
-    }
-    int ret = mode_pass(&opt);
-    free(new_argv);
-    return ret;
 }

@@ -415,6 +415,26 @@ fresh xpat
 run sh -c "cd xpat && \"$CPIO\" -id 'src/d/*' < ../pat.cpio"
 same "pattern extracts only matches" "xpat/src/d/g" "$(find xpat -type f)"
 
+# ---- options: GNU's long names, "--", an argument that looks like an
+# option, and the combinations that make no sense
+printf 'src/f\n' | "$CPIO" --create --format=odc --file=long.cpio
+same "long options" "src/f" "$("$CPIO" --extract --list --file long.cpio)"
+cp long.cpio ./--insecure
+same "-F takes an argument like an option" "src/f" "$("$CPIO" -it -F --insecure)"
+same "-- ends the options" "src/f" "$("$CPIO" -it -F long.cpio -- 'src/*')"
+same "-t alone lists" "src/f" "$("$CPIO" -t -F long.cpio)"
+run "$CPIO" -o -i
+same "two modes" "cpio: only one of -o, -i and -p may be given" "$err"
+same "two modes: status" 2 "$rc"
+run "$CPIO" -o stray </dev/null
+same "copy-out operand" "cpio: too many arguments: stray (copy-out reads its names from standard input)" "$err"
+run "$CPIO" -p -F x.cpio dir </dev/null
+same "-p with -F" "cpio: -F names an archive: -p has none" "$err"
+run "$CPIO" --frobnicate
+same "unknown long option" "cpio: unknown option --frobnicate" "$(head -1 .err)"
+run "$CPIO" -v </dev/null
+same "no mode" "cpio: one of -o, -i and -p is needed" "$(head -1 .err)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

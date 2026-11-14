@@ -189,6 +189,43 @@ which is otherwise the default.
 Restore the archived owner by number, which is what a cpio archive
 records; this is the default when run by root.
 .El
+.Pp
+The options also have GNU cpio's long names:
+.Fl -create ,
+.Fl -extract ,
+.Fl -pass-through ,
+.Fl -list ,
+.Fl -verbose ,
+.Fl -file ,
+.Fl -format ,
+.Fl -make-directories ,
+.Fl -preserve-modification-time ,
+.Fl -unconditional ,
+.Fl -link ,
+.Fl -nonmatching ,
+.Fl -pattern-file ,
+.Fl -owner
+and
+.Fl -numeric-uid-gid ;
+.Fl -no-absolute-filenames
+and
+.Fl -absolute-filenames
+are
+.Fl -no-absolute-paths
+and
+.Fl -absolute-paths .
+Exactly one of
+.Fl o ,
+.Fl i
+and
+.Fl p
+is given
+.Pf ( Fl t
+alone means
+.Fl it ) ,
+and the options come before the operands;
+.Ql --
+ends them.
 .Sh EXIT STATUS
 .Ex -std
 .Bl -tag -width Ds
