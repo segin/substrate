@@ -160,6 +160,15 @@ With
 write
 .Ar archive
 rather than standard output.
+.It Fl 0
+Read the name list of
+.Fl o
+and
+.Fl p
+as names each ended by a NUL byte rather than a newline, as
+.Ql find -print0
+writes them
+.Pf ( Fl -null ) .
 .It Fl D Ar directory
 Change to
 .Ar directory

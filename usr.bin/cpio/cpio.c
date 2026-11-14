@@ -42,6 +42,7 @@ typedef struct {
     char **patterns;    /* copy-in: members to select (all if none) */
     size_t npatterns;
     bool invert;        /* -f: select those that match none */
+    bool null_names;    /* -0: the name list is NUL-separated */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -1221,17 +1222,39 @@ static fmt_t detect_fmt(void) {
     return FMT_NEWC;
 }
 
+/* The next name of copy-out's or pass mode's list on standard input: a
+ * line, or with -0 a NUL-terminated string, of any length.  NULL at the
+ * end.  Empty names are passed over; a name too long for a path is
+ * reported and passed over, not cut in two. */
+static char *next_name(const options_t *opt) {
+    static char *buf;
+    static size_t cap;
+    ssize_t n;
+    while ((n = getdelim(&buf, &cap, opt->null_names ? '\0' : '\n', stdin)) > 0) {
+        if (buf[n - 1] == (opt->null_names ? '\0' : '\n')) buf[--n] = '\0';
+        if (n == 0) continue;
+        if (n >= PATH_MAX) {
+            warnx_("%.40s...: name too long", buf);
+            set_minor_error();
+            continue;
+        }
+        return buf;
+    }
+    if (ferror(stdin)) {
+        warn_errno("standard input");
+        set_minor_error();
+    }
+    return NULL;
+}
+
 static int mode_out(options_t *opt) {
     int afd = (opt->archive_file && strcmp(opt->archive_file, "-") != 0)
               ? open(opt->archive_file, O_WRONLY | O_CREAT | O_TRUNC, 0666)
               : STDOUT_FILENO;
-    char line[PATH_MAX];
+    const char *name;
     if (afd < 0) { warn_errno(opt->archive_file); return 2; }
-    while (fgets(line, sizeof(line), stdin)) {
-        size_t len = strlen(line);
-        if (len && line[len - 1] == '\n') line[len - 1] = '\0';
-        if (line[0] == '\0') continue;
-        if (write_entry(opt, afd, line) == -2) break;
+    while ((name = next_name(opt)) != NULL) {
+        if (write_entry(opt, afd, name) == -2) break;
     }
     if (g_status < 2) out_links_finish(opt, afd);
     if (g_status < 2 && write_trailer(opt, afd) < 0) {
@@ -1516,13 +1539,10 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
 }
 
 static int mode_pass(options_t *opt) {
-    char line[PATH_MAX];
-    while (fgets(line, sizeof(line), stdin)) {
-        size_t len = strlen(line);
-        if (len && line[len - 1] == '\n') line[len - 1] = '\0';
-        if (line[0] == '\0') continue;
-        if (copy_one_path(line, opt->pass_dir, opt) == 0 && opt->verbose)
-            fprintf(stderr, "%s\n", line);
+    const char *name;
+    while ((name = next_name(opt)) != NULL) {
+        if (copy_one_path(name, opt->pass_dir, opt) == 0 && opt->verbose)
+            fprintf(stderr, "%s\n", name);
     }
     dir_fixes_finish(opt);
     pass_links_free();
@@ -1580,6 +1600,7 @@ static const struct option long_opts[] = {
     { "owner", required_argument, NULL, 'R' },
     { "numeric-uid-gid", no_argument, NULL, 'n' },
     { "directory", required_argument, NULL, 'D' },
+    { "null", no_argument, NULL, '0' },
     { "safe-extract", no_argument, NULL, OPT_SAFE },
     { "no-absolute-paths", no_argument, NULL, OPT_NO_ABS },
     { "no-absolute-filenames", no_argument, NULL, OPT_NO_ABS },
@@ -1624,7 +1645,7 @@ int main(int argc, char **argv) {
     opt.fmt = (fmt_t)-1;
 
     opterr = 0;
-    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:", long_opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0", long_opts, NULL)) != -1) {
         switch (c) {
         case 'o': if (!set_mode(&opt, MODE_OUT)) return 2; break;
         case 'i': if (!set_mode(&opt, MODE_IN)) return 2; break;
@@ -1638,6 +1659,7 @@ int main(int argc, char **argv) {
         case 'I': in_file = optarg; break;
         case 'O': out_file = optarg; break;
         case 'D': dir = optarg; break;
+        case '0': opt.null_names = true; break;
         case 'R': if (parse_owner(optarg, &opt) < 0) return 2; break;
         case 'd': opt.make_dirs = true; break;
         case 'm': opt.preserve_mtime = true; break;

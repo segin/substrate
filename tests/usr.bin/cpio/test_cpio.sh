@@ -447,6 +447,21 @@ same "-D" "hello" "$(cat xD/src/f 2>&1)"
 run "$CPIO" -i -D nonexistentdir -I io.cpio
 same "-D to nowhere" "cpio: nonexistentdir: No such file or directory" "$err"
 
+# ---- -0 reads a NUL-separated list; a name too long for a path is
+# reported whole, not cut into two names
+mkdir -p nl && printf 'n\n' > "nl/a
+b"
+printf 'nl/a\nb\0src/f\0' | "$CPIO" -o0 > nul.cpio
+same "-0" "$(printf 'nl/a\nb\nsrc/f')" "$("$CPIO" -it -F nul.cpio)"
+fresh p0
+printf 'nl/a\nb\0' | "$CPIO" -p0d p0
+same "-p -0" "n" "$(cat "p0/nl/a
+b" 2>&1)"
+long=$(head -c 5000 /dev/zero | tr '\0' x)
+run sh -c "printf '%s\nsrc/f\n' $long | \"$CPIO\" -o > longname.cpio"
+same "long name" "cpio: $(printf %.40s "$long")...: name too long" "$err"
+same "long name: the rest archived" "src/f" "$("$CPIO" -it -F longname.cpio)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
