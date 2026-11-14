@@ -48,6 +48,11 @@ are read from standard input, one per line.
 Copy-in and pass-through give each file the archived (or source)
 permissions exactly, set-user-ID, set-group-ID and sticky bits
 included; the umask does not apply.
+A directory is made writable by its owner at first and given its own
+mode, and with
+.Fl m
+its time, only once everything has been extracted or copied, so that a
+read-only directory still takes its contents.
 .Pp
 Copy-out writes a file with more than one link in each format's way:
 newc names it with every name but the last at size zero and puts the

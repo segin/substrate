@@ -334,6 +334,26 @@ touch -d '2001-01-01' pu/f
 run sh -c "printf 'f\n' | (cd src && \"$CPIO\" -p ../pu)"
 same "-p: older replaced" "hello" "$(cat pu/f)"
 
+# ---- a read-only directory still takes its contents; -m keeps a
+# directory's time though files are made in it after it
+mkdir -p rod/ro
+printf 'z\n' > rod/ro/z
+touch -d '2001-02-03 04:05' rod/ro
+chmod 555 rod/ro
+(cd rod && printf 'ro\nro/z\n' | "$CPIO" -o) > ro.cpio
+fresh xro
+run sh -c "cd xro && \"$CPIO\" -idm < ../ro.cpio"
+same "read-only directory: contents" "z" "$(cat xro/ro/z 2>&1)"
+same "read-only directory: status" 0 "$rc"
+same "read-only directory: mode" 555 "$(stat -c %a xro/ro)"
+same "-m on a directory" "2001-02-03 04:05" "$(date -u -d "@$(stat -c %Y xro/ro)" '+%Y-%m-%d %H:%M')"
+fresh pro
+run sh -c "cd rod && printf 'ro\nro/z\n' | \"$CPIO\" -pdm ../pro"
+same "-p read-only directory: contents" "z" "$(cat pro/ro/z 2>&1)"
+same "-p read-only directory: mode" 555 "$(stat -c %a pro/ro)"
+same "-p -m on a directory" "2001-02-03 04:05" "$(date -u -d "@$(stat -c %Y pro/ro)" '+%Y-%m-%d %H:%M')"
+chmod 755 rod/ro xro/ro pro/ro
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

@@ -911,6 +911,43 @@ static void deferred_symlinks_finish(const options_t *opt) {
     }
 }
 
+/* Directories are made writable by their owner and given their own mode,
+ * and with -m their time, only when everything has been extracted: a
+ * read-only directory would refuse its own contents, and every file
+ * made in one changes its time.  The list runs newest first, so a
+ * directory is finished before the one holding it. */
+typedef struct dir_fix {
+    char *path;
+    entry_t meta;
+    struct dir_fix *next;
+} dir_fix_t;
+
+static dir_fix_t *g_dir_fixes;
+
+static void defer_dir(const char *path, const entry_t *e) {
+    dir_fix_t *d = calloc(1, sizeof(*d));
+    if (!d || !(d->path = strdup(path))) {
+        free(d);
+        warn_errno(shown(path));
+        set_minor_error();
+        return;
+    }
+    d->meta = *e;
+    d->meta.name = NULL;
+    d->next = g_dir_fixes;
+    g_dir_fixes = d;
+}
+
+static void dir_fixes_finish(const options_t *opt) {
+    while (g_dir_fixes) {
+        dir_fix_t *d = g_dir_fixes;
+        g_dir_fixes = d->next;
+        apply_attrs(d->path, &d->meta, opt);
+        free(d->path);
+        free(d);
+    }
+}
+
 static int extract_entry(const entry_t *e, const options_t *opt, const char *base) {
     char full[PATH_MAX];
     int fd = -1;
@@ -953,9 +990,11 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     }
 
     if (S_ISDIR(e->mode)) {
-        if (mkdir(full, e->mode & 07777) < 0 && errno != EEXIST) {
+        made = false;   /* its attributes come at the end */
+        if (mkdir(full, (e->mode & 07777) | S_IRWXU) < 0 && errno != EEXIST) {
             warn_errno(e->name); set_minor_error();
-            made = false;
+        } else {
+            defer_dir(full, e);
         }
     } else if (S_ISLNK(e->mode)) {
         char *target;
@@ -1175,6 +1214,7 @@ static int mode_in(options_t *opt) {
 
     in_links_finish(opt);
     deferred_symlinks_finish(opt);
+    dir_fixes_finish(opt);
     if (afd != STDIN_FILENO) close(afd);
     return g_status;
 }
@@ -1191,8 +1231,18 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
     if (opt->make_dirs && make_parent_dirs(target) < 0) { warn_errno(target); set_minor_error(); return -1; }
 
     if (S_ISDIR(st.st_mode)) {
-        if (mkdir(target, st.st_mode & 07777) < 0 && errno != EEXIST) { warn_errno(target); set_minor_error(); }
-        else if (chmod(target, st.st_mode & 07777) < 0) { warn_errno(target); set_minor_error(); }
+        if (mkdir(target, (st.st_mode & 07777) | S_IRWXU) < 0 && errno != EEXIST) {
+            warn_errno(target);
+            set_minor_error();
+        } else {
+            entry_t meta;
+            memset(&meta, 0, sizeof(meta));
+            meta.mode = st.st_mode;
+            meta.uid = st.st_uid;
+            meta.gid = st.st_gid;
+            meta.mtime = st.st_mtime;
+            defer_dir(target, &meta);
+        }
         return 0;
     }
     if (S_ISLNK(st.st_mode)) {
@@ -1269,6 +1319,7 @@ static int mode_pass(options_t *opt) {
         copy_one_path(line, opt->pass_dir, opt);
         if (opt->verbose) fprintf(stderr, "%s\n", line);
     }
+    dir_fixes_finish(opt);
     return g_status;
 }
 
