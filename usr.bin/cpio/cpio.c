@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -49,6 +50,20 @@ static hardlink_ent_t *g_links = NULL;
 
 static void set_minor_error(void) { if (g_status < 1) g_status = 1; }
 static void set_fatal_error(void) { g_status = 2; }
+
+/* Diagnostics: "cpio: " and the message, or "cpio: WHAT: strerror(errno)". */
+static void warnx_(const char *fmt, ...) {
+    va_list ap;
+    fputs("cpio: ", stderr);
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
+static void warn_errno(const char *what) {
+    warnx_("%s: %s", what, strerror(errno));
+}
 
 static void usage(FILE *out) {
     fprintf(out,
@@ -255,14 +270,14 @@ static int write_entry(options_t *opt, int afd, const char *path) {
     int ffd = -1;
 
     if (lstat(path, &st) < 0) {
-        perror(path);
+        warn_errno(path);
         set_minor_error();
         return -1;
     }
 
     if (S_ISLNK(st.st_mode)) {
         lsz = readlink(path, lnk, sizeof(lnk) - 1);
-        if (lsz < 0) { perror(path); set_minor_error(); return -1; }
+        if (lsz < 0) { warn_errno(path); set_minor_error(); return -1; }
         lnk[lsz] = '\0';
         data_size = (uint32_t)lsz;
     } else if (S_ISREG(st.st_mode)) {
@@ -273,13 +288,13 @@ static int write_entry(options_t *opt, int afd, const char *path) {
             h = hl_find(st.st_dev, st.st_ino);
             if (h) data_size = 0;
             else if (hl_add(st.st_dev, st.st_ino, path) < 0) {
-                perror("hardlink tracking");
+                warn_errno(path);
                 set_minor_error();
             }
         }
         if (data_size > 0) {
             ffd = open(path, O_RDONLY);
-            if (ffd < 0) { perror(path); set_minor_error(); return -1; }
+            if (ffd < 0) { warn_errno(path); set_minor_error(); return -1; }
         }
     }
 
@@ -316,7 +331,7 @@ static int write_entry(options_t *opt, int afd, const char *path) {
     return 0;
 
 ioerr:
-    perror("archive write");
+    warn_errno("write error");
     set_minor_error();
     if (ffd >= 0) close(ffd);
     return -1;
@@ -494,13 +509,13 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
 
     if (strcmp(e->name, "TRAILER!!!") == 0) return 1;
     if (!path_is_safe(e->name, opt)) {
-        fprintf(stderr, "cpio: blocked unsafe path: %s\n", e->name);
+        warnx_("%s: unsafe name, not extracted", e->name);
         set_minor_error();
         return skip_data_and_pad(afd, opt->fmt, e->filesize);
     }
 
     if (snprintf(full, sizeof(full), "%s/%s", base ? base : ".", e->name) >= (int)sizeof(full)) {
-        fprintf(stderr, "cpio: path too long: %s\n", e->name);
+        warnx_("%s: name too long", e->name);
         set_minor_error();
         return skip_data_and_pad(afd, opt->fmt, e->filesize);
     }
@@ -511,19 +526,19 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
     }
 
     if (opt->no_overwrite && access(full, F_OK) == 0) {
-        fprintf(stderr, "cpio: no-overwrite skipped: %s\n", full);
+        warnx_("%s: exists, not overwritten", e->name);
         return skip_data_and_pad(afd, opt->fmt, e->filesize);
     }
 
     if (opt->make_dirs && make_parent_dirs(full) < 0) {
-        perror("mkdir -p");
+        warn_errno(e->name);
         set_minor_error();
         return skip_data_and_pad(afd, opt->fmt, e->filesize);
     }
 
     if (S_ISDIR(e->mode)) {
         if (mkdir(full, e->mode & 07777) < 0 && errno != EEXIST) {
-            perror(full); set_minor_error();
+            warn_errno(full); set_minor_error();
         }
     } else if (S_ISLNK(e->mode)) {
         char *target = malloc((size_t)e->filesize + 1);
@@ -531,20 +546,20 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
         if (read_all(afd, target, (size_t)e->filesize) < 0) { free(target); return -1; }
         target[e->filesize] = '\0';
         unlink(full);
-        if (symlink(target, full) < 0) { perror(full); set_minor_error(); }
+        if (symlink(target, full) < 0) { warn_errno(full); set_minor_error(); }
         free(target);
         left = 0;
     } else if (S_ISFIFO(e->mode)) {
-        if (mkfifo(full, e->mode & 07777) < 0 && errno != EEXIST) { perror(full); set_minor_error(); }
+        if (mkfifo(full, e->mode & 07777) < 0 && errno != EEXIST) { warn_errno(full); set_minor_error(); }
     } else if (S_ISCHR(e->mode) || S_ISBLK(e->mode)) {
         if (geteuid() != 0) {
-            fprintf(stderr, "cpio: skipping device node %s (not root)\n", full);
+            warnx_("%s: device not created: only root may", e->name);
             set_minor_error();
         } else if (mknod(full, e->mode, e->rdev) < 0 && errno != EEXIST) {
-            perror(full); set_minor_error();
+            warn_errno(full); set_minor_error();
         }
     } else if (S_ISSOCK(e->mode)) {
-        fprintf(stderr, "cpio: skipping socket %s\n", full);
+        warnx_("%s: socket not created", e->name);
         set_minor_error();
     } else {
         off_t outoff = 0;
@@ -554,7 +569,7 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
         unlink(full);
         fd = open(full, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, e->mode & 07777);
         if (fd < 0) {
-            perror(full);
+            warn_errno(full);
             set_minor_error();
             return skip_data_and_pad(afd, opt->fmt, e->filesize);
         }
@@ -565,7 +580,7 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
             left -= chunk;
         }
         if (ftruncate(fd, (off_t)e->filesize) < 0) {
-            perror("ftruncate");
+            warn_errno(e->name);
             set_minor_error();
         }
         close(fd);
@@ -598,7 +613,7 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
             ts[1].tv_sec = e->mtime; ts[1].tv_nsec = 0;
             if (utimensat(AT_FDCWD, full, ts, AT_SYMLINK_NOFOLLOW) < 0) set_minor_error();
         }
-        if (opt->verbose) fprintf(stderr, "%s\n", full);
+        if (opt->verbose) fprintf(stderr, "%s\n", e->name);
     }
     return 0;
 }
@@ -617,7 +632,7 @@ static int mode_out(options_t *opt) {
               ? open(opt->archive_file, O_WRONLY | O_CREAT | O_TRUNC, 0666)
               : STDOUT_FILENO;
     char line[PATH_MAX];
-    if (afd < 0) { perror("open archive"); return 2; }
+    if (afd < 0) { warn_errno(opt->archive_file); return 2; }
     while (fgets(line, sizeof(line), stdin)) {
         size_t len = strlen(line);
         if (len && line[len - 1] == '\n') line[len - 1] = '\0';
@@ -625,7 +640,7 @@ static int mode_out(options_t *opt) {
         write_entry(opt, afd, line);
     }
     if (write_trailer(opt, afd) < 0) {
-        perror("trailer");
+        warn_errno("write error");
         set_minor_error();
     }
     hl_free();
@@ -637,7 +652,7 @@ static int mode_in(options_t *opt) {
     int afd = (opt->archive_file && strcmp(opt->archive_file, "-") != 0)
               ? open(opt->archive_file, O_RDONLY)
               : STDIN_FILENO;
-    if (afd < 0) { perror("open archive"); return 2; }
+    if (afd < 0) { warn_errno(opt->archive_file); return 2; }
 
     if (opt->fmt == (fmt_t)-1)
         opt->fmt = detect_fmt(afd);
@@ -665,34 +680,34 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
     char buf[IO_BUFSZ];
     char target[PATH_MAX];
     int in = -1, out = -1;
-    if (lstat(src, &st) < 0) { perror(src); set_minor_error(); return -1; }
+    if (lstat(src, &st) < 0) { warn_errno(src); set_minor_error(); return -1; }
     if (snprintf(target, sizeof(target), "%s/%s", dst, src) >= (int)sizeof(target)) {
         set_minor_error(); return -1;
     }
-    if (opt->make_dirs && make_parent_dirs(target) < 0) { perror("mkdir -p"); set_minor_error(); return -1; }
+    if (opt->make_dirs && make_parent_dirs(target) < 0) { warn_errno(target); set_minor_error(); return -1; }
 
     if (S_ISDIR(st.st_mode)) {
-        if (mkdir(target, st.st_mode & 07777) < 0 && errno != EEXIST) { perror(target); set_minor_error(); }
+        if (mkdir(target, st.st_mode & 07777) < 0 && errno != EEXIST) { warn_errno(target); set_minor_error(); }
         return 0;
     }
     if (S_ISLNK(st.st_mode)) {
         ssize_t n = readlink(src, buf, sizeof(buf) - 1);
-        if (n < 0) { perror(src); set_minor_error(); return -1; }
+        if (n < 0) { warn_errno(src); set_minor_error(); return -1; }
         buf[n] = '\0';
         unlink(target);
-        if (symlink(buf, target) < 0) { perror(target); set_minor_error(); }
+        if (symlink(buf, target) < 0) { warn_errno(target); set_minor_error(); }
         return 0;
     }
     if (!S_ISREG(st.st_mode)) return 0;
 
     in = open(src, O_RDONLY);
     out = open(target, O_WRONLY | O_CREAT | O_TRUNC, st.st_mode & 07777);
-    if (in < 0 || out < 0) { perror("open"); set_minor_error(); goto done; }
+    if (in < 0 || out < 0) { warn_errno(in < 0 ? src : target); set_minor_error(); goto done; }
     for (;;) {
         ssize_t r = read(in, buf, sizeof(buf));
-        if (r < 0) { if (errno == EINTR) continue; perror(src); set_minor_error(); break; }
+        if (r < 0) { if (errno == EINTR) continue; warn_errno(src); set_minor_error(); break; }
         if (r == 0) break;
-        if (write_all(out, buf, (size_t)r) < 0) { perror(target); set_minor_error(); break; }
+        if (write_all(out, buf, (size_t)r) < 0) { warn_errno(target); set_minor_error(); break; }
     }
     if (opt->preserve_mtime) {
         struct timespec ts[2];
@@ -746,7 +761,7 @@ int main(int argc, char **argv) {
             if (strcmp(f, "newc") == 0) opt.fmt = FMT_NEWC;
             else if (strcmp(f, "odc") == 0) opt.fmt = FMT_ODC;
             else if (strcmp(f, "bin") == 0) opt.fmt = FMT_BIN;
-            else { fprintf(stderr, "unknown format: %s\n", f); free(new_argv); return 2; }
+            else { warnx_("unknown archive format: %s", f); free(new_argv); return 2; }
         } else {
             new_argv[new_argc++] = argv[i];
         }
@@ -754,7 +769,7 @@ int main(int argc, char **argv) {
     new_argv[new_argc] = NULL;
 
     opterr = 0;
-    while ((c = getopt(new_argc, new_argv, "oipF:tvH:C:R:dmu")) != -1) {
+    while ((c = getopt(new_argc, new_argv, ":oipF:tvH:C:R:dmu")) != -1) {
         switch (c) {
         case 'o': opt.mode = MODE_OUT; break;
         case 'i': opt.mode = MODE_IN; break;
@@ -766,11 +781,11 @@ int main(int argc, char **argv) {
             if (strcmp(optarg, "newc") == 0) opt.fmt = FMT_NEWC;
             else if (strcmp(optarg, "odc") == 0) opt.fmt = FMT_ODC;
             else if (strcmp(optarg, "bin") == 0) opt.fmt = FMT_BIN;
-            else { fprintf(stderr, "unknown format: %s\n", optarg); free(new_argv); return 2; }
+            else { warnx_("unknown archive format: %s", optarg); free(new_argv); return 2; }
             break;
         case 'R':
             if (parse_owner(optarg, &opt.owner_uid, &opt.owner_gid) < 0) {
-                fprintf(stderr, "invalid owner: %s\n", optarg); free(new_argv); return 2;
+                warnx_("invalid owner: %s", optarg); free(new_argv); return 2;
             }
             opt.owner_set = true;
             break;
@@ -778,7 +793,13 @@ int main(int argc, char **argv) {
         case 'm': opt.preserve_mtime = true; break;
         case 'u': opt.force_overwrite = true; break;
         case 'C': break;
+        case ':':
+            warnx_("option -%c needs an argument", optopt);
+            usage(stderr);
+            free(new_argv);
+            return 2;
         default:
+            warnx_("unknown option -%c", optopt);
             usage(stderr);
             free(new_argv);
             return 2;
@@ -792,7 +813,7 @@ int main(int argc, char **argv) {
     }
     if (opt.mode == MODE_PASS) {
         if (optind >= new_argc) {
-            fprintf(stderr, "cpio: -p requires target directory\n");
+            warnx_("-p needs a destination directory");
             free(new_argv);
             return 2;
         }
