@@ -1,147 +1,277 @@
-.Dd February 11, 2026
+.Dd November 14, 2026
 .Dt CPIO 1
 .Os
 .Sh NAME
 .Nm cpio
-.Nd copy file archives in and out
+.Nd copy files into and out of archives
 .Sh SYNOPSIS
 .Nm
 .Fl o
-.Op Fl v
+.Op Fl 0aBcLvV
+.Op Fl C Ar size
+.Op Fl D Ar directory
+.Op Fl F Ar archive | Fl O Ar archive
 .Op Fl H Ar format
-.Op Fl F Ar archive
 .Op Fl R Ar owner
+.Op Fl -quiet
+.Li < Ar name-list
 .Nm
 .Fl i
-.Op Fl t
-.Op Fl v
-.Op Fl n
-.Op Fl dmu
+.Op Fl bBcdfmnrsStuvV
+.Op Fl C Ar size
+.Op Fl D Ar directory
+.Op Fl E Ar file
+.Op Fl F Ar archive | Fl I Ar archive
 .Op Fl H Ar format
-.Op Fl F Ar archive
-.Op Fl -safe-extract
-.Op Fl -no-absolute-paths
+.Op Fl R Ar owner
+.Op Fl -absolute-paths
+.Op Fl -insecure
 .Op Fl -no-overwrite
 .Op Fl -no-preserve-owner
-.Op Fl R Ar owner
-.Op Fl f
-.Op Fl E Ar file
+.Op Fl -quiet
 .Op Ar pattern ...
 .Nm
 .Fl p
-.Op Fl v
-.Op Fl dlmu
-.Op Fl -no-preserve-owner
+.Op Fl 0adlLmuvV
+.Op Fl D Ar directory
 .Op Fl R Ar owner
+.Op Fl -no-preserve-owner
+.Op Fl -quiet
 .Ar directory
+.Li < Ar name-list
 .Sh DESCRIPTION
 The
 .Nm
-utility reads and writes cpio archives using copy-out
-.Pq Fl o ,
-copy-in
-.Pq Fl i ,
-and pass-through
-.Pq Fl p
-modes.
+utility copies files into an archive
+.Pq copy-out, Fl o ,
+out of one
+.Pq copy-in, Fl i ,
+or from one directory tree to another
+.Pq pass-through, Fl p .
+Exactly one of the three is given;
+.Fl t
+alone means
+.Fl it .
 .Pp
-Pathnames for
-.Fl o
-and
-.Fl p
-are read from standard input, one per line.
+Copy-out and pass-through read the names of the files to take from
+standard input, one per line (one per NUL-terminated string with
+.Fl 0 ) ,
+as
+.Xr find 1
+writes them.
+A directory named is taken by itself, not with its contents.
+A name too long for a path is reported and passed over.
 .Pp
-With
+Copy-in takes every member of the archive, or with
 .Ar pattern
-operands, copy-in (and
-.Fl t )
-takes only the members whose names match one of them, as
+operands only those whose names match one of them as
 .Xr fnmatch 3
 matches with no flags: a
 .Ql *
 matches a
 .Ql /
 too.
+.Ss Formats
+.Bl -tag -width "hpodc, hpbin"
+.It Cm newc
+The SVR4 portable format: ASCII headers in hexadecimal, magic 070701.
+The default for copy-out.
+.It Cm crc
+newc with magic 070702 and a checksum of each regular file's data,
+which copy-in checks.
+.It Cm odc
+The old portable format: ASCII headers in octal, magic 070707.
+This is the cpio interchange format of
+.Xr pax 1 .
+.It Cm bin
+The old binary format, in the writing machine's byte order; copy-in
+reads either order.
+.It Cm hpodc , hpbin
+odc and bin with device numbers as HP-UX writes them.
+They cannot be told from odc and bin, so copy-in reads them only when
+named with
+.Fl H .
+.It Cm ustar
+The POSIX tar format.
+.It Cm tar
+The old tar format, which has no devices or fifos.
+.El
 .Pp
-Pass-through copies regular files, directories, symbolic links and
-fifos, and, when run by root, device files; the names of one file are
-copied as links to one copy.
-A socket is reported and left out.
+Copy-in finds the format of its archive, other than hpodc and hpbin,
+by itself.
+A file too large for the format is left out with a diagnostic: newc,
+crc and bin hold 4\~GiB less one byte, odc, ustar and tar 8\~GiB less
+one.
+.Xr cpio 5
+describes the formats.
+.Ss Links
+Copy-out writes a file with more than one link as each format expects.
+newc and crc give every name but the last a size of zero and the last
+the data, so the names are held back until all have been listed (or
+the list ends); odc and bin put the data with every name; ustar and tar
+write the later names as links to the first.
 .Pp
-Copy-in and pass-through give each file the archived (or source)
+Copy-in restores the links, the data coming with any of the names;
+names whose data never comes become an empty file and links to it.
+Pass-through copies the names of one file as links to one copy, or
+with
+.Fl l
+links each file to its source.
+.Ss Modes, times and owners
+Copy-in and pass-through give each file its archived (or source)
 permissions exactly, set-user-ID, set-group-ID and sticky bits
-included; the umask does not apply.
+included: the umask does not apply.
 A directory is made writable by its owner at first and given its own
 mode, and with
 .Fl m
-its time, only once everything has been extracted or copied, so that a
-read-only directory still takes its contents.
+its time, once everything has been extracted, so that a read-only
+directory still takes its contents.
 .Pp
-Copy-out writes a file with more than one link in each format's way:
-newc names it with every name but the last at size zero and puts the
-data with the last, holding the names back until all of them (or the
-end of the list) have come; odc and bin put the data with every name.
+When run by root, copy-in and pass-through also give each file its
+archived (or source) owner, by number, unless
+.Fl -no-preserve-owner
+is given.
 .Pp
-Copy-in restores hard links: the names an archive gives one file (the
-same device and inode number, with a link count above one) are
-extracted as links to one file.
-The data may come with the first name, with every name, or, as newc
-archives have it, with the last; names still waiting for it at the end
-of the archive become an empty file and links to it.
+Without
+.Fl u ,
+a file on disk no older than the one that would replace it is kept,
+with the diagnostic
+.Dq not created: newer or same age version exists .
+.Ss Safe extraction
+By default copy-in refuses a member whose name is absolute or has a
+.Sq ..
+component, and writes nothing through a symbolic link that the archive
+itself makes and that could lead out of the tree (one whose target is
+absolute or has a
+.Sq ..
+component): such links are made only once the archive has been read,
+an empty file holding each name until then.
+Symbolic links already on disk are followed as usual.
+.Fl -absolute-paths
+allows absolute names, which are then extracted at that path, and
+.Fl -insecure
+turns all of this off.
+.Pp
+On copy-out
+.Nm
+writes the archive in blocks, 512 bytes unless
+.Fl B ,
+.Fl C
+or
+.Fl -block-size
+says otherwise, the last padded with zeros.
 .Sh OPTIONS
+.Ss Modes
 .Bl -tag -width Ds
-.It Fl o
-Create archive.
-.It Fl i
-Extract archive.
-.It Fl p
-Pass-through copy to directory.
-.It Fl F Ar archive
-Read/write archive file instead of stdin/stdout.
-.It Fl H Ar format
-Archive format: bin, odc, newc, crc (newc with a checksum of each
-file's data, checked on copy-in), hpodc or hpbin (odc or bin with
-device numbers as HP-UX writes them; they cannot be told from odc and
-bin, so copy-in needs
-.Fl H
-to read them), ustar (the POSIX tar format) or tar (the old tar
-format, which has no devices or fifos).
-A file larger than the format can record is left out with a
-diagnostic: 4\~GiB less one byte for newc and bin, 8\~GiB less one for
-odc.
-.It Fl t
-List the archive's members, one name per line on standard output,
-rather than extracting them.
-The extraction safety checks do not apply to a listing.
-.It Fl v
-Verbose output: name each file as it is archived, copied or extracted,
-on standard error.
-With
-.Fl t ,
-list each member as
-.Xr ls 1
-.Fl l
-does: mode, links, owner, group, size (or major and minor numbers),
-modification time and name, and for a symbolic link its target.
-.It Fl n
+.It Fl o , Fl -create
+Copy-out: write an archive of the files named on standard input.
+.It Fl i , Fl -extract
+Copy-in: extract an archive's members.
+.It Fl t , Fl -list
+List the members, one name per line on standard output, rather than
+extracting them; the safety checks do not apply.
+.It Fl p , Fl -pass-through
+Copy the files named on standard input under
+.Ar directory .
+.El
+.Ss Archive and format
+.Bl -tag -width Ds
+.It Fl F Ar archive , Fl -file Ns = Ns Ar archive
+Read or write
+.Ar archive
+rather than standard input or output.
+.It Fl I Ar archive
+The archive copy-in reads.
+.It Fl O Ar archive
+The archive copy-out writes.
+.It Fl H Ar format , Fl -format Ns = Ns Ar format
+The archive format: one of those above.
+.It Fl c
+The same as
+.Fl H Cm newc .
+.It Fl B
+Blocks of 5120 bytes.
+.It Fl C Ar size , Fl -io-size Ns = Ns Ar size
+Blocks of
+.Ar size
+bytes.
+.It Fl -block-size Ns = Ns Ar n
+Blocks of
+.Ar n
+\(mu 512 bytes.
+.El
+.Ss Copy-out and pass-through
+.Bl -tag -width Ds
+.It Fl 0 , Fl -null
+Names on standard input end with a NUL byte rather than a newline.
+.It Fl a , Fl -reset-access-time
+Put back each file's access time after reading it.
+.It Fl L , Fl -dereference
+Take what each symbolic link points to rather than the link.
+.El
+.Ss Copy-in
+.Bl -tag -width Ds
+.It Fl f , Fl -nonmatching
+Take the members that match none of the patterns.
+.It Fl E Ar file , Fl -pattern-file Ns = Ns Ar file
+Read more patterns from
+.Ar file ,
+one per line.
+.It Fl n , Fl -numeric-uid-gid
 With
 .Fl tv ,
-show the owner and group as numbers.
-.It Fl V
-Write a dot to standard error for each file archived, extracted or
-copied, and a newline at the end
-.Pf ( Fl -dot ) .
-.It Fl d
-Create leading directories.
-.It Fl m
-Preserve modification time on extraction/copy.
-.It Fl u
-Replace files unconditionally.
-Without it, a file already on disk that is no older than the one
-replacing it is kept, with the diagnostic
-.Dq not created: newer or same age version exists
-(which does not change the exit status).
-.It Fl R Ar owner
+show owners and groups as numbers.
+.It Fl r , Fl -rename
+Ask on the terminal what to call each member; an empty reply skips it.
+.It Fl s , Fl -swap-bytes
+Swap the bytes of each 16-bit halfword of each regular file's data.
+.It Fl S , Fl -swap-halfwords
+Swap the halfwords of each 32-bit word.
+.It Fl b , Fl -swap
+Both.
+A file that is not a whole number of halfwords (or words) is extracted
+unswapped in that respect, with a warning.
+.It Fl -absolute-paths , Fl -absolute-filenames
+Extract members with absolute names, at those paths.
+.It Fl -no-absolute-paths , Fl -no-absolute-filenames
+Refuse members with absolute names; the default.
+.It Fl -safe-extract
+Refuse members with
+.Sq ..
+components and hold back the archive's escaping symbolic links; the
+default.
+.It Fl -insecure
+Turn off all of the safety checks.
+.It Fl -no-overwrite
+Keep anything already at a member's name.
+.El
+.Ss Pass-through
+.Bl -tag -width Ds
+.It Fl l , Fl -link
+Link each file to its source where they are on one file system, and
+copy it otherwise.
+.El
+.Ss Copy-in and pass-through
+.Bl -tag -width Ds
+.It Fl d , Fl -make-directories
+Make leading directories as needed.
+.It Fl m , Fl -preserve-modification-time
+Give each file its archived (or source) modification time.
+.It Fl u , Fl -unconditional
+Replace files whatever their age.
+.It Fl -no-preserve-owner
+When run by root, leave the files made owned by root.
+.It Fl -numeric-owner
+Give owners by number, which is all an archive records; the default as
+root.
+.El
+.Ss Any mode
+.Bl -tag -width Ds
+.It Fl D Ar directory , Fl -directory Ns = Ns Ar directory
+Change to
+.Ar directory
+first.
+.It Fl R Ar owner , Fl -owner Ns = Ns Ar owner
 On copy-out, record this owner in the archive; on copy-in and
 pass-through, give it to every file made.
 .Ar owner
@@ -149,214 +279,100 @@ is
 .Ar user : Ns Ar group ,
 .Ar user . Ns Ar group ,
 .Ar user
-alone (the group is left as it is),
+(the group left as it is),
 .Ar user :
 (the user's login group) or
-.Pf : Ar group ;
+.Pf : Ar group ,
 each a name or a number.
-.It Fl c
-The same as
-.Fl H Cm newc ,
-as in GNU cpio.
-.It Fl I Ar archive
+.It Fl v , Fl -verbose
+Name each file as it is archived, extracted or copied, on standard
+error.
 With
-.Fl i ,
-read
-.Ar archive
-rather than standard input.
-.It Fl O Ar archive
-With
-.Fl o ,
-write
-.Ar archive
-rather than standard output.
-.It Fl 0
-Read the name list of
-.Fl o
-and
-.Fl p
-as names each ended by a NUL byte rather than a newline, as
-.Ql find -print0
-writes them
-.Pf ( Fl -null ) .
-.It Fl L
-With
-.Fl o
-and
-.Fl p ,
-take what each symbolic link points to rather than the link itself
-.Pf ( Fl -dereference ) .
-.It Fl a
-With
-.Fl o
-and
-.Fl p ,
-put back each file's access time after reading it
-.Pf ( Fl -reset-access-time ) .
-.It Fl B
-Use blocks of 5120 bytes rather than 512.
-.It Fl C Ar size
-Use blocks of
-.Ar size
-bytes
-.Pf ( Fl -io-size ) .
-.It Fl -block-size Ns = Ns Ar n
-Use blocks of
-.Ar n
-\(mu 512 bytes.
+.Fl t ,
+list each member as
+.Ql ls -l
+does: mode, links, owner, group, size (or major and minor numbers),
+modification time and name, and a symbolic link's target.
+.It Fl V , Fl -dot
+Write a dot to standard error for each file, and a newline at the end.
 .It Fl -quiet
 Do not report the number of blocks.
-.It Fl D Ar directory
-Change to
-.Ar directory
-first
-.Pf ( Fl -directory ) .
-.It Fl f
-With
-.Fl i ,
-take the members that match none of the patterns instead.
-.It Fl s
-With
-.Fl i ,
-swap the bytes of each 16-bit halfword of each regular file's data
-.Pf ( Fl -swap-bytes ) .
-.It Fl S
-With
-.Fl i ,
-swap the halfwords of each 32-bit word
-.Pf ( Fl -swap-halfwords ) .
-.It Fl b
-Both
-.Fl s
-and
-.Fl S
-.Pf ( Fl -swap ) .
-A file whose size is not a whole number of halfwords (or words) is
-extracted unswapped in that respect, with a warning.
-.It Fl r
-With
-.Fl i ,
-ask on the terminal what to call each member
-.Pf ( Fl -rename ) ;
-an empty reply skips it.
-.It Fl E Ar file
-With
-.Fl i ,
-read patterns from
-.Ar file ,
-one per line, as well as from the operands.
-.It Fl l
-With
-.Fl p ,
-link each file to its source rather than copying it, where they are
-on one file system; copy it otherwise.
-.It Fl -safe-extract
-Refuse members whose names have a
-.Sq ..
-component, and hold back the archive's own symbolic links whose
-targets are absolute or have a
-.Sq ..
-component until the whole archive has been read, so that no member is
-written through one.
-Until then an empty file holds each such link's name.
-Symbolic links already on disk are followed as usual.
-This is the default.
-.It Fl -no-absolute-paths
-Refuse members with absolute names.
-This is the default.
-.It Fl -absolute-paths
-Allow members with absolute names.
-.It Fl -insecure
-Turn off both of the above: extract absolute names, names with
-.Sq ..
-components, and the archive's symbolic links as they come.
-.It Fl -no-overwrite
-Do not replace existing files on extraction.
-.It Fl -no-preserve-owner
-When run by root, leave the files made on copy-in and pass-through
-owned by root rather than giving them the archived (or source) owner,
-which is otherwise the default.
-.It Fl -numeric-owner
-Restore the archived owner by number, which is what a cpio archive
-records; this is the default when run by root.
 .El
 .Pp
-The options also have GNU cpio's long names:
-.Fl -create ,
-.Fl -extract ,
-.Fl -pass-through ,
-.Fl -list ,
-.Fl -verbose ,
-.Fl -file ,
-.Fl -format ,
-.Fl -make-directories ,
-.Fl -preserve-modification-time ,
-.Fl -unconditional ,
-.Fl -link ,
-.Fl -nonmatching ,
-.Fl -pattern-file ,
-.Fl -owner
-and
-.Fl -numeric-uid-gid ;
-.Fl -no-absolute-filenames
-and
-.Fl -absolute-filenames
-are
-.Fl -no-absolute-paths
-and
-.Fl -absolute-paths .
-Exactly one of
-.Fl o ,
-.Fl i
-and
-.Fl p
-is given
-.Pf ( Fl t
-alone means
-.Fl it ) ,
-and the options come before the operands;
+The options come before the operands;
 .Ql --
 ends them.
 .Sh EXIT STATUS
-.Ex -std
-.Bl -tag -width Ds
+.Bl -tag -width Ds -compact
 .It 0
-Success.
+Every file was archived, extracted or copied.
 .It 1
-Non-fatal errors occurred (partial success).
+Some were not, each with a diagnostic; the rest were.
 .It 2
-Fatal error.
+A fatal error: a bad command line, an archive that could not be opened
+or written, or one that ends before its trailer.
 .El
+.Sh EXAMPLES
+Archive a tree, and list the archive:
+.Bd -literal -offset indent
+$ find src -print | cpio -o > src.cpio
+$ cpio -itv < src.cpio
+.Ed
+.Pp
+Extract it elsewhere, making directories and keeping times:
+.Bd -literal -offset indent
+$ mkdir out && cd out && cpio -idm < ../src.cpio
+.Ed
+.Pp
+Extract only the C files, from a compressed archive:
+.Bd -literal -offset indent
+$ gzip -dc src.cpio.gz | cpio -id '*.c'
+.Ed
+.Pp
+Copy a tree, names with newlines and all:
+.Bd -literal -offset indent
+$ find src -print0 | cpio -p0dm /backup
+.Ed
 .Sh DIAGNOSTICS
 Each diagnostic is written to standard error and begins
-.Ql cpio: ,
-then the name of the file or member concerned.
+.Dq Li cpio:\& ,
+then names the file or member concerned.
 .Pp
-Copy-out writes the archive in whole blocks, the last padded with zeros.
 At the end of a run that did not fail,
 .Nm
-reports on standard error how many blocks it wrote, read or (for
-.Fl p )
-copied, as
+reports how many blocks it wrote, read or copied, as
 .Dq Ar n Li blocks ,
 unless
 .Fl -quiet
 is given.
 .Pp
-On copy-in, bytes that are not a header where one is due are skipped to
-the next header, with a warning of how many; a malformed header is
+On copy-in, bytes that are not a header where one is due are skipped
+to the next header, with a warning of how many; a malformed header is
 reported and passed over.
 An archive that ends before its trailer is a fatal error:
 .Dq premature end of archive
-if no header was found at all,
+if no header was found,
 .Dq premature end of file
 otherwise.
 .Pp
-On copy-out, a file that yields fewer bytes than its size when it was
-examined is padded with zeros to that size, with a warning, so that
-the archive stays readable.
+On copy-out, a file that yields fewer bytes than it had when it was
+examined is padded with zeros to that size, with a warning, so that the
+archive stays readable.
 A failure to write the archive is fatal.
 .Sh SEE ALSO
-.Xr pax 1
+.Xr find 1 ,
+.Xr pax 1 ,
+.Xr tar 1 ,
+.Xr cpio 5
 .Sh STANDARDS
-Behavior follows POSIX cpio model with pragmatic safety extensions.
+.Nm
+was specified by
+.St -p1003.1-88
+and left out of POSIX from IEEE Std 1003.1-2001 on; its odc format
+remains the cpio interchange format of
+.Xr pax 1 .
+This
+.Nm
+follows GNU cpio where a standard is silent: its options, formats,
+diagnostics and block count.
+The safety checks of copy-in are its own.
