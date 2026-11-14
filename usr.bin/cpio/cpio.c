@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <grp.h>
 #include <limits.h>
 #include <locale.h>
@@ -37,6 +38,9 @@ typedef struct {
     bool no_overwrite;
     bool no_preserve_owner; /* root: leave extracted files root's */
     bool link_files;    /* -l: pass mode links rather than copies */
+    char **patterns;    /* copy-in: members to select (all if none) */
+    size_t npatterns;
+    bool invert;        /* -f: select those that match none */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -1014,6 +1018,16 @@ static void dir_fixes_finish(const options_t *opt) {
     }
 }
 
+/* Whether copy-in takes the member NAME: it matches a pattern (fnmatch,
+ * no flags, as GNU cpio), or with -f matches none; every member if no
+ * patterns were given. */
+static bool selected(const char *name, const options_t *opt) {
+    bool match = opt->npatterns == 0;
+    for (size_t i = 0; !match && i < opt->npatterns; i++)
+        match = fnmatch(opt->patterns[i], name, 0) == 0;
+    return opt->npatterns == 0 ? true : match != opt->invert;
+}
+
 static int extract_entry(const entry_t *e, const options_t *opt, const char *base) {
     char full[PATH_MAX];
     int fd = -1;
@@ -1022,6 +1036,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     bool made = true;   /* the member is on disk, to be given its attributes */
 
     if (strcmp(e->name, "TRAILER!!!") == 0) return 1;
+    if (!selected(e->name, opt)) return skip_data_and_pad(opt->fmt, e->filesize);
     if (opt->toc) return list_entry(e, opt);
     if (!path_is_safe(e->name, opt)) {
         warnx_("%s: unsafe name, not extracted", e->name);
@@ -1512,6 +1527,33 @@ static int mode_pass(options_t *opt) {
     return g_status;
 }
 
+/* Copy-in's patterns: the operands, and with -E a file's lines. */
+static int add_pattern(options_t *opt, const char *p) {
+    char **v = realloc(opt->patterns, (opt->npatterns + 1) * sizeof(*v));
+    if (!v || !(v[opt->npatterns] = strdup(p))) {
+        if (v) opt->patterns = v;
+        warn_errno("pattern");
+        return -1;
+    }
+    opt->patterns = v;
+    opt->npatterns++;
+    return 0;
+}
+
+static int read_patterns(const char *file, options_t *opt) {
+    FILE *f = fopen(file, "r");
+    char line[PATH_MAX];
+    if (!f) { warn_errno(file); return -1; }
+    while (fgets(line, sizeof(line), f)) {
+        size_t len = strlen(line);
+        if (len && line[len - 1] == '\n') line[--len] = '\0';
+        if (len == 0) continue;
+        if (add_pattern(opt, line) < 0) { fclose(f); return -1; }
+    }
+    fclose(f);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     options_t opt;
     int c;
@@ -1552,7 +1594,7 @@ int main(int argc, char **argv) {
     new_argv[new_argc] = NULL;
 
     opterr = 0;
-    while ((c = getopt(new_argc, new_argv, ":oipF:tvnH:C:R:dmul")) != -1) {
+    while ((c = getopt(new_argc, new_argv, ":oipF:tvnH:C:R:dmulfE:")) != -1) {
         switch (c) {
         case 'o': opt.mode = MODE_OUT; break;
         case 'i': opt.mode = MODE_IN; break;
@@ -1573,6 +1615,10 @@ int main(int argc, char **argv) {
         case 'd': opt.make_dirs = true; break;
         case 'm': opt.preserve_mtime = true; break;
         case 'l': opt.link_files = true; break;
+        case 'f': opt.invert = true; break;
+        case 'E':
+            if (read_patterns(optarg, &opt) < 0) { free(new_argv); return 2; }
+            break;
         case 'u': opt.force_overwrite = true; break;
         case 'C': break;
         case ':':
@@ -1600,6 +1646,11 @@ int main(int argc, char **argv) {
             return 2;
         }
         opt.pass_dir = new_argv[optind];
+    }
+    if (opt.mode == MODE_IN) {
+        for (int i = optind; i < new_argc; i++) {
+            if (add_pattern(&opt, new_argv[i]) < 0) { free(new_argv); return 2; }
+        }
     }
 
     if (opt.fmt == (fmt_t)-1 && opt.mode == MODE_OUT) opt.fmt = FMT_NEWC;

@@ -404,6 +404,17 @@ fresh pl
 run sh -c "cd ps && printf 'l1\n' | \"$CPIO\" -pl ../pl"
 same "-pl links to the source" "$(stat -c %i ps/l1)" "$(stat -c %i pl/l1)"
 
+# ---- copy-in patterns: operands, -E file, -f to invert; * matches /
+printf 'src/f\nsrc/d\nsrc/d/g\n' | "$CPIO" -o > pat.cpio
+same "pattern" "src/d/g" "$("$CPIO" -it -F pat.cpio 'src/d/*')"
+same "patterns" "$(printf 'src/f\nsrc/d/g')" "$("$CPIO" -it -F pat.cpio 'src/f' '*/g')"
+same "-f" "$(printf 'src/f\nsrc/d')" "$("$CPIO" -itf -F pat.cpio 'src/d/*')"
+printf 'src/f\n\nsrc/d\n' > pats
+same "-E" "$(printf 'src/f\nsrc/d')" "$("$CPIO" -it -E pats -F pat.cpio)"
+fresh xpat
+run sh -c "cd xpat && \"$CPIO\" -id 'src/d/*' < ../pat.cpio"
+same "pattern extracts only matches" "xpat/src/d/g" "$(find xpat -type f)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

@@ -24,6 +24,9 @@
 .Op Fl -no-overwrite
 .Op Fl -no-preserve-owner
 .Op Fl R Ar owner
+.Op Fl f
+.Op Fl E Ar file
+.Op Ar pattern ...
 .Nm
 .Fl p
 .Op Fl v
@@ -47,6 +50,18 @@ Pathnames for
 and
 .Fl p
 are read from standard input, one per line.
+.Pp
+With
+.Ar pattern
+operands, copy-in (and
+.Fl t )
+takes only the members whose names match one of them, as
+.Xr fnmatch 3
+matches with no flags: a
+.Ql *
+matches a
+.Ql /
+too.
 .Pp
 Pass-through copies regular files, directories, symbolic links and
 fifos, and, when run by root, device files; the names of one file are
@@ -129,6 +144,16 @@ alone (the group is left as it is),
 (the user's login group) or
 .Pf : Ar group ;
 each a name or a number.
+.It Fl f
+With
+.Fl i ,
+take the members that match none of the patterns instead.
+.It Fl E Ar file
+With
+.Fl i ,
+read patterns from
+.Ar file ,
+one per line, as well as from the operands.
 .It Fl l
 With
 .Fl p ,
