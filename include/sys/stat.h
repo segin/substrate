@@ -157,6 +157,15 @@ mode_t umask(mode_t mask);
 int mkfifo(const char *path, mode_t mode);
 int mkfifoat(int dirfd, const char *path, mode_t mode);
 
+/* POSIX places these here; <sys/time.h> also declares them, as before.
+ * UTIME_NOW / UTIME_OMIT go in a tv_nsec slot: set that time to now, or
+ * leave it alone.  The kernel's values (sys/kern/syscall.c), as Linux's. */
+#define UTIME_NOW  ((1L << 30) - 1L)
+#define UTIME_OMIT ((1L << 30) - 2L)
+int utimensat(int dirfd, const char *path, const struct timespec times[2],
+              int flags);
+int futimens(int fd, const struct timespec times[2]);
+
 #ifdef __cplusplus
 }
 #endif

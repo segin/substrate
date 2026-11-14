@@ -32,13 +32,6 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
-#ifndef UTIME_NOW
-#define UTIME_NOW  ((1L << 30) - 1L)
-#endif
-#ifndef UTIME_OMIT
-#define UTIME_OMIT ((1L << 30) - 2L)
-#endif
-
 /* Validate broken-down fields and convert to an epoch timespec.  Uses
  * mktime(), so the fields are interpreted in the system's local time
  * (POSIX touch semantics), not forced to UTC. */
