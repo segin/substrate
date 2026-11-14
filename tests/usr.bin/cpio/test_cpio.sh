@@ -662,6 +662,21 @@ run sh -c "cd xn && \"$CPIO\" -iu --no-overwrite < ../nf.cpio"
 same "--no-overwrite: dangling symlink kept" "nowhere" "$(readlink xn/f)"
 same "--no-overwrite: message" "cpio: f: exists, not overwritten" "$err"
 
+# ---- extracted data is the archive's, whatever its zeros: short runs
+# written, long ones holes (and only those seeked over)
+printf 'a\0b\0\0c' > zs
+head -c 1048576 /dev/zero >> zs
+printf 'end' >> zs
+printf 'zs\n' | "$CPIO" -o --quiet > zs.cpio
+fresh xz
+(cd xz && "$CPIO" -i --quiet < ../zs.cpio)
+ok "zeros: data kept" cmp -s zs xz/zs
+if command -v strace >/dev/null 2>&1; then
+    fresh xz
+    seeks=$(cd xz && strace -f -e trace=lseek "$CPIO" -i --quiet < ../zs.cpio 2>&1 | grep -c 'lseek(.*SEEK_CUR')
+    ok "zeros: a seek per long run, not per zero byte ($seeks)" test "$seeks" -le 20
+fi
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

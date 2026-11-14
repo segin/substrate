@@ -1192,30 +1192,29 @@ static int skip_data_and_pad(fmt_t fmt, uint64_t size) {
     return in_skip(size + data_pad(fmt, size));
 }
 
+/* Runs of zeros at least this long are left as holes; shorter ones are
+ * written, so a file of scattered zero bytes is not a seek per byte. */
+#define SPARSE_MIN 4096
+
+/* Write N bytes of an extracted file, seeking over long runs of zeros
+ * (the final ftruncate gives a trailing hole its length). */
 static int write_sparse_aware(int outfd, const char *buf, size_t n, off_t *offset) {
-    size_t i = 0;
+    size_t i = 0, start = 0;    /* start: the data not yet written */
     while (i < n) {
-        size_t zstart = i;
-        while (zstart < n && buf[zstart] != '\0') zstart++;
-        if (zstart > i) {
-            if (write_all(outfd, buf + i, zstart - i) < 0) return -1;
-            *offset += (off_t)(zstart - i);
-        }
-        i = zstart;
-        while (i < n && buf[i] == '\0') i++;
-        if (i > zstart) {
-            if (lseek(outfd, (off_t)(i - zstart), SEEK_CUR) < 0) {
-                static char zeros[4096];
-                size_t rem = i - zstart;
-                while (rem > 0) {
-                    size_t c = rem > sizeof(zeros) ? sizeof(zeros) : rem;
-                    if (write_all(outfd, zeros, c) < 0) return -1;
-                    rem -= c;
-                }
+        size_t z;
+        if (buf[i] != '\0') { i++; continue; }
+        for (z = i; z < n && buf[z] == '\0'; z++) ;
+        if (z - i >= SPARSE_MIN) {
+            if (i > start && write_all(outfd, buf + start, i - start) < 0) return -1;
+            if (lseek(outfd, (off_t)(z - i), SEEK_CUR) < 0) {
+                if (write_all(outfd, buf + i, z - i) < 0) return -1;
             }
-            *offset += (off_t)(i - zstart);
+            start = z;
         }
+        i = z;
     }
+    if (n > start && write_all(outfd, buf + start, n - start) < 0) return -1;
+    *offset += (off_t)n;
     return 0;
 }
 
