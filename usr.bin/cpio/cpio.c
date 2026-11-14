@@ -42,15 +42,7 @@ typedef struct {
     bool owner_set;
 } options_t;
 
-typedef struct hardlink_ent {
-    dev_t dev;
-    ino_t ino;
-    char *first_path;
-    struct hardlink_ent *next;
-} hardlink_ent_t;
-
 static int g_status = 0;
-static hardlink_ent_t *g_links = NULL;
 
 static void set_minor_error(void) { if (g_status < 1) g_status = 1; }
 static void set_fatal_error(void) { g_status = 2; }
@@ -248,32 +240,10 @@ static int copy_out_file_data(int afd, int ffd, uint64_t size, const char *path)
     return 0;
 }
 
-static hardlink_ent_t *hl_find(dev_t dev, ino_t ino) {
-    hardlink_ent_t *e;
-    for (e = g_links; e; e = e->next)
-        if (e->dev == dev && e->ino == ino) return e;
-    return NULL;
-}
-
-static int hl_add(dev_t dev, ino_t ino, const char *path) {
-    hardlink_ent_t *e = calloc(1, sizeof(*e));
-    if (!e) return -1;
-    e->dev = dev;
-    e->ino = ino;
-    e->first_path = strdup(path);
-    if (!e->first_path) { free(e); return -1; }
-    e->next = g_links;
-    g_links = e;
-    return 0;
-}
-
-static void hl_free(void) {
-    while (g_links) {
-        hardlink_ent_t *next = g_links->next;
-        free(g_links->first_path);
-        free(g_links);
-        g_links = next;
-    }
+/* Both hard-link tables, copy-out's and copy-in's, hash (dev, ino). */
+#define LINK_BUCKETS 4096
+static size_t link_hash(dev_t dev, uint64_t ino) {
+    return (size_t)((ino * 0x9e3779b97f4a7c15ULL) ^ (uint64_t)dev) % LINK_BUCKETS;
 }
 
 /* The largest member each format's size field holds. */
@@ -285,42 +255,26 @@ static const char *fmt_name(fmt_t fmt) {
     return fmt == FMT_NEWC ? "newc" : fmt == FMT_ODC ? "odc" : "bin";
 }
 
-static int write_entry(options_t *opt, int afd, const char *path) {
-    struct stat st;
+/* Write one member: PATH's header, as ST describes it, and for a regular
+ * file its data if WITH_DATA (else a size of 0, the newc way of naming
+ * one more link).  0, -1 if PATH could not be archived, -2 if writing the
+ * archive failed. */
+static int write_member(options_t *opt, int afd, const char *path, struct stat *stp, bool with_data) {
+    struct stat st = *stp;
     char lnk[PATH_MAX];
     ssize_t lsz = 0;
     uint64_t data_size = 0;
     uint32_t nlink_hdr = 1;
     int ffd = -1;
 
-    if (lstat(path, &st) < 0) {
-        warn_errno(path);
-        set_minor_error();
-        return -1;
-    }
-
     if (S_ISLNK(st.st_mode)) {
         lsz = readlink(path, lnk, sizeof(lnk) - 1);
         if (lsz < 0) { warn_errno(path); set_minor_error(); return -1; }
         lnk[lsz] = '\0';
-        data_size = (uint32_t)lsz;
+        data_size = (uint64_t)lsz;
     } else if (S_ISREG(st.st_mode)) {
-        hardlink_ent_t *h = NULL;
-        if ((uint64_t)st.st_size > fmt_max_size(opt->fmt)) {
-            warnx_("%s: too large for the %s format", path, fmt_name(opt->fmt));
-            set_minor_error();
-            return -1;
-        }
-        data_size = (uint64_t)st.st_size;
         nlink_hdr = st.st_nlink;
-        if (st.st_nlink > 1) {
-            h = hl_find(st.st_dev, st.st_ino);
-            if (h) data_size = 0;
-            else if (hl_add(st.st_dev, st.st_ino, path) < 0) {
-                warn_errno(path);
-                set_minor_error();
-            }
-        }
+        data_size = with_data ? (uint64_t)st.st_size : 0;
         if (data_size > 0) {
             ffd = open(path, O_RDONLY);
             if (ffd < 0) { warn_errno(path); set_minor_error(); return -1; }
@@ -365,6 +319,98 @@ ioerr:
     set_fatal_error();
     if (ffd >= 0) close(ffd);
     return -2;
+}
+
+/* Copy-out's hard links, for newc, which puts a file's data on the last
+ * of its names: the names of a file with more than one link are held
+ * back until all have been seen, then written, the last with the data.
+ * (odc and bin carry the data on every name and hold nothing back.) */
+typedef struct out_link {
+    dev_t dev;
+    ino_t ino;
+    char **names;
+    struct stat *st;
+    size_t n;
+    struct out_link *next;
+} out_link_t;
+
+static out_link_t *g_out_links[LINK_BUCKETS];
+
+/* Write a held-back file: every name, the last with the data.  Its record
+ * is freed.  0, or -2 if writing the archive failed. */
+static int out_link_flush(options_t *opt, int afd, out_link_t *l) {
+    int r = 0;
+    for (size_t i = 0; i < l->n; i++) {
+        if (r != -2) {
+            int w = write_member(opt, afd, l->names[i], &l->st[i], i + 1 == l->n);
+            if (w == -2) r = -2;
+        }
+        free(l->names[i]);
+    }
+    free(l->names);
+    free(l->st);
+    free(l);
+    return r;
+}
+
+/* At the end of the list: write the files whose names did not all come. */
+static int out_links_finish(options_t *opt, int afd) {
+    int r = 0;
+    for (size_t h = 0; h < LINK_BUCKETS; h++) {
+        while (g_out_links[h]) {
+            out_link_t *l = g_out_links[h];
+            g_out_links[h] = l->next;
+            if (out_link_flush(opt, afd, l) == -2) r = -2;
+        }
+    }
+    return r;
+}
+
+static int write_entry(options_t *opt, int afd, const char *path) {
+    struct stat st;
+    out_link_t *l, **pp;
+    size_t h;
+
+    if (lstat(path, &st) < 0) {
+        warn_errno(path);
+        set_minor_error();
+        return -1;
+    }
+    if (S_ISREG(st.st_mode) && (uint64_t)st.st_size > fmt_max_size(opt->fmt)) {
+        warnx_("%s: too large for the %s format", path, fmt_name(opt->fmt));
+        set_minor_error();
+        return -1;
+    }
+    if (!S_ISREG(st.st_mode) || st.st_nlink < 2 || opt->fmt != FMT_NEWC)
+        return write_member(opt, afd, path, &st, true);
+
+    h = link_hash(st.st_dev, st.st_ino);
+    for (pp = &g_out_links[h]; *pp; pp = &(*pp)->next)
+        if ((*pp)->dev == st.st_dev && (*pp)->ino == st.st_ino) break;
+    l = *pp;
+    if (!l) {
+        l = calloc(1, sizeof(*l));
+        if (!l) { warn_errno(path); set_minor_error(); return -1; }
+        l->dev = st.st_dev;
+        l->ino = st.st_ino;
+        *pp = l;
+    }
+    {
+        char **names = realloc(l->names, (l->n + 1) * sizeof(*names));
+        struct stat *sts;
+        if (names) l->names = names;
+        sts = names ? realloc(l->st, (l->n + 1) * sizeof(*sts)) : NULL;
+        if (sts) l->st = sts;
+        if (!names || !sts || !(l->names[l->n] = strdup(path))) {
+            warn_errno(path);
+            set_minor_error();
+            return -1;
+        }
+        l->st[l->n++] = st;
+    }
+    if (l->n < (size_t)st.st_nlink) return 0;
+    *pp = l->next;
+    return out_link_flush(opt, afd, l);
 }
 
 static int write_trailer(options_t *opt, int afd) {
@@ -688,12 +734,7 @@ typedef struct in_link {
     struct in_link *next;
 } in_link_t;
 
-#define LINK_BUCKETS 4096
 static in_link_t *g_in_links[LINK_BUCKETS];
-
-static size_t link_hash(dev_t dev, uint64_t ino) {
-    return (size_t)((ino * 0x9e3779b97f4a7c15ULL) ^ (uint64_t)dev) % LINK_BUCKETS;
-}
 
 static in_link_t *in_link_get(const entry_t *e) {
     size_t h = link_hash(e->dev, e->ino);
@@ -953,11 +994,11 @@ static int mode_out(options_t *opt) {
         if (line[0] == '\0') continue;
         if (write_entry(opt, afd, line) == -2) break;
     }
+    if (g_status < 2) out_links_finish(opt, afd);
     if (g_status < 2 && write_trailer(opt, afd) < 0) {
         warn_errno("write error");
         set_fatal_error();
     }
-    hl_free();
     if (afd != STDOUT_FILENO && close(afd) < 0 && g_status < 2) {
         warn_errno("write error");
         set_fatal_error();

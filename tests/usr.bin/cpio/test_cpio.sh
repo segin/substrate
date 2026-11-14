@@ -226,6 +226,23 @@ if [ -w /dev/full ]; then
     same "write error: status" 2 "$rc"
 fi
 
+# ---- copy-out: newc carries a linked file's data on its last name, odc
+# and bin on every name (the size column of -tv: name size, in order)
+mkdir hl
+printf data > hl/a; ln hl/a hl/b; ln hl/a hl/c
+for fmt in newc odc bin; do
+    printf 'hl/a\nhl/b\nhl/c\n' | "$CPIO" -o -H "$fmt" > "hl-$fmt.cpio"
+    sizes=$("$CPIO" -itvn -F "hl-$fmt.cpio" | awk '{ printf "%s %s,", $9, $5 }')
+    case $fmt in
+    newc) want='hl/a 0,hl/b 0,hl/c 4,' ;;
+    *)    want='hl/a 4,hl/b 4,hl/c 4,' ;;
+    esac
+    same "links on copy-out, $fmt" "$want" "$sizes"
+done
+# a linked file whose other names are not listed still gets its data
+printf 'hl/b\n' | "$CPIO" -o -H newc > hl-one.cpio
+same "one name of a linked file" "hl/b 4," "$("$CPIO" -itvn -F hl-one.cpio | awk '{ printf "%s %s,", $9, $5 }')"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

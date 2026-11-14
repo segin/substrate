@@ -45,6 +45,11 @@ and
 .Fl p
 are read from standard input, one per line.
 .Pp
+Copy-out writes a file with more than one link in each format's way:
+newc names it with every name but the last at size zero and puts the
+data with the last, holding the names back until all of them (or the
+end of the list) have come; odc and bin put the data with every name.
+.Pp
 Copy-in restores hard links: the names an archive gives one file (the
 same device and inode number, with a link count above one) are
 extracted as links to one file.
