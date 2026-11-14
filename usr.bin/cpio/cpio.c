@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,10 +11,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
 
 #ifndef major
 #define major(dev) ((unsigned)(((dev) >> 8) & 0xff))
@@ -26,19 +23,6 @@
 #endif
 
 #define IO_BUFSZ 65536
-
-#ifndef AT_FDCWD
-#define AT_FDCWD -100
-#endif
-#ifndef AT_SYMLINK_NOFOLLOW
-#define AT_SYMLINK_NOFOLLOW 0x100
-#endif
-
-int symlink(const char *target, const char *linkpath);
-int mkfifo(const char *pathname, mode_t mode);
-int mknod(const char *pathname, mode_t mode, dev_t dev);
-int lchown(const char *pathname, uid_t owner, gid_t group);
-int utimensat(int dirfd, const char *pathname, const struct timespec times[2], int flags);
 
 typedef enum { MODE_NONE, MODE_OUT, MODE_IN, MODE_PASS } mode_tn;
 typedef enum { FMT_NEWC, FMT_ODC, FMT_BIN } fmt_t;
@@ -260,6 +244,15 @@ static int hl_add(dev_t dev, ino_t ino, const char *path) {
     e->next = g_links;
     g_links = e;
     return 0;
+}
+
+static void hl_free(void) {
+    while (g_links) {
+        hardlink_ent_t *next = g_links->next;
+        free(g_links->first_path);
+        free(g_links);
+        g_links = next;
+    }
 }
 
 static int write_entry(options_t *opt, int afd, const char *path) {
@@ -644,6 +637,7 @@ static int mode_out(options_t *opt) {
         perror("trailer");
         set_minor_error();
     }
+    hl_free();
     if (afd != STDOUT_FILENO) close(afd);
     return g_status;
 }
@@ -653,10 +647,6 @@ static int mode_in(options_t *opt) {
               ? open(opt->archive_file, O_RDONLY)
               : STDIN_FILENO;
     if (afd < 0) { perror("open archive"); return 2; }
-
-    if (!opt->toc && opt->pass_dir) {
-        if (chdir(opt->pass_dir) < 0) { perror("chdir"); return 2; }
-    }
 
     if (opt->fmt == (fmt_t)-1)
         opt->fmt = detect_fmt(afd);
@@ -785,11 +775,11 @@ int main(int argc, char **argv) {
             if (strcmp(optarg, "newc") == 0) opt.fmt = FMT_NEWC;
             else if (strcmp(optarg, "odc") == 0) opt.fmt = FMT_ODC;
             else if (strcmp(optarg, "bin") == 0) opt.fmt = FMT_BIN;
-            else { fprintf(stderr, "unknown format: %s\n", optarg); return 2; }
+            else { fprintf(stderr, "unknown format: %s\n", optarg); free(new_argv); return 2; }
             break;
         case 'R':
             if (parse_owner(optarg, &opt.owner_uid, &opt.owner_gid) < 0) {
-                fprintf(stderr, "invalid owner: %s\n", optarg); return 2;
+                fprintf(stderr, "invalid owner: %s\n", optarg); free(new_argv); return 2;
             }
             opt.owner_set = true;
             break;
@@ -799,6 +789,7 @@ int main(int argc, char **argv) {
         case 'C': break;
         default:
             usage(stderr);
+            free(new_argv);
             return 2;
         }
     }
