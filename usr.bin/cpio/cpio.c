@@ -45,6 +45,7 @@ typedef struct {
     bool null_names;    /* -0: the name list is NUL-separated */
     bool dereference;   /* -L: archive or copy what symlinks point to */
     bool reset_atime;   /* -a: put back the access times of files read */
+    bool quiet;         /* --quiet: no "N blocks" */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -169,6 +170,55 @@ static int write_all(int fd, const void *buf, size_t n) {
     return 0;
 }
 
+/* The I/O block: the archive is written in blocks of this size, the last
+ * padded with zeros, and sizes are reported in them.  512 bytes, 5120
+ * with -B, N with -C N, N * 512 with --block-size=N, as in GNU cpio. */
+static size_t g_block_size = 512;
+
+/* The archive being written, a block at a time. */
+static struct {
+    int fd;
+    unsigned char *buf;
+    size_t len;
+    uint64_t total;     /* bytes written */
+} g_out;
+
+static int ar_write(const void *p, size_t n) {
+    const unsigned char *s = p;
+    while (n > 0) {
+        size_t c = g_block_size - g_out.len;
+        if (c > n) c = n;
+        memcpy(g_out.buf + g_out.len, s, c);
+        g_out.len += c;
+        s += c;
+        n -= c;
+        if (g_out.len == g_block_size) {
+            if (write_all(g_out.fd, g_out.buf, g_block_size) < 0) return -1;
+            g_out.total += g_block_size;
+            g_out.len = 0;
+        }
+    }
+    return 0;
+}
+
+/* Pad the last block with zeros and write it. */
+static int ar_finish(void) {
+    if (g_out.len == 0) return 0;
+    memset(g_out.buf + g_out.len, 0, g_block_size - g_out.len);
+    if (write_all(g_out.fd, g_out.buf, g_block_size) < 0) return -1;
+    g_out.total += g_block_size;
+    g_out.len = 0;
+    return 0;
+}
+
+/* "N blocks" on standard error, as GNU cpio reports how much it moved,
+ * unless --quiet or the run failed. */
+static void report_blocks(const options_t *opt, uint64_t bytes) {
+    uint64_t n = (bytes + g_block_size - 1) / g_block_size;
+    if (opt->quiet || g_status >= 2) return;
+    fprintf(stderr, "%ju block%s\n", (uintmax_t)n, n == 1 ? "" : "s");
+}
+
 static int make_parent_dirs(const char *path) {
     char tmp[PATH_MAX];
     size_t i;
@@ -211,7 +261,7 @@ static bool bin_magic(const uint8_t *b, bool *le) {
     return false;
 }
 
-static int cpio_write_header_newc(int fd, const char *name, const struct stat *st, uint32_t filesize, uint32_t nlink) {
+static int cpio_write_header_newc(const char *name, const struct stat *st, uint32_t filesize, uint32_t nlink) {
     char hdr[110 + 1];
     uint32_t namesz = (uint32_t)strlen(name) + 1;
     snprintf(hdr, sizeof(hdr),
@@ -229,16 +279,16 @@ static int cpio_write_header_newc(int fd, const char *name, const struct stat *s
         (unsigned)minor(st->st_rdev),
         namesz,
         0U);
-    if (write_all(fd, hdr, 110) < 0) return -1;
-    if (write_all(fd, name, namesz) < 0) return -1;
+    if (ar_write(hdr, 110) < 0) return -1;
+    if (ar_write(name, namesz) < 0) return -1;
     while ((110 + namesz) % 4 != 0) {
-        if (write_all(fd, "\0", 1) < 0) return -1;
+        if (ar_write("\0", 1) < 0) return -1;
         namesz++;
     }
     return 0;
 }
 
-static int cpio_write_header_odc(int fd, const char *name, const struct stat *st, uint64_t filesize, uint32_t nlink) {
+static int cpio_write_header_odc(const char *name, const struct stat *st, uint64_t filesize, uint32_t nlink) {
     char hdr[128];
     uint32_t namesz = (uint32_t)strlen(name) + 1;
     snprintf(hdr, sizeof(hdr),
@@ -253,11 +303,11 @@ static int cpio_write_header_odc(int fd, const char *name, const struct stat *st
         (unsigned long)st->st_mtime,
         (unsigned long)namesz,
         (unsigned long long)filesize);
-    if (write_all(fd, hdr, 76) < 0) return -1;
-    return write_all(fd, name, namesz);
+    if (ar_write(hdr, 76) < 0) return -1;
+    return ar_write(name, namesz);
 }
 
-static int cpio_write_header_bin(int fd, const char *name, const struct stat *st, uint32_t filesize, uint32_t nlink) {
+static int cpio_write_header_bin(const char *name, const struct stat *st, uint32_t filesize, uint32_t nlink) {
     uint8_t hdr[26];
     uint16_t namesz = (uint16_t)(strlen(name) + 1);
     memset(hdr, 0, sizeof(hdr));
@@ -274,10 +324,10 @@ static int cpio_write_header_bin(int fd, const char *name, const struct stat *st
     put16(hdr + 20, namesz);
     put16(hdr + 22, (uint16_t)(filesize >> 16));
     put16(hdr + 24, (uint16_t)(filesize & 0xffff));
-    if (write_all(fd, hdr, sizeof(hdr)) < 0) return -1;
-    if (write_all(fd, name, namesz) < 0) return -1;
+    if (ar_write(hdr, sizeof(hdr)) < 0) return -1;
+    if (ar_write(name, namesz) < 0) return -1;
     if ((26 + namesz) & 1) {
-        if (write_all(fd, "\0", 1) < 0) return -1;
+        if (ar_write("\0", 1) < 0) return -1;
     }
     return 0;
 }
@@ -286,7 +336,7 @@ static int cpio_write_header_bin(int fd, const char *name, const struct stat *st
  * header already promises SIZE, so a file that comes up short -- it
  * shrank, or a read failed -- is padded with zeros to keep the archive
  * in step, and diagnosed.  -1 only if writing the archive fails. */
-static int copy_out_file_data(int afd, int ffd, uint64_t size, const char *path) {
+static int copy_out_file_data(int ffd, uint64_t size, const char *path) {
     char buf[IO_BUFSZ];
     uint64_t left = size;
     while (left > 0) {
@@ -303,12 +353,12 @@ static int copy_out_file_data(int afd, int ffd, uint64_t size, const char *path)
             memset(buf, 0, sizeof(buf));
             while (left > 0) {
                 chunk = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
-                if (write_all(afd, buf, chunk) < 0) return -1;
+                if (ar_write(buf, chunk) < 0) return -1;
                 left -= chunk;
             }
             return 0;
         }
-        if (write_all(afd, buf, (size_t)r) < 0) return -1;
+        if (ar_write(buf, (size_t)r) < 0) return -1;
         left -= (uint64_t)r;
     }
     return 0;
@@ -345,7 +395,7 @@ static const char *fmt_name(fmt_t fmt) {
  * file its data if WITH_DATA (else a size of 0, the newc way of naming
  * one more link).  0, -1 if PATH could not be archived, -2 if writing the
  * archive failed. */
-static int write_member(options_t *opt, int afd, const char *path, struct stat *stp, bool with_data) {
+static int write_member(options_t *opt, const char *path, struct stat *stp, bool with_data) {
     struct stat st = *stp;
     char lnk[PATH_MAX];
     ssize_t lsz = 0;
@@ -371,26 +421,26 @@ static int write_member(options_t *opt, int afd, const char *path, struct stat *
     if (opt->owner_gid_set) st.st_gid = opt->owner_gid;
 
     if (opt->fmt == FMT_NEWC) {
-        if (cpio_write_header_newc(afd, path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
+        if (cpio_write_header_newc(path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
     } else if (opt->fmt == FMT_ODC) {
-        if (cpio_write_header_odc(afd, path, &st, data_size, nlink_hdr) < 0) goto ioerr;
+        if (cpio_write_header_odc(path, &st, data_size, nlink_hdr) < 0) goto ioerr;
     } else {
-        if (cpio_write_header_bin(afd, path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
+        if (cpio_write_header_bin(path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
     }
 
     if (S_ISLNK(st.st_mode)) {
-        if (write_all(afd, lnk, (size_t)lsz) < 0) goto ioerr;
+        if (ar_write(lnk, (size_t)lsz) < 0) goto ioerr;
     } else if (S_ISREG(st.st_mode) && data_size > 0) {
-        if (copy_out_file_data(afd, ffd, data_size, path) < 0) goto ioerr;
+        if (copy_out_file_data(ffd, data_size, path) < 0) goto ioerr;
     }
 
     if (opt->fmt == FMT_NEWC) {
         while (data_size % 4 != 0) {
-            if (write_all(afd, "\0", 1) < 0) goto ioerr;
+            if (ar_write("\0", 1) < 0) goto ioerr;
             data_size++;
         }
     } else if (opt->fmt == FMT_BIN && (data_size & 1)) {
-        if (write_all(afd, "\0", 1) < 0) goto ioerr;
+        if (ar_write("\0", 1) < 0) goto ioerr;
     }
 
     if (opt->verbose) fprintf(stderr, "%s\n", path);
@@ -425,11 +475,11 @@ static out_link_t *g_out_links[LINK_BUCKETS];
 
 /* Write a held-back file: every name, the last with the data.  Its record
  * is freed.  0, or -2 if writing the archive failed. */
-static int out_link_flush(options_t *opt, int afd, out_link_t *l) {
+static int out_link_flush(options_t *opt, out_link_t *l) {
     int r = 0;
     for (size_t i = 0; i < l->n; i++) {
         if (r != -2) {
-            int w = write_member(opt, afd, l->names[i], &l->st[i], i + 1 == l->n);
+            int w = write_member(opt, l->names[i], &l->st[i], i + 1 == l->n);
             if (w == -2) r = -2;
         }
         free(l->names[i]);
@@ -441,19 +491,19 @@ static int out_link_flush(options_t *opt, int afd, out_link_t *l) {
 }
 
 /* At the end of the list: write the files whose names did not all come. */
-static int out_links_finish(options_t *opt, int afd) {
+static int out_links_finish(options_t *opt) {
     int r = 0;
     for (size_t h = 0; h < LINK_BUCKETS; h++) {
         while (g_out_links[h]) {
             out_link_t *l = g_out_links[h];
             g_out_links[h] = l->next;
-            if (out_link_flush(opt, afd, l) == -2) r = -2;
+            if (out_link_flush(opt, l) == -2) r = -2;
         }
     }
     return r;
 }
 
-static int write_entry(options_t *opt, int afd, const char *path) {
+static int write_entry(options_t *opt, const char *path) {
     struct stat st;
     out_link_t *l, **pp;
     size_t h;
@@ -469,7 +519,7 @@ static int write_entry(options_t *opt, int afd, const char *path) {
         return -1;
     }
     if (!S_ISREG(st.st_mode) || st.st_nlink < 2 || opt->fmt != FMT_NEWC)
-        return write_member(opt, afd, path, &st, true);
+        return write_member(opt, path, &st, true);
 
     h = link_hash(st.st_dev, st.st_ino);
     for (pp = &g_out_links[h]; *pp; pp = &(*pp)->next)
@@ -497,20 +547,20 @@ static int write_entry(options_t *opt, int afd, const char *path) {
     }
     if (l->n < (size_t)st.st_nlink) return 0;
     *pp = l->next;
-    return out_link_flush(opt, afd, l);
+    return out_link_flush(opt, l);
 }
 
-static int write_trailer(options_t *opt, int afd) {
+static int write_trailer(options_t *opt) {
     struct stat st;
     memset(&st, 0, sizeof(st));
     st.st_mode = S_IFREG;
     if (opt->fmt == FMT_NEWC) {
-        return cpio_write_header_newc(afd, "TRAILER!!!", &st, 0, 1);
+        return cpio_write_header_newc("TRAILER!!!", &st, 0, 1);
     }
     if (opt->fmt == FMT_ODC) {
-        return cpio_write_header_odc(afd, "TRAILER!!!", &st, 0, 1);
+        return cpio_write_header_odc("TRAILER!!!", &st, 0, 1);
     }
-    return cpio_write_header_bin(afd, "TRAILER!!!", &st, 0, 1);
+    return cpio_write_header_bin("TRAILER!!!", &st, 0, 1);
 }
 
 typedef struct {
@@ -534,6 +584,7 @@ static struct {
     unsigned char buf[IO_BUFSZ];
     size_t pos, len;
     bool eof;
+    uint64_t consumed;  /* bytes taken from the archive */
 } g_in;
 
 /* Make at least WANT (<= IO_BUFSZ) bytes available, if the archive has
@@ -567,6 +618,7 @@ static int in_read(void *p, size_t n) {
         c = avail < n ? avail : n;
         memcpy(d, g_in.buf + g_in.pos, c);
         g_in.pos += c;
+        g_in.consumed += c;
         d += c;
         n -= c;
     }
@@ -581,6 +633,7 @@ static int in_skip(uint64_t n) {
         if (avail == 0) return -1;
         c = (uint64_t)avail < n ? avail : (size_t)n;
         g_in.pos += c;
+        g_in.consumed += c;
         n -= c;
     }
     return 0;
@@ -1270,11 +1323,14 @@ static int mode_out(options_t *opt) {
               : STDOUT_FILENO;
     const char *name;
     if (afd < 0) { warn_errno(opt->archive_file); return 2; }
+    g_out.fd = afd;
+    g_out.buf = malloc(g_block_size);
+    if (!g_out.buf) { warn_errno("out of memory"); return 2; }
     while ((name = next_name(opt)) != NULL) {
-        if (write_entry(opt, afd, name) == -2) break;
+        if (write_entry(opt, name) == -2) break;
     }
-    if (g_status < 2) out_links_finish(opt, afd);
-    if (g_status < 2 && write_trailer(opt, afd) < 0) {
+    if (g_status < 2) out_links_finish(opt);
+    if (g_status < 2 && (write_trailer(opt) < 0 || ar_finish() < 0)) {
         warn_errno("write error");
         set_fatal_error();
     }
@@ -1282,6 +1338,8 @@ static int mode_out(options_t *opt) {
         warn_errno("write error");
         set_fatal_error();
     }
+    free(g_out.buf);
+    report_blocks(opt, g_out.total);
     return g_status;
 }
 
@@ -1304,6 +1362,7 @@ static int mode_in(options_t *opt) {
         uint64_t junk = 0;
         while (!magic_here(opt->fmt) && in_fill(1) > 0) {
             g_in.pos++;
+            g_in.consumed++;
             junk++;
         }
         /* junk with no header after it is only the archive ending early */
@@ -1339,6 +1398,7 @@ static int mode_in(options_t *opt) {
     deferred_symlinks_finish(opt);
     dir_fixes_finish(opt);
     if (afd != STDIN_FILENO) close(afd);
+    report_blocks(opt, g_in.consumed);
     return g_status;
 }
 
@@ -1352,6 +1412,7 @@ typedef struct pass_link {
 } pass_link_t;
 
 static pass_link_t *g_pass_links[LINK_BUCKETS];
+static uint64_t g_pass_bytes;   /* data copied, for the block count */
 
 static const char *pass_link_find(const struct stat *st) {
     pass_link_t *l;
@@ -1545,6 +1606,7 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
             break;
         }
         if (r == 0) break;
+        g_pass_bytes += (uint64_t)r;
         if (write_all(out, buf, (size_t)r) < 0) {
             warn_errno(target);
             set_minor_error();
@@ -1568,6 +1630,7 @@ static int mode_pass(options_t *opt) {
     }
     dir_fixes_finish(opt);
     pass_links_free();
+    report_blocks(opt, g_pass_bytes);
     return g_status;
 }
 
@@ -1602,7 +1665,7 @@ static int read_patterns(const char *file, options_t *opt) {
  * options, which are this cpio's own. */
 enum {
     OPT_SAFE = 256, OPT_NO_ABS, OPT_ABS, OPT_INSECURE, OPT_NO_OVERWRITE,
-    OPT_NUMERIC_OWNER, OPT_NO_PRESERVE_OWNER,
+    OPT_NUMERIC_OWNER, OPT_NO_PRESERVE_OWNER, OPT_QUIET, OPT_BLOCK_SIZE,
 };
 
 static const struct option long_opts[] = {
@@ -1625,6 +1688,9 @@ static const struct option long_opts[] = {
     { "null", no_argument, NULL, '0' },
     { "dereference", no_argument, NULL, 'L' },
     { "reset-access-time", no_argument, NULL, 'a' },
+    { "io-size", required_argument, NULL, 'C' },
+    { "block-size", required_argument, NULL, OPT_BLOCK_SIZE },
+    { "quiet", no_argument, NULL, OPT_QUIET },
     { "safe-extract", no_argument, NULL, OPT_SAFE },
     { "no-absolute-paths", no_argument, NULL, OPT_NO_ABS },
     { "no-absolute-filenames", no_argument, NULL, OPT_NO_ABS },
@@ -1669,7 +1735,7 @@ int main(int argc, char **argv) {
     opt.fmt = (fmt_t)-1;
 
     opterr = 0;
-    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0La", long_opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0LaB", long_opts, NULL)) != -1) {
         switch (c) {
         case 'o': if (!set_mode(&opt, MODE_OUT)) return 2; break;
         case 'i': if (!set_mode(&opt, MODE_IN)) return 2; break;
@@ -1693,7 +1759,18 @@ int main(int argc, char **argv) {
         case 'f': opt.invert = true; break;
         case 'E': if (read_patterns(optarg, &opt) < 0) return 2; break;
         case 'u': opt.force_overwrite = true; break;
-        case 'C': break;
+        case 'B': g_block_size = 5120; break;
+        case 'C':
+        case OPT_BLOCK_SIZE: {
+            unsigned long n;
+            if (!parse_id(optarg, &n) || n == 0 || n > (c == 'C' ? 1UL << 24 : (1UL << 24) / 512)) {
+                warnx_("invalid block size: %s", optarg);
+                return 2;
+            }
+            g_block_size = c == 'C' ? (size_t)n : (size_t)n * 512;
+            break;
+        }
+        case OPT_QUIET: opt.quiet = true; break;
         case OPT_SAFE: opt.safe_extract = true; break;
         case OPT_NO_ABS: opt.no_absolute_paths = true; break;
         case OPT_ABS: opt.no_absolute_paths = false; break;

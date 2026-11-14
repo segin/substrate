@@ -183,6 +183,19 @@ and
 .Fl p ,
 put back each file's access time after reading it
 .Pf ( Fl -reset-access-time ) .
+.It Fl B
+Use blocks of 5120 bytes rather than 512.
+.It Fl C Ar size
+Use blocks of
+.Ar size
+bytes
+.Pf ( Fl -io-size ) .
+.It Fl -block-size Ns = Ns Ar n
+Use blocks of
+.Ar n
+\(mu 512 bytes.
+.It Fl -quiet
+Do not report the number of blocks.
 .It Fl D Ar directory
 Change to
 .Ar directory
@@ -284,6 +297,17 @@ Fatal error.
 Each diagnostic is written to standard error and begins
 .Ql cpio: ,
 then the name of the file or member concerned.
+.Pp
+Copy-out writes the archive in whole blocks, the last padded with zeros.
+At the end of a run that did not fail,
+.Nm
+reports on standard error how many blocks it wrote, read or (for
+.Fl p )
+copied, as
+.Dq Ar n Li blocks ,
+unless
+.Fl -quiet
+is given.
 .Pp
 On copy-in, bytes that are not a header where one is due are skipped to
 the next header, with a warning of how many; a malformed header is

@@ -8,6 +8,9 @@ CPIO=${CPIO:-"$ROOT/usr.bin/cpio/cpio"}
 TMP=$(mktemp -d)
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 cd "$TMP" || exit 1
+# failures are reported on stdout; the stderr of commands not run through
+# run() (block counts, mostly) is kept out of the way
+exec 2>"$TMP/.stderr"
 export TZ=UTC LC_ALL=C
 umask 022
 
@@ -20,9 +23,12 @@ fail=0
 cases=0
 
 # run CMD...: run it in a subshell, keeping stdout, stderr and status.
+# The "N blocks" report is dropped from stderr; the block cases check it.
 run() {
     "$@" >"$TMP/.out" 2>"$TMP/.err"
     rc=$?
+    grep -Ev '^[0-9]+ blocks?$' "$TMP/.err" > "$TMP/.err2"
+    mv "$TMP/.err2" "$TMP/.err"
     out=$(cat "$TMP/.out")
     err=$(cat "$TMP/.err")
 }
@@ -48,6 +54,11 @@ same() {
 
 # fresh DIR: an empty directory
 fresh() { rm -rf "$1"; mkdir -p "$1"; }
+
+# notrailer NEWC-ARCHIVE: its members, without the trailer and padding
+notrailer() {
+    head -c "$(( $(grep -abo 'TRAILER!!!' "$1" | head -1 | cut -d: -f1) - 110 ))" "$1"
+}
 
 # ---- source tree used by most cases
 mkdir src src/d
@@ -184,7 +195,7 @@ if [ -n "$GNU" ]; then
     same "GNU bin, ours reading" "hello" "$(cat xb/src/f 2>&1)"
     run "$GNU" -it -F ourbin.cpio
     same "our bin, GNU reading" "src/f" "$out"
-    same "our bin, GNU reading: no byte-order warning" "1 block" "$err"
+    same "our bin, GNU reading: no byte-order warning" "" "$err"
 fi
 
 # ---- a file too large for the format's size field is refused, not
@@ -248,8 +259,9 @@ same "one name of a linked file" "hl/b 4," "$("$CPIO" -itvn -F hl-one.cpio | awk
 mkdir -p esc/a esc/b victim
 ln -s "$TMP/victim" esc/a/lnk
 mkdir esc/b/lnk && printf 'pwned\n' > esc/b/lnk/pwn
-{ (cd esc/a && printf 'lnk\n' | "$CPIO" -o -H newc) | head -c -124
-  (cd esc/b && printf 'lnk/pwn\n' | "$CPIO" -o -H newc); } > esc.cpio
+(cd esc/a && printf 'lnk\n' | "$CPIO" -o -H newc --quiet) > esc1.cpio
+{ notrailer esc1.cpio
+  (cd esc/b && printf 'lnk/pwn\n' | "$CPIO" -o -H newc --quiet); } > esc.cpio
 fresh xe
 run sh -c "cd xe && \"$CPIO\" -id < ../esc.cpio"
 ok "escape: nothing written outside" test ! -e victim/pwn
@@ -259,8 +271,9 @@ same "escape: the link is still made" "$TMP/victim" "$(readlink xe/lnk)"
 mkdir -p rel/a/real rel/b/in
 ln -s real rel/a/in
 printf 'ok\n' > rel/b/in/f
-{ (cd rel/a && printf 'real\nin\n' | "$CPIO" -o -H newc) | head -c -124
-  (cd rel/b && printf 'in/f\n' | "$CPIO" -o -H newc); } > rel.cpio
+(cd rel/a && printf 'real\nin\n' | "$CPIO" -o -H newc --quiet) > rel1.cpio
+{ notrailer rel1.cpio
+  (cd rel/b && printf 'in/f\n' | "$CPIO" -o -H newc --quiet); } > rel.cpio
 fresh xr
 run sh -c "cd xr && \"$CPIO\" -id < ../rel.cpio"
 same "relative link: written through" "ok" "$(cat xr/real/f 2>&1)"
@@ -472,6 +485,28 @@ rm src/lnk
 printf 'atime\n' > at; touch -a -d '2001-01-01 00:00' at
 printf 'at\n' | "$CPIO" -oa > /dev/null
 same "-a" "2001-01-01" "$(date -u -d "@$(stat -c %X at)" +%F)"
+
+# ---- the archive is written in whole blocks, and their number reported
+# on stderr as GNU cpio's: 512 bytes, -B 5120, -C N, --block-size=N * 512
+head -c 3000 /dev/urandom > blk
+for o in "" -B "-C 1000" --block-size=3; do
+    run sh -c "printf 'src/f\nblk\n' | \"$CPIO\" -o $o 2>&1 >blk.cpio"
+    size=$(stat -c %s blk.cpio)
+    case $o in
+    "")  want="7 blocks 3584" ;;
+    -B)  want="1 block 5120" ;;
+    -C*) want="4 blocks 4000" ;;
+    *)   want="3 blocks 4608" ;;
+    esac
+    same "blocks, copy-out ${o:-512}" "$want" "$out $size"
+    same "blocks, copy-in ${o:-512}" "${want% *}" "$("$CPIO" -it $o -F blk.cpio 2>&1 >/dev/null)"
+    if [ -n "$GNU" ]; then
+        same "blocks, ${o:-512}: GNU reads it" "$(printf 'src/f\nblk')" "$("$GNU" -it $o -F blk.cpio 2>/dev/null)"
+    fi
+done
+fresh pb
+same "blocks, pass mode" "6 blocks" "$(printf 'src/f\nblk\n' | "$CPIO" -pd pb 2>&1)"
+same "--quiet" "" "$(printf 'src/f\n' | "$CPIO" -o --quiet 2>&1 >/dev/null)"
 
 if [ "$fail" -ne 0 ]; then
     exit 1
