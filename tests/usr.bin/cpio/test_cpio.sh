@@ -545,6 +545,32 @@ same "-b: warnings" "$(printf '%s\n' \
     'cpio: cannot swap bytes of odd: odd number of bytes' \
     'cpio: cannot swap halfwords of six: odd number of halfwords')" "$err"
 
+# ---- crc: newc with magic 070702 and the data's byte sum; checked on
+# copy-in
+printf 'src/f\n' | "$CPIO" -o -H crc --quiet > crc.cpio
+same "crc magic" "070702" "$(head -c 6 crc.cpio)"
+# "hello\n": 104+101+108+108+111+10 = 542 = 0x21e, the last header field
+same "crc check field" "0000021e" "$(dd if=crc.cpio bs=1 skip=102 count=8 status=none)"
+fresh xc
+run sh -c "cd xc && \"$CPIO\" -id < ../crc.cpio"
+same "crc round trip" "hello" "$(cat xc/src/f 2>&1)"
+same "crc round trip: quiet" "" "$err"
+# a data byte changed: 'h' at 116 becomes 'j'
+{ head -c 116 crc.cpio; printf j; tail -c +118 crc.cpio; } > crcbad.cpio
+fresh xc
+run sh -c "cd xc && \"$CPIO\" -id < ../crcbad.cpio"
+same "crc error" "cpio: src/f: checksum error (0x220, should be 0x21e)" "$err"
+same "crc error: status" 1 "$rc"
+if [ -n "$GNU" ]; then
+    run "$GNU" -it --only-verify-crc -F crc.cpio
+    same "our crc, GNU verifying" "" "$err"
+    printf 'src/f\n' | "$GNU" -o -H crc 2>/dev/null > gcrc.cpio
+    fresh xc
+    run sh -c "cd xc && \"$CPIO\" -id < ../gcrc.cpio"
+    same "GNU crc, ours reading" "hello" "$(cat xc/src/f 2>&1)"
+    same "GNU crc, ours reading: no error" "" "$err"
+fi
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

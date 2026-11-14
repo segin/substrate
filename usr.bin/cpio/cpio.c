@@ -22,7 +22,11 @@
 #define IO_BUFSZ 65536
 
 typedef enum { MODE_NONE, MODE_OUT, MODE_IN, MODE_PASS } mode_tn;
-typedef enum { FMT_NEWC, FMT_ODC, FMT_BIN } fmt_t;
+/* FMT_CRC is newc with a checksum: written by -H crc; read as newc, the
+ * sum checked wherever a member's magic says crc. */
+typedef enum { FMT_NEWC, FMT_ODC, FMT_BIN, FMT_CRC } fmt_t;
+
+static bool newc_like(fmt_t f) { return f == FMT_NEWC || f == FMT_CRC; }
 
 typedef struct {
     mode_tn mode;
@@ -279,11 +283,15 @@ static bool bin_magic(const uint8_t *b, bool *le) {
     return false;
 }
 
-static int cpio_write_header_newc(const char *name, const struct stat *st, uint32_t filesize, uint32_t nlink) {
+/* newc's header, or with CRC the crc format's: magic 070702 and CHECK,
+ * the sum of the data's bytes. */
+static int cpio_write_header_newc(const char *name, const struct stat *st, uint32_t filesize,
+                                  uint32_t nlink, bool crc, uint32_t check) {
     char hdr[110 + 1];
     uint32_t namesz = (uint32_t)strlen(name) + 1;
     snprintf(hdr, sizeof(hdr),
-        "070701%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x",
+        "%s%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x",
+        crc ? "070702" : "070701",
         (unsigned)st->st_ino,
         (unsigned)st->st_mode,
         (unsigned)st->st_uid,
@@ -296,7 +304,7 @@ static int cpio_write_header_newc(const char *name, const struct stat *st, uint3
         (unsigned)major(st->st_rdev),
         (unsigned)minor(st->st_rdev),
         namesz,
-        0U);
+        check);
     if (ar_write(hdr, 110) < 0) return -1;
     if (ar_write(name, namesz) < 0) return -1;
     while ((110 + namesz) % 4 != 0) {
@@ -400,13 +408,39 @@ static void reset_atime(int fd, const struct stat *st, const char *path) {
     }
 }
 
+/* crc: the sum of the bytes of the first SIZE bytes of the file PATH open
+ * on FD, which is then put back at its start.  -1 if it cannot be read. */
+static int data_sum(int fd, uint64_t size, uint32_t *sum, const char *path) {
+    unsigned char buf[IO_BUFSZ];
+    uint32_t s = 0;
+    while (size > 0) {
+        ssize_t r = read(fd, buf, size > sizeof(buf) ? sizeof(buf) : (size_t)size);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            warn_errno(path);
+            set_minor_error();
+            return -1;
+        }
+        if (r == 0) break;      /* shrank: copying it will say so */
+        for (ssize_t i = 0; i < r; i++) s += buf[i];
+        size -= (uint64_t)r;
+    }
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+        warn_errno(path);
+        set_minor_error();
+        return -1;
+    }
+    *sum = s;
+    return 0;
+}
+
 /* The largest member each format's size field holds. */
 static uint64_t fmt_max_size(fmt_t fmt) {
     return fmt == FMT_ODC ? 077777777777ULL : 0xffffffffULL;
 }
 
 static const char *fmt_name(fmt_t fmt) {
-    return fmt == FMT_NEWC ? "newc" : fmt == FMT_ODC ? "odc" : "bin";
+    return fmt == FMT_NEWC ? "newc" : fmt == FMT_CRC ? "crc" : fmt == FMT_ODC ? "odc" : "bin";
 }
 
 /* Write one member: PATH's header, as ST describes it, and for a regular
@@ -419,6 +453,7 @@ static int write_member(options_t *opt, const char *path, struct stat *stp, bool
     ssize_t lsz = 0;
     uint64_t data_size = 0;
     uint32_t nlink_hdr = 1;
+    uint32_t check = 0;
     int ffd = -1;
 
     if (S_ISLNK(st.st_mode)) {
@@ -426,20 +461,27 @@ static int write_member(options_t *opt, const char *path, struct stat *stp, bool
         if (lsz < 0) { warn_errno(path); set_minor_error(); return -1; }
         lnk[lsz] = '\0';
         data_size = (uint64_t)lsz;
-    } else if (S_ISREG(st.st_mode)) {
+    }
+    if (S_ISREG(st.st_mode)) {
         nlink_hdr = st.st_nlink;
         data_size = with_data ? (uint64_t)st.st_size : 0;
         if (data_size > 0) {
             ffd = open(path, O_RDONLY);
             if (ffd < 0) { warn_errno(path); set_minor_error(); return -1; }
+            /* crc: the header's sum is of data not yet read; read it twice */
+            if (opt->fmt == FMT_CRC && data_sum(ffd, data_size, &check, path) < 0) {
+                close(ffd);
+                return -1;
+            }
         }
     }
 
     if (opt->owner_uid_set) st.st_uid = opt->owner_uid;
     if (opt->owner_gid_set) st.st_gid = opt->owner_gid;
 
-    if (opt->fmt == FMT_NEWC) {
-        if (cpio_write_header_newc(path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
+    if (newc_like(opt->fmt)) {
+        if (cpio_write_header_newc(path, &st, (uint32_t)data_size, nlink_hdr,
+                                   opt->fmt == FMT_CRC, check) < 0) goto ioerr;
     } else if (opt->fmt == FMT_ODC) {
         if (cpio_write_header_odc(path, &st, data_size, nlink_hdr) < 0) goto ioerr;
     } else {
@@ -452,7 +494,7 @@ static int write_member(options_t *opt, const char *path, struct stat *stp, bool
         if (copy_out_file_data(ffd, data_size, path) < 0) goto ioerr;
     }
 
-    if (opt->fmt == FMT_NEWC) {
+    if (newc_like(opt->fmt)) {
         while (data_size % 4 != 0) {
             if (ar_write("\0", 1) < 0) goto ioerr;
             data_size++;
@@ -536,7 +578,7 @@ static int write_entry(options_t *opt, const char *path) {
         set_minor_error();
         return -1;
     }
-    if (!S_ISREG(st.st_mode) || st.st_nlink < 2 || opt->fmt != FMT_NEWC)
+    if (!S_ISREG(st.st_mode) || st.st_nlink < 2 || !newc_like(opt->fmt))
         return write_member(opt, path, &st, true);
 
     h = link_hash(st.st_dev, st.st_ino);
@@ -572,8 +614,8 @@ static int write_trailer(options_t *opt) {
     struct stat st;
     memset(&st, 0, sizeof(st));
     st.st_mode = S_IFREG;
-    if (opt->fmt == FMT_NEWC) {
-        return cpio_write_header_newc("TRAILER!!!", &st, 0, 1);
+    if (newc_like(opt->fmt)) {
+        return cpio_write_header_newc("TRAILER!!!", &st, 0, 1, opt->fmt == FMT_CRC, 0);
     }
     if (opt->fmt == FMT_ODC) {
         return cpio_write_header_odc("TRAILER!!!", &st, 0, 1);
@@ -592,6 +634,8 @@ typedef struct {
     time_t mtime;
     uint64_t filesize;
     dev_t rdev;
+    bool crc;           /* a crc-format member: CHECK is its data's sum */
+    uint32_t check;
 } entry_t;
 
 /* The archive being read, through a buffer.  The format is found by
@@ -721,6 +765,8 @@ static int parse_newc_header(entry_t *e) {
     e->filesize = f[6];
     e->dev = makedev(f[7], f[8]);
     e->rdev = makedev(f[9], f[10]);
+    e->crc = hdr[5] == '2';
+    e->check = (uint32_t)f[12];
     return read_name(e, f[11], (4 - (110 + f[11]) % 4) % 4);
 }
 
@@ -770,7 +816,7 @@ static int parse_bin_header(entry_t *e) {
 
 /* The padding after SIZE bytes of member data. */
 static uint64_t data_pad(fmt_t fmt, uint64_t size) {
-    if (fmt == FMT_NEWC) return (4 - size % 4) % 4;
+    if (newc_like(fmt)) return (4 - size % 4) % 4;
     if (fmt == FMT_BIN) return size & 1;
     return 0;
 }
@@ -1251,7 +1297,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
                 note_file(opt, e->name);
                 return skip_data_and_pad(opt->fmt, e->filesize);
             }
-            if (l && e->filesize == 0 && opt->fmt == FMT_NEWC) {
+            if (l && e->filesize == 0 && newc_like(opt->fmt)) {
                 /* newc: the data comes with a later name */
                 char **p = realloc(l->pending, (l->npending + 1) * sizeof(*p));
                 if (p) {
@@ -1280,6 +1326,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         }
         /* -s, -S: swap only what divides evenly, as GNU cpio does */
         bool swap_bytes = opt->swap_bytes, swap_halves = opt->swap_halfwords;
+        uint32_t sum = 0;   /* crc: the data's, checked against the header */
         if (swap_halves && e->filesize % 4 != 0) {
             warnx_("cannot swap halfwords of %s: odd number of halfwords", e->name);
             swap_halves = false;
@@ -1292,6 +1339,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
             size_t chunk = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
             if (in_read(buf, chunk) < 0) { close(fd); return -1; }
             left -= chunk;
+            for (size_t i = 0; i < chunk; i++) sum += (unsigned char)buf[i];
             /* a chunk is whole words: IO_BUFSZ, or the rest of the file */
             if (swap_halves) {
                 for (size_t i = 0; i + 4 <= chunk; i += 4) {
@@ -1313,6 +1361,11 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
                 close(fd);
                 return in_skip(left + data_pad(opt->fmt, e->filesize));
             }
+        }
+        if (e->crc && sum != e->check) {
+            warnx_("%s: checksum error (0x%x, should be 0x%x)", e->name,
+                   (unsigned)sum, (unsigned)e->check);
+            set_minor_error();
         }
         if (ftruncate(fd, (off_t)e->filesize) < 0) {
             warn_errno(e->name);
@@ -1444,7 +1497,7 @@ static int mode_in(options_t *opt) {
             break;
         }
         memset(&e, 0, sizeof(e));
-        if (opt->fmt == FMT_NEWC) r = parse_newc_header(&e);
+        if (newc_like(opt->fmt)) r = parse_newc_header(&e);
         else if (opt->fmt == FMT_ODC) r = parse_odc_header(&e);
         else r = parse_bin_header(&e);
         if (r == HDR_BAD) { set_minor_error(); continue; }
@@ -1789,6 +1842,7 @@ static bool set_mode(options_t *opt, mode_tn m) {
 
 static bool set_format(options_t *opt, const char *f) {
     if (strcmp(f, "newc") == 0) opt->fmt = FMT_NEWC;
+    else if (strcmp(f, "crc") == 0) opt->fmt = FMT_CRC;
     else if (strcmp(f, "odc") == 0) opt->fmt = FMT_ODC;
     else if (strcmp(f, "bin") == 0) opt->fmt = FMT_BIN;
     else {
