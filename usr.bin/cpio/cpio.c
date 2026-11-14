@@ -1,4 +1,5 @@
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <dirent.h>
 #include <errno.h>
@@ -11,16 +12,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-#ifndef major
-#define major(dev) ((unsigned)(((dev) >> 8) & 0xff))
-#endif
-#ifndef minor
-#define minor(dev) ((unsigned)((dev) & 0xff))
-#endif
-#ifndef makedev
-#define makedev(ma,mi) ((dev_t)((((ma) & 0xff) << 8) | ((mi) & 0xff)))
-#endif
 
 #define IO_BUFSZ 65536
 
