@@ -36,6 +36,7 @@ typedef struct {
     bool safe_extract;
     bool no_overwrite;
     bool no_preserve_owner; /* root: leave extracted files root's */
+    bool link_files;    /* -l: pass mode links rather than copies */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -1284,14 +1285,121 @@ static int mode_in(options_t *opt) {
     return g_status;
 }
 
+/* Pass mode's hard links: the copy made of each (dev, ino) with more than
+ * one link, so that its other names are linked to the copy. */
+typedef struct pass_link {
+    dev_t dev;
+    ino_t ino;
+    char *target;
+    struct pass_link *next;
+} pass_link_t;
+
+static pass_link_t *g_pass_links[LINK_BUCKETS];
+
+static const char *pass_link_find(const struct stat *st) {
+    pass_link_t *l;
+    for (l = g_pass_links[link_hash(st->st_dev, st->st_ino)]; l; l = l->next)
+        if (l->dev == st->st_dev && l->ino == st->st_ino) return l->target;
+    return NULL;
+}
+
+static void pass_link_add(const struct stat *st, const char *target) {
+    size_t h = link_hash(st->st_dev, st->st_ino);
+    pass_link_t *l = calloc(1, sizeof(*l));
+    if (!l || !(l->target = strdup(target))) { free(l); return; }   /* copies, then */
+    l->dev = st->st_dev;
+    l->ino = st->st_ino;
+    l->next = g_pass_links[h];
+    g_pass_links[h] = l;
+}
+
+static void pass_links_free(void) {
+    for (size_t h = 0; h < LINK_BUCKETS; h++) {
+        while (g_pass_links[h]) {
+            pass_link_t *l = g_pass_links[h];
+            g_pass_links[h] = l->next;
+            free(l->target);
+            free(l);
+        }
+    }
+}
+
+/* Clear the way for a copy of SRC (described by ST) at TARGET.  What is
+ * there is removed rather than written into -- a symlink there would take
+ * the data elsewhere -- unless it is a directory, the source itself, or
+ * (without -u) no older than the source.  0 to go on, 1 if the file there
+ * stays, -1 on an error. */
+static int prepare_dest(const char *src, const char *target, const struct stat *st,
+                        const options_t *opt) {
+    struct stat dst_st;
+    if (lstat(target, &dst_st) < 0) return 0;
+    if (S_ISDIR(dst_st.st_mode)) {
+        errno = EISDIR;
+        warn_errno(target);
+        set_minor_error();
+        return -1;
+    }
+    if (!opt->force_overwrite && dst_st.st_mtime >= st->st_mtime) {
+        warnx_("%s not created: newer or same age version exists", target);
+        return 1;
+    }
+    if (dst_st.st_dev == st->st_dev && dst_st.st_ino == st->st_ino) {
+        warnx_("%s: is the same file as its copy", src);
+        set_minor_error();
+        return -1;
+    }
+    if (unlink(target) < 0) {
+        warn_errno(target);
+        set_minor_error();
+        return -1;
+    }
+    return 0;
+}
+
+/* Owner, then mode (chown() clears the set-ID bits), then with -m times,
+ * for a copy just made at TARGET (open on FD, or -1). */
+static int finish_copy(const char *target, const struct stat *st, const options_t *opt, int fd) {
+    uid_t ou;
+    gid_t og;
+    int r = 0;
+    if (owner_for(opt, st->st_uid, st->st_gid, &ou, &og) &&
+        (fd >= 0 ? fchown(fd, ou, og) : lchown(target, ou, og)) < 0) {
+        warn_errno(target);
+        set_minor_error();
+        r = -1;
+    }
+    if (!S_ISLNK(st->st_mode) &&
+        (fd >= 0 ? fchmod(fd, st->st_mode & 07777) : chmod(target, st->st_mode & 07777)) < 0) {
+        warn_errno(target);
+        set_minor_error();
+        r = -1;
+    }
+    if (opt->preserve_mtime && !S_ISLNK(st->st_mode)) {
+        struct timespec ts[2];
+        ts[0].tv_sec = st->st_atime; ts[0].tv_nsec = 0;
+        ts[1].tv_sec = st->st_mtime; ts[1].tv_nsec = 0;
+        if ((fd >= 0 ? futimens(fd, ts) : utimensat(AT_FDCWD, target, ts, 0)) < 0) {
+            warn_errno(target);
+            set_minor_error();
+            r = -1;
+        }
+    }
+    return r;
+}
+
+/* Copy SRC to DST/SRC.  0 if copied, 1 if a newer file there was kept,
+ * -1 on an error (already reported). */
 static int copy_one_path(const char *src, const char *dst, const options_t *opt) {
     struct stat st;
     char buf[IO_BUFSZ];
     char target[PATH_MAX];
-    int in = -1, out = -1;
+    int in, out;
+    bool ok = true;
     if (lstat(src, &st) < 0) { warn_errno(src); set_minor_error(); return -1; }
     if (snprintf(target, sizeof(target), "%s/%s", dst, src) >= (int)sizeof(target)) {
-        set_minor_error(); return -1;
+        warnx_("%s: name too long", src);
+        set_minor_error();
+        return -1;
     }
     if (opt->make_dirs && make_parent_dirs(target) < 0) { warn_errno(target); set_minor_error(); return -1; }
 
@@ -1314,84 +1422,80 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
         ssize_t n = readlink(src, buf, sizeof(buf) - 1);
         if (n < 0) { warn_errno(src); set_minor_error(); return -1; }
         buf[n] = '\0';
-        {
-            struct stat dst_st;
-            if (!opt->force_overwrite && lstat(target, &dst_st) == 0 &&
-                !S_ISDIR(dst_st.st_mode) && dst_st.st_mtime >= st.st_mtime) {
-                warnx_("%s not created: newer or same age version exists", target);
-                return 0;
-            }
+        switch (prepare_dest(src, target, &st, opt)) {
+        case 1: return 1;
+        case -1: return -1;
         }
-        unlink(target);
         if (symlink(buf, target) < 0) {
             warn_errno(target);
             set_minor_error();
-        } else {
-            uid_t ou;
-            gid_t og;
-            if (owner_for(opt, st.st_uid, st.st_gid, &ou, &og) && lchown(target, ou, og) < 0) {
-                warn_errno(target);
-                set_minor_error();
-            }
+            return -1;
         }
+        return finish_copy(target, &st, opt, -1);
+    }
+    if (S_ISSOCK(st.st_mode)) {
+        warnx_("%s: socket not copied", src);
+        set_minor_error();
+        return -1;
+    }
+    if ((S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode)) && geteuid() != 0) {
+        warnx_("%s: device not created: only root may", src);
+        set_minor_error();
+        return -1;
+    }
+
+    switch (prepare_dest(src, target, &st, opt)) {
+    case 1: return 1;
+    case -1: return -1;
+    }
+
+    if (S_ISFIFO(st.st_mode) || S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode)) {
+        int r = S_ISFIFO(st.st_mode) ? mkfifo(target, st.st_mode & 07777)
+                                     : mknod(target, st.st_mode, st.st_rdev);
+        if (r < 0) { warn_errno(target); set_minor_error(); return -1; }
+        return finish_copy(target, &st, opt, -1);
+    }
+
+    /* A regular file.  Another name for one copied already is linked to
+     * that copy; with -l, the copy is a link to the source itself. */
+    if (st.st_nlink > 1) {
+        const char *first = pass_link_find(&st);
+        if (first) {
+            if (link(first, target) < 0) { warn_errno(target); set_minor_error(); return -1; }
+            return 0;
+        }
+    }
+    if (opt->link_files && link(src, target) == 0) {
+        if (st.st_nlink > 1) pass_link_add(&st, target);
         return 0;
     }
-    if (!S_ISREG(st.st_mode)) return 0;
 
-    /* Replace what is at the destination rather than write into it: a
-     * symlink there would take the data elsewhere, and an existing file
-     * would keep its old mode.  But never the source itself. */
-    {
-        struct stat dst_st;
-        if (lstat(target, &dst_st) == 0) {
-            /* without -u, a file there no older than the source stays */
-            if (!opt->force_overwrite && !S_ISDIR(dst_st.st_mode) &&
-                dst_st.st_mtime >= st.st_mtime) {
-                warnx_("%s not created: newer or same age version exists", target);
-                return 0;
-            }
-            if (dst_st.st_dev == st.st_dev && dst_st.st_ino == st.st_ino) {
-                warnx_("%s: is the same file as its copy", src);
-                set_minor_error();
-                return -1;
-            }
-            if (!S_ISDIR(dst_st.st_mode) && unlink(target) < 0) {
-                warn_errno(target);
-                set_minor_error();
-                return -1;
-            }
-        }
-    }
     in = open(src, O_RDONLY);
-    out = open(target, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, st.st_mode & 07777);
-    if (in < 0 || out < 0) { warn_errno(in < 0 ? src : target); set_minor_error(); goto done; }
+    if (in < 0) { warn_errno(src); set_minor_error(); return -1; }
+    out = open(target, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, st.st_mode & 07777);
+    if (out < 0) { warn_errno(target); set_minor_error(); close(in); return -1; }
     for (;;) {
         ssize_t r = read(in, buf, sizeof(buf));
-        if (r < 0) { if (errno == EINTR) continue; warn_errno(src); set_minor_error(); break; }
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            warn_errno(src);
+            set_minor_error();
+            ok = false;
+            break;
+        }
         if (r == 0) break;
-        if (write_all(out, buf, (size_t)r) < 0) { warn_errno(target); set_minor_error(); break; }
-    }
-    {
-        uid_t ou;
-        gid_t og;
-        if (owner_for(opt, st.st_uid, st.st_gid, &ou, &og) && fchown(out, ou, og) < 0) {
+        if (write_all(out, buf, (size_t)r) < 0) {
             warn_errno(target);
             set_minor_error();
+            ok = false;
+            break;
         }
     }
-    /* the source's permissions outright, not through the umask, and
-     * after the owner, since chown() clears the set-ID bits */
-    if (fchmod(out, st.st_mode & 07777) < 0) { warn_errno(target); set_minor_error(); }
-    if (opt->preserve_mtime) {
-        struct timespec ts[2];
-        ts[0].tv_sec = st.st_atime; ts[0].tv_nsec = 0;
-        ts[1].tv_sec = st.st_mtime; ts[1].tv_nsec = 0;
-        utimensat(AT_FDCWD, target, ts, 0);
-    }
-done:
-    if (in >= 0) close(in);
-    if (out >= 0) close(out);
-    return 0;
+    close(in);
+    if (st.st_nlink > 1) pass_link_add(&st, target);
+    finish_copy(target, &st, opt, out);
+    close(out);
+    return ok ? 0 : -1;
 }
 
 static int mode_pass(options_t *opt) {
@@ -1400,10 +1504,11 @@ static int mode_pass(options_t *opt) {
         size_t len = strlen(line);
         if (len && line[len - 1] == '\n') line[len - 1] = '\0';
         if (line[0] == '\0') continue;
-        copy_one_path(line, opt->pass_dir, opt);
-        if (opt->verbose) fprintf(stderr, "%s\n", line);
+        if (copy_one_path(line, opt->pass_dir, opt) == 0 && opt->verbose)
+            fprintf(stderr, "%s\n", line);
     }
     dir_fixes_finish(opt);
+    pass_links_free();
     return g_status;
 }
 
@@ -1447,7 +1552,7 @@ int main(int argc, char **argv) {
     new_argv[new_argc] = NULL;
 
     opterr = 0;
-    while ((c = getopt(new_argc, new_argv, ":oipF:tvnH:C:R:dmu")) != -1) {
+    while ((c = getopt(new_argc, new_argv, ":oipF:tvnH:C:R:dmul")) != -1) {
         switch (c) {
         case 'o': opt.mode = MODE_OUT; break;
         case 'i': opt.mode = MODE_IN; break;
@@ -1467,6 +1572,7 @@ int main(int argc, char **argv) {
             break;
         case 'd': opt.make_dirs = true; break;
         case 'm': opt.preserve_mtime = true; break;
+        case 'l': opt.link_files = true; break;
         case 'u': opt.force_overwrite = true; break;
         case 'C': break;
         case ':':

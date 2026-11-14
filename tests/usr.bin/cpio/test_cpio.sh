@@ -382,6 +382,28 @@ if [ "$uid" -ne 0 ]; then
     same "-i -R 0:0, not root: status" 1 "$rc"
 fi
 
+# ---- pass mode: fifos copied, hard links kept, -l links, nothing made
+# for a source that cannot be read, -v names only what was copied
+mkdir -p ps
+mkfifo -m 0640 ps/fifo
+printf 'L\n' > ps/l1; ln ps/l1 ps/l2
+printf 'secret\n' > ps/noread; chmod 000 ps/noread
+fresh pp
+run sh -c "cd ps && printf 'fifo\nl1\nl2\nnoread\n' | \"$CPIO\" -pv ../pp"
+ok "-p fifo" test -p pp/fifo
+same "-p fifo mode" 640 "$(stat -c %a pp/fifo 2>&1)"
+same "-p links kept" "$(stat -c %i pp/l1)" "$(stat -c %i pp/l2)"
+if [ "$uid" -ne 0 ]; then
+    ok "-p unreadable source: no empty copy" test ! -e pp/noread
+    same "-p unreadable source" "cpio: noread: Permission denied" "$(grep noread .err)"
+    same "-p -v names what was copied" "$(printf 'fifo\nl1\nl2')" "$(grep -v '^cpio:' .err)"
+    same "-p unreadable source: status" 1 "$rc"
+fi
+chmod 600 ps/noread
+fresh pl
+run sh -c "cd ps && printf 'l1\n' | \"$CPIO\" -pl ../pl"
+same "-pl links to the source" "$(stat -c %i ps/l1)" "$(stat -c %i pl/l1)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

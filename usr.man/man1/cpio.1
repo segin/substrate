@@ -27,7 +27,7 @@
 .Nm
 .Fl p
 .Op Fl v
-.Op Fl dmu
+.Op Fl dlmu
 .Op Fl -no-preserve-owner
 .Op Fl R Ar owner
 .Ar directory
@@ -47,6 +47,11 @@ Pathnames for
 and
 .Fl p
 are read from standard input, one per line.
+.Pp
+Pass-through copies regular files, directories, symbolic links and
+fifos, and, when run by root, device files; the names of one file are
+copied as links to one copy.
+A socket is reported and left out.
 .Pp
 Copy-in and pass-through give each file the archived (or source)
 permissions exactly, set-user-ID, set-group-ID and sticky bits
@@ -122,8 +127,13 @@ is
 alone (the group is left as it is),
 .Ar user :
 (the user's login group) or
-.No : Ns Ar group ;
+.Pf : Ar group ;
 each a name or a number.
+.It Fl l
+With
+.Fl p ,
+link each file to its source rather than copying it, where they are
+on one file system; copy it otherwise.
 .It Fl -safe-extract
 Refuse members whose names have a
 .Sq ..
