@@ -435,6 +435,18 @@ same "unknown long option" "cpio: unknown option --frobnicate" "$(head -1 .err)"
 run "$CPIO" -v </dev/null
 same "no mode" "cpio: one of -o, -i and -p is needed" "$(head -1 .err)"
 
+# ---- -c is -H newc; -I and -O name the archive; -D changes directory
+printf 'src/f\n' | "$CPIO" -oc -O io.cpio
+same "-c writes newc" "070701" "$(head -c 6 io.cpio)"
+same "-I" "src/f" "$("$CPIO" -it -I io.cpio)"
+run "$CPIO" -o -I io.cpio </dev/null
+same "-I with -o" "cpio: -I names the archive to read: it goes with -i" "$err"
+fresh xD
+run "$CPIO" -id -D xD -I "$TMP/io.cpio"
+same "-D" "hello" "$(cat xD/src/f 2>&1)"
+run "$CPIO" -i -D nonexistentdir -I io.cpio
+same "-D to nowhere" "cpio: nonexistentdir: No such file or directory" "$err"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

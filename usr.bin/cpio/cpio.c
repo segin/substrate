@@ -1579,6 +1579,7 @@ static const struct option long_opts[] = {
     { "pattern-file", required_argument, NULL, 'E' },
     { "owner", required_argument, NULL, 'R' },
     { "numeric-uid-gid", no_argument, NULL, 'n' },
+    { "directory", required_argument, NULL, 'D' },
     { "safe-extract", no_argument, NULL, OPT_SAFE },
     { "no-absolute-paths", no_argument, NULL, OPT_NO_ABS },
     { "no-absolute-filenames", no_argument, NULL, OPT_NO_ABS },
@@ -1614,6 +1615,7 @@ static bool set_format(options_t *opt, const char *f) {
 int main(int argc, char **argv) {
     options_t opt;
     int c;
+    const char *in_file = NULL, *out_file = NULL, *dir = NULL;
 
     setlocale(LC_ALL, "");
     memset(&opt, 0, sizeof(opt));
@@ -1622,7 +1624,7 @@ int main(int argc, char **argv) {
     opt.fmt = (fmt_t)-1;
 
     opterr = 0;
-    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:", long_opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:", long_opts, NULL)) != -1) {
         switch (c) {
         case 'o': if (!set_mode(&opt, MODE_OUT)) return 2; break;
         case 'i': if (!set_mode(&opt, MODE_IN)) return 2; break;
@@ -1632,6 +1634,10 @@ int main(int argc, char **argv) {
         case 'v': opt.verbose = true; break;
         case 'n': opt.numeric_ids = true; break;
         case 'H': if (!set_format(&opt, optarg)) return 2; break;
+        case 'c': opt.fmt = FMT_NEWC; break;    /* GNU: the same as -H newc */
+        case 'I': in_file = optarg; break;
+        case 'O': out_file = optarg; break;
+        case 'D': dir = optarg; break;
         case 'R': if (parse_owner(optarg, &opt) < 0) return 2; break;
         case 'd': opt.make_dirs = true; break;
         case 'm': opt.preserve_mtime = true; break;
@@ -1671,6 +1677,19 @@ int main(int argc, char **argv) {
     }
     if (opt.toc && opt.mode != MODE_IN) {
         warnx_("-t lists an archive: it goes with -i");
+        return 2;
+    }
+    /* -I is copy-in's archive and -O copy-out's, each another -F */
+    if (in_file) {
+        if (opt.mode != MODE_IN) { warnx_("-I names the archive to read: it goes with -i"); return 2; }
+        opt.archive_file = in_file;
+    }
+    if (out_file) {
+        if (opt.mode != MODE_OUT) { warnx_("-O names the archive to write: it goes with -o"); return 2; }
+        opt.archive_file = out_file;
+    }
+    if (dir && chdir(dir) < 0) {
+        warn_errno(dir);
         return 2;
     }
 

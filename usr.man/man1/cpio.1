@@ -144,6 +144,27 @@ alone (the group is left as it is),
 (the user's login group) or
 .Pf : Ar group ;
 each a name or a number.
+.It Fl c
+The same as
+.Fl H Cm newc ,
+as in GNU cpio.
+.It Fl I Ar archive
+With
+.Fl i ,
+read
+.Ar archive
+rather than standard input.
+.It Fl O Ar archive
+With
+.Fl o ,
+write
+.Ar archive
+rather than standard output.
+.It Fl D Ar directory
+Change to
+.Ar directory
+first
+.Pf ( Fl -directory ) .
 .It Fl f
 With
 .Fl i ,
