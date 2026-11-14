@@ -508,6 +508,11 @@ fresh pb
 same "blocks, pass mode" "6 blocks" "$(printf 'src/f\nblk\n' | "$CPIO" -pd pb 2>&1)"
 same "--quiet" "" "$(printf 'src/f\n' | "$CPIO" -o --quiet 2>&1 >/dev/null)"
 
+# ---- -V: a dot a file, then a newline, before the block count
+same "-V" "$(printf '..\n1 block')" "$(printf 'src/f\nsrc/d/g\n' | "$CPIO" -oV 2>&1 >/dev/null)"
+fresh xV
+same "-iV" "$(printf '...\n1 block')" "$(cd xV && "$CPIO" -idV < ../pat.cpio 2>&1)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

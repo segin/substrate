@@ -46,6 +46,7 @@ typedef struct {
     bool dereference;   /* -L: archive or copy what symlinks point to */
     bool reset_atime;   /* -a: put back the access times of files read */
     bool quiet;         /* --quiet: no "N blocks" */
+    bool dot;           /* -V: a dot for each file */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -211,10 +212,24 @@ static int ar_finish(void) {
     return 0;
 }
 
+static bool g_dots;     /* -V has written a dot */
+
+/* A file has been archived, extracted or copied: -v names it, -V marks
+ * it with a dot, on standard error. */
+static void note_file(const options_t *opt, const char *name) {
+    if (opt->verbose) {
+        fprintf(stderr, "%s\n", name);
+    } else if (opt->dot) {
+        fputc('.', stderr);
+        g_dots = true;
+    }
+}
+
 /* "N blocks" on standard error, as GNU cpio reports how much it moved,
  * unless --quiet or the run failed. */
 static void report_blocks(const options_t *opt, uint64_t bytes) {
     uint64_t n = (bytes + g_block_size - 1) / g_block_size;
+    if (g_dots) fputc('\n', stderr);    /* end -V's line of dots */
     if (opt->quiet || g_status >= 2) return;
     fprintf(stderr, "%ju block%s\n", (uintmax_t)n, n == 1 ? "" : "s");
 }
@@ -443,7 +458,7 @@ static int write_member(options_t *opt, const char *path, struct stat *stp, bool
         if (ar_write("\0", 1) < 0) goto ioerr;
     }
 
-    if (opt->verbose) fprintf(stderr, "%s\n", path);
+    note_file(opt, path);
     if (ffd >= 0) {
         if (opt->reset_atime) reset_atime(ffd, &st, path);
         close(ffd);
@@ -1203,7 +1218,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
             if (l && l->path) {
                 /* another name for a file already extracted */
                 make_link(l->path, full);
-                if (opt->verbose) fprintf(stderr, "%s\n", e->name);
+                note_file(opt, e->name);
                 return skip_data_and_pad(opt->fmt, e->filesize);
             }
             if (l && e->filesize == 0 && opt->fmt == FMT_NEWC) {
@@ -1214,7 +1229,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
                     p[l->npending] = strdup(full);
                     if (p[l->npending]) {
                         l->npending++;
-                        if (opt->verbose) fprintf(stderr, "%s\n", e->name);
+                        note_file(opt, e->name);
                         return 0;
                     }
                 }
@@ -1255,7 +1270,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     if (in_skip(left + data_pad(opt->fmt, e->filesize)) < 0) return -1;
 
     if (made) apply_attrs(full, e, opt);
-    if (opt->verbose) fprintf(stderr, "%s\n", e->name);
+    note_file(opt, e->name);
     return 0;
 }
 
@@ -1625,8 +1640,8 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
 static int mode_pass(options_t *opt) {
     const char *name;
     while ((name = next_name(opt)) != NULL) {
-        if (copy_one_path(name, opt->pass_dir, opt) == 0 && opt->verbose)
-            fprintf(stderr, "%s\n", name);
+        if (copy_one_path(name, opt->pass_dir, opt) == 0)
+            note_file(opt, name);
     }
     dir_fixes_finish(opt);
     pass_links_free();
@@ -1691,6 +1706,7 @@ static const struct option long_opts[] = {
     { "io-size", required_argument, NULL, 'C' },
     { "block-size", required_argument, NULL, OPT_BLOCK_SIZE },
     { "quiet", no_argument, NULL, OPT_QUIET },
+    { "dot", no_argument, NULL, 'V' },
     { "safe-extract", no_argument, NULL, OPT_SAFE },
     { "no-absolute-paths", no_argument, NULL, OPT_NO_ABS },
     { "no-absolute-filenames", no_argument, NULL, OPT_NO_ABS },
@@ -1735,7 +1751,7 @@ int main(int argc, char **argv) {
     opt.fmt = (fmt_t)-1;
 
     opterr = 0;
-    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0LaB", long_opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0LaBV", long_opts, NULL)) != -1) {
         switch (c) {
         case 'o': if (!set_mode(&opt, MODE_OUT)) return 2; break;
         case 'i': if (!set_mode(&opt, MODE_IN)) return 2; break;
@@ -1771,6 +1787,7 @@ int main(int argc, char **argv) {
             break;
         }
         case OPT_QUIET: opt.quiet = true; break;
+        case 'V': opt.dot = true; break;
         case OPT_SAFE: opt.safe_extract = true; break;
         case OPT_NO_ABS: opt.no_absolute_paths = true; break;
         case OPT_ABS: opt.no_absolute_paths = false; break;
