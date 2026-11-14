@@ -1579,7 +1579,9 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
-    if (snprintf(full, sizeof(full), "%s/%s", base ? base : ".", e->name) >= (int)sizeof(full)) {
+    /* an absolute name (allowed by --absolute-paths) is where it says */
+    if (snprintf(full, sizeof(full), "%s%s%s", e->name[0] == '/' ? "" : base ? base : ".",
+                 e->name[0] == '/' ? "" : "/", e->name) >= (int)sizeof(full)) {
         warnx_("%s: name too long", e->name);
         set_minor_error();
         return skip_data_and_pad(opt->fmt, e->filesize);
@@ -1667,7 +1669,8 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
          * itself pass the safety checks */
         char old[PATH_MAX];
         if (!path_is_safe(e->linkname, opt) ||
-            snprintf(old, sizeof(old), "%s/%s", base ? base : ".", e->linkname) >= (int)sizeof(old)) {
+            snprintf(old, sizeof(old), "%s%s%s", e->linkname[0] == '/' ? "" : base ? base : ".",
+                     e->linkname[0] == '/' ? "" : "/", e->linkname) >= (int)sizeof(old)) {
             warnx_("%s: unsafe link target %s, not extracted", e->name, e->linkname);
             set_minor_error();
             return 0;
