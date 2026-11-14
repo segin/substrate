@@ -43,6 +43,8 @@ typedef struct {
     size_t npatterns;
     bool invert;        /* -f: select those that match none */
     bool null_names;    /* -0: the name list is NUL-separated */
+    bool dereference;   /* -L: archive or copy what symlinks point to */
+    bool reset_atime;   /* -a: put back the access times of files read */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -318,6 +320,18 @@ static size_t link_hash(dev_t dev, uint64_t ino) {
     return (size_t)((ino * 0x9e3779b97f4a7c15ULL) ^ (uint64_t)dev) % LINK_BUCKETS;
 }
 
+/* -a: put back the access time a file had before it was read (on FD). */
+static void reset_atime(int fd, const struct stat *st, const char *path) {
+    struct timespec ts[2];
+    ts[0] = st->st_atim;
+    ts[1].tv_sec = 0;
+    ts[1].tv_nsec = UTIME_OMIT;
+    if (futimens(fd, ts) < 0) {
+        warn_errno(path);
+        set_minor_error();
+    }
+}
+
 /* The largest member each format's size field holds. */
 static uint64_t fmt_max_size(fmt_t fmt) {
     return fmt == FMT_ODC ? 077777777777ULL : 0xffffffffULL;
@@ -380,7 +394,10 @@ static int write_member(options_t *opt, int afd, const char *path, struct stat *
     }
 
     if (opt->verbose) fprintf(stderr, "%s\n", path);
-    if (ffd >= 0) close(ffd);
+    if (ffd >= 0) {
+        if (opt->reset_atime) reset_atime(ffd, &st, path);
+        close(ffd);
+    }
     return 0;
 
 ioerr:
@@ -441,7 +458,7 @@ static int write_entry(options_t *opt, int afd, const char *path) {
     out_link_t *l, **pp;
     size_t h;
 
-    if (lstat(path, &st) < 0) {
+    if ((opt->dereference ? stat(path, &st) : lstat(path, &st)) < 0) {
         warn_errno(path);
         set_minor_error();
         return -1;
@@ -1435,7 +1452,11 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
     char target[PATH_MAX];
     int in, out;
     bool ok = true;
-    if (lstat(src, &st) < 0) { warn_errno(src); set_minor_error(); return -1; }
+    if ((opt->dereference ? stat(src, &st) : lstat(src, &st)) < 0) {
+        warn_errno(src);
+        set_minor_error();
+        return -1;
+    }
     if (snprintf(target, sizeof(target), "%s/%s", dst, src) >= (int)sizeof(target)) {
         warnx_("%s: name too long", src);
         set_minor_error();
@@ -1531,6 +1552,7 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
             break;
         }
     }
+    if (opt->reset_atime) reset_atime(in, &st, src);
     close(in);
     if (st.st_nlink > 1) pass_link_add(&st, target);
     finish_copy(target, &st, opt, out);
@@ -1601,6 +1623,8 @@ static const struct option long_opts[] = {
     { "numeric-uid-gid", no_argument, NULL, 'n' },
     { "directory", required_argument, NULL, 'D' },
     { "null", no_argument, NULL, '0' },
+    { "dereference", no_argument, NULL, 'L' },
+    { "reset-access-time", no_argument, NULL, 'a' },
     { "safe-extract", no_argument, NULL, OPT_SAFE },
     { "no-absolute-paths", no_argument, NULL, OPT_NO_ABS },
     { "no-absolute-filenames", no_argument, NULL, OPT_NO_ABS },
@@ -1645,7 +1669,7 @@ int main(int argc, char **argv) {
     opt.fmt = (fmt_t)-1;
 
     opterr = 0;
-    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0", long_opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0La", long_opts, NULL)) != -1) {
         switch (c) {
         case 'o': if (!set_mode(&opt, MODE_OUT)) return 2; break;
         case 'i': if (!set_mode(&opt, MODE_IN)) return 2; break;
@@ -1660,6 +1684,8 @@ int main(int argc, char **argv) {
         case 'O': out_file = optarg; break;
         case 'D': dir = optarg; break;
         case '0': opt.null_names = true; break;
+        case 'L': opt.dereference = true; break;
+        case 'a': opt.reset_atime = true; break;
         case 'R': if (parse_owner(optarg, &opt) < 0) return 2; break;
         case 'd': opt.make_dirs = true; break;
         case 'm': opt.preserve_mtime = true; break;

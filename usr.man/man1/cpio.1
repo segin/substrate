@@ -169,6 +169,20 @@ as names each ended by a NUL byte rather than a newline, as
 .Ql find -print0
 writes them
 .Pf ( Fl -null ) .
+.It Fl L
+With
+.Fl o
+and
+.Fl p ,
+take what each symbolic link points to rather than the link itself
+.Pf ( Fl -dereference ) .
+.It Fl a
+With
+.Fl o
+and
+.Fl p ,
+put back each file's access time after reading it
+.Pf ( Fl -reset-access-time ) .
 .It Fl D Ar directory
 Change to
 .Ar directory

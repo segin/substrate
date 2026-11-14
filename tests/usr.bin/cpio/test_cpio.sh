@@ -462,6 +462,17 @@ run sh -c "printf '%s\nsrc/f\n' $long | \"$CPIO\" -o > longname.cpio"
 same "long name" "cpio: $(printf %.40s "$long")...: name too long" "$err"
 same "long name: the rest archived" "src/f" "$("$CPIO" -it -F longname.cpio)"
 
+# ---- -L archives what a symlink points to; -a puts access times back
+ln -s f src/lnk
+same "-L" "-rw-r--r-- 6 src/lnk" "$(printf 'src/lnk\n' | "$CPIO" -oL | "$CPIO" -itv | awk '{ print $1, $5, $9 }')"
+fresh pL
+printf 'src/lnk\n' | "$CPIO" -pdL pL
+ok "-p -L copies the file" test -f pL/src/lnk -a ! -L pL/src/lnk
+rm src/lnk
+printf 'atime\n' > at; touch -a -d '2001-01-01 00:00' at
+printf 'at\n' | "$CPIO" -oa > /dev/null
+same "-a" "2001-01-01" "$(date -u -d "@$(stat -c %X at)" +%F)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
