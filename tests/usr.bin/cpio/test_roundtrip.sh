@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
-CPIO="$ROOT/cpio"
+ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+CPIO=${CPIO:-"$ROOT/usr.bin/cpio/cpio"}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/src/dir"

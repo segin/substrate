@@ -151,6 +151,13 @@ jobs:
       - name: pr tests
         run: make -C tests/usr.bin/pr run
 
+      # cpio, built for the host, through every tests/usr.bin/cpio/test_*.sh;
+      # GNU cpio, where installed, is the other end of the interop checks.
+      - name: cpio tests
+        run: |
+          sudo apt-get install -y cpio
+          make -C tests/usr.bin/cpio run
+
       - name: Toolchain manual page install
         run: make -C tests/usr.man run
 

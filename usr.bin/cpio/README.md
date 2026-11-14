@@ -30,6 +30,14 @@ Select using `-H format` or `--format=format`.
 make -C usr.bin/cpio
 ```
 
+## Run tests
+```sh
+make -C tests/usr.bin/cpio run
+```
+
+This builds a host binary and runs every `tests/usr.bin/cpio/test_*.sh`.
+`make -C usr.bin/cpio test` does the same after cleaning the build.
+
 ## Quick examples
 ```sh
 # Create
