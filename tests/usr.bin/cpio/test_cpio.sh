@@ -70,6 +70,28 @@ fresh xv
 run sh -c "cd xv && \"$CPIO\" -idv -F ../v.cpio"
 same "-iv names the member, not ./member" "src/f" "$err"
 
+# ---- copy-in from a pipe, the format found without seeking
+for fmt in newc odc bin; do
+    printf 'src/f\n' | "$CPIO" -o -H "$fmt" -F "p-$fmt.cpio"
+    fresh xp
+    run sh -c "cat p-$fmt.cpio | (cd xp && \"$CPIO\" -id)"
+    same "pipe, $fmt: status" 0 "$rc"
+    same "pipe, $fmt: data" "hello" "$(cat xp/src/f 2>&1)"
+done
+
+# ---- a member skipped (here as unsafe) leaves the stream in step: its
+# data and padding are passed over, and the next member extracts
+mkdir -p skip/in
+printf 'abc' > skip/up
+(cd skip/in && printf '../up\n' | "$CPIO" -o -H newc) > skip1.cpio
+printf 'src/f\n' | "$CPIO" -o -H newc > skip2.cpio
+# the first archive without its trailer, then the second
+head -c "$(( $(grep -abo 'TRAILER!!!' skip1.cpio | head -1 | cut -d: -f1) - 110 ))" skip1.cpio > skip.cpio
+cat skip2.cpio >> skip.cpio
+fresh xs
+run sh -c "cd xs && \"$CPIO\" -id < ../skip.cpio"
+same "member after a skipped one" "hello" "$(cat xs/src/f 2>&1)"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

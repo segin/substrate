@@ -99,21 +99,6 @@ static int write_all(int fd, const void *buf, size_t n) {
     return 0;
 }
 
-static int read_all(int fd, void *buf, size_t n) {
-    uint8_t *p = (uint8_t *)buf;
-    while (n > 0) {
-        ssize_t r = read(fd, p, n);
-        if (r == 0) return -1;
-        if (r < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        p += (size_t)r;
-        n -= (size_t)r;
-    }
-    return 0;
-}
-
 static int make_parent_dirs(const char *path) {
     char tmp[PATH_MAX];
     size_t i;
@@ -361,13 +346,73 @@ typedef struct {
     dev_t rdev;
 } entry_t;
 
-static int parse_newc_header(int fd, entry_t *e) {
+/* The archive being read, through a buffer.  The format is found by
+ * looking at the first bytes without consuming them, so the archive
+ * need not be seekable: a pipe works as well as a file. */
+static struct {
+    int fd;
+    unsigned char buf[IO_BUFSZ];
+    size_t pos, len;
+    bool eof;
+} g_in;
+
+/* Make at least WANT (<= IO_BUFSZ) bytes available, if the archive has
+ * them; return how many are. */
+static size_t in_fill(size_t want) {
+    if (g_in.len - g_in.pos >= want) return g_in.len - g_in.pos;
+    memmove(g_in.buf, g_in.buf + g_in.pos, g_in.len - g_in.pos);
+    g_in.len -= g_in.pos;
+    g_in.pos = 0;
+    while (g_in.len < want && !g_in.eof) {
+        ssize_t r = read(g_in.fd, g_in.buf + g_in.len, sizeof(g_in.buf) - g_in.len);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            warn_errno("read error");
+            g_in.eof = true;
+            break;
+        }
+        if (r == 0) { g_in.eof = true; break; }
+        g_in.len += (size_t)r;
+    }
+    return g_in.len - g_in.pos;
+}
+
+/* Read exactly N bytes of the archive into P; -1 if it ends first. */
+static int in_read(void *p, size_t n) {
+    unsigned char *d = p;
+    while (n > 0) {
+        size_t avail = in_fill(1);
+        size_t c;
+        if (avail == 0) return -1;
+        c = avail < n ? avail : n;
+        memcpy(d, g_in.buf + g_in.pos, c);
+        g_in.pos += c;
+        d += c;
+        n -= c;
+    }
+    return 0;
+}
+
+/* Skip N bytes of the archive; -1 if it ends first. */
+static int in_skip(uint64_t n) {
+    while (n > 0) {
+        size_t avail = in_fill(1);
+        size_t c;
+        if (avail == 0) return -1;
+        c = (uint64_t)avail < n ? avail : (size_t)n;
+        g_in.pos += c;
+        n -= c;
+    }
+    return 0;
+}
+
+static int parse_newc_header(entry_t *e) {
     char hdr[110 + 1];
     char *name;
     unsigned ino, mode, uid, gid, nlink, mtime, filesize, rmaj, rmin, namesz;
     size_t padded;
 
-    if (read_all(fd, hdr, 110) < 0) return -1;
+    if (in_read(hdr, 110) < 0) return -1;
     hdr[110] = '\0';
     if (strncmp(hdr, "070701", 6) != 0 && strncmp(hdr, "070702", 6) != 0) return -1;
     if (sscanf(hdr + 6,
@@ -380,14 +425,10 @@ static int parse_newc_header(int fd, entry_t *e) {
 
     name = malloc(namesz + 1);
     if (!name) return -1;
-    if (read_all(fd, name, namesz) < 0) { free(name); return -1; }
+    if (in_read(name, namesz) < 0) { free(name); return -1; }
     name[namesz] = '\0';
     padded = 110 + namesz;
-    while (padded % 4) {
-        char c;
-        if (read_all(fd, &c, 1) < 0) { free(name); return -1; }
-        padded++;
-    }
+    if (in_skip((4 - padded % 4) % 4) < 0) { free(name); return -1; }
 
     e->name = name;
     e->mode = (mode_t)mode;
@@ -400,11 +441,11 @@ static int parse_newc_header(int fd, entry_t *e) {
     return 0;
 }
 
-static int parse_odc_header(int fd, entry_t *e) {
+static int parse_odc_header(entry_t *e) {
     char hdr[76 + 1];
     unsigned long mode, uid, gid, nlink, rdev, namesz, mtime;
     unsigned long long filesize;
-    if (read_all(fd, hdr, 76) < 0) return -1;
+    if (in_read(hdr, 76) < 0) return -1;
     hdr[76] = '\0';
     if (strncmp(hdr, "070707", 6) != 0) return -1;
     {
@@ -418,7 +459,7 @@ static int parse_odc_header(int fd, entry_t *e) {
 
     e->name = malloc(namesz + 1);
     if (!e->name) return -1;
-    if (read_all(fd, e->name, namesz) < 0) { free(e->name); return -1; }
+    if (in_read(e->name, namesz) < 0) { free(e->name); return -1; }
     e->name[namesz] = '\0';
     e->mode = (mode_t)mode;
     e->uid = (uid_t)uid;
@@ -430,10 +471,10 @@ static int parse_odc_header(int fd, entry_t *e) {
     return 0;
 }
 
-static int parse_bin_header(int fd, entry_t *e) {
+static int parse_bin_header(entry_t *e) {
     uint8_t hdr[26];
     uint16_t namesz;
-    if (read_all(fd, hdr, 26) < 0) return -1;
+    if (in_read(hdr, 26) < 0) return -1;
     if (be16(hdr) != 070707) return -1;
     namesz = be16(hdr + 20);
 
@@ -441,12 +482,9 @@ static int parse_bin_header(int fd, entry_t *e) {
 
     e->name = malloc((size_t)namesz + 1);
     if (!e->name) return -1;
-    if (read_all(fd, e->name, namesz) < 0) { free(e->name); return -1; }
+    if (in_read(e->name, namesz) < 0) { free(e->name); return -1; }
     e->name[namesz] = '\0';
-    if ((26 + namesz) & 1) {
-        char pad;
-        if (read_all(fd, &pad, 1) < 0) { free(e->name); return -1; }
-    }
+    if (in_skip((26 + namesz) & 1) < 0) { free(e->name); return -1; }
     e->mode = be16(hdr + 6);
     e->uid = be16(hdr + 8);
     e->gid = be16(hdr + 10);
@@ -457,21 +495,15 @@ static int parse_bin_header(int fd, entry_t *e) {
     return 0;
 }
 
-static int skip_data_and_pad(int fd, fmt_t fmt, uint64_t size) {
-    char buf[IO_BUFSZ];
-    while (size > 0) {
-        size_t chunk = size > sizeof(buf) ? sizeof(buf) : (size_t)size;
-        if (read_all(fd, buf, chunk) < 0) return -1;
-        size -= chunk;
-    }
-    if (fmt == FMT_NEWC) {
-        while (size % 4) {
-            char pad;
-            if (read_all(fd, &pad, 1) < 0) return -1;
-            size++;
-        }
-    }
+/* The padding after SIZE bytes of member data. */
+static uint64_t data_pad(fmt_t fmt, uint64_t size) {
+    if (fmt == FMT_NEWC) return (4 - size % 4) % 4;
+    if (fmt == FMT_BIN) return size & 1;
     return 0;
+}
+
+static int skip_data_and_pad(fmt_t fmt, uint64_t size) {
+    return in_skip(size + data_pad(fmt, size));
 }
 
 static int write_sparse_aware(int outfd, const char *buf, size_t n, off_t *offset) {
@@ -501,7 +533,7 @@ static int write_sparse_aware(int outfd, const char *buf, size_t n, off_t *offse
     return 0;
 }
 
-static int extract_entry(int afd, const entry_t *e, const options_t *opt, const char *base) {
+static int extract_entry(const entry_t *e, const options_t *opt, const char *base) {
     char full[PATH_MAX];
     int fd = -1;
     uint64_t left = e->filesize;
@@ -511,29 +543,29 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
     if (!path_is_safe(e->name, opt)) {
         warnx_("%s: unsafe name, not extracted", e->name);
         set_minor_error();
-        return skip_data_and_pad(afd, opt->fmt, e->filesize);
+        return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
     if (snprintf(full, sizeof(full), "%s/%s", base ? base : ".", e->name) >= (int)sizeof(full)) {
         warnx_("%s: name too long", e->name);
         set_minor_error();
-        return skip_data_and_pad(afd, opt->fmt, e->filesize);
+        return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
     if (opt->toc) {
         if (opt->verbose) fprintf(stdout, "%s\n", e->name);
-        return skip_data_and_pad(afd, opt->fmt, e->filesize);
+        return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
     if (opt->no_overwrite && access(full, F_OK) == 0) {
         warnx_("%s: exists, not overwritten", e->name);
-        return skip_data_and_pad(afd, opt->fmt, e->filesize);
+        return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
     if (opt->make_dirs && make_parent_dirs(full) < 0) {
         warn_errno(e->name);
         set_minor_error();
-        return skip_data_and_pad(afd, opt->fmt, e->filesize);
+        return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
     if (S_ISDIR(e->mode)) {
@@ -543,7 +575,7 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
     } else if (S_ISLNK(e->mode)) {
         char *target = malloc((size_t)e->filesize + 1);
         if (!target) { set_minor_error(); return -1; }
-        if (read_all(afd, target, (size_t)e->filesize) < 0) { free(target); return -1; }
+        if (in_read(target, (size_t)e->filesize) < 0) { free(target); return -1; }
         target[e->filesize] = '\0';
         unlink(full);
         if (symlink(target, full) < 0) { warn_errno(full); set_minor_error(); }
@@ -571,11 +603,11 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
         if (fd < 0) {
             warn_errno(full);
             set_minor_error();
-            return skip_data_and_pad(afd, opt->fmt, e->filesize);
+            return skip_data_and_pad(opt->fmt, e->filesize);
         }
         while (left > 0) {
             size_t chunk = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
-            if (read_all(afd, buf, chunk) < 0) { close(fd); return -1; }
+            if (in_read(buf, chunk) < 0) { close(fd); return -1; }
             if (write_sparse_aware(fd, buf, chunk, &outoff) < 0) { close(fd); return -1; }
             left -= chunk;
         }
@@ -586,22 +618,7 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
         close(fd);
     }
 
-    while (left > 0) {
-        size_t chunk = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
-        if (read_all(afd, buf, chunk) < 0) return -1;
-        left -= chunk;
-    }
-
-    if (opt->fmt == FMT_NEWC) {
-        uint64_t pad = (4 - (e->filesize % 4)) % 4;
-        while (pad--) {
-            char c;
-            if (read_all(afd, &c, 1) < 0) return -1;
-        }
-    } else if (opt->fmt == FMT_BIN && (e->filesize & 1)) {
-        char c;
-        if (read_all(afd, &c, 1) < 0) return -1;
-    }
+    if (in_skip(left + data_pad(opt->fmt, e->filesize)) < 0) return -1;
 
     if (!opt->toc) {
         if (opt->numeric_owner && geteuid() == 0) {
@@ -618,10 +635,11 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
     return 0;
 }
 
-static fmt_t detect_fmt(int fd) {
-    char b[6];
-    if (read_all(fd, b, 6) < 0) return FMT_NEWC;
-    if (lseek(fd, 0, SEEK_SET) < 0) return FMT_NEWC;
+/* The format of the archive, from its first bytes, which stay unread. */
+static fmt_t detect_fmt(void) {
+    const char *b;
+    if (in_fill(6) < 6) return FMT_NEWC;
+    b = (const char *)g_in.buf + g_in.pos;
     if (memcmp(b, "070701", 6) == 0 || memcmp(b, "070702", 6) == 0) return FMT_NEWC;
     if (memcmp(b, "070707", 6) == 0) return FMT_ODC;
     return FMT_BIN;
@@ -653,19 +671,20 @@ static int mode_in(options_t *opt) {
               ? open(opt->archive_file, O_RDONLY)
               : STDIN_FILENO;
     if (afd < 0) { warn_errno(opt->archive_file); return 2; }
+    g_in.fd = afd;
 
     if (opt->fmt == (fmt_t)-1)
-        opt->fmt = detect_fmt(afd);
+        opt->fmt = detect_fmt();
 
     for (;;) {
         entry_t e;
         int r;
         memset(&e, 0, sizeof(e));
-        if (opt->fmt == FMT_NEWC) r = parse_newc_header(afd, &e);
-        else if (opt->fmt == FMT_ODC) r = parse_odc_header(afd, &e);
-        else r = parse_bin_header(afd, &e);
+        if (opt->fmt == FMT_NEWC) r = parse_newc_header(&e);
+        else if (opt->fmt == FMT_ODC) r = parse_odc_header(&e);
+        else r = parse_bin_header(&e);
         if (r < 0) break;
-        r = extract_entry(afd, &e, opt, ".");
+        r = extract_entry(&e, opt, ".");
         free(e.name);
         if (r == 1) break;
         if (r < 0) { set_fatal_error(); break; }
