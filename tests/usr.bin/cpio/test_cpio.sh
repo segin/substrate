@@ -133,6 +133,36 @@ xin badnum.cpio
 same "bad number" "cpio: malformed header: bad number zzzzzzzz" "$(head -1 .err)"
 same "bad number: next member" "hello" "$(cat xd/src/f 2>&1)"
 
+# ---- -t lists names; -tv lines as GNU cpio's
+mkdir lt
+printf 'hello\n' > lt/f
+ln -s f lt/l
+mkdir lt/d
+touch -h -d '2020-01-02 03:04' lt/f lt/l lt/d
+(cd lt && printf 'f\nl\nd\n' | "$CPIO" -o -H newc) > lt.cpio
+run "$CPIO" -it -F lt.cpio
+same "-t" "$(printf 'f\nl\nd')" "$out"
+same "-t: status" 0 "$rc"
+uid=$(id -u); gid=$(id -g)
+run "$CPIO" -itvn -F lt.cpio
+want=$(printf '%s %3s %-8s %-8s %8s %s %s\n' \
+    -rw-r--r-- 1 "$uid" "$gid" 6 'Jan  2  2020' f \
+    lrwxrwxrwx 1 "$uid" "$gid" 1 'Jan  2  2020' 'l -> f' \
+    drwxr-xr-x 1 "$uid" "$gid" 0 'Jan  2  2020' d)
+same "-tvn" "$want" "$out"
+if [ -n "$GNU" ]; then
+    run "$CPIO" -itv -F lt.cpio
+    ours=$out
+    "$GNU" -itv -F lt.cpio > .gnu 2>/dev/null
+    same "-tv as GNU's" "$(cat .gnu)" "$ours"
+fi
+# listing applies no extraction safety: an absolute name is listed
+printf 'src/f\n' | "$CPIO" -o -H odc | sed 's|src/f|/rc/f|' > abs.cpio
+run "$CPIO" -it -F abs.cpio
+same "-t of an absolute name" "/rc/f" "$out"
+same "-t of an absolute name: status" 0 "$rc"
+same "-t of an absolute name: quiet" "" "$err"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

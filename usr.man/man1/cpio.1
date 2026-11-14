@@ -15,6 +15,7 @@
 .Fl i
 .Op Fl t
 .Op Fl v
+.Op Fl n
 .Op Fl dmu
 .Op Fl H Ar format
 .Op Fl F Ar archive
@@ -56,9 +57,23 @@ Read/write archive file instead of stdin/stdout.
 .It Fl H Ar format
 Archive format: bin, odc, newc.
 .It Fl t
-Table of contents only.
+List the archive's members, one name per line on standard output,
+rather than extracting them.
+The extraction safety checks do not apply to a listing.
 .It Fl v
-Verbose output.
+Verbose output: name each file as it is archived, copied or extracted,
+on standard error.
+With
+.Fl t ,
+list each member as
+.Xr ls 1
+.Fl l
+does: mode, links, owner, group, size (or major and minor numbers),
+modification time and name, and for a symbolic link its target.
+.It Fl n
+With
+.Fl tv ,
+show the owner and group as numbers.
 .It Fl d
 Create leading directories.
 .It Fl m

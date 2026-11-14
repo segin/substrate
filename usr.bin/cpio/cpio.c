@@ -4,7 +4,10 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <limits.h>
+#include <locale.h>
+#include <pwd.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -33,6 +36,7 @@ typedef struct {
     bool safe_extract;
     bool no_overwrite;
     bool numeric_owner;
+    bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;
     gid_t owner_gid;
     bool owner_set;
@@ -555,6 +559,73 @@ static int write_sparse_aware(int outfd, const char *buf, size_t n, off_t *offse
     return 0;
 }
 
+/* ls -l's mode string: the type, then rwx three times with s/S/t/T. */
+static void mode_string(mode_t m, char out[11]) {
+    static const char rwx[] = "rwxrwxrwx";
+    out[0] = S_ISDIR(m) ? 'd' : S_ISLNK(m) ? 'l' : S_ISCHR(m) ? 'c' :
+             S_ISBLK(m) ? 'b' : S_ISFIFO(m) ? 'p' : S_ISSOCK(m) ? 's' : '-';
+    for (int i = 0; i < 9; i++)
+        out[1 + i] = (m & (0400 >> i)) ? rwx[i] : '-';
+    if (m & S_ISUID) out[3] = (m & S_IXUSR) ? 's' : 'S';
+    if (m & S_ISGID) out[6] = (m & S_IXGRP) ? 's' : 'S';
+    if (m & S_ISVTX) out[9] = (m & S_IXOTH) ? 't' : 'T';
+    out[10] = '\0';
+}
+
+/* -t: the member's name, or with -v a line as GNU cpio writes it:
+ * mode, links, owner, group, size (or major, minor), date, name, and
+ * for a symlink " -> target".  The member's data is passed over. */
+static int list_entry(const entry_t *e, const options_t *opt) {
+    char mbuf[11], tbuf[32], owner[16], group[16];
+    char target[PATH_MAX];
+    size_t tlen = 0;
+    time_t now = time(NULL);
+    time_t when = e->mtime;
+    struct tm *tm;
+
+    if (!opt->verbose) {
+        printf("%s\n", e->name);
+        return skip_data_and_pad(opt->fmt, e->filesize);
+    }
+
+    if (S_ISLNK(e->mode)) {
+        tlen = e->filesize < sizeof(target) ? (size_t)e->filesize : sizeof(target) - 1;
+        if (in_read(target, tlen) < 0) return -1;
+        target[tlen] = '\0';
+        if (in_skip(e->filesize - tlen + data_pad(opt->fmt, e->filesize)) < 0) return -1;
+    } else if (skip_data_and_pad(opt->fmt, e->filesize) < 0) {
+        return -1;
+    }
+
+    mode_string(e->mode, mbuf);
+    {
+        struct passwd *pw = opt->numeric_ids ? NULL : getpwuid(e->uid);
+        struct group *gr = opt->numeric_ids ? NULL : getgrgid(e->gid);
+        if (pw) snprintf(owner, sizeof(owner), "%.8s", pw->pw_name);
+        else snprintf(owner, sizeof(owner), "%u", (unsigned)e->uid);
+        if (gr) snprintf(group, sizeof(group), "%.8s", gr->gr_name);
+        else snprintf(group, sizeof(group), "%u", (unsigned)e->gid);
+    }
+    tm = localtime(&when);
+    if (!tm) {
+        snprintf(tbuf, sizeof(tbuf), "%jd", (intmax_t)when);
+    } else if (when > now || now - when > (time_t)(365.2425 * 24 * 60 * 60 / 2)) {
+        strftime(tbuf, sizeof(tbuf), "%b %e  %Y", tm);
+    } else {
+        strftime(tbuf, sizeof(tbuf), "%b %e %H:%M", tm);
+    }
+
+    printf("%s %3lu %-8s %-8s ", mbuf, (unsigned long)e->nlink, owner, group);
+    if (S_ISCHR(e->mode) || S_ISBLK(e->mode))
+        printf("%3u, %3u ", (unsigned)major(e->rdev), (unsigned)minor(e->rdev));
+    else
+        printf("%8ju ", (uintmax_t)e->filesize);
+    printf("%s %s", tbuf, e->name);
+    if (S_ISLNK(e->mode)) printf(" -> %s", target);
+    putchar('\n');
+    return 0;
+}
+
 static int extract_entry(const entry_t *e, const options_t *opt, const char *base) {
     char full[PATH_MAX];
     int fd = -1;
@@ -562,6 +633,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     char buf[IO_BUFSZ];
 
     if (strcmp(e->name, "TRAILER!!!") == 0) return 1;
+    if (opt->toc) return list_entry(e, opt);
     if (!path_is_safe(e->name, opt)) {
         warnx_("%s: unsafe name, not extracted", e->name);
         set_minor_error();
@@ -571,11 +643,6 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
     if (snprintf(full, sizeof(full), "%s/%s", base ? base : ".", e->name) >= (int)sizeof(full)) {
         warnx_("%s: name too long", e->name);
         set_minor_error();
-        return skip_data_and_pad(opt->fmt, e->filesize);
-    }
-
-    if (opt->toc) {
-        if (opt->verbose) fprintf(stdout, "%s\n", e->name);
         return skip_data_and_pad(opt->fmt, e->filesize);
     }
 
@@ -839,6 +906,7 @@ int main(int argc, char **argv) {
 
     if (!new_argv) return 2;
 
+    setlocale(LC_ALL, "");
     memset(&opt, 0, sizeof(opt));
     opt.no_absolute_paths = true;
     opt.safe_extract = true;
@@ -867,7 +935,7 @@ int main(int argc, char **argv) {
     new_argv[new_argc] = NULL;
 
     opterr = 0;
-    while ((c = getopt(new_argc, new_argv, ":oipF:tvH:C:R:dmu")) != -1) {
+    while ((c = getopt(new_argc, new_argv, ":oipF:tvnH:C:R:dmu")) != -1) {
         switch (c) {
         case 'o': opt.mode = MODE_OUT; break;
         case 'i': opt.mode = MODE_IN; break;
@@ -875,6 +943,7 @@ int main(int argc, char **argv) {
         case 'F': opt.archive_file = optarg; break;
         case 't': opt.toc = true; break;
         case 'v': opt.verbose = true; break;
+        case 'n': opt.numeric_ids = true; break;
         case 'H':
             if (strcmp(optarg, "newc") == 0) opt.fmt = FMT_NEWC;
             else if (strcmp(optarg, "odc") == 0) opt.fmt = FMT_ODC;
