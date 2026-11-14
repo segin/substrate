@@ -1,38 +1,129 @@
-.Dd February 11, 2026
+.Dd November 14, 2026
 .Dt CPIO 5
 .Os
 .Sh NAME
 .Nm cpio
-.Nd cpio archive formats
+.Nd formats of cpio archives
 .Sh DESCRIPTION
-This document describes cpio formats supported by
-.Xr cpio 1 :
-.Pp
-.Bl -bullet
-.It
-newc (SVR4 ASCII header, magic 070701)
-.It
-ustar (POSIX tar: 512-byte headers with octal fields and a checksum,
-names split between a 155-byte prefix and a 100-byte name, data padded
-to 512 bytes, two zero blocks at the end) and tar (the old format:
-the same without the magic, owner names, device numbers or prefix)
-.It
-hpodc and hpbin (odc and bin as HP-UX writes them: a device file's
-number goes in the file size field, and its device field holds 0,1)
-.It
-crc (newc with magic 070702; its last header field, zero in newc, is the
-sum of the bytes of a regular file's data, modulo 2^32)
-.It
-odc (portable old character format, magic 070707)
-.It
-bin (old binary format, magic 070707 in a 16-bit word).
-Its words are in the byte order of the machine that wrote it;
+A cpio archive is a sequence of members, each a header, the member's
+name, and its data, ended by a member named
+.Ql TRAILER\&!\&!\&! .
+The data of a regular file is its contents and of a symbolic link its
+target; other files have none.
 .Xr cpio 1
-writes its own (little-endian on x86) and reads either.
+reads and writes the formats below, and the two tar formats at the
+end.
+.Ss newc and crc
+The header is 110 bytes of ASCII: a 6-byte magic and thirteen 8-digit
+hexadecimal fields.
+.Bl -column "c_filesize" "Bytes" -offset indent
+.It Sy Field Ta Sy Bytes Ta Sy Contents
+.It c_magic Ta 6 Ta Qq 070701 , or Qq 070702 for crc
+.It c_ino Ta 8 Ta inode number
+.It c_mode Ta 8 Ta file type and permissions
+.It c_uid Ta 8 Ta owner
+.It c_gid Ta 8 Ta group
+.It c_nlink Ta 8 Ta link count
+.It c_mtime Ta 8 Ta modification time, seconds since the Epoch
+.It c_filesize Ta 8 Ta size of the data
+.It c_devmajor Ta 8 Ta major number of the device holding the file
+.It c_devminor Ta 8 Ta its minor number
+.It c_rdevmajor Ta 8 Ta for a device file, its major number
+.It c_rdevminor Ta 8 Ta and its minor number
+.It c_namesize Ta 8 Ta length of the name, its NUL included
+.It c_check Ta 8 Ta crc: the sum of the data's bytes, modulo 2^32; newc: 0
 .El
 .Pp
-Each archive entry contains a header, pathname, file payload (if any), and
-format-specific alignment padding.
+The name follows, with its NUL, padded with NULs to a multiple of 4
+bytes counted from the start of the header; then the data, padded to a
+multiple of 4.
+.Pp
+A file with several links is written once for each name, every name
+but the last with a size of zero and the last with the data; a reader
+links the names that share
+.Va c_devmajor ,
+.Va c_devminor
+and
+.Va c_ino .
+.Ss odc
+The header is 76 bytes of ASCII: a 6-byte magic and octal fields.
+.Bl -column "c_filesize" "Bytes" -offset indent
+.It Sy Field Ta Sy Bytes Ta Sy Contents
+.It c_magic Ta 6 Ta Qq 070707
+.It c_dev Ta 6 Ta device holding the file
+.It c_ino Ta 6 Ta inode number
+.It c_mode Ta 6 Ta file type and permissions
+.It c_uid Ta 6 Ta owner
+.It c_gid Ta 6 Ta group
+.It c_nlink Ta 6 Ta link count
+.It c_rdev Ta 6 Ta for a device file, its number
+.It c_mtime Ta 11 Ta modification time
+.It c_namesize Ta 6 Ta length of the name, its NUL included
+.It c_filesize Ta 11 Ta size of the data
+.El
+.Pp
+The name and the data follow unpadded.
+Every name of a linked file carries the data.
+This is the cpio interchange format of
+.Xr pax 1 .
+.Ss bin
+The header is thirteen 16-bit words in the byte order of the machine
+that wrote it: c_magic (070707 octal), c_dev, c_ino, c_mode, c_uid,
+c_gid, c_nlink, c_rdev, c_mtime (two words, the high one first),
+c_namesize and c_filesize (two words, the high one first).
+The name and the data each follow padded to an even length.
+A reader tells the byte order from the magic.
+Every name of a linked file carries the data.
+.Ss hpodc and hpbin
+odc and bin as HP-UX writes them: for a device file
+.Va c_rdev
+holds 0,1 and
+.Va c_filesize
+the device's number.
+The magic is odc's or bin's, so they cannot be told apart from those.
+.Ss ustar and tar
+A tar archive is a sequence of 512-byte blocks: for each file a header
+block, then its data padded to a whole block; two blocks of zeros end
+it.
+Numeric fields are octal, ended by a NUL or a space.
+.Bl -column "typeflag" "Offset" "Bytes" -offset indent
+.It Sy Field Ta Sy Offset Ta Sy Bytes Ta Sy Contents
+.It name Ta 0 Ta 100 Ta name; a directory's ends in Ql /
+.It mode Ta 100 Ta 8 Ta permissions
+.It uid Ta 108 Ta 8 Ta owner
+.It gid Ta 116 Ta 8 Ta group
+.It size Ta 124 Ta 12 Ta size of the data (regular files only)
+.It mtime Ta 136 Ta 12 Ta modification time
+.It chksum Ta 148 Ta 8 Ta sum of the header's bytes, this field as spaces
+.It typeflag Ta 156 Ta 1 Ta the type: 0 file, 1 hard link, 2 symbolic link, 3 character device, 4 block device, 5 directory, 6 fifo
+.It linkname Ta 157 Ta 100 Ta target of a link
+.It magic Ta 257 Ta 6 Ta ustar: Qq ustar
+.It version Ta 263 Ta 2 Ta ustar: Qq 00
+.It uname Ta 265 Ta 32 Ta ustar: owner's name
+.It gname Ta 297 Ta 32 Ta ustar: group's name
+.It devmajor Ta 329 Ta 8 Ta ustar: a device's major number
+.It devminor Ta 337 Ta 8 Ta ustar: its minor number
+.It prefix Ta 345 Ta 155 Ta ustar: the start of a name longer than 100 bytes
+.El
+.Pp
+The old tar format has only the fields up to
+.Va linkname ,
+types
+.Ql 0
+to
+.Ql 2
+and
+.Ql 5 ,
+and names of at most 100 bytes.
+A file's second and later names are written as hard links to its first.
 .Sh SEE ALSO
 .Xr cpio 1 ,
+.Xr pax 1 ,
+.Xr tar 1
+.Sh STANDARDS
+The odc format is the cpio interchange format, and ustar the ustar
+interchange format, of
 .Xr pax 1
+in
+.St -p1003.1-2008
+and later.
