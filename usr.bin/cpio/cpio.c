@@ -261,11 +261,20 @@ static void hl_free(void) {
     }
 }
 
+/* The largest member each format's size field holds. */
+static uint64_t fmt_max_size(fmt_t fmt) {
+    return fmt == FMT_ODC ? 077777777777ULL : 0xffffffffULL;
+}
+
+static const char *fmt_name(fmt_t fmt) {
+    return fmt == FMT_NEWC ? "newc" : fmt == FMT_ODC ? "odc" : "bin";
+}
+
 static int write_entry(options_t *opt, int afd, const char *path) {
     struct stat st;
     char lnk[PATH_MAX];
     ssize_t lsz = 0;
-    uint32_t data_size = 0;
+    uint64_t data_size = 0;
     uint32_t nlink_hdr = 1;
     int ffd = -1;
 
@@ -282,7 +291,12 @@ static int write_entry(options_t *opt, int afd, const char *path) {
         data_size = (uint32_t)lsz;
     } else if (S_ISREG(st.st_mode)) {
         hardlink_ent_t *h = NULL;
-        data_size = (uint32_t)st.st_size;
+        if ((uint64_t)st.st_size > fmt_max_size(opt->fmt)) {
+            warnx_("%s: too large for the %s format", path, fmt_name(opt->fmt));
+            set_minor_error();
+            return -1;
+        }
+        data_size = (uint64_t)st.st_size;
         nlink_hdr = st.st_nlink;
         if (st.st_nlink > 1) {
             h = hl_find(st.st_dev, st.st_ino);
@@ -304,17 +318,17 @@ static int write_entry(options_t *opt, int afd, const char *path) {
     }
 
     if (opt->fmt == FMT_NEWC) {
-        if (cpio_write_header_newc(afd, path, &st, data_size, nlink_hdr) < 0) goto ioerr;
+        if (cpio_write_header_newc(afd, path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
     } else if (opt->fmt == FMT_ODC) {
         if (cpio_write_header_odc(afd, path, &st, data_size, nlink_hdr) < 0) goto ioerr;
     } else {
-        if (cpio_write_header_bin(afd, path, &st, data_size, nlink_hdr) < 0) goto ioerr;
+        if (cpio_write_header_bin(afd, path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
     }
 
     if (S_ISLNK(st.st_mode)) {
         if (write_all(afd, lnk, (size_t)lsz) < 0) goto ioerr;
     } else if (S_ISREG(st.st_mode) && data_size > 0) {
-        if (copy_out_file_data(afd, ffd, data_size) < 0) goto ioerr;
+        if (copy_out_file_data(afd, ffd, (off_t)data_size) < 0) goto ioerr;
     }
 
     if (opt->fmt == FMT_NEWC) {

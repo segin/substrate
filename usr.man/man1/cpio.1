@@ -56,6 +56,9 @@ Pass-through copy to directory.
 Read/write archive file instead of stdin/stdout.
 .It Fl H Ar format
 Archive format: bin, odc, newc.
+A file larger than the format can record is left out with a
+diagnostic: 4\~GiB less one byte for newc and bin, 8\~GiB less one for
+odc.
 .It Fl t
 List the archive's members, one name per line on standard output,
 rather than extracting them.

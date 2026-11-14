@@ -187,6 +187,18 @@ if [ -n "$GNU" ]; then
     same "our bin, GNU reading: no byte-order warning" "1 block" "$err"
 fi
 
+# ---- a file too large for the format's size field is refused, not
+# truncated (a sparse 4 GiB + 1: newc and bin hold 4 GiB - 1)
+truncate -s 4294967297 big
+for fmt in newc bin; do
+    run sh -c "printf 'big\nsrc/f\n' | \"$CPIO\" -o -H $fmt > big-$fmt.cpio"
+    same "4 GiB + 1, $fmt" "cpio: big: too large for the $fmt format" "$err"
+    same "4 GiB + 1, $fmt: status" 1 "$rc"
+    run "$CPIO" -it -F "big-$fmt.cpio"
+    same "4 GiB + 1, $fmt: left out" "src/f" "$out"
+done
+rm -f big
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
