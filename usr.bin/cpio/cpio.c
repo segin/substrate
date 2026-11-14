@@ -47,6 +47,7 @@ typedef struct {
     bool reset_atime;   /* -a: put back the access times of files read */
     bool quiet;         /* --quiet: no "N blocks" */
     bool dot;           /* -V: a dot for each file */
+    bool rename;        /* -r: ask for each member's name */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
     uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
@@ -1116,16 +1117,43 @@ static bool selected(const char *name, const options_t *opt) {
     return opt->npatterns == 0 ? true : match != opt->invert;
 }
 
+/* -r: ask on the terminal what to call member NAME.  The new name, in a
+ * static buffer, or NULL to skip the member (an empty reply). */
+static const char *ask_rename(const char *name) {
+    static FILE *tty;
+    static char reply[PATH_MAX];
+    size_t len;
+    if (!tty && !(tty = fopen("/dev/tty", "r+"))) {
+        warn_errno("/dev/tty");
+        set_minor_error();
+        return NULL;
+    }
+    fprintf(tty, "rename %s -> ", name);
+    fflush(tty);
+    if (!fgets(reply, sizeof(reply), tty)) return NULL;
+    len = strlen(reply);
+    if (len && reply[len - 1] == '\n') reply[--len] = '\0';
+    return len ? reply : NULL;
+}
+
 static int extract_entry(const entry_t *e, const options_t *opt, const char *base) {
     char full[PATH_MAX];
     int fd = -1;
     uint64_t left = e->filesize;
     char buf[IO_BUFSZ];
     bool made = true;   /* the member is on disk, to be given its attributes */
+    entry_t renamed;    /* -r: the member under its new name */
 
     if (strcmp(e->name, "TRAILER!!!") == 0) return 1;
     if (!selected(e->name, opt)) return skip_data_and_pad(opt->fmt, e->filesize);
     if (opt->toc) return list_entry(e, opt);
+    if (opt->rename) {
+        const char *to = ask_rename(e->name);
+        if (!to) return skip_data_and_pad(opt->fmt, e->filesize);
+        renamed = *e;
+        renamed.name = (char *)to;
+        e = &renamed;
+    }
     if (!path_is_safe(e->name, opt)) {
         warnx_("%s: unsafe name, not extracted", e->name);
         set_minor_error();
@@ -1707,6 +1735,7 @@ static const struct option long_opts[] = {
     { "block-size", required_argument, NULL, OPT_BLOCK_SIZE },
     { "quiet", no_argument, NULL, OPT_QUIET },
     { "dot", no_argument, NULL, 'V' },
+    { "rename", no_argument, NULL, 'r' },
     { "safe-extract", no_argument, NULL, OPT_SAFE },
     { "no-absolute-paths", no_argument, NULL, OPT_NO_ABS },
     { "no-absolute-filenames", no_argument, NULL, OPT_NO_ABS },
@@ -1751,7 +1780,7 @@ int main(int argc, char **argv) {
     opt.fmt = (fmt_t)-1;
 
     opterr = 0;
-    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0LaBV", long_opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, ":oipF:tvnH:C:R:dmulfE:cI:O:D:0LaBVr", long_opts, NULL)) != -1) {
         switch (c) {
         case 'o': if (!set_mode(&opt, MODE_OUT)) return 2; break;
         case 'i': if (!set_mode(&opt, MODE_IN)) return 2; break;
@@ -1788,6 +1817,7 @@ int main(int argc, char **argv) {
         }
         case OPT_QUIET: opt.quiet = true; break;
         case 'V': opt.dot = true; break;
+        case 'r': opt.rename = true; break;
         case OPT_SAFE: opt.safe_extract = true; break;
         case OPT_NO_ABS: opt.no_absolute_paths = true; break;
         case OPT_ABS: opt.no_absolute_paths = false; break;
@@ -1819,6 +1849,10 @@ int main(int argc, char **argv) {
     }
     if (opt.toc && opt.mode != MODE_IN) {
         warnx_("-t lists an archive: it goes with -i");
+        return 2;
+    }
+    if (opt.rename && opt.mode != MODE_IN) {
+        warnx_("-r renames members as they are extracted: it goes with -i");
         return 2;
     }
     /* -I is copy-in's archive and -O copy-out's, each another -F */

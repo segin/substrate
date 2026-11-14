@@ -513,6 +513,20 @@ same "-V" "$(printf '..\n1 block')" "$(printf 'src/f\nsrc/d/g\n' | "$CPIO" -oV 2
 fresh xV
 same "-iV" "$(printf '...\n1 block')" "$(cd xV && "$CPIO" -idV < ../pat.cpio 2>&1)"
 
+# ---- -r asks on the terminal for each name; an empty reply skips the
+# member (script(1) supplies the terminal)
+if command -v script >/dev/null 2>&1; then
+    fresh xr2
+    (cd xr2 && { sleep 1; printf 'renamed\n'; sleep 1; printf '\n'; sleep 1; } |
+        script -qec "\"$CPIO\" -ird -I ../pat.cpio 'src/f' 'src/d/g'" /dev/null >/dev/null 2>&1)
+    same "-r renames" "hello" "$(cat xr2/renamed 2>&1)"
+    ok "-r: an empty reply skips" test ! -e xr2/src/d/g
+else
+    echo "no script(1): -r case skipped"
+fi
+run "$CPIO" -o -r </dev/null
+same "-r with -o" "cpio: -r renames members as they are extracted: it goes with -i" "$err"
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
