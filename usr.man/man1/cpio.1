@@ -98,9 +98,25 @@ Allow overwrite behavior (accepted for compatibility).
 .It Fl R Ar uid:gid
 Set owner fields while writing archive.
 .It Fl -safe-extract
-Reject absolute and parent-traversal path entries.
+Refuse members whose names have a
+.Sq ..
+component, and hold back the archive's own symbolic links whose
+targets are absolute or have a
+.Sq ..
+component until the whole archive has been read, so that no member is
+written through one.
+Until then an empty file holds each such link's name.
+Symbolic links already on disk are followed as usual.
+This is the default.
 .It Fl -no-absolute-paths
-Reject absolute path entries during extraction.
+Refuse members with absolute names.
+This is the default.
+.It Fl -absolute-paths
+Allow members with absolute names.
+.It Fl -insecure
+Turn off both of the above: extract absolute names, names with
+.Sq ..
+components, and the archive's symbolic links as they come.
 .It Fl -no-overwrite
 Do not replace existing files on extraction.
 .It Fl -numeric-owner

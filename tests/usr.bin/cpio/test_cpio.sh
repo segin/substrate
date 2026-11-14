@@ -243,6 +243,34 @@ done
 printf 'hl/b\n' | "$CPIO" -o -H newc > hl-one.cpio
 same "one name of a linked file" "hl/b 4," "$("$CPIO" -itvn -F hl-one.cpio | awk '{ printf "%s %s,", $9, $5 }')"
 
+# ---- safe extraction: no member is written through a symlink the archive
+# itself made, if that symlink could lead out of the tree
+mkdir -p esc/a esc/b victim
+ln -s "$TMP/victim" esc/a/lnk
+mkdir esc/b/lnk && printf 'pwned\n' > esc/b/lnk/pwn
+{ (cd esc/a && printf 'lnk\n' | "$CPIO" -o -H newc) | head -c -124
+  (cd esc/b && printf 'lnk/pwn\n' | "$CPIO" -o -H newc); } > esc.cpio
+fresh xe
+run sh -c "cd xe && \"$CPIO\" -id < ../esc.cpio"
+ok "escape: nothing written outside" test ! -e victim/pwn
+same "escape: refused" "cpio: lnk/pwn: Not a directory" "$err"
+same "escape: the link is still made" "$TMP/victim" "$(readlink xe/lnk)"
+# a relative link inside the tree is made at once and can be used
+mkdir -p rel/a/real rel/b/in
+ln -s real rel/a/in
+printf 'ok\n' > rel/b/in/f
+{ (cd rel/a && printf 'real\nin\n' | "$CPIO" -o -H newc) | head -c -124
+  (cd rel/b && printf 'in/f\n' | "$CPIO" -o -H newc); } > rel.cpio
+fresh xr
+run sh -c "cd xr && \"$CPIO\" -id < ../rel.cpio"
+same "relative link: written through" "ok" "$(cat xr/real/f 2>&1)"
+same "relative link: status" 0 "$rc"
+# --insecure trusts the archive's links as before
+fresh xi
+run sh -c "cd xi && \"$CPIO\" -id --insecure < ../esc.cpio"
+same "--insecure follows the link" "pwned" "$(cat victim/pwn 2>&1)"
+rm -f victim/pwn
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

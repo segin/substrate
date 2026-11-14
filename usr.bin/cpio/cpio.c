@@ -825,6 +825,86 @@ static void apply_attrs(const char *full, const entry_t *e, const options_t *opt
     }
 }
 
+/* Symlinks from the archive that could lead out of the tree -- an
+ * absolute target, or one with a ".." component -- are not made until
+ * the archive has been read, so no later member can be written through
+ * one (as GNU tar does).  Meanwhile an empty, mode-0 regular file holds
+ * the name, which makes "link/anything" fail; at the end it is replaced
+ * by the symlink if it is still that same file.  Symlinks already on
+ * disk are not this program's to judge and are followed as usual. */
+typedef struct deferred_link {
+    char *path;
+    char *target;
+    dev_t dev;
+    ino_t ino;
+    entry_t meta;
+    struct deferred_link *next;
+} deferred_link_t;
+
+static deferred_link_t *g_deferred;
+
+static bool symlink_escapes(const char *target) {
+    const char *p = target;
+    if (target[0] == '/') return true;
+    while (*p) {
+        if ((p == target || p[-1] == '/') && p[0] == '.' && p[1] == '.' &&
+            (p[2] == '/' || p[2] == '\0'))
+            return true;
+        p++;
+    }
+    return false;
+}
+
+static void defer_symlink(const char *full, const char *target, const entry_t *e) {
+    deferred_link_t *d = calloc(1, sizeof(*d));
+    struct stat st;
+    int fd;
+    if (!d || !(d->path = strdup(full)) || !(d->target = strdup(target))) {
+        warn_errno(e->name);
+        set_minor_error();
+        if (d) { free(d->path); free(d); }
+        return;
+    }
+    fd = open(full, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0);
+    if (fd < 0 || fstat(fd, &st) < 0) {
+        warn_errno(e->name);
+        set_minor_error();
+        if (fd >= 0) close(fd);
+        free(d->path); free(d->target); free(d);
+        return;
+    }
+    close(fd);
+    d->dev = st.st_dev;
+    d->ino = st.st_ino;
+    d->meta = *e;
+    d->meta.name = NULL;
+    d->next = g_deferred;
+    g_deferred = d;
+}
+
+static void apply_attrs(const char *full, const entry_t *e, const options_t *opt);
+
+/* The archive is read: make the held-back symlinks. */
+static void deferred_symlinks_finish(const options_t *opt) {
+    while (g_deferred) {
+        deferred_link_t *d = g_deferred;
+        struct stat st;
+        g_deferred = d->next;
+        if (lstat(d->path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size == 0 &&
+            st.st_dev == d->dev && st.st_ino == d->ino) {
+            if (unlink(d->path) < 0 || symlink(d->target, d->path) < 0) {
+                warn_errno(shown(d->path));
+                set_minor_error();
+            } else {
+                apply_attrs(d->path, &d->meta, opt);
+            }
+        }
+        free(d->path);
+        free(d->target);
+        free(d);
+    }
+}
+
 static int extract_entry(const entry_t *e, const options_t *opt, const char *base) {
     char full[PATH_MAX];
     int fd = -1;
@@ -858,7 +938,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
 
     if (S_ISDIR(e->mode)) {
         if (mkdir(full, e->mode & 07777) < 0 && errno != EEXIST) {
-            warn_errno(full); set_minor_error();
+            warn_errno(e->name); set_minor_error();
         }
     } else if (S_ISLNK(e->mode)) {
         char *target = malloc((size_t)e->filesize + 1);
@@ -870,17 +950,22 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         if (in_read(target, (size_t)e->filesize) < 0) { free(target); return -1; }
         target[e->filesize] = '\0';
         unlink(full);
-        if (symlink(target, full) < 0) { warn_errno(full); set_minor_error(); }
+        if (opt->safe_extract && symlink_escapes(target))
+            defer_symlink(full, target, e);
+        else if (symlink(target, full) < 0) {
+            warn_errno(e->name);
+            set_minor_error();
+        }
         free(target);
         left = 0;
     } else if (S_ISFIFO(e->mode)) {
-        if (mkfifo(full, e->mode & 07777) < 0 && errno != EEXIST) { warn_errno(full); set_minor_error(); }
+        if (mkfifo(full, e->mode & 07777) < 0 && errno != EEXIST) { warn_errno(e->name); set_minor_error(); }
     } else if (S_ISCHR(e->mode) || S_ISBLK(e->mode)) {
         if (geteuid() != 0) {
             warnx_("%s: device not created: only root may", e->name);
             set_minor_error();
         } else if (mknod(full, e->mode, e->rdev) < 0 && errno != EEXIST) {
-            warn_errno(full); set_minor_error();
+            warn_errno(e->name); set_minor_error();
         }
     } else if (S_ISSOCK(e->mode)) {
         warnx_("%s: socket not created", e->name);
@@ -919,7 +1004,7 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
         unlink(full);
         fd = open(full, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, e->mode & 07777);
         if (fd < 0) {
-            warn_errno(full);
+            warn_errno(e->name);
             set_minor_error();
             return skip_data_and_pad(opt->fmt, e->filesize);
         }
@@ -1057,6 +1142,7 @@ static int mode_in(options_t *opt) {
     }
 
     in_links_finish(opt);
+    deferred_symlinks_finish(opt);
     if (afd != STDIN_FILENO) close(afd);
     return g_status;
 }
