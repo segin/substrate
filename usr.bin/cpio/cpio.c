@@ -941,7 +941,13 @@ static int extract_entry(const entry_t *e, const options_t *opt, const char *bas
             warn_errno(e->name); set_minor_error();
         }
     } else if (S_ISLNK(e->mode)) {
-        char *target = malloc((size_t)e->filesize + 1);
+        char *target;
+        if (e->filesize >= PATH_MAX) {
+            warnx_("%s: symbolic link target too long", e->name);
+            set_minor_error();
+            return skip_data_and_pad(opt->fmt, e->filesize);
+        }
+        target = malloc((size_t)e->filesize + 1);
         if (!target) {
             warn_errno(e->name);
             set_minor_error();

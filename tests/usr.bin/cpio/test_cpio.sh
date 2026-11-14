@@ -271,6 +271,20 @@ run sh -c "cd xi && \"$CPIO\" -id --insecure < ../esc.cpio"
 same "--insecure follows the link" "pwned" "$(cat victim/pwn 2>&1)"
 rm -f victim/pwn
 
+# ---- a symlink member whose size is past PATH_MAX is refused, its data
+# skipped, and the archive read on: an odc symlink of 8 GiB - 1 claimed
+# bytes would otherwise be a huge allocation (or, on i386, a truncated
+# one and a stream out of step)
+ln -s f lk
+printf 'lk\nsrc/f\n' | "$CPIO" -o -H odc > lk.cpio
+# the odc size field of the first member (bytes 65-75): 00000010001
+# makes it 4097 bytes, past PATH_MAX, which zeros after it cover
+{ head -c 65 lk.cpio; printf '00000010001'; tail -c +77 lk.cpio; head -c 8000 /dev/zero; } > lkbig.cpio
+fresh xl
+run sh -c "cd xl && \"$CPIO\" -id < ../lkbig.cpio"
+same "long symlink target" "cpio: lk: symbolic link target too long" "$(head -1 .err)"
+ok "long symlink target: not made" test ! -L xl/lk
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
