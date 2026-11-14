@@ -354,6 +354,34 @@ same "-p read-only directory: mode" 555 "$(stat -c %a pro/ro)"
 same "-p -m on a directory" "2001-02-03 04:05" "$(date -u -d "@$(stat -c %Y pro/ro)" '+%Y-%m-%d %H:%M')"
 chmod 755 rod/ro xro/ro pro/ro
 
+# ---- -R: USER:GROUP, USER, :GROUP, USER: (login group), names or numbers;
+# on copy-out it sets the header, on copy-in the files' owner
+owners() { "$CPIO" -itvn -F "$1" | awk '{ printf "%s %s", $3, $4 }'; }
+for spec in 123:456 123 :456 "$(id -un):" "$(id -un).$(id -gn)"; do
+    run sh -c "printf 'src/f\n' | \"$CPIO\" -o -R '$spec' > own.cpio"
+    case $spec in
+    123:456) want="123 456" ;;
+    123)     want="123 $gid" ;;
+    :456)    want="$uid 456" ;;
+    *)       want="$uid $gid" ;;
+    esac
+    same "-R $spec" "$want" "$(owners own.cpio)"
+done
+run sh -c "printf 'src/f\n' | \"$CPIO\" -o -R nosuchuser0:"
+same "-R unknown user" "cpio: invalid user: nosuchuser0" "$err"
+same "-R unknown user: status" 2 "$rc"
+printf 'src/f\n' | "$CPIO" -o -R 123:456 > own.cpio
+fresh xo
+run sh -c "cd xo && \"$CPIO\" -id -R $uid:$gid < ../own.cpio"
+same "-i -R to oneself" "$uid $gid" "$(stat -c '%u %g' xo/src/f)"
+same "-i -R to oneself: status" 0 "$rc"
+if [ "$uid" -ne 0 ]; then
+    fresh xo
+    run sh -c "cd xo && \"$CPIO\" -id -R 0:0 < ../own.cpio"
+    same "-i -R 0:0, not root" "cpio: src/f: Operation not permitted" "$err"
+    same "-i -R 0:0, not root: status" 1 "$rc"
+fi
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

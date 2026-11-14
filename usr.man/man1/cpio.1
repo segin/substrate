@@ -10,7 +10,7 @@
 .Op Fl v
 .Op Fl H Ar format
 .Op Fl F Ar archive
-.Op Fl R Ar uid:gid
+.Op Fl R Ar owner
 .Nm
 .Fl i
 .Op Fl t
@@ -22,11 +22,14 @@
 .Op Fl -safe-extract
 .Op Fl -no-absolute-paths
 .Op Fl -no-overwrite
-.Op Fl -numeric-owner
+.Op Fl -no-preserve-owner
+.Op Fl R Ar owner
 .Nm
 .Fl p
 .Op Fl v
 .Op Fl dmu
+.Op Fl -no-preserve-owner
+.Op Fl R Ar owner
 .Ar directory
 .Sh DESCRIPTION
 The
@@ -108,8 +111,19 @@ Without it, a file already on disk that is no older than the one
 replacing it is kept, with the diagnostic
 .Dq not created: newer or same age version exists
 (which does not change the exit status).
-.It Fl R Ar uid:gid
-Set owner fields while writing archive.
+.It Fl R Ar owner
+On copy-out, record this owner in the archive; on copy-in and
+pass-through, give it to every file made.
+.Ar owner
+is
+.Ar user : Ns Ar group ,
+.Ar user . Ns Ar group ,
+.Ar user
+alone (the group is left as it is),
+.Ar user :
+(the user's login group) or
+.No : Ns Ar group ;
+each a name or a number.
 .It Fl -safe-extract
 Refuse members whose names have a
 .Sq ..
@@ -132,8 +146,13 @@ Turn off both of the above: extract absolute names, names with
 components, and the archive's symbolic links as they come.
 .It Fl -no-overwrite
 Do not replace existing files on extraction.
+.It Fl -no-preserve-owner
+When run by root, leave the files made on copy-in and pass-through
+owned by root rather than giving them the archived (or source) owner,
+which is otherwise the default.
 .It Fl -numeric-owner
-Apply numeric owner/group on extraction (root only).
+Restore the archived owner by number, which is what a cpio archive
+records; this is the default when run by root.
 .El
 .Sh EXIT STATUS
 .Ex -std

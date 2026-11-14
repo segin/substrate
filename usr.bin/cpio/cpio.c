@@ -35,11 +35,12 @@ typedef struct {
     bool no_absolute_paths;
     bool safe_extract;
     bool no_overwrite;
-    bool numeric_owner;
+    bool no_preserve_owner; /* root: leave extracted files root's */
     bool numeric_ids;   /* -n: -tv shows uid and gid as numbers */
-    uid_t owner_uid;
+    uid_t owner_uid;    /* -R: the owner and/or group to give */
     gid_t owner_gid;
-    bool owner_set;
+    bool owner_uid_set;
+    bool owner_gid_set;
 } options_t;
 
 static int g_status = 0;
@@ -68,17 +69,80 @@ static void usage(FILE *out) {
         "       cpio -p [-v] [-dmu] directory\n");
 }
 
-static int parse_owner(const char *s, uid_t *uid, gid_t *gid) {
+/* A decimal id: all digits, in range. */
+static bool parse_id(const char *s, unsigned long *out) {
+    char *end;
+    if (!*s || strspn(s, "0123456789") != strlen(s)) return false;
+    errno = 0;
+    *out = strtoul(s, &end, 10);
+    return errno == 0 && *out <= 0xffffffffUL;
+}
+
+/* -R as GNU cpio takes it: USER, USER:GROUP, USER.GROUP, USER: (the user's
+ * login group) or :GROUP; each a name or a number.  -1 with a message if
+ * a name is unknown or the form is not one of these. */
+static int parse_owner(const char *s, options_t *opt) {
     char *tmp = strdup(s);
-    char *sep;
-    if (!tmp) return -1;
-    sep = strchr(tmp, ':');
-    if (!sep) { free(tmp); return -1; }
-    *sep = '\0';
-    *uid = (uid_t)strtol(tmp, NULL, 10);
-    *gid = (gid_t)strtol(sep + 1, NULL, 10);
+    char *user, *group = NULL;
+    bool login_group = false;
+    int r = -1;
+    if (!tmp) { warn_errno("-R"); return -1; }
+    user = tmp;
+    {
+        char *sep = strchr(tmp, ':');
+        if (!sep && !getpwnam(tmp)) sep = strchr(tmp, '.');
+        if (sep) {
+            *sep = '\0';
+            group = sep + 1;
+            if (*group == '\0') { group = NULL; login_group = true; }
+        }
+    }
+    if (*user) {
+        struct passwd *pw = getpwnam(user);
+        unsigned long id;
+        if (pw) {
+            opt->owner_uid = pw->pw_uid;
+            if (login_group) { opt->owner_gid = pw->pw_gid; opt->owner_gid_set = true; }
+        } else if (parse_id(user, &id) && !login_group) {
+            opt->owner_uid = (uid_t)id;
+        } else {
+            warnx_("invalid user: %s", user);
+            goto out;
+        }
+        opt->owner_uid_set = true;
+    } else if (!group) {
+        warnx_("invalid owner: %s", s);
+        goto out;
+    }
+    if (group) {
+        struct group *gr = getgrnam(group);
+        unsigned long id;
+        if (gr) opt->owner_gid = gr->gr_gid;
+        else if (parse_id(group, &id)) opt->owner_gid = (gid_t)id;
+        else { warnx_("invalid group: %s", group); goto out; }
+        opt->owner_gid_set = true;
+    }
+    r = 0;
+out:
     free(tmp);
-    return 0;
+    return r;
+}
+
+/* The owner to give a file archived or found with UID and GID: -R's, or as
+ * root (unless --no-preserve-owner) the archived one.  False if its owner
+ * is to be left alone. */
+static bool owner_for(const options_t *opt, uid_t uid, gid_t gid, uid_t *ou, gid_t *og) {
+    if (opt->owner_uid_set || opt->owner_gid_set) {
+        *ou = opt->owner_uid_set ? opt->owner_uid : (uid_t)-1;
+        *og = opt->owner_gid_set ? opt->owner_gid : (gid_t)-1;
+        return true;
+    }
+    if (geteuid() == 0 && !opt->no_preserve_owner) {
+        *ou = uid;
+        *og = gid;
+        return true;
+    }
+    return false;
 }
 
 static int write_all(int fd, const void *buf, size_t n) {
@@ -281,10 +345,8 @@ static int write_member(options_t *opt, int afd, const char *path, struct stat *
         }
     }
 
-    if (opt->owner_set) {
-        st.st_uid = opt->owner_uid;
-        st.st_gid = opt->owner_gid;
-    }
+    if (opt->owner_uid_set) st.st_uid = opt->owner_uid;
+    if (opt->owner_gid_set) st.st_gid = opt->owner_gid;
 
     if (opt->fmt == FMT_NEWC) {
         if (cpio_write_header_newc(afd, path, &st, (uint32_t)data_size, nlink_hdr) < 0) goto ioerr;
@@ -816,8 +878,11 @@ static void in_links_finish(const options_t *opt) {
  * outright, not through the umask, and after the owner, since chown()
  * clears the set-ID bits. */
 static void apply_attrs(const char *full, const entry_t *e, const options_t *opt) {
-    if (opt->numeric_owner && geteuid() == 0) {
-        if (lchown(full, e->uid, e->gid) < 0) set_minor_error();
+    uid_t ou;
+    gid_t og;
+    if (owner_for(opt, e->uid, e->gid, &ou, &og) && lchown(full, ou, og) < 0) {
+        warn_errno(shown(full));
+        set_minor_error();
     }
     if (!S_ISLNK(e->mode) && chmod(full, e->mode & 07777) < 0) {
         warn_errno(shown(full));
@@ -1258,7 +1323,17 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
             }
         }
         unlink(target);
-        if (symlink(buf, target) < 0) { warn_errno(target); set_minor_error(); }
+        if (symlink(buf, target) < 0) {
+            warn_errno(target);
+            set_minor_error();
+        } else {
+            uid_t ou;
+            gid_t og;
+            if (owner_for(opt, st.st_uid, st.st_gid, &ou, &og) && lchown(target, ou, og) < 0) {
+                warn_errno(target);
+                set_minor_error();
+            }
+        }
         return 0;
     }
     if (!S_ISREG(st.st_mode)) return 0;
@@ -1296,7 +1371,16 @@ static int copy_one_path(const char *src, const char *dst, const options_t *opt)
         if (r == 0) break;
         if (write_all(out, buf, (size_t)r) < 0) { warn_errno(target); set_minor_error(); break; }
     }
-    /* the source's permissions outright, not through the umask */
+    {
+        uid_t ou;
+        gid_t og;
+        if (owner_for(opt, st.st_uid, st.st_gid, &ou, &og) && fchown(out, ou, og) < 0) {
+            warn_errno(target);
+            set_minor_error();
+        }
+    }
+    /* the source's permissions outright, not through the umask, and
+     * after the owner, since chown() clears the set-ID bits */
     if (fchmod(out, st.st_mode & 07777) < 0) { warn_errno(target); set_minor_error(); }
     if (opt->preserve_mtime) {
         struct timespec ts[2];
@@ -1346,7 +1430,10 @@ int main(int argc, char **argv) {
             opt.safe_extract = false;
             opt.no_absolute_paths = false;
         } else if (strcmp(argv[i], "--no-overwrite") == 0) opt.no_overwrite = true;
-        else if (strcmp(argv[i], "--numeric-owner") == 0) opt.numeric_owner = true;
+        /* the owner is restored by number, the only way cpio archives
+         * record it: as root that is now the default, so this is it */
+        else if (strcmp(argv[i], "--numeric-owner") == 0) opt.no_preserve_owner = false;
+        else if (strcmp(argv[i], "--no-preserve-owner") == 0) opt.no_preserve_owner = true;
         else if (strncmp(argv[i], "--format=", 9) == 0) {
             const char *f = argv[i] + 9;
             if (strcmp(f, "newc") == 0) opt.fmt = FMT_NEWC;
@@ -1376,10 +1463,7 @@ int main(int argc, char **argv) {
             else { warnx_("unknown archive format: %s", optarg); free(new_argv); return 2; }
             break;
         case 'R':
-            if (parse_owner(optarg, &opt.owner_uid, &opt.owner_gid) < 0) {
-                warnx_("invalid owner: %s", optarg); free(new_argv); return 2;
-            }
-            opt.owner_set = true;
+            if (parse_owner(optarg, &opt) < 0) { free(new_argv); return 2; }
             break;
         case 'd': opt.make_dirs = true; break;
         case 'm': opt.preserve_mtime = true; break;
