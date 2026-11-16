@@ -5,8 +5,9 @@
 # another object each, a word of data naming one each, a branch to a
 # label each, a section for every function, and a label less the label
 # before it -- are each assembled at n statements and at 4n, and 4n may
-# take no more than five times as long as n.  (Four times is linear;
-# the fifth is for the noise of a busy machine.  Branches between
+# take no more than five times as long as n, or failing that 8n six
+# times as long as 2n.  (Four times is linear; the rest is for the noise
+# of a busy machine.  Branches between
 # labels took 24 times as long at 4n, a label less a label 18 and a
 # section per function 7.)
 #
@@ -81,14 +82,31 @@ for shape in plain extern data branch section difference; do
     # they take 160, 660 and, for four times that again, 2,540.)  At
     # twice the size both are past the cache, and what is quadratic is
     # further over than it was.
+    #
+    # There too the lesser of up to four measurements is kept, and the
+    # larger may take six times as long: a run of GitHub's took 260 ms
+    # and 1350 there for branches, measured once, so five was within
+    # the noise of a busy runner.  Six is still short
+    # of the least that was quadratic, seven at 4n, which grows at the
+    # larger size.
     if [ "$b" -gt $((low * 5 + 2)) ]; then
         gen "$shape" $((N * 2)) > one.s
         gen "$shape" $((N * 8)) > four.s
         a2=$(cost one.s) && b2=$(cost four.s) || { echo "FAIL $shape: not assembled at n=$((N * 8))"; fail=1; continue; }
-        low2=$a2
-        [ "$low2" -lt 5 ] && low2=5
-        if [ "$b2" -gt $((low2 * 5 + 2)) ]; then
-            echo "FAIL $shape: $N statements in ${a}0 ms and $((N * 4)) in ${b}0 ms, more than five times as long; and $((N * 2)) in ${a2}0 ms and $((N * 8)) in ${b2}0 ms"
+        tries=0
+        while :; do
+            low2=$a2
+            [ "$low2" -lt 5 ] && low2=5
+            [ "$b2" -le $((low2 * 6 + 2)) ] && break
+            tries=$((tries + 1))
+            [ "$tries" -ge 4 ] && break
+            a3=$(cost one.s)
+            b3=$(cost four.s)
+            [ "$a3" -lt "$a2" ] && a2=$a3
+            [ "$b3" -lt "$b2" ] && b2=$b3
+        done
+        if [ "$b2" -gt $((low2 * 6 + 2)) ]; then
+            echo "FAIL $shape: $N statements in ${a}0 ms and $((N * 4)) in ${b}0 ms, more than five times as long; and $((N * 2)) in ${a2}0 ms and $((N * 8)) in ${b2}0 ms, more than six"
             fail=1
         fi
     fi
